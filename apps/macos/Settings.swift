@@ -14,13 +14,14 @@ final class SettingsWindow {
     private var window: NSWindow?
 
     enum Tab: String, CaseIterable {
-        case general, canvas, agents, sounds, performance, privacy, shortcuts
+        case general, canvas, agents, cloud, sounds, performance, privacy, shortcuts
         var title: String { rawValue.capitalized }
         var symbol: String {
             switch self {
             case .general: "gearshape"
             case .canvas: "square.on.square.dashed"
             case .agents: "sparkles"
+            case .cloud: "cloud"
             case .sounds: "speaker.wave.2"
             case .performance: "gauge.with.dots.needle.67percent"
             case .privacy: "hand.raised"
@@ -100,6 +101,7 @@ struct SettingsPane: View {
             case .general: GeneralSettings(model: model)
             case .canvas: CanvasSettings(model: model)
             case .agents: AgentSettings(model: model)
+            case .cloud: CloudSettings(model: model)
             case .sounds: SoundSettings(model: model)
             case .performance: PerformanceSettings(model: model)
             case .privacy: PrivacySettings(model: model)

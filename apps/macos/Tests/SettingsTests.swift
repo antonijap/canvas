@@ -23,7 +23,7 @@ struct SettingsTests {
     }
 
     static func main() {
-        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect()
+        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -137,6 +137,34 @@ struct SettingsTests {
         for sym in ShortcutCatalog.symbols.keys { check(sym.count == 1, "symbol caps are one glyph") }
         let ids = ShortcutCatalog.all.flatMap { g in g.rows.map { g.title + $0.id } }
         check(Set(ids).count == ids.count, "rows unique within their group")
+    }
+
+    static func cloud() {
+        check(CloudURL.clean("https://studio-canvas.workers.dev/some/path") == "https://studio-canvas.workers.dev", "an https address keeps only its origin")
+        check(CloudURL.clean("  https://Studio.workers.dev  ") == "https://studio.workers.dev", "spaces and case are cleaned")
+        check(CloudURL.clean("http://localhost:8787") == "http://localhost:8787", "http on this Mac is allowed, for development")
+        check(CloudURL.clean("http://127.0.0.1:8787/x") == "http://127.0.0.1:8787", "127.0.0.1 too")
+        check(CloudURL.clean("http://studio.example.com") == nil, "http on another host is refused")
+        check(CloudURL.clean("https://user:pw@studio.example.com") == nil, "no credentials in an address")
+        check(CloudURL.clean("studio") == nil && CloudURL.clean("") == nil && CloudURL.clean("file:///etc/passwd") == nil, "not an address")
+        check(CloudURL.isLocal("http://localhost:8787") && !CloudURL.isLocal("https://studio.workers.dev"), "local means http on this Mac")
+        check(CloudURL.host("https://studio.workers.dev/x") == "studio.workers.dev" && CloudURL.host("http://localhost:8787") == "localhost:8787", "the host is the Keychain account")
+        var s = AppSettings()
+        s.cloudUrl = "https://studio.workers.dev/x"; s.cloudDevEmail = "anna@studio.test"
+        check(s.serverSettings["cloudUrl"] as? String == "https://studio.workers.dev", "the server gets the cleaned address")
+        check(s.serverSettings["cloudDevEmail"] as? String == "", "and no development email for a real server")
+        s.cloudUrl = "http://localhost:8787"
+        check(s.serverSettings["cloudDevEmail"] as? String == "anna@studio.test", "a local server gets it")
+        s.cloudUrl = "nonsense"
+        check(s.serverSettings["cloudUrl"] as? String == "", "a bad address is not sent")
+        let d = fresh()
+        s.cloudUrl = "https://studio.workers.dev"; s.save(d)
+        check(AppSettings.load(d).cloudUrl == "https://studio.workers.dev", "the address is stored")
+        check(CloudStatusText.line("connected", configured: true) == "Connected" && CloudStatusText.line("offline", configured: true) == "Offline", "status lines")
+        check(CloudStatusText.line("signedOut", configured: true) == "Signed out" && CloudStatusText.line("signInAgain", configured: true) == "Sign in again", "signed out and sign in again")
+        check(CloudStatusText.line("tooOld", configured: true) == "The server is too old", "a server too old")
+        check(CloudStatusText.account(email: "anna@studio.com", role: "owner") == "Signed in as anna@studio.com, owner", "who is signed in")
+        check(CloudStatusText.account(email: nil, role: nil) == nil, "nobody")
     }
 
     static func connect() {
