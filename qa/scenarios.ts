@@ -1396,6 +1396,8 @@ sc("clipboard", "a board and every card kind copied on one page paste on another
   t.ok(board && board !== "crd_board", "a new board is selected");
   t.eq(pageOfBoard(t, board!), "style", "the board is on the Style page");
   // Where they were copied unless that is taken: Style has boards there, so they move right, clear of them.
+  // Boxes are read once the page has drawn the paste: under load the new board's box lags its placement.
+  await t.settle();
   const boards = await t.ev<Rect[]>(`[...window.canvasHost.boards.keys()].filter((id) => id !== ${JSON.stringify(board)}).map((id) => window.canvasHost.boxOf(id))`);
   const mine = [await t.ev<Rect>(`window.canvasHost.boxOf(${JSON.stringify(board)})`), ...made.map((w: any) => ({ x: w.x, y: w.y, w: w.w, h: w.h }))];
   t.ok(!mine.some((m) => boards.some((b) => overlap(m, b))), "nothing pasted lands on a board of the Style page");
