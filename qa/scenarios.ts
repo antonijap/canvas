@@ -16,6 +16,7 @@ import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";
 import "./scenarios-review2.ts";
 import "./scenarios-comments.ts";
+import "./scenarios-comments-shared.ts";
 import { buildLink } from "../src/page/link-logic.js";
 
 const pos = (n: any) => ({ x: n?.x, y: n?.y });

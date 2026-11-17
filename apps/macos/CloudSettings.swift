@@ -1,0 +1,257 @@
+// Settings > Cloud: the team's own Canvas server (cloud/cloudflare), who is signed in there, and sharing a file's
+// comments to it (File > Share Comments to Server). The shell only signs in: a small window shows the server's own
+// Cloudflare Access login (a one-time email code), and when it lands on the server's /v1/me the `CF_Authorization`
+// cookie is read from that window's cookie store. The token goes to the Keychain (Keychain.swift) and to the local
+// server's memory (POST /api/cloud/token, src/cloud.ts), which sends it to that one server as `cf-access-token`. It is
+// never a setting, never in a file or UserDefaults, and never logged. For a server on this Mac (http://localhost) the
+// server's DEV mode needs no sign-in: the "Development email" below stands in for Access, for local tests only.
+
+import AppKit
+import SwiftUI
+import WebKit
+
+/// What GET /api/cloud/status said.
+struct CloudState: Equatable {
+    var configured = false
+    var status = "signedOut"
+    var email: String?
+    var role: String?
+    var host = ""
+}
+
+@MainActor
+final class CloudAccount: ObservableObject {
+    static let shared = CloudAccount()
+    /// The Keychain service of the token (src/cloud.ts keychainService); its account is the server's host.
+    static let service = "cc.getcanvas.canvas.cloud"
+
+    @Published var state = CloudState()
+    @Published var busy = false
+    private var signIn: CloudSignInWindow?
+
+    func refresh(_ model: CanvasModel) async {
+        var req = URLRequest(url: model.base.appendingPathComponent("api/cloud/status"))
+        req.timeoutInterval = 15
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        let next = CloudState(configured: j["configured"] as? Bool ?? false, status: j["status"] as? String ?? "offline",
+                              email: j["email"] as? String, role: j["role"] as? String, host: j["host"] as? String ?? "")
+        if next != state { state = next }
+    }
+
+    /// A local development server needs no window: its DEV mode takes the email in Settings. Any other server shows its login.
+    func signIn(_ model: CanvasModel) {
+        let url = model.prefs.cloudUrl
+        guard let clean = CloudURL.clean(url) else { return }
+        if CloudURL.isLocal(clean) { Task { await refresh(model) }; return }
+        signIn?.close()
+        let w = CloudSignInWindow(origin: clean) { [weak self] token in
+            guard let self else { return }
+            self.signIn = nil
+            self.store(token: token, origin: clean, model: model)
+        }
+        signIn = w
+        w.show()
+    }
+
+    /// The Keychain first (it outlives this run), then the server's memory.
+    private func store(token: String, origin: String, model: CanvasModel) {
+        let host = CloudURL.host(origin)
+        busy = true
+        Task.detached {
+            let saved = KeychainStore.set(service: CloudAccount.service, account: host, secret: token)
+            _ = await CloudAccount.post(model, "api/cloud/token", ["url": origin, "token": token])
+            await MainActor.run {
+                if !saved { model.flash("Signed in, but the token could not be saved to the Keychain. You will sign in again after a restart.") }
+                self.busy = false
+            }
+            await self.refresh(model)
+        }
+    }
+
+    func signOut(_ model: CanvasModel) {
+        guard let origin = CloudURL.clean(model.prefs.cloudUrl) else { return }
+        // A development server has no token: signing out forgets the development email.
+        if CloudURL.isLocal(origin) { model.prefs.cloudDevEmail = ""; return }
+        let host = CloudURL.host(origin)
+        Task.detached {
+            KeychainStore.delete(service: CloudAccount.service, account: host)
+            _ = await CloudAccount.post(model, "api/cloud/signout", ["url": origin])
+            await self.refresh(model)
+        }
+    }
+
+    /// File > Share Comments to Server...: the open file's comments go to the configured server.
+    func shareOpenFile(_ model: CanvasModel) {
+        guard let file = model.currentFile else { model.flash("Open a Canvas file first"); return }
+        guard CloudURL.clean(model.prefs.cloudUrl) != nil else {
+            model.flash("Set your team's server address in Settings > Cloud first")
+            SettingsWindow.shared.show(model, tab: .cloud)
+            return
+        }
+        Task {
+            let (status, j) = await CloudAccount.post(model, "api/cloud/share", [:], query: [URLQueryItem(name: "file", value: file)])
+            if status == 200 {
+                let host = CloudURL.host(model.prefs.cloudUrl)
+                model.flash((j["already"] as? Bool == true) ? "Already shared. Connected to \(host)" : "Comments shared to \(host)", level: "success")
+                model.reloadPage()
+            } else {
+                model.flash(j["error"] as? String ?? "Could not share the comments")
+                if status == 401 { SettingsWindow.shared.show(model, tab: .cloud) }
+            }
+            await refresh(model)
+        }
+    }
+
+    nonisolated static func post(_ model: CanvasModel, _ path: String, _ body: [String: Any], query: [URLQueryItem] = []) async -> (Int, [String: Any]) {
+        var c = URLComponents(url: model.base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        if !query.isEmpty { c?.queryItems = query }
+        guard let url = c?.url else { return (0, [:]) }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 60
+        req.setValue("1", forHTTPHeaderField: "X-Canvas")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return (0, [:]) }
+        let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        return ((resp as? HTTPURLResponse)?.statusCode ?? 0, j)
+    }
+}
+
+// MARK: Sign-in window
+
+/// A small window on the server's /v1/me: Cloudflare Access shows its own login, and once /v1/me answers with the
+/// person's email the Access cookie of this window is the token. The window keeps nothing (a non-persistent store).
+@MainActor
+final class CloudSignInWindow: NSObject, WKNavigationDelegate, NSWindowDelegate {
+    private let origin: String
+    private let done: (String) -> Void
+    private let web: WKWebView
+    private let window: NSWindow
+    private var finished = false
+
+    init(origin: String, done: @escaping (String) -> Void) {
+        self.origin = origin
+        self.done = done
+        let cfg = WKWebViewConfiguration()
+        cfg.websiteDataStore = .nonPersistent()
+        web = WKWebView(frame: NSRect(x: 0, y: 0, width: 460, height: 620), configuration: cfg)
+        window = NSWindow(contentRect: web.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        super.init()
+        window.title = "Sign in to \(CloudURL.host(origin))"
+        window.contentView = web
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+        web.navigationDelegate = self
+        if let u = URL(string: origin + "/v1/me") { web.load(URLRequest(url: u)) }
+    }
+
+    func show() {
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    func close() { finished = true; window.close() }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard !finished, webView.url?.path == "/v1/me", webView.url.map({ "\($0.scheme ?? "")://\($0.host ?? "")" + ($0.port.map { ":\($0)" } ?? "") }) == origin else { return }
+        // The Access login also ends here once it lets the person through; only a JSON answer with an email counts.
+        webView.evaluateJavaScript("document.body ? document.body.innerText : ''") { [weak self] result, _ in
+            guard let self, let text = result as? String, let d = text.data(using: .utf8),
+                  let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], (j["email"] as? String)?.isEmpty == false else { return }
+            let host = webView.url?.host ?? ""
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+                let c = cookies.first { $0.name == "CF_Authorization" && host.hasSuffix($0.domain.hasPrefix(".") ? String($0.domain.dropFirst()) : $0.domain) }
+                guard let token = c?.value, !token.isEmpty else { return }
+                DispatchQueue.main.async {
+                    guard let self, !self.finished else { return }
+                    self.finished = true
+                    self.window.close()
+                    self.done(token)
+                }
+            }
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) { finished = true }
+}
+
+// MARK: The pane
+
+struct CloudSettings: View {
+    @ObservedObject var model: CanvasModel
+    @ObservedObject private var account = CloudAccount.shared
+
+    private var urlText: String { model.prefs.cloudUrl.trimmingCharacters(in: .whitespaces) }
+    private var valid: Bool { CloudURL.clean(urlText) != nil }
+    private var local: Bool { CloudURL.isLocal(urlText) }
+    private var signedIn: Bool { CloudStatusText.account(email: account.state.email, role: account.state.role) != nil && account.state.status != "signInAgain" && account.state.status != "signedOut" }
+    private var tone: Color {
+        switch account.state.status {
+        case "connected": Palette.ok
+        case "offline": Palette.mutedFg.opacity(0.5)
+        default: account.state.configured ? Palette.warn : Palette.mutedFg.opacity(0.5)
+        }
+    }
+
+    var body: some View {
+        SettingsStack {
+            SettingsCard(title: "Team server") {
+                SettingsRow("Server address", detail: urlText.isEmpty || valid ? "Your team\u{2019}s own Canvas server" : "Use an https address, like https://studio.workers.dev") {
+                    FieldBox {
+                        TextField("https://your-team.workers.dev", text: Binding(get: { model.prefs.cloudUrl }, set: { model.prefs.cloudUrl = String($0.prefix(200)) }))
+                            .textFieldStyle(.plain).font(Typography.body)
+                            .accessibilityLabel("Server address").qaID("cloud-url")
+                    }
+                    .frame(width: 260)
+                }
+                if local {
+                    SettingsDivider()
+                    SettingsRow("Development email", detail: "For a local server in DEV mode") {
+                        FieldBox {
+                            TextField("anna@studio.test", text: Binding(get: { model.prefs.cloudDevEmail }, set: { model.prefs.cloudDevEmail = String($0.prefix(120)) }))
+                                .textFieldStyle(.plain).font(Typography.body)
+                                .accessibilityLabel("Development email").qaID("cloud-dev-email")
+                        }
+                        .frame(width: 260)
+                    }
+                }
+                SettingsDivider()
+                SettingsRow("Account", detail: CloudStatusText.account(email: account.state.email, role: account.state.role).flatMap { signedIn ? $0 : nil } ?? "Not signed in") {
+                    if signedIn {
+                        FieldButton(title: "Sign out", symbol: nil) { account.signOut(model) }.qaID("cloud-sign-out", label: "Sign out")
+                    } else {
+                        FieldButton(title: account.state.status == "signInAgain" ? "Sign in again" : "Sign in", symbol: nil) { account.signIn(model) }
+                            .disabled(!valid || (local && model.prefs.cloudDevEmail.isEmpty)).opacity(!valid ? 0.5 : 1)
+                            .qaID("cloud-sign-in", label: "Sign in")
+                    }
+                }
+                SettingsDivider()
+                SettingsRow("Status") {
+                    HStack(spacing: 6) {
+                        Circle().fill(tone).frame(width: 8, height: 8)
+                        Text(CloudStatusText.line(account.state.status, configured: account.state.configured))
+                            .font(Typography.body).foregroundStyle(account.state.status == "connected" ? Palette.fg : Palette.mutedFg).lineLimit(1)
+                            .qaID("cloud-status", label: CloudStatusText.line(account.state.status, configured: account.state.configured))
+                    }
+                }
+            }
+            SettingsCard(title: "Comments") {
+                SettingsRow("Share the open file", detail: "Sends its comments to your server and keeps them in sync") {
+                    FieldButton(title: "Share Comments\u{2026}", symbol: nil) { account.shareOpenFile(model) }
+                        .disabled(model.currentFile == nil || account.state.status != "connected").opacity(model.currentFile == nil || account.state.status != "connected" ? 0.5 : 1)
+                        .qaID("cloud-share", label: "Share Comments")
+                }
+            }
+        }
+        // While the pane shows: the server is asked now, and again every few seconds.
+        .task(id: model.prefs.cloudUrl + "|" + model.prefs.cloudDevEmail) {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            while !Task.isCancelled {
+                await account.refresh(model)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+    }
+}

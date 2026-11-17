@@ -25,7 +25,7 @@ export function freePort(): Promise<number> {
 export type Scratch = { port: number; base: string; proc: ChildProcess; log: string[]; stop: () => Promise<void> };
 
 /** `node src/server.ts` on a free port, reading and writing only under `dir`. */
-export async function startServer(dir: string): Promise<Scratch> {
+export async function startServer(dir: string, extraEnv: Record<string, string> = {}): Promise<Scratch> {
   const port = await freePort();
   const log: string[] = [];
   const proc = spawn(process.execPath, [path.join(ROOT, "src/server.ts")], {
@@ -44,6 +44,7 @@ export async function startServer(dir: string): Promise<Scratch> {
       // this Mac's, so a run reads the same on every machine and never writes the person's config.
       CLAUDE_CONFIG_DIR: path.join(dir, ".claude-config"),
       CODEX_HOME: path.join(dir, ".codex-home"),
+      ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

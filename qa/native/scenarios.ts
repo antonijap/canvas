@@ -12,6 +12,7 @@ import { ROOT, copyDir, gradientPng, sleep } from "../lib.ts";
 import { buildLink, parseLink } from "../../src/page/link-logic.js";
 import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";
+import "./scenarios-cloud.ts";
 import { intoInspector } from "./scenarios-leftovers.ts";
 
 /** The canvas area well clear of the panels (window points). */
@@ -635,7 +636,7 @@ sc("inspector", "Option over a field and drag scrubs; up is faster, down slower"
 // ---------------------------------------------------------------- Settings and Styles
 
 /** The Settings toolbar's tabs, left to right (SettingsWindow.Tab in apps/macos/Settings.swift). */
-export const SETTINGS_TABS = ["General", "Canvas", "Agents", "Sounds", "Performance", "Privacy", "Shortcuts"];
+export const SETTINGS_TABS = ["General", "Canvas", "Agents", "Cloud", "Sounds", "Performance", "Privacy", "Shortcuts"];
 
 /** Clicks a Settings tab: its toolbar button by label, else by position once every tab is there. */
 async function settingsTab(t: NT, label: string) {

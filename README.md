@@ -53,6 +53,7 @@ More in the [MCP guide](docs/developer-guide.md#register-the-mcp-server).
 - **Live data cards** running PostHog queries. Secrets stay in the macOS Keychain.
 - **Video cards** that play a local file over a design, so motion sits next to the static screens.
 - **Shader cards** running WGSL on the GPU. An agent writes the shader, gets back compile errors or a rendered frame with its GPU cost, and fixes it in the same turn.
+- **Comments** pinned to layers (press C), saved in the file. Share them to your team's own Canvas server (a Cloudflare Worker you deploy; Canvas hosts nothing) and they sync live. Comments written offline wait and send on their own.
 
 ## Design tools
 
