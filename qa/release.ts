@@ -79,6 +79,13 @@ function scrubPatterns(): Pattern[] {
     { id: "google-key", what: "Google API key", re: /\bAIza[0-9A-Za-z_-]{35}\b/g, secret: true, status: "FAIL" },
     { id: "fal-key", what: "fal.ai key", re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/g, secret: true, status: "FAIL" },
     { id: "private-key", what: "private key", re: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/g, secret: true, status: "FAIL" },
+    // A hosted Cloud's secrets (cloud/node/host.ts, src/cloud-tunnel.ts): an invite link, a join code, a device token,
+    // a tunnel address (it carries keys), a bearer header with a real value.
+    { id: "cloud-invite", what: "Cloud invite link", re: /canvas:\/\/cloud\/join\?[^\s"'`<>)]*(?:code|tc)=[A-Za-z0-9_.-]{20,}/g, secret: true, status: "FAIL" },
+    { id: "cloud-secret", what: "Cloud device token or join code", re: /\bcc[dj]_[0-9a-f]{16}\.[A-Za-z0-9_-]{43}/g, secret: true, status: "FAIL" },
+    { id: "tunnel-address", what: "tunnel address", re: /(?<![A-Za-z0-9_-])tc[A-Za-z0-9_-]{50,}/g, secret: true, status: "FAIL" },
+    { id: "bearer-value", what: "bearer token", re: /\bBearer [A-Za-z0-9._~+/-]{30,}/g, secret: true, status: "FAIL" },
+    { id: "token-param", what: "token in a URL", re: /[?&]token=[A-Za-z0-9._~+/-]{20,}/g, secret: true, status: "FAIL" },
     { id: "assigned-secret", what: "a secret assigned in code", re: /\b(?:api[_-]?key|secret|token|password|passwd)["']?\s*[:=]\s*["'][A-Za-z0-9_\-+/=]{20,}["']/gi, secret: true, status: "FAIL" },
     { id: "personal-path", what: "personal path", re: /\/Users\/(?!Shared\/)[A-Za-z0-9._-]+|\/home\/[a-z][a-z0-9._-]+/g, status: "FAIL" },
     ...(emails.size ? [{ id: "maintainer-email", what: "the maintainer's email", re: new RegExp([...emails].map(escapeRe).join("|"), "gi"), status: "FAIL" as Status }] : []),

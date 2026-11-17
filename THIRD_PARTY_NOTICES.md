@@ -153,6 +153,42 @@ The runtime dependencies in `package.json` and everything they pull in (`pnpm li
 | zod | 4.6.7 | MIT |
 | zod-to-json-schema | 3.25.2 | ISC |
 
+## tailcat
+
+- Used in: `cloud/tunnel` (the `canvas-tunnel` helper inside Canvas.app), which reaches a Cloud hosted on a Mac through an encrypted tunnel. Built from source at v0.7.0 (commit 546a07dc6b93df6ce42e36059f8a8b339061de7a). Its own Go dependencies (Tailscale libraries and others) are pinned in `cloud/tunnel/go.sum` and carry their own licences.
+- License: BSD-3-Clause
+
+```
+BSD 3-Clause License
+
+Copyright (c) 2020 Tailscale Inc & contributors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
 ## Rust crates compiled into the engine
 
 The crates `engine/Cargo.toml` builds into `engine/pkg` (WebAssembly), 143 crates, from `cargo metadata --locked`. Each crate's licence text is in its source on crates.io.
