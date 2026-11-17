@@ -87,8 +87,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
     img = await grab(t);
     m = resolve(img, await measure(t, {
       pop: "b:.cm-pop", openPin: `b:${pin(A)}`, openPinT: `t:${pin(A)}`,
-      chip: "b:.cm-head .cm-chip", chipIcon: "b:.cm-head .cm-chip svg", chipT: "t:.cm-head .cm-chip span",
-      resolve: "b:.cm-head .cm-btn.txt", resolveIcon: "b:.cm-head .cm-btn.txt svg", resolveT: "t:.cm-head .cm-btn.txt", more: "b:.cm-head .cm-btn:not(.txt)",
+      resolve: "b:.cm-item .cm-res", resolveIcon: "b:.cm-item .cm-res svg",
       av: "b:.cm-item .cm-av", avT: "t:.cm-item .cm-av", agent: "b:.cm-item .cm-agent", who: "t:.cm-item .cm-who b", time: "t:.cm-item .cm-who time",
       stIcon: "b:.cm-item .cm-state svg", stT: "t:.cm-item .cm-state", stWho: "t:.cm-item:nth-child(4) .cm-who b",
       retry: "b:.cm-fail .cm-btn", retryT: "t:.cm-fail .cm-btn", discard: "b:.cm-fail .cm-btn.dim", discardT: "t:.cm-fail .cm-btn.dim", failIcon: "b:.cm-fail .cm-state svg", failT: "t:.cm-fail .cm-state",
@@ -96,13 +95,9 @@ sc("comments", "alignment: every comment control is optically centred, light and
     }));
     k = new AlignChecker("page", th, img, K);
     k.label("open-pin-count", m.openPin, m.openPinT, { inset: 4 });
-    k.icon("thread-more", m.more);
-    k.label("thread-resolve", m.resolve, m.resolveT);
     const resolveIcon = k.ink("thread-resolve-icon", bare(m.resolveIcon), { inset: 0 });
     k.near("Resolve: the check's middle on the button's centre line", midY(resolveIcon), cy(m.resolve));
-    k.label("thread-chip", m.chip, m.chipT);
-    const chipIcon = k.ink("thread-chip-icon", bare(m.chipIcon), { inset: 0 });
-    k.near("layer chip: the icon's middle on the chip's centre line", midY(chipIcon), cy(m.chip));
+    k.near("Resolve: the button's centre line on the first name's cap middle", cy(m.resolve), m.who?.cap);
     k.label("thread-avatar", m.av, m.avT, { inset: 1.5 });
     k.icon("thread-agent", m.agent, { inset: 1.5 });
     k.near("comment: the name's cap middle on the avatar's centre line", m.who?.cap, cy(m.av));
@@ -126,12 +121,10 @@ sc("comments", "alignment: every comment control is optically centred, light and
     img = await grab(t);
     m = resolve(img, await measure(t, {
       band: "b:.cm-gone", ghost: "b:.cm-gone .cm-ghost svg", title: "t:.cm-gone b", line: "t:.cm-gone .cm-gl",
-      pinTo: "b:.cm-gone .cm-acts .cm-btn.txt", pinToT: "t:.cm-gone .cm-acts .cm-btn.txt", resolve: "b:.cm-gone .cm-acts .cm-btn.txt:nth-child(2)", resolveT: "t:.cm-gone .cm-acts .cm-btn.txt:nth-child(2)", more: "b:.cm-gone .cm-acts .cm-btn:not(.txt)",
+      pinTo: "b:.cm-gone .cm-acts .cm-btn.txt", pinToT: "t:.cm-gone .cm-acts .cm-btn.txt",
     }));
     k = new AlignChecker("page", th, img, K);
     k.label("band-pin-to-a-layer", m.pinTo, m.pinToT);
-    k.label("band-resolve", m.resolve, m.resolveT);
-    k.icon("band-more", m.more);
     const ghost = k.ink("band-ghost", bare(m.ghost), { inset: 0 });
     k.near("band: the ghost's middle on the middle of the two lines (cap top to baseline)", midY(ghost), m.title && m.line ? (m.title.base - 2 * (m.title.base - m.title.cap) + m.line.base) / 2 : null);
     k.near("band: the ghost and the buttons share a left edge", ghost?.x0, m.pinTo?.x);

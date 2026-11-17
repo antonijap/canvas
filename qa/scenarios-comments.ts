@@ -150,11 +150,13 @@ sc("comments", "reply, resolve and Show resolved", { covers: ["comments:reply", 
   await until(t, () => !!file(t)?.threads?.length, "the thread");
   const id = file(t).threads[0].id;
   await t.io.key("Escape");
-  // The pin opens the thread: the comment, a reply box, Resolve and Delete.
+  // The pin opens the thread: no header, the comment with a Resolve check on its name row, and a reply box.
   await openThread(t, id);
   const text = await t.ev<string>(`document.querySelector(".cm-pop").innerText`);
-  t.ok(/Is this the right teal\?/.test(text) && /Resolve/.test(text), "the thread shows its comment and Resolve");
-  t.ok(await t.ev(`!!document.querySelector('.cm-pop [aria-label="More"]')`), "and a More menu");
+  t.ok(/Is this the right teal\?/.test(text), "the thread shows its comment");
+  t.ok(await t.ev(`!!document.querySelector('.cm-pop .cm-item:first-child .cm-who [aria-label="Resolve thread"]')`), "Resolve is a check on the first comment's name row");
+  t.eq(await t.ev(`document.querySelector('.cm-pop .cm-res').title`), "Resolve", "its tooltip");
+  t.ok(await t.ev(`!document.querySelector('.cm-pop .cm-head') && !document.querySelector('.cm-pop [aria-label="More"]')`), "no header and no More button");
   await t.io.type("Yes, keep it");
   await t.io.key("Enter");
   await until(t, () => file(t).threads[0].comments.length === 2, "the reply");
@@ -171,6 +173,7 @@ sc("comments", "reply, resolve and Show resolved", { covers: ["comments:reply", 
   await t.waitFor(`(() => { const p = document.querySelector('.cm-pin[data-thread="${id}"]'); return p?.classList.contains("resolved") && p.style.display !== "none"; })()`, "the resolved pin shown");
   await openThread(t, id);
   t.ok(/Resolved by/.test(await t.ev<string>(`document.querySelector(".cm-pop").innerText`)), "the thread says who resolved it");
+  t.eq(await t.ev(`document.querySelector('.cm-pop .cm-res').title`), "Reopen", "the check says Reopen on a resolved thread");
   await t.ev(`document.querySelector('.cm-pop [aria-label="Reopen thread"]').click()`);
   await until(t, () => !file(t).threads[0].resolvedAt, "reopened on disk");
   // Delete: a reply goes (its tombstone stays), then the thread.
@@ -178,8 +181,13 @@ sc("comments", "reply, resolve and Show resolved", { covers: ["comments:reply", 
   await t.ev(`document.querySelector('.cm-pop [aria-label="Delete comment"]').click()`);
   await until(t, () => !!file(t).threads[0].comments[1].deletedAt, "the reply deleted");
   t.eq(file(t).threads[0].comments[1].body, "", "its text is gone from the file");
-  await t.ev(`document.querySelector('.cm-pop [aria-label="More"]').click()`);
-  await t.waitFor(`!!document.querySelector('.cm-menu [aria-label="Delete thread"]')`, "the More menu");
+  // Delete thread is in the thread's right-click menu: a real right-click on the comment's text.
+  const tx = await t.ev<{ x: number; y: number }>(`(() => { const b = document.querySelector(".cm-pop .cm-text").getBoundingClientRect(); return { x: b.left + 8, y: b.top + b.height / 2 }; })()`);
+  await t.io.move(tx.x, tx.y);
+  await t.page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: tx.x, y: tx.y, button: "right", buttons: 2, clickCount: 1 });
+  await t.page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: tx.x, y: tx.y, button: "right", buttons: 0, clickCount: 1 });
+  await t.waitFor(`!!document.querySelector('.cm-pop .cm-menu [aria-label="Delete thread"]')`, "the thread's right-click menu");
+  t.ok(await t.ev(`(() => { const m = document.querySelector('.cm-pop .cm-menu').getBoundingClientRect(); return Math.abs(m.left - ${tx.x}) < 12 && Math.abs(m.top - ${tx.y}) < 12; })()`), "the menu opens at the pointer");
   await t.ev(`document.querySelector('.cm-menu [aria-label="Delete thread"]').click()`);
   await until(t, () => !!file(t).threads[0].deletedAt, "the thread deleted");
   await t.waitFor(`document.querySelectorAll(".cm-pin").length === 0`, "no pins");

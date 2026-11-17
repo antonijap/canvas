@@ -378,17 +378,16 @@ sc("comments", "alignment: in the app's page, the pins, the bars, the thread's h
       k.near("app count bar: the bubble's middle on the bar's centre line", midY(k.ink("app-bar-icon", bare(m.barIcon), { inset: 0 })), cy(m.bar));
       k.near("app count bar: the count's cap middle on the bar's centre line", m.barT?.cap, cy(m.bar));
       bad.push(...k.bad);
-      // The thread's head and reply row.
+      // The thread: the first comment (its Resolve check) and the reply row.
       const p = (await pageMeasure(t, s, { pin: `b:${pin}` })).pin as Box;
       await t.click({ x: p.x + p.w / 2, y: p.y + p.h / 2 });
       await t.waitJs(`!!document.querySelector(".cm-pop:not([hidden]) .cm-field")`, "the thread");
       await t.js(`document.head.appendChild(Object.assign(document.createElement("style"), { textContent: ".cm-field{caret-color:transparent!important}" })); return true;`);
       s = await grab(t);
-      m = await pageMeasure(t, s, { chip: "b:.cm-head .cm-chip", chipT: "t:.cm-head .cm-chip span", resolve: "b:.cm-head .cm-btn.txt", resolveT: "t:.cm-head .cm-btn.txt", more: "b:.cm-head .cm-btn:not(.txt)", send: "b:.cm-row .cm-send", field: "t:.cm-row .cm-field", av: "b:.cm-item .cm-av", who: "t:.cm-item .cm-who b", time: "t:.cm-item .cm-who time" });
+      m = await pageMeasure(t, s, { resolve: "b:.cm-item .cm-res", send: "b:.cm-row .cm-send", field: "t:.cm-row .cm-field", av: "b:.cm-item .cm-av", who: "t:.cm-item .cm-who b", time: "t:.cm-item .cm-who time" });
       k = new AlignChecker("native-page", theme, s.img, s.k);
-      k.label("app-thread-chip", m.chip, m.chipT);
-      k.label("app-thread-resolve", m.resolve, m.resolveT);
-      k.icon("app-thread-more", m.more);
+      k.icon("app-thread-resolve", m.resolve);
+      k.near("app thread: Resolve's centre line on the first name's cap middle", cy(m.resolve), m.who?.cap);
       k.icon("app-reply-send", m.send);
       k.near("app reply: the field's cap middle on the send button's centre line", m.field?.cap, cy(m.send));
       k.near("app comment: the name's cap middle on the avatar's centre line", m.who?.cap, cy(m.av));
