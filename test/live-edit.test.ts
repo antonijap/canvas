@@ -221,15 +221,16 @@ describe("text resize growth (QA item 4)", () => {
   // An auto-width text 22.6 px tall: pixel rounding makes the dragged box 23 px tall on a right-edge drag.
   const r0 = { x: 10, y: 10.4, w: 80, h: 22.6 };
   const right = { x: 10, y: 10, w: 140, h: 23 };
-  test("a side drag of auto-width text gives Auto height and leaves the height alone", () => {
-    const w = L.textResizeWrites(L.resizeWrites(r0, right, { positioned: true, own: { x: 10, y: 10.4 } }), "e", "auto", right);
-    assert.deepEqual(w.props, { width: 140, textGrowth: "fixed-width" });
-    const none = L.textResizeWrites(L.resizeWrites(r0, right, { positioned: true }), "w", undefined, right);
-    assert.equal(none.props.textGrowth, "fixed-width");
+  test("a side drag of auto-width text gives Fixed size at the height it had", () => {
+    const w = L.textResizeWrites(L.resizeWrites(r0, right, { positioned: true, own: { x: 10, y: 10.4 } }), "e", "auto", right, r0);
+    assert.deepEqual(w.props, { width: 140, height: 22.6, textGrowth: "fixed-width-height" });
+    const none = L.textResizeWrites(L.resizeWrites(r0, right, { positioned: true }), "w", undefined, right, r0);
+    assert.equal(none.props.textGrowth, "fixed-width-height");
+    assert.equal(none.props.height, 22.6);
   });
   test("a side drag keeps Auto height and Fixed size as they are", () => {
     for (const g of ["fixed-width", "fixed-width-height"]) {
-      const w = L.textResizeWrites({ props: { width: 140, height: 23 }, children: [] }, "e", g, right);
+      const w = L.textResizeWrites({ props: { width: 140, height: 23 }, children: [] }, "e", g, right, r0);
       assert.deepEqual(w.props, { width: 140 }, g);
     }
   });

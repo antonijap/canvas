@@ -2591,7 +2591,7 @@ function candsFor(kind, id) {
   }
   return snapLib.nearbyRects(out, cam, VW, VH, 0.5);
 }
-// One snap query: where the rect lands and the guides to draw. ev: the pointer event (Cmd bypasses).
+// One snap query: where the rect lands and the guides to draw. ev: the pointer event (Control bypasses).
 function snapQuery(s, raw, e) {
   if (!snapLib || !cam) return { x: raw.x, y: raw.y, guides: [] };
   const t0 = performance.now();
@@ -3412,7 +3412,9 @@ addEventListener("keydown", (e) => {
     else if (zk === "fitSelection") fitSelectionOrPage();
     else document.getElementById("z100").onclick();
   }
-  if (e.key === "Escape") { if (mv) { endMove(true); return; } if (host.marqueeActive && host.marqueeActive()) return; if (host.selectParent && host.selectParent()) return; deselect(); }
+  // Esc cancels a move, else deselects, nested layers too (the common convention; Shift+Return or \ selects the parent).
+  // The canvas used the key: preventDefault keeps the browser's own Esc (stop loading) away.
+  if (e.key === "Escape") { if (mv) { endMove(true); return; } if (host.marqueeActive && host.marqueeActive()) return; e.preventDefault(); deselect(); }
   // Arrow keys nudge the selection: 1 px, Shift for the big nudge (settings). Text fields returned above.
   if (sel && !e.metaKey && !e.ctrlKey && !e.altKey && e.key.startsWith("Arrow")) {
     const s = e.shiftKey ? snapCfg.bigNudge : 1;

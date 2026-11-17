@@ -107,3 +107,36 @@ sc("keys", "Shift+Cmd+Return asks for variations of the selected board", { cover
   const got = await t.waitFor<any[]>(`window.__vars.length ? window.__vars : null`, "a variations request");
   t.eq(got[0].ids, ["lay_nest"], "for the selected board");
 });
+
+sc("keys", "Esc deselects a nested layer; Shift+Return and backslash select the parent; Esc ends a text edit with the text selected", { covers: ["select-keys:nested", "select-keys:keyboard", "select-keys:backslash", "text-edit:keyboard"] }, async (t: T) => {
+  await t.focus("lay_nest");
+  const none = () => t.waitFor("window.canvasHost.selection().length === 0", "nothing selected", 3000);
+  // A layer inside a group: Esc clears the selection at once, it does not walk up to the group.
+  await t.select(["r_g1"]);
+  await t.io.key("Escape");
+  await none();
+  t.eq(await t.sel(), [], "Esc deselects a layer in a group");
+  // Walking up is Shift+Return or \; Esc from the group deselects it too.
+  await t.select(["r_g1"]);
+  await t.io.key("Enter", { shift: true });
+  await t.waitFor("window.canvasHost.selection()[0] === 'g_pair'", "the group");
+  t.eq(await t.sel(), ["g_pair"], "Shift+Return selects the parent");
+  await t.io.key("Escape");
+  await none();
+  await t.select(["r_g2"]);
+  await t.io.key("\\");
+  await t.waitFor("window.canvasHost.selection()[0] === 'g_pair'", "the group again");
+  t.eq(await t.sel(), ["g_pair"], "backslash selects the parent");
+  // Editing text: the first Esc ends the edit and leaves the text layer selected, the second deselects.
+  await t.focus("lay_text");
+  const c = await t.center("tx_auto");
+  await t.select(["tx_auto"]);
+  await t.io.dblclick(c.x, c.y);
+  await t.waitFor(`!!(window.canvasHost.textEdit && window.canvasHost.textEdit.active && window.canvasHost.textEdit.id === "tx_auto")`, "editing tx_auto");
+  await t.io.key("Escape");
+  await t.waitFor("!(window.canvasHost.textEdit && window.canvasHost.textEdit.active)", "the edit to end");
+  await t.frames(3);
+  t.eq(await t.sel(), ["tx_auto"], "the text layer stays selected");
+  await t.io.key("Escape");
+  await none();
+});

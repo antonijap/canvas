@@ -21,7 +21,7 @@ How to read the tables:
 | Deep marquee | Hold Cmd while dragging a selection box to select nested layers | **HAVE**: `structure.js` beginMarquee | - | - |
 | Add or remove one layer | Shift+click adds; Shift+click on a selected layer removes it | **HAVE**: `server.ts` pointerup (toggled) | - | - |
 | Marquee adds to the selection | Shift+drag on empty canvas keeps the current selection | **HAVE**: `structure.js` (base selection on Shift) | - | - |
-| Deselect | Esc, or click empty canvas | **HAVE**, differs: Esc cancels a move, then selects the parent, then deselects (`server.ts` keydown) | - | - |
+| Deselect | Esc, or click empty canvas | **HAVE**: Esc cancels a move, else deselects, a nested layer too (`server.ts` keydown); Shift+Return or \ walks up to the parent | - | - |
 | Select all | Cmd+A | **HAVE**: Edit menu, `structure.js` | - | - |
 | Select inverse | Shift+Cmd+A: everything except the current selection | **HAVE**: Edit > Select Inverse, `structure.js` selectInverse (Select All's scope minus the selection) | - | - |
 | Select all with the same property | Edit > Select All > Fill, Stroke, Effect, Text properties, Font, Instance | **HAVE**: Edit > Select All with Same (Fill, Stroke, Effect, Text Properties, Font, Instances), `src/search.ts` matchActions; also in Cmd+K | - | - |
@@ -38,7 +38,7 @@ How to read the tables:
 | Keep the parent while dragging | Hold Space while moving a layer out of a frame's bounds: it stays in its current parent. Holding Space also stops it nesting into the frame it is dropped on | **HAVE**: Space mid-drag keeps the parent for layers, several layers, boards and auto layout children (`server.ts` keepParent, `autolayout.js` keepParent); Space alone still pans. [Evidence](evidence/moving.md) | - | - |
 | Keep the parent when adding | Hold Space while adding objects to stop them being reparented | **HAVE**: Space held while pasting puts the paste beside the selected frame (Paste here: on the canvas); a dropped, pasted or placed image goes on the canvas, not into a frame (`structure.js` pastePlace keep, `drop-logic.js` dropParent) | - | - |
 | Duplicate by dragging | Option+drag leaves the original and moves a copy | **HAVE**: `server.ts` mv.dup, `shortcuts.js` ghost; Option pressed mid-drag works too | - | - |
-| Bypass snapping | Hold Control while dragging to turn off snap to geometry and objects for that drag | **HAVE**: Control skips object snapping on moves and resizes (`snap.js` bypassSnap, `live.js`, `group-resize.js`); Cmd still does too. [Evidence](evidence/moving.md) | - | - |
+| Bypass snapping | Hold Control while dragging to turn off snap to geometry and objects for that drag | **HAVE**: Control skips object snapping on moves and resizes (`snap.js` bypassSnap, `live.js`, `group-resize.js`). Cmd does not: on a move it lets a layer drop into a frame smaller than itself (`autolayout-logic.js` dropTarget). [Evidence](evidence/moving.md) | - | - |
 | Move on one axis | Shift while dragging locks to the axis moved most | **HAVE**: `server.ts` (lock on Shift) | - | - |
 | Nudge | Arrow keys move by the small nudge (1), Shift+arrows by the big nudge (10), both set in preferences | **HAVE**: `server.ts` nudge, Settings > Canvas big nudge | - | - |
 | Duplicate | Cmd+D; a top-level frame goes to the right of the original, other layers on top of it | **HAVE**: `structure.js`; on moved copies Cmd+D repeats their step | - | - |
@@ -63,7 +63,7 @@ How to read the tables:
 | Scale tool | K scales a layer with everything inside it, keeping the ratio | **HAVE**: `live.js`, `src/page/scale.js` | - | - |
 | Resize frame to fit | Option+Shift+Cmd+R fits the frame to its outermost children | **HAVE**: `live.js` | - | - |
 | Flip | Shift+H / Shift+V | **HAVE**: `shortcuts.js` flip | - | - |
-| Resizing text by its box | Dragging a text box edge switches it to Fixed size | **HAVE**, differs: a side edge gives auto height, a top or bottom edge fixed size (`live.js`) | - | - |
+| Resizing text by its box | Dragging a text box edge switches it to Fixed size | **HAVE**: auto width dragged by a side becomes Fixed size at the height it had; a top or bottom edge or a corner makes any text Fixed size (`live-edit.js` textResizeWrites). One exception: a side edge on auto height text keeps auto height, so a widened paragraph keeps fitting its lines | - | - |
 | Fit a side to content | Double-click a text box edge to make it auto width or auto height | **HAVE**: double-click an edge fits that side to the content (`live.js`) | - | - |
 | Clip content | A frame checkbox hides children past its bounds | **HAVE**: `InspectorLayout.swift` | - | - |
 
@@ -281,7 +281,7 @@ Ranked by how often a designer hits it and how broken its absence feels. P1 firs
 4. **Copy as PNG** (P1, M). Shift+Cmd+C puts a 2x PNG of the selection on the pasteboard.
 5. **Lock layers** (P2, M). Shift+Cmd+L and a lock per row; locked layers ignore canvas clicks, stay selectable in the panel, and lock their children.
 6. **Paste to replace** (P2, S). Shift+Cmd+R swaps the selection for the clipboard in the same place and parent. **Done** (docs/evidence/paste.md).
-7. **Control bypasses snapping** (P2, S). Hold Control during a drag to skip snapping; Canvas uses Cmd today.
+7. **Control bypasses snapping** (P2, S). Hold Control during a drag to skip snapping. **Done**: Control only, Cmd no longer bypasses.
 8. **Smart selection** (P2, L). Pink spacing handles between evenly spaced layers, a centre knob to drag a layer to a new slot, Cmd while dragging to swap.
 9. **Tidy up** (P2, S). Control+Option+T lays the selection out as an evenly spaced row or grid from its top-left.
 10. **Select matching layers** (P2, S). Option+Cmd+A selects layers with the same name in the other boards.

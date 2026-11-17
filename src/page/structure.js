@@ -401,7 +401,7 @@ export function attach(host) {
         const kids = inf && Array.isArray(inf.node.children) ? inf.node.children.filter((c) => c && c.locked !== true).map((c) => c.id).filter((id) => id && !(host.isLocked && host.isLocked(String(id)))) : [];
         if (kids.length && st.same()) host.setSelection(kids);
       } else if (op === "parent") {
-        selectParent(true);
+        selectParent();
       }
     } catch (err) {
       if (err.code !== "no_change") tell(err.message);
@@ -586,20 +586,18 @@ export function attach(host) {
   });
 
   // ---------- selection walking ----------
-  function selectParent(always) {
+  // Shift+Return and \ (Esc deselects, server.ts). A board has no parent to select.
+  function selectParent() {
     const p = primary();
-    if (!p || isW(p)) return false;
+    if (!p || isW(p)) return;
     const inf = known && known.id === p ? known.info : null;
     if (!inf) {
       const st = stamp();
-      if (always) nodeInfo(p, 0).then((i) => { if (i && i.parentId && i.parentId !== "document" && st.same()) host.selectId(i.parentId); });
-      return !!always;
+      nodeInfo(p, 0).then((i) => { if (i && i.parentId && i.parentId !== "document" && st.same()) host.selectId(i.parentId); });
+      return;
     }
-    if (!inf.parentId || inf.parentId === "document") return false; // a board: Esc deselects
-    host.selectId(inf.parentId);
-    return true;
+    if (inf.parentId && inf.parentId !== "document") host.selectId(inf.parentId);
   }
-  host.selectParent = () => selectParent(false);
   async function selectAll() {
     const p = primary();
     if (p && !isW(p) && !host.boards.has(p)) {
