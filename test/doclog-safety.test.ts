@@ -815,7 +815,7 @@ fs.promises.rename = async function (a, b, ...rest) {
       await new Promise<void>((r) => (N.proc.exitCode !== null || N.proc.signalCode ? r() : N.proc.once("exit", () => r())));
       assert.equal(nodeIn(alone(p.docPath), "B9N9").name, "N-EDIT", "N's whole write landed");
       assert.equal(nodeIn(alone(p.docPath), "B3N4").x, x0 + 1, "with S's nudge in it");
-      assert.ok(fs.existsSync(p.logPath), "and S's log is still there (N died before removing it)");
+      // N died before removing S's log; S may have settled it already (it reads the fold line), so no look at it here.
       await sleep(800);
       await s.flush();
       assert.ok(await until(() => !fs.existsSync(p.logPath), 8000), "the log is settled");
