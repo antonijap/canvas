@@ -1,0 +1,10 @@
+# Allowed hits for the release scrub (pnpm qa:release, check 1). One rule per line:
+#   <pattern id or *> <path glob> [regex the matched text must match]  # reason (required)
+# Pattern ids: anthropic-key openai-key stripe-key posthog-key github-token slack-token aws-key google-key fal-key
+# private-key assigned-secret personal-path maintainer-email private-name bundle-id. Globs: * within a folder, ** across.
+
+* qa/release-allow.txt  # this file quotes the fake keys and names it allows
+personal-path ** ^/Users/(me|x|t|you|\.\.\.)$  # placeholder home folders in tests, comments and docs, nobody's real path
+stripe-key test/widgets-secrets.test.ts ^sk_live_(ROTATED|SUPERSECRET)  # fake keys that prove a secret never leaks (docs/developer-guide.md, Testing)
+assigned-secret test/widgets-secrets.test.ts SUPERSECRET  # the same fake key, assigned to a constant
+anthropic-key test/agent-run.test.ts ^sk-ant-should-not-reach-the-child$  # a fake key that proves the agent's child gets no keys

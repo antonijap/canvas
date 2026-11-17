@@ -1,0 +1,80 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "mask",
+   "x": 0,
+   "y": 0,
+   "width": 400,
+   "height": 160,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "rectangle",
+     "id": "r1",
+     "x": 0,
+     "y": 0,
+     "width": 400,
+     "height": 160,
+     "fill": "#E4E4E7"
+    },
+    {
+     "type": "ellipse",
+     "id": "e2",
+     "x": 20,
+     "y": 20,
+     "width": 160,
+     "height": 120,
+     "fill": "#000000",
+     "mask": true
+    },
+    {
+     "type": "rectangle",
+     "id": "r3",
+     "x": 0,
+     "y": 0,
+     "width": 400,
+     "height": 160,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "linear",
+      "colors": [
+       {
+        "color": "#EF4444",
+        "position": 0
+       },
+       {
+        "color": "#FACC15",
+        "position": 0.33
+       },
+       {
+        "color": "#22C55E",
+        "position": 0.66
+       },
+       {
+        "color": "#3B82F6",
+        "position": 1
+       }
+      ],
+      "rotation": 90
+     }
+    },
+    {
+     "type": "rectangle",
+     "id": "r4",
+     "x": 220,
+     "y": 20,
+     "width": 160,
+     "height": 120,
+     "fill": "#18181B",
+     "cornerRadius": 24,
+     "blendMode": "multiply"
+    }
+   ]
+  }
+ ]
+}

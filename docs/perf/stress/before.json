@@ -1,0 +1,1549 @@
+{
+ "cold": [
+  {
+   "firstBoardMs": 994,
+   "fullViewportMs": 2424,
+   "nav": {
+    "ttfb": 75,
+    "dcl": 110
+   }
+  },
+  {
+   "firstBoardMs": 425,
+   "fullViewportMs": 999,
+   "nav": {
+    "ttfb": 2,
+    "dcl": 29
+   }
+  },
+  {
+   "firstBoardMs": 420,
+   "fullViewportMs": 997,
+   "nav": {
+    "ttfb": 2,
+    "dcl": 29
+   }
+  },
+  {
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   },
+   "mem": {
+    "jsHeapMb": 2.5,
+    "domNodes": 955,
+    "listeners": 182,
+    "timers": 2,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 10.3,
+     "imageMB": 13.6,
+     "effectMB": 3.4,
+     "wasmMB": 59.8,
+     "tiles": 31,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 2111,
+    "chromeFootprintMb": 1515,
+    "chromeCpuSec": 6.77
+   }
+  }
+ ],
+ "pinch": {
+  "frames": {
+   "frames": 307,
+   "p50": 16.7,
+   "p95": 16.7,
+   "p99": 16.8,
+   "max": 16.8,
+   "over33": 0,
+   "over50": 0,
+   "blankFrames": 4,
+   "blankAt": [
+    [
+     1951,
+     7
+    ],
+    [
+     2734,
+     7
+    ],
+    [
+     3517,
+     7
+    ],
+    [
+     4301,
+     7
+    ]
+   ],
+   "unloadedFrames": 0,
+   "engineCpu": {
+    "n": 307,
+    "min": 0,
+    "p50": 0.8,
+    "p95": 1.1,
+    "p99": 1.8,
+    "max": 7,
+    "mean": 0.75
+   }
+  },
+  "before": {
+   "jsHeapMb": 4.2,
+   "domNodes": 955,
+   "listeners": 182,
+   "timers": 1,
+   "intervals": 5,
+   "videos": 0,
+   "engine": {
+    "tileMB": 10.3,
+    "imageMB": 13.6,
+    "effectMB": 3.4,
+    "wasmMB": 90.6,
+    "tiles": 31,
+    "boards": 20,
+    "nodes": 4550,
+    "errors": 0
+   },
+   "cards": {
+    "cardMB": 0,
+    "stagingMB": 0,
+    "playing": 0,
+    "cards": 0
+   },
+   "chromeRssMb": 2275,
+   "chromeFootprintMb": 1718,
+   "chromeCpuSec": 8.01
+  },
+  "after": {
+   "jsHeapMb": 3.3,
+   "domNodes": 957,
+   "listeners": 182,
+   "timers": 1,
+   "intervals": 5,
+   "videos": 0,
+   "engine": {
+    "tileMB": 254.6,
+    "imageMB": 61.9,
+    "effectMB": 3.4,
+    "wasmMB": 90.6,
+    "tiles": 88,
+    "boards": 20,
+    "nodes": 4550,
+    "errors": 0
+   },
+   "cards": {
+    "cardMB": 0,
+    "stagingMB": 0,
+    "playing": 0,
+    "cards": 0
+   },
+   "chromeRssMb": 2415,
+   "chromeFootprintMb": 2665,
+   "chromeCpuSec": 10.49
+  },
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [],
+   "engineErrors": []
+  },
+  "idle": {
+   "pageTaskMsPerSec": 0.32,
+   "chromeCpuPct": 1,
+   "engineFramesTotal": 379
+  }
+ },
+ "pan-load": {
+  "frames": {
+   "frames": 177,
+   "p50": 16.7,
+   "p95": 16.8,
+   "p99": 66.6,
+   "max": 7149.7,
+   "over33": 2,
+   "over50": 2,
+   "blankFrames": 25,
+   "blankAt": [
+    [
+     571,
+     200
+    ],
+    [
+     7720,
+     124
+    ],
+    [
+     8837,
+     62
+    ],
+    [
+     8854,
+     150
+    ],
+    [
+     8870,
+     273
+    ],
+    [
+     8887,
+     362
+    ],
+    [
+     8904,
+     379
+    ],
+    [
+     8920,
+     416
+    ]
+   ],
+   "unloadedFrames": 0,
+   "engineCpu": {
+    "n": 177,
+    "min": 0,
+    "p50": 0.2,
+    "p95": 3.3,
+    "p99": 6.6,
+    "max": 6.6,
+    "mean": 0.73
+   }
+  },
+  "settleAfterMs": 5934,
+  "wallMs": 16377,
+  "mem": {
+   "jsHeapMb": 8.9,
+   "domNodes": 3350,
+   "listeners": 596,
+   "timers": 0,
+   "intervals": 5,
+   "videos": 0,
+   "engine": {
+    "tileMB": 46.8,
+    "imageMB": 0,
+    "effectMB": 0,
+    "wasmMB": 158.1,
+    "tiles": 1002,
+    "boards": 501,
+    "nodes": 99502,
+    "errors": 0
+   },
+   "cards": {
+    "cardMB": 0,
+    "stagingMB": 0,
+    "playing": 0,
+    "cards": 0
+   },
+   "chromeRssMb": 1902,
+   "chromeFootprintMb": 1336,
+   "chromeCpuSec": 13.98
+  },
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [],
+   "engineErrors": []
+  },
+  "idle": {
+   "pageTaskMsPerSec": 0.33,
+   "chromeCpuPct": 3.6,
+   "engineFramesTotal": 535
+  }
+ },
+ "page-fly": {
+  "frames": {
+   "frames": 294,
+   "p50": 16.7,
+   "p95": 100,
+   "p99": 233.4,
+   "max": 250,
+   "over33": 31,
+   "over50": 27,
+   "blankFrames": 84,
+   "blankAt": [
+    [
+     539,
+     21
+    ],
+    [
+     856,
+     19
+    ],
+    [
+     939,
+     9
+    ],
+    [
+     956,
+     8
+    ],
+    [
+     973,
+     7
+    ],
+    [
+     989,
+     7
+    ],
+    [
+     1056,
+     1
+    ],
+    [
+     1089,
+     1
+    ]
+   ],
+   "unloadedFrames": 4,
+   "engineCpu": {
+    "n": 294,
+    "min": 0,
+    "p50": 0.2,
+    "p95": 3.7,
+    "p99": 14,
+    "max": 14.2,
+    "mean": 0.8
+   }
+  },
+  "settle": 103,
+  "end": {
+   "cam": {
+    "z": 0.02,
+    "x": 703.2,
+    "y": -252.50999999999996
+   },
+   "page": "design-system",
+   "flying": false,
+   "shown": 12
+  },
+  "pages": [
+   "final",
+   "page-2",
+   "design-system"
+  ],
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fbig.canvas%2Fmedia%2Fimage.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fbig.canvas%2Fmedia%2Fimage.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fbig.canvas%2Fmedia%2Fimage.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fbig.canvas%2Fmedia%2Fimage.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fbig.canvas%2Fmedia%2Fimage.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fbig.canvas%2Fmedia%2Fimage.png 404"
+   ],
+   "engineErrors": []
+  }
+ },
+ "edit-gesture": {
+  "frames": {
+   "frames": 430,
+   "p50": 16.7,
+   "p95": 16.8,
+   "p99": 16.8,
+   "max": 16.8,
+   "over33": 0,
+   "over50": 0,
+   "blankFrames": 5,
+   "blankAt": [
+    [
+     92,
+     3
+    ],
+    [
+     109,
+     2
+    ],
+    [
+     125,
+     2
+    ],
+    [
+     142,
+     1
+    ],
+    [
+     159,
+     1
+    ]
+   ],
+   "unloadedFrames": 0,
+   "engineCpu": {
+    "n": 430,
+    "min": 0,
+    "p50": 0.1,
+    "p95": 0.5,
+    "p99": 2.3,
+    "max": 14.3,
+    "mean": 0.22
+   }
+  },
+  "writes": {
+   "200": 306
+  },
+  "writeLatency": {
+   "n": 300,
+   "min": 15.03,
+   "p50": 36.29,
+   "p95": 69.92,
+   "p99": 71.45,
+   "max": 71.87,
+   "mean": 38.91
+  },
+  "integrity": {
+   "ok": true,
+   "nodes": 28668,
+   "dupes": [],
+   "wrong": [],
+   "bytes": 17679119
+  },
+  "mem": {
+   "jsHeapMb": 3,
+   "domNodes": 955,
+   "listeners": 182,
+   "timers": 0,
+   "intervals": 5,
+   "videos": 0,
+   "engine": {
+    "tileMB": 8.3,
+    "imageMB": 13.6,
+    "effectMB": 0.5,
+    "wasmMB": 92,
+    "tiles": 38,
+    "boards": 20,
+    "nodes": 4550,
+    "errors": 0
+   },
+   "cards": {
+    "cardMB": 0,
+    "stagingMB": 0,
+    "playing": 0,
+    "cards": 0
+   },
+   "chromeRssMb": 2547,
+   "chromeFootprintMb": 1305,
+   "chromeCpuSec": 15.29
+  },
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [],
+   "engineErrors": []
+  },
+  "idle": {
+   "pageTaskMsPerSec": 0.32,
+   "chromeCpuPct": 0.2,
+   "engineFramesTotal": 509
+  }
+ },
+ "drag50": {
+  "frames": {
+   "frames": 130,
+   "p50": 16.7,
+   "p95": 16.7,
+   "p99": 16.8,
+   "max": 33.4,
+   "over33": 0,
+   "over50": 0,
+   "blankFrames": 1,
+   "blankAt": [
+    [
+     259,
+     2
+    ]
+   ],
+   "unloadedFrames": 0,
+   "engineCpu": {
+    "n": 130,
+    "min": 0,
+    "p50": 0.1,
+    "p95": 0.3,
+    "p99": 5.6,
+    "max": 5.6,
+    "mean": 0.28
+   }
+  },
+  "moved": {
+   "dx": 800,
+   "dy": 400
+  },
+  "integrity": {
+   "ok": true,
+   "nodes": 5181,
+   "dupes": [],
+   "wrong": [],
+   "bytes": 557567
+  },
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [],
+   "engineErrors": []
+  }
+ },
+ "resize5k": {
+  "frames": {
+   "frames": 305,
+   "p50": 16.7,
+   "p95": 16.8,
+   "p99": 16.8,
+   "max": 16.8,
+   "over33": 0,
+   "over50": 0,
+   "blankFrames": 0,
+   "blankAt": [],
+   "unloadedFrames": 0,
+   "engineCpu": {
+    "n": 305,
+    "min": 0.3,
+    "p50": 0.5,
+    "p95": 0.6,
+    "p99": 0.8,
+    "max": 2.5,
+    "mean": 0.5
+   }
+  },
+  "board": {
+   "width": 1400,
+   "height": 700,
+   "children": 5000
+  },
+  "integrity": {
+   "ok": true,
+   "nodes": 5181,
+   "dupes": [],
+   "wrong": [],
+   "bytes": 557536
+  },
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [],
+   "engineErrors": []
+  }
+ },
+ "resize-storm": {
+  "frames": {
+   "frames": 316,
+   "p50": 16.7,
+   "p95": 16.8,
+   "p99": 16.8,
+   "max": 16.8,
+   "over33": 0,
+   "over50": 0,
+   "blankFrames": 10,
+   "blankAt": [
+    [
+     457,
+     7
+    ],
+    [
+     474,
+     7
+    ],
+    [
+     490,
+     7
+    ],
+    [
+     507,
+     2
+    ],
+    [
+     574,
+     1
+    ],
+    [
+     590,
+     1
+    ],
+    [
+     607,
+     1
+    ],
+    [
+     1340,
+     1
+    ]
+   ],
+   "unloadedFrames": 0,
+   "engineCpu": {
+    "n": 316,
+    "min": 0,
+    "p50": 0.6,
+    "p95": 2.2,
+    "p99": 3.2,
+    "max": 15.2,
+    "mean": 0.81
+   }
+  },
+  "mem": {
+   "jsHeapMb": 2.8,
+   "domNodes": 967,
+   "listeners": 182,
+   "timers": 2,
+   "intervals": 5,
+   "videos": 0,
+   "engine": {
+    "tileMB": 39.8,
+    "imageMB": 17.7,
+    "effectMB": 3,
+    "wasmMB": 90.9,
+    "tiles": 74,
+    "boards": 20,
+    "nodes": 4550,
+    "errors": 0
+   },
+   "cards": {
+    "cardMB": 0,
+    "stagingMB": 0,
+    "playing": 0,
+    "cards": 0
+   },
+   "chromeRssMb": 2776,
+   "chromeFootprintMb": 1707,
+   "chromeCpuSec": 23.47
+  },
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [],
+   "engineErrors": []
+  },
+  "size": [
+   2880,
+   1800
+  ]
+ },
+ "theme-zoom": {
+  "frames": {
+   "frames": 176,
+   "p50": 16.7,
+   "p95": 16.7,
+   "p99": 16.8,
+   "max": 16.8,
+   "over33": 0,
+   "over50": 0,
+   "blankFrames": 1,
+   "blankAt": [
+    [
+     198,
+     1
+    ]
+   ],
+   "unloadedFrames": 0,
+   "engineCpu": {
+    "n": 176,
+    "min": 0,
+    "p50": 0.1,
+    "p95": 0.7,
+    "p99": 15,
+    "max": 15,
+    "mean": 0.33
+   }
+  },
+  "bg": "rgb(24, 24, 27)",
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [],
+   "engineErrors": []
+  }
+ },
+ "synthetic": {
+  "big500": {
+   "bytes": 26678286,
+   "loadMs": 12622,
+   "frames": {
+    "frames": 239,
+    "p50": 16.7,
+    "p95": 16.7,
+    "p99": 16.8,
+    "max": 16.8,
+    "over33": 0,
+    "over50": 0,
+    "blankFrames": 71,
+    "blankAt": [
+     [
+      55,
+      348
+     ],
+     [
+      72,
+      347
+     ],
+     [
+      88,
+      346
+     ],
+     [
+      105,
+      345
+     ],
+     [
+      122,
+      344
+     ],
+     [
+      138,
+      343
+     ],
+     [
+      155,
+      342
+     ],
+     [
+      172,
+      341
+     ]
+    ],
+    "unloadedFrames": 0,
+    "engineCpu": {
+     "n": 239,
+     "min": 0,
+     "p50": 0.1,
+     "p95": 1.4,
+     "p99": 2.8,
+     "max": 2.8,
+     "mean": 0.49
+    }
+   },
+   "settleAfterMs": 103,
+   "loaded": {
+    "jsHeapMb": 14.8,
+    "domNodes": 3362,
+    "listeners": 596,
+    "timers": 0,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 47.5,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 158.6,
+     "tiles": 1002,
+     "boards": 501,
+     "nodes": 99502,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1924,
+    "chromeFootprintMb": 1369,
+    "chromeCpuSec": 15.38
+   },
+   "after": {
+    "jsHeapMb": 9,
+    "domNodes": 3362,
+    "listeners": 596,
+    "timers": 3,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 48.5,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 158.6,
+     "tiles": 1074,
+     "boards": 501,
+     "nodes": 99502,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1870,
+    "chromeFootprintMb": 1229,
+    "chromeCpuSec": 16.36
+   },
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   },
+   "idle": {
+    "pageTaskMsPerSec": 0.29,
+    "chromeCpuPct": 3.8,
+    "engineFramesTotal": 672
+   }
+  },
+  "huge60": {
+   "bytes": 61429204,
+   "loadMs": 120749,
+   "frames": {
+    "frames": 21,
+    "p50": 383.3,
+    "p95": 433.2,
+    "p99": 433.3,
+    "max": 433.3,
+    "over33": 12,
+    "over50": 12,
+    "blankFrames": 21,
+    "blankAt": [
+     [
+      -6,
+      99
+     ],
+     [
+      394,
+      99
+     ],
+     [
+      794,
+      99
+     ],
+     [
+      1227,
+      99
+     ],
+     [
+      1660,
+      98
+     ],
+     [
+      1694,
+      98
+     ],
+     [
+      2077,
+      97
+     ],
+     [
+      2094,
+      97
+     ]
+    ],
+    "unloadedFrames": 0,
+    "engineCpu": {
+     "n": 21,
+     "min": 0.8,
+     "p50": 1.2,
+     "p95": 1.5,
+     "p99": 1.5,
+     "max": 1.5,
+     "mean": 1.19
+    }
+   },
+   "settleAfterMs": 39252,
+   "loaded": {
+    "jsHeapMb": 53.5,
+    "domNodes": 7507,
+    "listeners": 1246,
+    "timers": 7,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 8.1,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 309.9,
+     "tiles": 882,
+     "boards": 1021,
+     "nodes": 203179,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1565,
+    "chromeFootprintMb": 1467,
+    "chromeCpuSec": 133.16
+   },
+   "after": {
+    "jsHeapMb": 35.4,
+    "domNodes": 7291,
+    "listeners": 1246,
+    "timers": 8,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 9.9,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 340.2,
+     "tiles": 964,
+     "boards": 1124,
+     "nodes": 223676,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1532,
+    "chromeFootprintMb": 1359,
+    "chromeCpuSec": 180.96
+   },
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   },
+   "idle": {
+    "pageTaskMsPerSec": 1128.75,
+    "chromeCpuPct": 114.5,
+    "engineFramesTotal": 1099
+   }
+  },
+  "deep60": {
+   "bytes": 352447,
+   "loadMs": 428,
+   "frames": {
+    "frames": 238,
+    "p50": 16.7,
+    "p95": 16.8,
+    "p99": 16.8,
+    "max": 16.8,
+    "over33": 0,
+    "over50": 0,
+    "blankFrames": 0,
+    "blankAt": [],
+    "unloadedFrames": 0,
+    "engineCpu": {
+     "n": 238,
+     "min": 0,
+     "p50": 0.1,
+     "p95": 0.2,
+     "p99": 0.2,
+     "max": 0.4,
+     "mean": 0.09
+    }
+   },
+   "settleAfterMs": 104,
+   "loaded": {
+    "jsHeapMb": 1.7,
+    "domNodes": 525,
+    "listeners": 124,
+    "timers": 7,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 1.9,
+     "tiles": 0,
+     "boards": 0,
+     "nodes": 0,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1283,
+    "chromeFootprintMb": 929,
+    "chromeCpuSec": 12.1
+   },
+   "after": {
+    "jsHeapMb": 1.6,
+    "domNodes": 525,
+    "listeners": 124,
+    "timers": 3,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 1.9,
+     "tiles": 0,
+     "boards": 0,
+     "nodes": 0,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1310,
+    "chromeFootprintMb": 834,
+    "chromeCpuSec": 13.32
+   },
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   },
+   "idle": {
+    "pageTaskMsPerSec": 0.38,
+    "chromeCpuPct": 0.5,
+    "engineFramesTotal": 252
+   }
+  },
+  "text": {
+   "bytes": 387794,
+   "loadMs": 3874,
+   "frames": {
+    "frames": 238,
+    "p50": 16.7,
+    "p95": 16.7,
+    "p99": 16.8,
+    "max": 16.8,
+    "over33": 0,
+    "over50": 0,
+    "blankFrames": 26,
+    "blankAt": [
+     [
+      309,
+      16
+     ],
+     [
+      326,
+      13
+     ],
+     [
+      342,
+      12
+     ],
+     [
+      359,
+      11
+     ],
+     [
+      376,
+      10
+     ],
+     [
+      392,
+      9
+     ],
+     [
+      409,
+      8
+     ],
+     [
+      426,
+      7
+     ]
+    ],
+    "unloadedFrames": 0,
+    "engineCpu": {
+     "n": 238,
+     "min": 0,
+     "p50": 0.1,
+     "p95": 2.2,
+     "p99": 2.4,
+     "max": 6.9,
+     "mean": 0.43
+    }
+   },
+   "settleAfterMs": 104,
+   "loaded": {
+    "jsHeapMb": 3.7,
+    "domNodes": 533,
+    "listeners": 114,
+    "timers": 3,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 11.6,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 596.5,
+     "tiles": 40,
+     "boards": 20,
+     "nodes": 1220,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 2667,
+    "chromeFootprintMb": 2531,
+    "chromeCpuSec": 15.46
+   },
+   "after": {
+    "jsHeapMb": 2,
+    "domNodes": 513,
+    "listeners": 114,
+    "timers": 3,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 16,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 596.5,
+     "tiles": 76,
+     "boards": 20,
+     "nodes": 1220,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1453,
+    "chromeFootprintMb": 1540,
+    "chromeCpuSec": 16.5
+   },
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   },
+   "idle": {
+    "pageTaskMsPerSec": 0.35,
+    "chromeCpuPct": 1,
+    "engineFramesTotal": 275
+   }
+  },
+  "components": {
+   "bytes": 278560,
+   "loadMs": 6120,
+   "frames": {
+    "frames": 238,
+    "p50": 16.7,
+    "p95": 16.7,
+    "p99": 16.8,
+    "max": 16.8,
+    "over33": 0,
+    "over50": 0,
+    "blankFrames": 64,
+    "blankAt": [
+     [
+      47,
+      5
+     ],
+     [
+      63,
+      5
+     ],
+     [
+      80,
+      5
+     ],
+     [
+      97,
+      5
+     ],
+     [
+      113,
+      12
+     ],
+     [
+      130,
+      12
+     ],
+     [
+      147,
+      12
+     ],
+     [
+      163,
+      12
+     ]
+    ],
+    "unloadedFrames": 0,
+    "engineCpu": {
+     "n": 238,
+     "min": 0,
+     "p50": 0.1,
+     "p95": 2.2,
+     "p99": 12.8,
+     "max": 12.8,
+     "mean": 0.49
+    }
+   },
+   "settleAfterMs": 105,
+   "loaded": {
+    "jsHeapMb": 11.6,
+    "domNodes": 1080,
+    "listeners": 214,
+    "timers": 2,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 63.3,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 107.8,
+     "tiles": 134,
+     "boards": 59,
+     "nodes": 47720,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1605,
+    "chromeFootprintMb": 1287,
+    "chromeCpuSec": 21.17
+   },
+   "after": {
+    "jsHeapMb": 6.6,
+    "domNodes": 1005,
+    "listeners": 214,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 81.9,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 107.8,
+     "tiles": 208,
+     "boards": 59,
+     "nodes": 47720,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1540,
+    "chromeFootprintMb": 1139,
+    "chromeCpuSec": 22.4
+   },
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   },
+   "idle": {
+    "pageTaskMsPerSec": 0.44,
+    "chromeCpuPct": 0.3,
+    "engineFramesTotal": 293
+   }
+  },
+  "images": {
+   "bytes": 31933,
+   "loadMs": 6230,
+   "frames": {
+    "frames": 243,
+    "p50": 16.7,
+    "p95": 16.8,
+    "p99": 66.7,
+    "max": 83.3,
+    "over33": 3,
+    "over50": 3,
+    "blankFrames": 4,
+    "blankAt": [
+     [
+      737,
+      4
+     ],
+     [
+      754,
+      3
+     ],
+     [
+      771,
+      2
+     ],
+     [
+      787,
+      1
+     ]
+    ],
+    "unloadedFrames": 0,
+    "engineCpu": {
+     "n": 243,
+     "min": 0,
+     "p50": 0.1,
+     "p95": 2.3,
+     "p99": 3.6,
+     "max": 16.9,
+     "mean": 0.59
+    }
+   },
+   "settleAfterMs": 159,
+   "loaded": {
+    "jsHeapMb": 1.8,
+    "domNodes": 339,
+    "listeners": 99,
+    "timers": 83,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 29.5,
+     "imageMB": 45.3,
+     "effectMB": 0,
+     "wasmMB": 2.6,
+     "tiles": 15,
+     "boards": 5,
+     "nodes": 209,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1478,
+    "chromeFootprintMb": 1538,
+    "chromeCpuSec": 41.71
+   },
+   "after": {
+    "jsHeapMb": 1.8,
+    "domNodes": 339,
+    "listeners": 99,
+    "timers": 2,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 31.9,
+     "imageMB": 66,
+     "effectMB": 0,
+     "wasmMB": 2.8,
+     "tiles": 21,
+     "boards": 5,
+     "nodes": 209,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 0,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 0
+    },
+    "chromeRssMb": 1641,
+    "chromeFootprintMb": 1669,
+    "chromeCpuSec": 55.5
+   },
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg179.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg183.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg187.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg191.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg195.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg199.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg25.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg29.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg33.jpg The source image could not be decoded.",
+     "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fimg8k%2Fimg37.jpg The source image could not be decoded."
+    ],
+    "engineErrors": []
+   },
+   "idle": {
+    "pageTaskMsPerSec": 0.37,
+    "chromeCpuPct": 0.2,
+    "engineFramesTotal": 304
+   }
+  }
+ },
+ "media": {
+  "withMedia": {
+   "frames": {
+    "frames": 348,
+    "p50": 16.7,
+    "p95": 16.8,
+    "p99": 33.5,
+    "max": 116.5,
+    "over33": 3,
+    "over50": 2,
+    "blankFrames": 0,
+    "blankAt": [],
+    "unloadedFrames": 0,
+    "engineCpu": null
+   },
+   "mem": {
+    "jsHeapMb": 3.1,
+    "domNodes": 2577,
+    "listeners": 473,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 8,
+    "engine": {
+     "tileMB": 8,
+     "imageMB": 13.6,
+     "effectMB": 0,
+     "wasmMB": 90.2,
+     "tiles": 30,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 7,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2287,
+    "chromeFootprintMb": 1681,
+    "chromeCpuSec": 11.48
+   },
+   "cards": {
+    "playing": 4,
+    "visible": 28,
+    "textureMB": 7,
+    "stagingMB": 8
+   },
+   "videoElements": 8,
+   "videoElementsBeforeGesture": 8,
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   }
+  },
+  "empty": {
+   "frames": {
+    "frames": 359,
+    "p50": 16.7,
+    "p95": 16.8,
+    "p99": 16.8,
+    "max": 16.8,
+    "over33": 0,
+    "over50": 0,
+    "blankFrames": 0,
+    "blankAt": [],
+    "unloadedFrames": 0,
+    "engineCpu": null
+   },
+   "mem": {
+    "jsHeapMb": 3,
+    "domNodes": 1389,
+    "listeners": 433,
+    "timers": 0,
+    "intervals": 5,
+    "videos": 0,
+    "engine": {
+     "tileMB": 8,
+     "imageMB": 13.6,
+     "effectMB": 3.4,
+     "wasmMB": 89.9,
+     "tiles": 30,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 32.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2211,
+    "chromeFootprintMb": 1390,
+    "chromeCpuSec": 11.4
+   },
+   "cards": {
+    "playing": 0,
+    "visible": 0,
+    "textureMB": 32,
+    "stagingMB": 0
+   },
+   "videoElements": 0,
+   "videoElementsBeforeGesture": 8,
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   }
+  },
+  "again": {
+   "frames": {
+    "frames": 358,
+    "p50": 16.7,
+    "p95": 16.7,
+    "p99": 16.8,
+    "max": 16.8,
+    "over33": 0,
+    "over50": 0,
+    "blankFrames": 0,
+    "blankAt": [],
+    "unloadedFrames": 0,
+    "engineCpu": null
+   },
+   "mem": {
+    "jsHeapMb": 3.1,
+    "domNodes": 2577,
+    "listeners": 473,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 8,
+    "engine": {
+     "tileMB": 8,
+     "imageMB": 13.6,
+     "effectMB": 0,
+     "wasmMB": 91.5,
+     "tiles": 30,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 12.9,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2247,
+    "chromeFootprintMb": 1570,
+    "chromeCpuSec": 18.25
+   },
+   "cards": {
+    "playing": 4,
+    "visible": 28,
+    "textureMB": 13,
+    "stagingMB": 8
+   },
+   "videoElements": 8,
+   "videoElementsBeforeGesture": 8,
+   "errors": {
+    "exceptions": [],
+    "pageErrors": [],
+    "warnings": [],
+    "engineErrors": []
+   }
+  },
+  "deltaFootprintMb": 180,
+  "deltaRssMb": 36
+ },
+ "_note": "Before the E1 fixes (committed HEAD dd899fc plus uncommitted work then in the tree). Blank-frame counts here used the first metric, which also counted slots whose uncovered part lies outside the board (no grey drawn); see docs/perf/stress.md."
+}

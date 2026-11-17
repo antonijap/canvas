@@ -1,0 +1,140 @@
+/* Chart cards (src/page/charts.js). Positions of the frame are set in JS so every card lines up; this file
+   holds type, colour and states. The categorical slots are the dataviz reference palette, validated against
+   the card surface in each theme (#ffffff light, #27272a dark: every adjacent pair passes the CVD and
+   normal-vision floors). Text is the system font, so no letter-spacing: WebKit tracks SF by size itself. */
+
+.ch {
+  --ch-blue: #2a78d6; --ch-orange: #eb6834; --ch-aqua: #1baf7a; --ch-yellow: #eda100;
+  --ch-magenta: #e87ba4; --ch-green: #008300; --ch-violet: #6250d6; --ch-red: #e34948;
+  --ch-other: #d4d4d8;
+  --ch-grid: #0000000f;
+  --ch-base: #00000026;
+  --ch-up: #13861b;
+  --ch-down: #d03b3b;
+  --ch-h0: #f2f2f4; --ch-h1: #cde2fb; --ch-h2: #9ec5f4; --ch-h3: #5598e7; --ch-h4: #2a78d6;
+  --ch-tip: var(--c-popover);
+  --ch-accent: var(--ch-blue);
+  position: absolute; inset: 0; overflow: hidden;
+  color: var(--c-fg);
+  font: 13px/18px var(--c-font-sans);
+}
+@media (prefers-color-scheme: dark) {
+  .ch {
+    --ch-blue: #3987e5; --ch-orange: #d95926; --ch-aqua: #199e70; --ch-yellow: #c98500;
+    --ch-magenta: #d55181; --ch-green: #0ca30c; --ch-violet: #9085e9; --ch-red: #e66767;
+    --ch-other: #52525b;
+    --ch-grid: #ffffff12;
+    --ch-base: #ffffff29;
+    --ch-up: #2fbf3a;
+    --ch-down: #ef6b6b;
+    --ch-h0: #ffffff0d; --ch-h1: #184f95; --ch-h2: #256abf; --ch-h3: #3987e5; --ch-h4: #86b6ef;
+    --ch-tip: #3a3a3e;
+  }
+}
+
+/* ---------- frame ---------- */
+.ch-title { position: absolute; left: 20px; right: 20px; top: 20px; height: 16px; font-size: 13px; line-height: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-meta { position: absolute; right: 20px; top: 20px; height: 16px; padding-left: 12px; font-size: 11px; line-height: 16px; color: var(--c-muted-fg); background: inherit; display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.ch-meta::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c-warn); }
+.ch:has(.ch-meta:not([hidden])) .ch-title { right: 120px; }
+.ch-hl { position: absolute; left: 20px; right: 20px; height: 34px; display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
+.ch-val { flex: none; font-size: 28px; line-height: 34px; font-weight: 600; }
+.ch-cap { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13px; line-height: 18px; color: var(--c-muted-fg); }
+.ch-delta { flex: none; margin-left: 2px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--c-muted-fg); font-variant-numeric: tabular-nums; }
+.ch-delta.up { color: var(--ch-up); }
+.ch-vs { flex: none; font-size: 12px; line-height: 16px; color: var(--c-muted-fg); }
+.ch-delta.down { color: var(--ch-down); }
+.ch[data-state=stale] .ch-val { color: var(--c-muted-fg); }
+.ch-plot { position: absolute; }
+.ch-svg { display: block; overflow: visible; }
+
+/* ---------- legend ---------- */
+.ch-legend { position: absolute; height: 16px; display: flex; gap: 6px 16px; flex-wrap: wrap; overflow: hidden; font-size: 12px; line-height: 16px; color: var(--c-muted-fg); }
+.ch-leg { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.ch-key { flex: none; display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+.ch-key.line { width: 12px; height: 2px; border-radius: 1px; }
+
+/* ---------- marks ---------- */
+.ch-grid { stroke: var(--ch-grid); stroke-width: 1; shape-rendering: crispEdges; }
+.ch-base { stroke: var(--ch-base); stroke-width: 1; shape-rendering: crispEdges; }
+.ch-tick { fill: var(--c-muted-fg); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ch-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ch-line.thin { stroke-width: 1.5; }
+.ch-dot { stroke: var(--c-popover); stroke-width: 2; }
+.ch-cross { stroke: var(--c-muted-fg); stroke-opacity: .45; stroke-width: 1; shape-rendering: crispEdges; }
+.ch-hit { fill: transparent; }
+.ch-bar { transition: opacity .12s ease-out; }
+.ch-focus .ch-col:not(.on) .ch-bar { opacity: .32; }
+.ch-slice { stroke: var(--c-popover); stroke-width: 2; stroke-linejoin: round; transition: opacity .12s ease-out; }
+.ch-slice.ring { stroke-linecap: butt; }
+.ch-focus .ch-slice:not(.on) { opacity: .32; }
+.ch-ring-track { fill: none; stroke: var(--ch-accent); stroke-opacity: .16; }
+.ch-ring { fill: none; stroke: var(--ch-accent); stroke-linecap: round; }
+.ch-cell { transition: opacity .12s ease-out; }
+.ch-cell.l0 { fill: var(--ch-h0); } .ch-cell.l1 { fill: var(--ch-h1); } .ch-cell.l2 { fill: var(--ch-h2); } .ch-cell.l3 { fill: var(--ch-h3); } .ch-cell.l4 { fill: var(--ch-h4); }
+.ch-cell.on { stroke: var(--c-fg); stroke-width: 1.5; }
+
+/* ---------- ranked rows (hbar, funnel) ---------- */
+.ch-rows { display: flex; flex-direction: column; }
+.ch-row { display: flex; flex-direction: column; justify-content: flex-start; gap: 5px; min-width: 0; transition: opacity .12s ease-out; }
+.ch-row-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; height: 16px; font-size: 13px; line-height: 16px; }
+.ch-row-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-row-val { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ch-row-pct { flex: none; font-size: 12px; color: var(--c-muted-fg); font-variant-numeric: tabular-nums; }
+.ch-row-track { height: 8px; }
+/* Square where the bar starts, rounded at its data end: the same 4 px corner as the columns. */
+.ch-row-bar { min-width: 2px; height: 8px; border-radius: 0 4px 4px 0; background: var(--ch-other); }
+.ch-row.other .ch-row-name { color: var(--c-muted-fg); }
+.ch-focus .ch-row:not(.on) { opacity: .4; }
+.ch-more { padding-top: 6px; font-size: 11px; line-height: 14px; color: var(--c-muted-fg); }
+
+/* ---------- pie, donut, ring ---------- */
+.ch-pie-wrap { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.ch-pie-fig { position: relative; flex: none; }
+.ch-pie-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; text-align: center; }
+.ch-ring-big { font-size: 22px; line-height: 26px; font-weight: 600; }
+.ch-pie-big { font-size: 20px; line-height: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ch-pie-what { font-size: 11px; line-height: 14px; color: var(--c-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-pie-legend { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ch-pie-row { display: flex; align-items: center; gap: 8px; height: 24px; min-width: 0; font-size: 13px; line-height: 16px; transition: opacity .12s ease-out; }
+.ch-pie-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-pie-val { flex: none; font-weight: 500; font-variant-numeric: tabular-nums; }
+.ch-pie-pct { flex: none; width: 36px; text-align: right; font-size: 12px; color: var(--c-muted-fg); font-variant-numeric: tabular-nums; }
+.ch-focus .ch-pie-row:not(.on) { opacity: .4; }
+
+/* ---------- small multiples ---------- */
+.ch-sm { position: relative; width: 100%; height: 100%; }
+.ch-sm-tile { position: absolute; display: flex; flex-direction: column; gap: 6px; }
+.ch-sm-head { display: flex; align-items: baseline; gap: 8px; height: 18px; min-width: 0; }
+.ch-sm-name { flex: 1; min-width: 0; font-size: 12px; line-height: 16px; color: var(--c-muted-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-sm-cap { flex: none; font-size: 11px; line-height: 14px; color: var(--c-muted-fg); }
+.ch-sm-val { flex: none; font-size: 13px; line-height: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ---------- table ---------- */
+.ch-table { display: flex; flex-direction: column; margin-top: -4px; }
+.ch-tr { display: flex; align-items: center; gap: 12px; height: 30px; border-top: 1px solid var(--ch-grid); font-size: 13px; line-height: 16px; }
+.ch-tr.ch-th { height: 24px; border-top: 0; font-size: 11px; line-height: 14px; font-weight: 500; color: var(--c-muted-fg); }
+.ch-td { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-td.num { flex: 0 0 76px; text-align: right; font-variant-numeric: tabular-nums; }
+.ch-tr:not(.ch-th) .ch-td.num { font-weight: 500; }
+
+/* ---------- tooltip ---------- */
+.ch-tip { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; padding: 6px 10px; border-radius: 8px; background: var(--ch-tip); border: 1px solid var(--c-stroke); box-shadow: 0 1px 2px #0000000f, 0 6px 16px #0000001f; white-space: nowrap; }
+.ch-tip-val { font-size: 13px; line-height: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ch-tip-label { font-size: 11px; line-height: 14px; color: var(--c-muted-fg); }
+.ch-tip-rows { display: flex; flex-direction: column; gap: 2px; margin: 2px 0; }
+.ch-tip-row { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; }
+.ch-tip-name { flex: 1; color: var(--c-muted-fg); }
+.ch-tip-row b { font-weight: 600; font-variant-numeric: tabular-nums; margin-left: 10px; }
+
+/* ---------- states ---------- */
+.ch-msg { position: absolute; left: 20px; right: 20px; bottom: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; text-align: center; }
+.ch-msg-title { font-size: 13px; line-height: 16px; font-weight: 600; color: var(--c-muted-fg); }
+.ch-msg-text { max-width: 260px; font-size: 12px; line-height: 16px; color: var(--c-muted-fg); }
+.ch[data-state=error] .ch-msg-title::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 2px; border-radius: 50%; background: var(--c-danger); }
+.ch[data-state=needs-secret] .ch-msg-title::before, .ch[data-state=needs-approval] .ch-msg-title::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; vertical-align: 2px; border-radius: 50%; background: var(--c-warn); }
+.ch[data-state=loading] .ch-msg-title { font-weight: 500; animation: ch-breathe 1.6s ease-in-out infinite; }
+@keyframes ch-breathe { 50% { opacity: .45; } }
+.wd .ch-btn { margin-top: 8px; height: 24px; padding: 0 12px; border: 0; border-radius: 999px; font: 500 12px/24px var(--c-font-sans); background: var(--c-primary); color: var(--c-primary-fg); cursor: pointer; }
+.wd .ch-btn:disabled { opacity: .5; cursor: default; }
+@media (prefers-reduced-motion: reduce) { .ch *, .ch-tip { transition: none !important; animation: none !important; } }

@@ -1,0 +1,36 @@
+# PR guard: checks what a pull request changes, without running any of it.
+#
+# Why `pull_request_target`: a pull request can edit ci.yml and anything it runs, so a check that lives in the pull
+# request can be switched off by the pull request. This workflow runs main's copy of itself and of
+# .github/pr-guard.mjs instead. That makes it safe only while it NEVER checks out, builds, installs or runs the pull
+# request's code: it reads the list of changed files and their diffs through the API and nothing else.
+# Do not add a checkout of the pull request's head, `pnpm install`, or any step that executes its files here.
+name: PR guard
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  guard:
+    name: guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # main's own files (the default ref for pull_request_target is the base branch), never the pull request's.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github
+      - name: Check the changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+        run: node .github/pr-guard.mjs

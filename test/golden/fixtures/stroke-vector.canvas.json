@@ -1,0 +1,151 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "stroke-vector",
+   "x": 0,
+   "y": 0,
+   "width": 520,
+   "height": 230,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "path",
+     "id": "p1",
+     "x": 24,
+     "y": 24,
+     "width": 120,
+     "height": 70,
+     "geometry": "M0 60 L30 0 L60 60 L90 0 L120 60",
+     "viewBox": [
+      0,
+      0,
+      120,
+      70
+     ],
+     "stroke": "#18181B",
+     "strokeWidth": 6,
+     "strokeLinecap": "butt",
+     "strokeLinejoin": "miter"
+    },
+    {
+     "type": "path",
+     "id": "p2",
+     "x": 174,
+     "y": 24,
+     "width": 120,
+     "height": 70,
+     "geometry": "M0 60 L30 0 L60 60 L90 0 L120 60",
+     "viewBox": [
+      0,
+      0,
+      120,
+      70
+     ],
+     "stroke": "#DC2626",
+     "strokeWidth": 6,
+     "strokeLinecap": "round",
+     "strokeLinejoin": "round"
+    },
+    {
+     "type": "path",
+     "id": "p3",
+     "x": 324,
+     "y": 24,
+     "width": 120,
+     "height": 70,
+     "geometry": "M0 60 L30 0 L60 60 L90 0 L120 60",
+     "viewBox": [
+      0,
+      0,
+      120,
+      70
+     ],
+     "stroke": "#2563EB",
+     "strokeWidth": 6,
+     "strokeLinecap": "square",
+     "strokeLinejoin": "bevel"
+    },
+    {
+     "type": "path",
+     "id": "p4",
+     "x": 24,
+     "y": 130,
+     "width": 120,
+     "height": 80,
+     "geometry": "M10 40 C10 0 110 0 110 40 S10 80 10 40 Z M40 40 A20 12 0 1 0 80 40 A20 12 0 1 0 40 40 Z",
+     "viewBox": [
+      0,
+      0,
+      120,
+      80
+     ],
+     "fill": "#FDE68A",
+     "fillRule": "evenodd",
+     "stroke": "#92400E",
+     "strokeWidth": 2
+    },
+    {
+     "type": "polygon",
+     "id": "g1",
+     "x": 174,
+     "y": 130,
+     "width": 80,
+     "height": 80,
+     "polygonCount": 3,
+     "fill": "#BBF7D0",
+     "stroke": "#15803D",
+     "strokeWidth": 3
+    },
+    {
+     "type": "polygon",
+     "id": "g2",
+     "x": 274,
+     "y": 130,
+     "width": 80,
+     "height": 80,
+     "polygonCount": 6,
+     "fill": "#BFDBFE",
+     "stroke": "#1D4ED8",
+     "strokeWidth": 3
+    },
+    {
+     "type": "polygon",
+     "id": "g3",
+     "x": 374,
+     "y": 130,
+     "width": 120,
+     "height": 80,
+     "polygonCount": 5,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "linear",
+      "colors": [
+       {
+        "color": "#EF4444",
+        "position": 0
+       },
+       {
+        "color": "#FACC15",
+        "position": 0.33
+       },
+       {
+        "color": "#22C55E",
+        "position": 0.66
+       },
+       {
+        "color": "#3B82F6",
+        "position": 1
+       }
+      ],
+      "rotation": 90
+     }
+    }
+   ]
+  }
+ ]
+}

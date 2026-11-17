@@ -1,0 +1,174 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "text-line-height",
+   "x": 0,
+   "y": 0,
+   "width": 760,
+   "height": 400,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "frame",
+     "id": "f2",
+     "x": 20,
+     "y": 16,
+     "width": 170,
+     "layout": "vertical",
+     "fill": "#F4F4F5",
+     "children": [
+      {
+       "type": "text",
+       "id": "t1",
+       "x": 0,
+       "y": 0,
+       "content": "Design tools draw the same paragraph a thousand times a day. Line height decides where every baseline sits, so a rounding slip moves the whole block.",
+       "fontFamily": "Inter",
+       "fontSize": 13,
+       "fontWeight": "400",
+       "fill": "#18181B",
+       "lineHeight": 1,
+       "textGrowth": "fixed-width",
+       "width": "fill_container"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f4",
+     "x": 205,
+     "y": 16,
+     "width": 170,
+     "layout": "vertical",
+     "fill": "#F4F4F5",
+     "children": [
+      {
+       "type": "text",
+       "id": "t3",
+       "x": 0,
+       "y": 0,
+       "content": "Design tools draw the same paragraph a thousand times a day. Line height decides where every baseline sits, so a rounding slip moves the whole block.",
+       "fontFamily": "Inter",
+       "fontSize": 13,
+       "fontWeight": "400",
+       "fill": "#18181B",
+       "lineHeight": 1.2,
+       "textGrowth": "fixed-width",
+       "width": "fill_container"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f6",
+     "x": 390,
+     "y": 16,
+     "width": 170,
+     "layout": "vertical",
+     "fill": "#F4F4F5",
+     "children": [
+      {
+       "type": "text",
+       "id": "t5",
+       "x": 0,
+       "y": 0,
+       "content": "Design tools draw the same paragraph a thousand times a day. Line height decides where every baseline sits, so a rounding slip moves the whole block.",
+       "fontFamily": "Inter",
+       "fontSize": 13,
+       "fontWeight": "400",
+       "fill": "#18181B",
+       "lineHeight": 1.5,
+       "textGrowth": "fixed-width",
+       "width": "fill_container"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f8",
+     "x": 575,
+     "y": 16,
+     "width": 170,
+     "layout": "vertical",
+     "fill": "#F4F4F5",
+     "children": [
+      {
+       "type": "text",
+       "id": "t7",
+       "x": 0,
+       "y": 0,
+       "content": "Design tools draw the same paragraph a thousand times a day. Line height decides where every baseline sits, so a rounding slip moves the whole block.",
+       "fontFamily": "Inter",
+       "fontSize": 13,
+       "fontWeight": "400",
+       "fill": "#18181B",
+       "lineHeight": 2,
+       "textGrowth": "fixed-width",
+       "width": "fill_container"
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "id": "t9",
+     "x": 20,
+     "y": 330,
+     "content": "No line height, 13px",
+     "fontFamily": "Inter",
+     "fontSize": 13,
+     "fontWeight": "400",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t10",
+     "x": 200,
+     "y": 318,
+     "content": "No line height, 28px",
+     "fontFamily": "Inter",
+     "fontSize": 28,
+     "fontWeight": "400",
+     "fill": "#18181B"
+    },
+    {
+     "type": "rectangle",
+     "id": "r11",
+     "x": 520,
+     "y": 322,
+     "width": 220,
+     "height": 24,
+     "fill": "#2563EB"
+    },
+    {
+     "type": "text",
+     "id": "t12",
+     "x": 520,
+     "y": 322,
+     "content": "lineHeight 1, 24px",
+     "fontFamily": "Inter",
+     "fontSize": 24,
+     "fontWeight": "400",
+     "fill": "#FFFFFF",
+     "lineHeight": 1
+    },
+    {
+     "type": "text",
+     "id": "t13",
+     "x": 520,
+     "y": 356,
+     "content": "SF lineHeight 1.25",
+     "fontFamily": "SF Pro",
+     "fontSize": 17,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "lineHeight": 1.25
+    }
+   ]
+  }
+ ]
+}

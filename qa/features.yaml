@@ -1,0 +1,767 @@
+# The feature catalog: every Canvas feature and the cases it must survive (docs/qa-plan.md section 1).
+#
+# A scenario says what it tests with covers: ["feature-id:case", ...] (qa/scenarios.ts, qa/matrix.ts), and
+# pnpm qa:coverage prints which feature x case pairs have a test and which do not.
+#
+# Each feature: id, name, area, driven (how a test drives it: page = the web page with real mouse and keys in
+# headless Chrome, native = the macOS shell's SwiftUI or AppKit parts, mcp = Canvas MCP tools or the HTTP API they
+# use) and cases. A case is one value on one dimension below (a node type, a state, a theme, a file size, an input),
+# or a case of the feature's own (a handle, a tool name, a key). $name expands one of the sets.
+#
+# Derived from docs/developer-guide.md (shortcuts, tools, variations, agent cursor, settings), README.md, the
+# inspector sections (apps/macos/Inspector*.swift), the widget kinds (src/widgets/kinds) and the MCP tool list
+# (mcp/tools/*.ts).
+
+dimensions:
+  node: [rectangle, ellipse, frame, group, text, image, instance, board, component, card-todo, card-note, card-posthog, card-shader, card-video]
+  state: [empty, one, many, rotated, in-instance, in-autolayout, hidden, other-page, nested, in-frame, cross-board]
+  theme: [light, dark]
+  size: [tiny, large, 5000-boards]
+  input: [mouse, keyboard, agent]
+
+sets:
+  layers: [rectangle, ellipse, frame, group, text, image, instance]
+  cards: [card-todo, card-note, card-posthog, card-shader, card-video]
+  states: [one, many, rotated, in-instance, in-autolayout, hidden, other-page, nested]
+  themes: [light, dark]
+  sizes: [tiny, large, 5000-boards]
+  handles: [handle-n, handle-s, handle-e, handle-w, handle-ne, handle-nw, handle-se, handle-sw]
+
+features:
+  # ------------------------------------------------------------ canvas and render
+  - id: render
+    name: Every node type draws on the engine renderer
+    area: canvas
+    driven: [page]
+    cases: [$layers, board, component, $cards, rotated, nested, hidden, $themes, $sizes]
+  - id: pan-zoom
+    name: Pan (Space drag, scroll, arrows with nothing selected) and zoom (Cmd scroll, pinch, Cmd +/-, Shift +/-, Z tool, typed in the zoom pill)
+    area: canvas
+    driven: [page, native]
+    cases: [mouse, keyboard, tiny, large, 5000-boards, shift-keys, arrows, zoom-tool, typed]
+  - id: pixel-grid
+    name: The pixel grid from 400% up, Cmd+' (View > Pixel Grid) toggles it
+    area: canvas
+    driven: [page, native]
+    cases: [keyboard, menu, zoom-below, zoom-above]
+  - id: rulers
+    name: Rulers (Shift+R, View > Rulers); guides dragged out of them onto a board, saved on the board, moved and removed
+    area: canvas
+    driven: [page, native]
+    cases: [keyboard, menu, add, move, remove, undo]
+  - id: layout-guides
+    name: Layout guides (grid, columns, rows) per frame, Control+G and View > Layout Guides, snapping to them, inspector Layout guide section
+    area: canvas
+    driven: [page, native]
+    cases: [keyboard, menu, columns, rows, grid, snap-move, snap-resize, inspector]
+  - id: fit
+    name: Shift+1 fit page, Shift+2 fit selection, Shift+0 100%
+    area: canvas
+    driven: [page]
+    cases: [empty, one, many, other-page, keyboard]
+  - id: board-labels
+    name: Board name labels (only top-level frames carry one)
+    area: canvas
+    driven: [page]
+    cases: [board, instance, text, many, $themes]
+  - id: renderer-fallback
+    name: DOM renderer when WebGPU is missing
+    area: canvas
+    driven: [page]
+    cases: [tiny, large]
+
+  # ------------------------------------------------------------ selection
+  - id: select-click
+    name: Click selects the board child, double-click goes one level in
+    area: select
+    driven: [page]
+    cases: [$layers, nested, in-frame, in-instance, in-autolayout, rotated, mouse]
+  - id: select-layer
+    name: Right-click > Select layer lists every layer under the pointer, topmost first; picking one selects it
+    area: select
+    driven: [page, native]
+    cases: [nested, overlap, menu]
+  - id: select-deep
+    name: Cmd+click selects the deepest layer
+    area: select
+    driven: [page]
+    cases: [nested, in-frame, in-instance, mouse]
+  - id: select-add
+    name: Shift+click adds to the selection
+    area: select
+    driven: [page]
+    cases: [many, cross-board, mouse]
+  - id: marquee
+    name: Marquee and deep marquee (Cmd)
+    area: select
+    driven: [page]
+    cases: [empty, many, board, nested, cross-board]
+  - id: select-keys
+    name: Enter/Shift+Enter children/parent, Tab siblings, N boards, Esc, Cmd+A
+    area: select
+    driven: [page]
+    cases: [one, nested, board, keyboard, backslash]
+  - id: lock
+    name: Shift+Cmd+L and the Layers padlock lock layers; locked ones ignore canvas clicks and the marquee, a locked frame locks its children
+    area: select
+    driven: [page, native, mcp]
+    cases: [rectangle, frame, board, nested, many, keyboard, mouse, agent, lock-drag, canvas-keys]
+  - id: select-matching
+    name: Option+Cmd+A selects same-named layers in the other boards
+    area: select
+    driven: [page]
+    cases: [cross-board, keyboard, empty]
+  - id: select-same
+    name: Edit > Select All with Same fill, stroke, effect, text properties, font, instances
+    area: select
+    driven: [page]
+    cases: [stroke, effect, many]
+  - id: select-inverse
+    name: Shift+Cmd+A selects everything in the selection's scope except it
+    area: select
+    driven: [page]
+    cases: [one, board, keyboard]
+  - id: keyboard-select
+    name: Option+Space keyboard cursor; arrows move it, Return picks, Cmd+arrows draw a selection box
+    area: select
+    driven: [page]
+    cases: [one, many, keyboard]
+
+  # ------------------------------------------------------------ move
+  - id: move
+    name: Drag moves the selection, one undo step
+    area: move
+    driven: [page, mcp]
+    cases: [$layers, $cards, board, one, many, rotated, in-frame, nested, in-instance, cross-board, mouse, agent]
+  - id: move-axis-lock
+    name: Shift locks a drag to one axis
+    area: move
+    driven: [page]
+    cases: [one, mouse]
+  - id: move-reparent
+    name: Drag into a frame and back out
+    area: move
+    driven: [page, mcp]
+    cases: [one, in-frame, in-autolayout, mouse, agent]
+  - id: move-keep-parent
+    name: Space held while dragging keeps a layer in its parent (no leaving its frame, no nesting)
+    area: move
+    driven: [page]
+    cases: [one, many, in-frame, in-autolayout, board, mouse]
+  - id: option-drag-duplicate
+    name: Option-drag copies, the original stays
+    area: move
+    driven: [page]
+    cases: [one, many, rectangle, mouse]
+  - id: nudge
+    name: Arrows nudge 1 px, Shift+arrows big nudge
+    area: move
+    driven: [page]
+    cases: [$layers, many, in-autolayout, keyboard, rotated, in-frame, nested]
+  - id: snapping
+    name: Snap to objects, pixel grid, smart guides; Control or Cmd bypasses
+    area: move
+    driven: [page]
+    cases: [one, many, mouse, ctrl]
+
+  # ------------------------------------------------------------ resize, rotate, scale
+  - id: resize
+    name: Resize from 4 edges and 4 corners
+    area: resize
+    driven: [page, mcp]
+    cases: [$layers, $cards, $handles, rotated, in-autolayout, in-instance, mouse, agent, in-frame, nested]
+  - id: resize-modifiers
+    name: Option resizes from the centre, Shift keeps the ratio
+    area: resize
+    driven: [page]
+    cases: [$layers, $cards, mouse]
+  - id: resize-text-growth
+    name: A side edge makes text auto height, a top edge fixed size
+    area: resize
+    driven: [page]
+    cases: [text, mouse]
+  - id: resize-keys
+    name: Cmd+arrows resize width and height
+    area: resize
+    driven: [page]
+    cases: [$layers, keyboard, rotated, in-autolayout, in-frame, nested]
+  - id: group-box
+    name: A group's box covers its layers, rotated ones too
+    area: resize
+    driven: [page]
+    cases: [group, rotated, nested]
+  - id: rotate
+    name: Rotate from outside a corner, about the centre or the origin Option+R shows
+    area: resize
+    driven: [page, mcp]
+    cases: [$layers, rotated, nested, mouse, agent, in-autolayout, in-frame, keyboard, origin]
+  - id: scale-tool
+    name: K scales a layer with its contents
+    area: resize
+    driven: [page, mcp]
+    cases: [frame, group, text, keyboard, agent]
+  - id: fit-board
+    name: Opt+Cmd+Shift+R resizes a board to fit its content
+    area: resize
+    driven: [page]
+    cases: [board, keyboard]
+
+  # ------------------------------------------------------------ properties
+  - id: opacity-keys
+    name: Digits set opacity (1 is 10%, 0 is 100%, two quick digits a percentage)
+    area: properties
+    driven: [page]
+    cases: [$layers, many, keyboard, rotated, in-autolayout, in-frame, nested]
+  - id: flip
+    name: Shift+H / Shift+V flip
+    area: properties
+    driven: [page]
+    cases: [$layers, rotated, keyboard, in-autolayout, in-frame, nested]
+  - id: hide-show
+    name: Shift+Cmd+H hides and shows the selection
+    area: properties
+    driven: [page, native]
+    cases: [$layers, many, hidden, keyboard, rotated, in-autolayout, in-frame, nested]
+  - id: set-props
+    name: Set fill, stroke, radius, effects, name, size through the inspector's write
+    area: properties
+    driven: [native, mcp]
+    cases: [$layers, many, in-instance, $themes, agent, rotated, in-autolayout, in-frame, nested]
+  - id: corner-radius-knob
+    name: Corner knobs drag the radius (Option one corner)
+    area: properties
+    driven: [page]
+    cases: [rectangle, frame, mouse]
+  - id: smart-selection
+    name: Evenly spaced layers - pink gap handles, rings to reorder (Cmd swaps), marks, Cmd+D and Delete in the list, spacing fields
+    area: arrange
+    driven: [page, native]
+    cases: [many, board, grid, mouse, keyboard, spacing, reorder, swap, mark, duplicate, delete, inspector]
+  - id: tidy-up
+    name: Control+Option+T makes a selection an evenly spaced row, column or grid from its top-left
+    area: arrange
+    driven: [page, native]
+    cases: [many, board, keyboard, menu]
+  - id: align-distribute
+    name: Option+W/A/S/D/H/V align, Option+Shift+H/V distribute; Shift on an align item aligns to the parent
+    area: properties
+    driven: [page]
+    cases: [many, in-frame, keyboard, parent]
+  - id: text-style-keys
+    name: Cmd+B/I/U, Shift+Cmd+X, font size and text align keys
+    area: properties
+    driven: [page]
+    cases: [text, many, keyboard]
+  - id: copy-paste-props
+    name: Opt+Cmd+C / Opt+Cmd+V copy and paste properties
+    area: properties
+    driven: [page]
+    cases: [$layers, keyboard]
+  - id: repeat
+    name: . repeats the last property edit
+    area: properties
+    driven: [page, native]
+    cases: [one, many, keyboard]
+  - id: variables
+    name: Colour and number variables, light and dark themes
+    area: properties
+    driven: [page, native]
+    cases: [rectangle, frame, text, $themes]
+  - id: text-edit
+    name: Double-click edits a text layer; typing, selection, Escape commits
+    area: properties
+    driven: [page]
+    cases: [text, in-instance, in-autolayout, keyboard, large]
+  - id: paint-type
+    name: "+ in Fill and Stroke asks for the type (Solid, Gradient, Image, Shader); a paint's swatch tabs switch it"
+    area: properties
+    driven: [native]
+    cases: [rectangle, frame, ellipse, mouse, solid, gradient, image, shader, stroke]
+  - id: gradient-edit
+    name: Gradient stops (add, move, colour, remove), type, angle, flip, opacity
+    area: properties
+    driven: [native, page]
+    cases: [rectangle, mouse, keyboard, stops, angle]
+  - id: image-fill
+    name: Image fills Fill, Fit, Crop, Tile, Rotate 90, adjustments; Crop by double-clicking the image
+    area: properties
+    driven: [native, page]
+    cases: [rectangle, image, mouse, keyboard, fill, fit, crop, tile, rotate, adjust, paste]
+  - id: shader-fill-edit
+    name: A shader fill's preset and parameters in its paint popover
+    area: properties
+    driven: [native]
+    cases: [rectangle, frame, mouse]
+  - id: blend-mode
+    name: Blend mode per paint and per layer, drawn by the engine and the HTML renderer
+    area: properties
+    driven: [native, page]
+    cases: [rectangle, ellipse, paint, layer]
+  - id: selection-colors
+    name: Selection colors list each colour once; an edit changes it everywhere, one undo step
+    area: properties
+    driven: [native, mcp]
+    cases: [many, frame, mouse]
+  - id: eyedropper
+    name: I (Control+C in the app) samples a colour into the selection's fill
+    area: properties
+    driven: [native, page]
+    cases: [rectangle, many, keyboard]
+  - id: paint-keys
+    name: Option+/ removes fills, Shift+/ strokes, Shift+X swaps them; Shift+Up/Down in a hex field
+    area: properties
+    driven: [page, native]
+    cases: [rectangle, many, instance, keyboard]
+  - id: copy-paint
+    name: Copy one paint, a right-click Copy Fill / Paste Fill or a picked row with Cmd+C / Cmd+V, onto another layer
+    area: properties
+    driven: [native]
+    cases: [rectangle, ellipse, mouse, keyboard, stroke, effect]
+  - id: contrast-check
+    name: The colour picker rates a text colour against what is behind it (WCAG ratio, APCA Lc)
+    area: properties
+    driven: [native]
+    cases: [text, mouse]
+  - id: use-as-mask
+    name: Control+Cmd+M makes a layer a mask for the layers above it
+    area: properties
+    driven: [page]
+    cases: [ellipse, rectangle, keyboard]
+  - id: corner-smoothing
+    name: Corner smoothing (iOS 60%) in the corner fields; the engine draws the squircle
+    area: properties
+    driven: [native, page]
+    cases: [rectangle, frame, keyboard]
+  - id: text-type-keys
+    name: Option+< / > letter spacing, Option+Shift line height, Option+Cmd font weight
+    area: properties
+    driven: [page]
+    cases: [text, many, keyboard]
+  - id: find-replace
+    name: Cmd+F find and replace text on every page; Replace, Replace all, one undo step each
+    area: properties
+    driven: [page, native]
+    cases: [text, other-page, keyboard, mouse]
+  - id: text-ranges
+    name: Style part of a text while editing (bold, italic, size, weight, colour, tracking on the selected letters)
+    area: properties
+    driven: [page, native]
+    cases: [text, keyboard, mouse, many]
+  - id: text-multi-edit
+    name: Several text layers selected, Return, type, all of them change (multi-edit)
+    area: properties
+    driven: [page]
+    cases: [text, many, keyboard]
+  - id: paragraph-settings
+    name: Paragraph spacing and paragraph indent on a text layer (Type details); the editor's caret where the canvas draws
+    area: properties
+    driven: [page, native]
+    cases: [text, keyboard, mouse, export]
+  - id: text-lists
+    name: Bulleted and numbered lists per paragraph, nested with Tab and Shift+Tab, hanging indent; list spacing, hanging lists, markers in their item's colour, Backspace keeps the indent
+    area: properties
+    driven: [page, native]
+    cases: [text, keyboard, mouse, nesting, export, list-spacing, hanging-list, marker-colour, backspace]
+  - id: letter-case
+    name: Letter case on a text layer (Type details) - Original, Uppercase, Lowercase, Title case, Small caps (the font's smcp); the editor's caret on the drawn letters
+    area: properties
+    driven: [page, native]
+    cases: [text, keyboard, mouse, export, small-caps]
+  - id: hanging-punctuation
+    name: Hanging punctuation (Type details) - an opening quote that starts a paragraph hangs outside the text box
+    area: properties
+    driven: [page, native]
+    cases: [text, keyboard, mouse, export]
+  - id: text-truncate
+    name: Truncate text and Max lines (an ellipsis where the text stops)
+    area: properties
+    driven: [page, native, mcp]
+    cases: [text, keyboard, mouse, agent]
+  - id: text-edit-next
+    name: While editing, a click on another text layer edits that one at the click
+    area: properties
+    driven: [page]
+    cases: [text, mouse]
+
+  # ------------------------------------------------------------ structure
+  - id: group
+    name: Cmd+G groups, Opt+Cmd+G frames the selection
+    area: structure
+    driven: [page, mcp]
+    cases: [$layers, many, cross-board, keyboard, agent, rotated, in-autolayout, in-frame, nested]
+  - id: ungroup
+    name: Shift+Cmd+G ungroups
+    area: structure
+    driven: [page, mcp]
+    cases: [group, frame, nested, keyboard, agent]
+  - id: duplicate
+    name: Cmd+D duplicates in place, boards and cards go to the right
+    area: structure
+    driven: [page, mcp]
+    cases: [$layers, $cards, rotated, in-autolayout, in-frame, nested, board, many, keyboard, agent]
+  - id: delete
+    name: Delete and Backspace delete the selection
+    area: structure
+    driven: [page, mcp]
+    cases: [$layers, $cards, board, component, many, keyboard, agent, rotated, in-autolayout, in-frame, nested]
+  - id: copy-paste
+    name: Cmd+C/X/V and Shift+Cmd+V paste in place, layers and cards, to another page, file or tab
+    area: structure
+    driven: [page, native]
+    cases: [$layers, $cards, component, many, board, other-page, other-file, other-tab, keyboard, rotated, in-autolayout, in-frame, nested]
+  - id: paste-replace
+    name: Shift+Cmd+R Paste to replace swaps the selected layers for the clipboard's, same spot and index
+    area: structure
+    driven: [page, native]
+    cases: [rectangle, group, many, nested, in-autolayout, keyboard, other-app]
+  - id: paste-text
+    name: Plain text from another app pastes as a text layer; Canvas's own copy still pastes layers
+    area: structure
+    driven: [page, native]
+    cases: [text, in-frame, empty, keyboard]
+  - id: paste-frames
+    name: Cmd+V with several frames selected pastes one copy into each
+    area: structure
+    driven: [page]
+    cases: [frame, many, keyboard]
+  - id: keep-parent-add
+    name: Space held while pasting or dropping keeps the paste or drop out of the frame
+    area: structure
+    driven: [page]
+    cases: [in-frame, keyboard, mouse]
+  - id: paste-safety
+    name: A payload from another app pastes without the files it names; undo of a paste takes back the files it copied
+    area: structure
+    driven: [page, mcp]
+    cases: [image, card-video, other-app, other-file]
+  - id: reorder
+    name: Cmd+] / Cmd+[ and Option for front and back
+    area: structure
+    driven: [page, mcp]
+    cases: [$layers, keyboard, agent]
+
+  # ------------------------------------------------------------ auto layout
+  - id: autolayout-toggle
+    name: Shift+A adds auto layout, Option+Shift+A removes it, Control+Shift+A suggests it on each selected frame
+    area: autolayout
+    driven: [page, mcp]
+    cases: [frame, group, many, keyboard, agent, rotated, in-autolayout, in-frame, nested, suggest]
+  - id: autolayout-reorder
+    name: Drag a flow child to reorder, or out into another auto layout frame
+    area: autolayout
+    driven: [page, native, mcp]
+    cases: [in-autolayout, instance, mouse, agent, nested, image, into-autolayout, large]
+  - id: autolayout-handles
+    name: Padding and gap handles (Option opposite, Option+Shift all four, Shift big steps, Option+click an area)
+    area: autolayout
+    driven: [page]
+    cases: [frame, mouse, alt, alt-shift, shift, click-area]
+  - id: autolayout-sizing
+    name: Hug, fill and absolute children lay out
+    area: autolayout
+    driven: [page, native]
+    cases: [frame, text, instance, in-autolayout]
+
+  # ------------------------------------------------------------ components
+  - id: instance-overrides
+    name: Instance text, fill and font overrides
+    area: components
+    driven: [page, native, mcp]
+    cases: [instance, text, in-instance, in-autolayout]
+  - id: reset-overrides
+    name: Reset all changes on an instance, or one override
+    area: components
+    driven: [page, native, mcp]
+    cases: [instance, one, in-instance, mouse, agent, field]
+  - id: swap-instance
+    name: Swap an instance for another component (a nested instance too, from the picker or Option+drag from the Components panel); text overrides carry over when layer names match
+    area: components
+    driven: [page, native, mcp]
+    cases: [instance, many, nested, mouse, agent, option-drag, outline]
+  - id: component-drag
+    name: Drag a component from the Components panel onto the canvas; an instance lands where it is dropped, in the frame under the pointer
+    area: components
+    driven: [page, native]
+    cases: [board, in-frame, in-autolayout, mouse]
+  - id: push-overrides
+    name: Push an instance's overrides to its main component
+    area: components
+    driven: [native, mcp]
+    cases: [instance, mouse, agent]
+  - id: create-component
+    name: Opt+Cmd+K creates a component, Opt+Cmd+B detaches an instance
+    area: components
+    driven: [page]
+    cases: [frame, group, instance, keyboard]
+  - id: component-navigation
+    name: Go to main component, select all instances
+    area: components
+    driven: [native]
+    cases: [instance, component, other-page]
+
+  # ------------------------------------------------------------ pages and layers panel
+  - id: pages
+    name: Switch pages, move boards between pages
+    area: pages
+    driven: [page, native, mcp]
+    cases: [board, other-page, many, mouse, agent]
+  - id: page-crud
+    name: Create, rename, reorder and delete pages (delete takes its boards, one undo)
+    area: pages
+    driven: [native, mcp]
+    cases: [empty, board, agent]
+  - id: layers-panel
+    name: Layers panel rename, hide, reorder by drag, select
+    area: pages
+    driven: [native]
+    cases: [$layers, hidden, nested, mouse, keyboard, tab-rename, collapse-all]
+  - id: batch-rename
+    name: Cmd+R with several layers opens Rename Layers (tokens, numbers, match and replace), one undo step
+    area: pages
+    driven: [native]
+    cases: [many, keyboard]
+
+  # ------------------------------------------------------------ inspector
+  - id: inspector
+    name: Inspector sections show the file's values (Position, Layout, Auto layout, Appearance, Fill, Stroke, Effects, Typography, Component)
+    area: inspector
+    driven: [native]
+    cases: [$layers, many, in-instance, in-autolayout, rotated]
+  - id: aspect-lock
+    name: Lock aspect ratio beside W and H; handles and fields keep the ratio, Control frees one drag
+    area: inspector
+    driven: [page, native]
+    cases: [rectangle, frame, instance, mouse, keyboard]
+  - id: field-math
+    name: Number fields take + - * / ^ and parentheses ("^2" raises the current value)
+    area: inspector
+    driven: [native]
+    cases: [rectangle, keyboard]
+  - id: field-scrub
+    name: Option over a field's label or input and drag scrubs; up is faster, down slower (2x, 1x, 1/2, 1/4)
+    area: inspector
+    driven: [native]
+    cases: [rectangle, mouse]
+  - id: rotate-keys
+    name: Cmd+Option+Up/Down turns the selection by 1 degree
+    area: inspector
+    driven: [page]
+    cases: [rectangle, many, keyboard]
+  - id: selection-post
+    name: The page's selection post (size) matches the drawn selection
+    area: inspector
+    driven: [page]
+    cases: [$layers, rotated, in-autolayout, in-instance, in-frame, nested]
+
+  # ------------------------------------------------------------ cards
+  - id: card-move
+    name: A press on a card's body drags it
+    area: cards
+    driven: [page, mcp]
+    cases: [$cards, mouse, agent]
+  - id: card-resize
+    name: Cards resize from 4 edges and 4 corners
+    area: cards
+    driven: [page]
+    cases: [$cards, $handles, mouse]
+  - id: card-select
+    name: A selected card shows a 1.5 px blue outline around its rounded corners, no handles
+    area: cards
+    driven: [page, native]
+    cases: [$cards, $themes, many]
+  - id: card-add
+    name: Drag a Widgets panel row onto the canvas, or add_widget
+    area: cards
+    driven: [native, mcp]
+    cases: [$cards, agent]
+  - id: todo
+    name: To-do list editing (Return adds, Backspace deletes, Cmd+K completes)
+    area: cards
+    driven: [page, mcp]
+    cases: [card-todo, keyboard, mouse, agent]
+  - id: note
+    name: Rich notes (markdown typing, Cmd+B, paste keeps formatting)
+    area: cards
+    driven: [page, mcp]
+    cases: [card-note, keyboard, agent]
+  - id: charts
+    name: PostHog cards and charts (configured, unconfigured, cached)
+    area: cards
+    driven: [page, mcp]
+    cases: [card-posthog, empty, $themes]
+  - id: shaders
+    name: Shader cards (create, update, compile errors, export)
+    area: cards
+    driven: [page, mcp]
+    cases: [card-shader, agent]
+  - id: video
+    name: Video cards (play, frame, over an image placeholder)
+    area: cards
+    driven: [page, mcp]
+    cases: [card-video, agent]
+  - id: shader-fill
+    name: Shader fills (drop a shader tile on a layer, Option-drop for a card, Cmd-drag a shader card on a layer with a tip without Cmd, set_node_props); animate clipped to the shape, headless render
+    area: cards
+    driven: [page, native, mcp]
+    cases: [frame, rectangle, ellipse, text, in-instance, board, mouse, agent, outline, card, option-card, card-tip]
+  - id: image-drop
+    name: Image files dropped from Finder (a layer where it lands, side by side; Cmd-drop fills the layer under it)
+    area: cards
+    driven: [page, native]
+    cases: [frame, in-frame, many, mouse, fill]
+  - id: image-paste
+    name: Cmd+V of an image on the pasteboard pastes an image layer
+    area: cards
+    driven: [page, native]
+    cases: [keyboard, in-frame]
+  - id: place-image
+    name: Shift+Cmd+K Place Image opens a file picker; the images go side by side in the view or the selected frame
+    area: cards
+    driven: [page, native]
+    cases: [keyboard, in-frame, many]
+
+  # ------------------------------------------------------------ agent
+  - id: talk-to-selection
+    name: Spark and composer, Cmd+Return asks about the selection
+    area: agent
+    driven: [page, native]
+    cases: [one, many, card-note, keyboard]
+  - id: variations
+    name: Shift+Cmd+Return makes 3 variations; keep, discard, captions
+    area: agent
+    driven: [page, mcp]
+    cases: [board, one, keyboard, agent]
+  - id: agent-cursor
+    name: Agent cursor glides to each agent edit
+    area: agent
+    driven: [page, mcp]
+    cases: [one, many, agent]
+  - id: finish-work
+    name: finish_work gloss, toast and sound
+    area: agent
+    driven: [page, native, mcp]
+    cases: [agent]
+  - id: copy-link
+    name: Cmd+L copies a canvas:// link to the selection or the board in view; opening one shows it; MCP tools take it
+    area: agent
+    driven: [page, native, mcp]
+    cases: [one, many, board, empty, other-page, keyboard, open-url, agent]
+  - id: toast-actions
+    name: Toasts you can act on; a path or error copies on click, Undo after a board, page or card delete, Ask agent on an error
+    area: agent
+    driven: [page, native]
+    cases: [copy-path, copy-error, undo-board, undo-page, ask-agent, mouse]
+  - id: first-run
+    name: First launch opens the Welcome file; the welcome card's MCP commands copy; Connected follows the agent; Settings > Agents shows the same; the browser page points at the app
+    area: agent
+    driven: [page, native, mcp]
+    cases: [welcome, copy-command, connected, settings-agents, web-hint, engine-missing]
+
+  # ------------------------------------------------------------ MCP tools (cases are tool names)
+  - id: mcp-read
+    name: Disk read tools
+    area: mcp
+    driven: [mcp]
+    cases: [get_document_summary, lookup_nodes, inspect_node, get_fonts, list_installed_fonts, get_current_file, resolve_link]
+  - id: mcp-edit
+    name: Property and position edits
+    area: mcp
+    driven: [mcp]
+    cases: [set_node_props, move_board, scale_nodes, undo, redo, swap_instance, reset_overrides, push_overrides]
+  - id: mcp-structure
+    name: Structure tools
+    area: mcp
+    driven: [mcp]
+    cases: [add_nodes, delete_nodes, duplicate_nodes, group_nodes, ungroup_nodes, reorder_nodes, place_nodes, add_auto_layout, remove_auto_layout]
+  - id: mcp-pages
+    name: Page tools
+    area: mcp
+    driven: [mcp]
+    cases: [list_pages, create_page, rename_page, delete_page, move_boards_to_page, set_active_page]
+  - id: mcp-cards
+    name: Widget, shader and video tools
+    area: mcp
+    driven: [mcp]
+    cases: [list_widgets, list_widget_kinds, add_widget, update_widget, remove_widget, widget_action, refresh_widget, reveal_widget, list_shader_presets, list_shaders, create_shader, update_shader, export_shader, list_videos, add_video, video_frame]
+  - id: mcp-render
+    name: Render and export tools
+    area: mcp
+    driven: [mcp]
+    cases: [render_node, export_nodes, screenshot_view]
+  - id: mcp-live
+    name: Live state and commands
+    area: mcp
+    driven: [mcp]
+    cases: [get_selection, wait_for_selection, get_events, get_viewport, canvas_status, list_tabs, get_theme, set_theme, select_nodes, clear_selection, highlight_nodes, clear_highlights, fit_view, set_zoom, pan_view, open_file, close_tab, launch_canvas, notify_user, finish_work]
+  - id: mcp-variations
+    name: Variation tools
+    area: mcp
+    driven: [mcp]
+    cases: [make_variations, list_variations, keep_variation, discard_variations, get_product_brief, set_product_brief, get_design_context, check_variation, mark_variation]
+
+  # ------------------------------------------------------------ history and files
+  - id: undo-redo
+    name: Cmd+Z / Shift+Cmd+Z, one step per gesture, back to the original bytes
+    area: history
+    driven: [page, mcp]
+    cases: [$layers, $cards, many, board, other-page, keyboard, agent, rotated, in-autolayout, in-frame, nested]
+  - id: save-reopen
+    name: Save and reopen draws the same picture
+    area: files
+    driven: [page]
+    cases: [$layers, $cards, other-page, $themes, $sizes, rotated, in-autolayout, in-frame, nested]
+  - id: file-integrity
+    name: The file stays valid (schema, unique ids, refs resolve, pages list real boards)
+    area: files
+    driven: [page, mcp]
+    cases: [tiny, large, 5000-boards]
+  - id: crash-journal
+    name: Crash during save loses nothing; outside changes win
+    area: files
+    driven: [mcp]
+    cases: [tiny, large]
+  - id: caching
+    name: Board cache by content key, snapshots, parsed-document cache
+    area: files
+    driven: [page]
+    cases: [tiny, large, 5000-boards]
+  - id: export
+    name: Export as PNG (1x, 2x, 3x, store presets), JPG, WebP, SVG and PDF; export settings per layer; Shift+Cmd+E
+    area: files
+    driven: [page, native, mcp]
+    cases: [$layers, board, many, jpg, webp, pdf, settings, suffix, keyboard]
+  - id: copy-as
+    name: Copy as PNG (Shift+Cmd+C, 2x), SVG, CSS, SwiftUI and text from the right-click menu's Copy as
+    area: files
+    driven: [page, native]
+    cases: [one, many, board, keyboard, menu, png, svg, css, swiftui, text]
+  - id: menu-keys
+    name: Every Shift+Cmd menu chord runs its own item, never the plain Cmd item's (and the plain Cmd chord its own); capitals type into fields
+    area: chrome
+    driven: [native]
+    cases: [redo, ungroup, paste-in-place, save-as, show-hide, select-inverse, lock, place-image, copy-as-png, undo, group, paste, save, hide-app, select-all, copy-link, quick-actions, typing-capitals]
+  - id: palette
+    name: Cmd+K quick actions (boards, layers, text, components, pages, cards, commands)
+    area: chrome
+    driven: [native, page]
+    cases: [board, text, component, card-todo, other-page, keyboard]
+  - id: search
+    name: Search API behind the palette
+    area: chrome
+    driven: [mcp]
+    cases: [board, text, card-todo]
+  - id: settings
+    name: Settings tabs (General, Canvas, Agents, Sounds, Performance, Shortcuts)
+    area: chrome
+    driven: [native]
+    cases: [$themes]
+  - id: theme
+    name: App theme light and dark
+    area: chrome
+    driven: [native, mcp]
+    cases: [$themes]
+  - id: overlay-ui
+    name: Floating UI never overlaps or clips (captions, toasts, pills, spark, labels)
+    area: chrome
+    driven: [page]
+    cases: [one, many, $themes]

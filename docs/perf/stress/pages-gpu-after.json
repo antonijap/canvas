@@ -1,0 +1,2493 @@
+{
+ "probe-gpu": {
+  "switches": 119,
+  "rows": [
+   {
+    "min": 0,
+    "gc": true,
+    "proc": {
+     "browser": 185,
+     "gpu-process": 486,
+     "utility:NetworkService": 60,
+     "utility:StorageService": 7,
+     "renderer": 832
+    },
+    "heapMb": 2.9,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 504,
+       "destroyed": 359,
+       "gced": 361
+      },
+      "view": {
+       "made": 701,
+       "destroyed": 0,
+       "gced": 699
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 250,
+       "destroyed": 114,
+       "gced": 114
+      },
+      "bindGroup": {
+       "made": 2496,
+       "destroyed": 0,
+       "gced": 2465
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 289,
+       "destroyed": 0,
+       "gced": 289
+      }
+     },
+     "liveMb": {
+      "buffer": 171,
+      "texture": 125
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 20,
+    "wasmMb": 90,
+    "tileMb": 8,
+    "imageMb": 13,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 14,
+      "mb": 3.63037109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 10,
+      "mb": 0.00629425048828125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 10,
+      "mb": 1.611328125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 15,
+      "mb": 0.0762786865234375
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 4,
+      "mb": 0.000152587890625
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 14,
+      "mb": 0.05291748046875
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 12,
+      "mb": 0.00641632080078125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 1,
+      "mb": 0.00000762939453125
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 11,
+      "mb": 0.025634765625
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 12,
+      "mb": 0.0128326416015625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 14,
+      "mb": 0.05291748046875
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 4,
+      "mb": 0.01953125
+     },
+     "buffer:vello.path_buf": {
+      "n": 4,
+      "mb": 0.078125
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 89,
+      "mb": 21.902599334716797
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 89,
+      "mb": 13.596435546875
+     },
+     "texture:effect": {
+      "n": 171,
+      "mb": 46.71481704711914
+     },
+     "buffer:blur": {
+      "n": 114,
+      "mb": 0.005218505859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     }
+    }
+   },
+   {
+    "min": 0.5,
+    "gc": false,
+    "proc": {
+     "browser": 99,
+     "gpu-process": 612,
+     "utility:NetworkService": 67,
+     "utility:StorageService": 7,
+     "renderer": 953
+    },
+    "heapMb": 46.8,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 893,
+       "destroyed": 488,
+       "gced": 490
+      },
+      "view": {
+       "made": 1282,
+       "destroyed": 0,
+       "gced": 1273
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 316,
+       "destroyed": 116,
+       "gced": 116
+      },
+      "bindGroup": {
+       "made": 4332,
+       "destroyed": 0,
+       "gced": 4215
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 654,
+       "destroyed": 0,
+       "gced": 611
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 177
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 78,
+    "wasmMb": 155,
+    "tileMb": 34,
+    "imageMb": 38,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 21,
+      "mb": 23.84912109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 14,
+      "mb": 0.02704620361328125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 14,
+      "mb": 5.923828125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 20,
+      "mb": 0.2497100830078125
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 8,
+      "mb": 0.00079345703125
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 17,
+      "mb": 0.01935577392578125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 2,
+      "mb": 0.00002288818359375
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 16,
+      "mb": 0.077392578125
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 17,
+      "mb": 0.0387115478515625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 8,
+      "mb": 0.1015625
+     },
+     "buffer:vello.path_buf": {
+      "n": 8,
+      "mb": 0.40625
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 195,
+      "mb": 51.07517623901367
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 262,
+      "mb": 38.8177490234375
+     },
+     "texture:effect": {
+      "n": 174,
+      "mb": 46.76796340942383
+     },
+     "buffer:blur": {
+      "n": 116,
+      "mb": 0.00531005859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     },
+     "texture:?512x39": {
+      "n": 1,
+      "mb": 0.076171875
+     },
+     "buffer:vello.reduced2_buf": {
+      "n": 1,
+      "mb": 0.005859375
+     },
+     "buffer:reduced_scan_buf": {
+      "n": 1,
+      "mb": 0.01171875
+     },
+     "texture:?512x41": {
+      "n": 13,
+      "mb": 1.041015625
+     },
+     "texture:?512x42": {
+      "n": 16,
+      "mb": 1.3125
+     },
+     "texture:?512x64": {
+      "n": 77,
+      "mb": 9.625
+     }
+    }
+   },
+   {
+    "min": 1.01,
+    "gc": false,
+    "proc": {
+     "browser": 123,
+     "gpu-process": 570,
+     "utility:NetworkService": 61,
+     "utility:StorageService": 7,
+     "renderer": 853
+    },
+    "heapMb": 9.7,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 893,
+       "destroyed": 488,
+       "gced": 490
+      },
+      "view": {
+       "made": 1503,
+       "destroyed": 0,
+       "gced": 1492
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 316,
+       "destroyed": 116,
+       "gced": 116
+      },
+      "bindGroup": {
+       "made": 4332,
+       "destroyed": 0,
+       "gced": 4215
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 875,
+       "destroyed": 0,
+       "gced": 866
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 177
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 78,
+    "wasmMb": 155,
+    "tileMb": 34,
+    "imageMb": 38,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 21,
+      "mb": 23.84912109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 14,
+      "mb": 0.02704620361328125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 14,
+      "mb": 5.923828125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 20,
+      "mb": 0.2497100830078125
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 8,
+      "mb": 0.00079345703125
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 17,
+      "mb": 0.01935577392578125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 2,
+      "mb": 0.00002288818359375
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 16,
+      "mb": 0.077392578125
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 17,
+      "mb": 0.0387115478515625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 8,
+      "mb": 0.1015625
+     },
+     "buffer:vello.path_buf": {
+      "n": 8,
+      "mb": 0.40625
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 195,
+      "mb": 51.07517623901367
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 262,
+      "mb": 38.8177490234375
+     },
+     "texture:effect": {
+      "n": 174,
+      "mb": 46.76796340942383
+     },
+     "buffer:blur": {
+      "n": 116,
+      "mb": 0.00531005859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     },
+     "texture:?512x39": {
+      "n": 1,
+      "mb": 0.076171875
+     },
+     "buffer:vello.reduced2_buf": {
+      "n": 1,
+      "mb": 0.005859375
+     },
+     "buffer:reduced_scan_buf": {
+      "n": 1,
+      "mb": 0.01171875
+     },
+     "texture:?512x41": {
+      "n": 13,
+      "mb": 1.041015625
+     },
+     "texture:?512x42": {
+      "n": 16,
+      "mb": 1.3125
+     },
+     "texture:?512x64": {
+      "n": 77,
+      "mb": 9.625
+     }
+    }
+   },
+   {
+    "min": 1.52,
+    "gc": false,
+    "proc": {
+     "browser": 121,
+     "gpu-process": 559,
+     "utility:NetworkService": 61,
+     "utility:StorageService": 7,
+     "renderer": 846
+    },
+    "heapMb": 25.4,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 893,
+       "destroyed": 488,
+       "gced": 490
+      },
+      "view": {
+       "made": 1726,
+       "destroyed": 0,
+       "gced": 1706
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 316,
+       "destroyed": 116,
+       "gced": 116
+      },
+      "bindGroup": {
+       "made": 4332,
+       "destroyed": 0,
+       "gced": 4215
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 1098,
+       "destroyed": 0,
+       "gced": 1080
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 177
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 78,
+    "wasmMb": 155,
+    "tileMb": 34,
+    "imageMb": 38,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 21,
+      "mb": 23.84912109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 14,
+      "mb": 0.02704620361328125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 14,
+      "mb": 5.923828125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 20,
+      "mb": 0.2497100830078125
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 8,
+      "mb": 0.00079345703125
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 17,
+      "mb": 0.01935577392578125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 2,
+      "mb": 0.00002288818359375
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 16,
+      "mb": 0.077392578125
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 17,
+      "mb": 0.0387115478515625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 8,
+      "mb": 0.1015625
+     },
+     "buffer:vello.path_buf": {
+      "n": 8,
+      "mb": 0.40625
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 195,
+      "mb": 51.07517623901367
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 262,
+      "mb": 38.8177490234375
+     },
+     "texture:effect": {
+      "n": 174,
+      "mb": 46.76796340942383
+     },
+     "buffer:blur": {
+      "n": 116,
+      "mb": 0.00531005859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     },
+     "texture:?512x39": {
+      "n": 1,
+      "mb": 0.076171875
+     },
+     "buffer:vello.reduced2_buf": {
+      "n": 1,
+      "mb": 0.005859375
+     },
+     "buffer:reduced_scan_buf": {
+      "n": 1,
+      "mb": 0.01171875
+     },
+     "texture:?512x41": {
+      "n": 13,
+      "mb": 1.041015625
+     },
+     "texture:?512x42": {
+      "n": 16,
+      "mb": 1.3125
+     },
+     "texture:?512x64": {
+      "n": 77,
+      "mb": 9.625
+     }
+    }
+   },
+   {
+    "min": 2,
+    "gc": false,
+    "proc": {
+     "browser": 121,
+     "gpu-process": 563,
+     "utility:NetworkService": 60,
+     "utility:StorageService": 7,
+     "renderer": 783
+    },
+    "heapMb": 4.4,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 893,
+       "destroyed": 488,
+       "gced": 490
+      },
+      "view": {
+       "made": 1938,
+       "destroyed": 0,
+       "gced": 1936
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 316,
+       "destroyed": 116,
+       "gced": 116
+      },
+      "bindGroup": {
+       "made": 4332,
+       "destroyed": 0,
+       "gced": 4215
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 1310,
+       "destroyed": 0,
+       "gced": 1310
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 177
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 78,
+    "wasmMb": 155,
+    "tileMb": 34,
+    "imageMb": 38,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 21,
+      "mb": 23.84912109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 14,
+      "mb": 0.02704620361328125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 14,
+      "mb": 5.923828125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 20,
+      "mb": 0.2497100830078125
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 8,
+      "mb": 0.00079345703125
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 17,
+      "mb": 0.01935577392578125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 2,
+      "mb": 0.00002288818359375
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 16,
+      "mb": 0.077392578125
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 17,
+      "mb": 0.0387115478515625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 8,
+      "mb": 0.1015625
+     },
+     "buffer:vello.path_buf": {
+      "n": 8,
+      "mb": 0.40625
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 195,
+      "mb": 51.07517623901367
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 262,
+      "mb": 38.8177490234375
+     },
+     "texture:effect": {
+      "n": 174,
+      "mb": 46.76796340942383
+     },
+     "buffer:blur": {
+      "n": 116,
+      "mb": 0.00531005859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     },
+     "texture:?512x39": {
+      "n": 1,
+      "mb": 0.076171875
+     },
+     "buffer:vello.reduced2_buf": {
+      "n": 1,
+      "mb": 0.005859375
+     },
+     "buffer:reduced_scan_buf": {
+      "n": 1,
+      "mb": 0.01171875
+     },
+     "texture:?512x41": {
+      "n": 13,
+      "mb": 1.041015625
+     },
+     "texture:?512x42": {
+      "n": 16,
+      "mb": 1.3125
+     },
+     "texture:?512x64": {
+      "n": 77,
+      "mb": 9.625
+     }
+    }
+   },
+   {
+    "min": 2.51,
+    "gc": false,
+    "proc": {
+     "browser": 121,
+     "gpu-process": 554,
+     "utility:NetworkService": 61,
+     "utility:StorageService": 7,
+     "renderer": 901
+    },
+    "heapMb": 15.8,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 893,
+       "destroyed": 488,
+       "gced": 490
+      },
+      "view": {
+       "made": 2159,
+       "destroyed": 0,
+       "gced": 2140
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 316,
+       "destroyed": 116,
+       "gced": 116
+      },
+      "bindGroup": {
+       "made": 4332,
+       "destroyed": 0,
+       "gced": 4215
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 1531,
+       "destroyed": 0,
+       "gced": 1514
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 177
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 78,
+    "wasmMb": 155,
+    "tileMb": 34,
+    "imageMb": 38,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 21,
+      "mb": 23.84912109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 14,
+      "mb": 0.02704620361328125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 14,
+      "mb": 5.923828125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 20,
+      "mb": 0.2497100830078125
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 8,
+      "mb": 0.00079345703125
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 17,
+      "mb": 0.01935577392578125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 2,
+      "mb": 0.00002288818359375
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 16,
+      "mb": 0.077392578125
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 17,
+      "mb": 0.0387115478515625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 8,
+      "mb": 0.1015625
+     },
+     "buffer:vello.path_buf": {
+      "n": 8,
+      "mb": 0.40625
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 195,
+      "mb": 51.07517623901367
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 262,
+      "mb": 38.8177490234375
+     },
+     "texture:effect": {
+      "n": 174,
+      "mb": 46.76796340942383
+     },
+     "buffer:blur": {
+      "n": 116,
+      "mb": 0.00531005859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     },
+     "texture:?512x39": {
+      "n": 1,
+      "mb": 0.076171875
+     },
+     "buffer:vello.reduced2_buf": {
+      "n": 1,
+      "mb": 0.005859375
+     },
+     "buffer:reduced_scan_buf": {
+      "n": 1,
+      "mb": 0.01171875
+     },
+     "texture:?512x41": {
+      "n": 13,
+      "mb": 1.041015625
+     },
+     "texture:?512x42": {
+      "n": 16,
+      "mb": 1.3125
+     },
+     "texture:?512x64": {
+      "n": 77,
+      "mb": 9.625
+     }
+    }
+   },
+   {
+    "min": 3.02,
+    "gc": false,
+    "proc": {
+     "browser": 121,
+     "gpu-process": 554,
+     "utility:NetworkService": 61,
+     "utility:StorageService": 7,
+     "renderer": 896
+    },
+    "heapMb": 51.3,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 893,
+       "destroyed": 488,
+       "gced": 490
+      },
+      "view": {
+       "made": 2380,
+       "destroyed": 0,
+       "gced": 2339
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 316,
+       "destroyed": 116,
+       "gced": 116
+      },
+      "bindGroup": {
+       "made": 4332,
+       "destroyed": 0,
+       "gced": 4215
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 1752,
+       "destroyed": 0,
+       "gced": 1713
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 177
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 78,
+    "wasmMb": 155,
+    "tileMb": 34,
+    "imageMb": 38,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 21,
+      "mb": 23.84912109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 14,
+      "mb": 0.02704620361328125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 14,
+      "mb": 5.923828125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 20,
+      "mb": 0.2497100830078125
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 8,
+      "mb": 0.00079345703125
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 17,
+      "mb": 0.01935577392578125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 2,
+      "mb": 0.00002288818359375
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 16,
+      "mb": 0.077392578125
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 17,
+      "mb": 0.0387115478515625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 8,
+      "mb": 0.1015625
+     },
+     "buffer:vello.path_buf": {
+      "n": 8,
+      "mb": 0.40625
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 195,
+      "mb": 51.07517623901367
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 262,
+      "mb": 38.8177490234375
+     },
+     "texture:effect": {
+      "n": 174,
+      "mb": 46.76796340942383
+     },
+     "buffer:blur": {
+      "n": 116,
+      "mb": 0.00531005859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     },
+     "texture:?512x39": {
+      "n": 1,
+      "mb": 0.076171875
+     },
+     "buffer:vello.reduced2_buf": {
+      "n": 1,
+      "mb": 0.005859375
+     },
+     "buffer:reduced_scan_buf": {
+      "n": 1,
+      "mb": 0.01171875
+     },
+     "texture:?512x41": {
+      "n": 13,
+      "mb": 1.041015625
+     },
+     "texture:?512x42": {
+      "n": 16,
+      "mb": 1.3125
+     },
+     "texture:?512x64": {
+      "n": 77,
+      "mb": 9.625
+     }
+    }
+   },
+   {
+    "min": 3.03,
+    "gc": true,
+    "proc": {
+     "browser": 121,
+     "gpu-process": 554,
+     "utility:NetworkService": 60,
+     "utility:StorageService": 7,
+     "renderer": 802
+    },
+    "heapMb": 6.2,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 893,
+       "destroyed": 488,
+       "gced": 490
+      },
+      "view": {
+       "made": 2380,
+       "destroyed": 0,
+       "gced": 2378
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 316,
+       "destroyed": 116,
+       "gced": 116
+      },
+      "bindGroup": {
+       "made": 4332,
+       "destroyed": 0,
+       "gced": 4215
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 1752,
+       "destroyed": 0,
+       "gced": 1752
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 177
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 78,
+    "wasmMb": 155,
+    "tileMb": 34,
+    "imageMb": 38,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 21,
+      "mb": 23.84912109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 14,
+      "mb": 0.02704620361328125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 14,
+      "mb": 5.923828125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 20,
+      "mb": 0.2497100830078125
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 8,
+      "mb": 0.00079345703125
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 17,
+      "mb": 0.01935577392578125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 2,
+      "mb": 0.00002288818359375
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 16,
+      "mb": 0.077392578125
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 17,
+      "mb": 0.0387115478515625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 8,
+      "mb": 0.1015625
+     },
+     "buffer:vello.path_buf": {
+      "n": 8,
+      "mb": 0.40625
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 195,
+      "mb": 51.07517623901367
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 262,
+      "mb": 38.8177490234375
+     },
+     "texture:effect": {
+      "n": 174,
+      "mb": 46.76796340942383
+     },
+     "buffer:blur": {
+      "n": 116,
+      "mb": 0.00531005859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     },
+     "texture:?512x39": {
+      "n": 1,
+      "mb": 0.076171875
+     },
+     "buffer:vello.reduced2_buf": {
+      "n": 1,
+      "mb": 0.005859375
+     },
+     "buffer:reduced_scan_buf": {
+      "n": 1,
+      "mb": 0.01171875
+     },
+     "texture:?512x41": {
+      "n": 13,
+      "mb": 1.041015625
+     },
+     "texture:?512x42": {
+      "n": 16,
+      "mb": 1.3125
+     },
+     "texture:?512x64": {
+      "n": 77,
+      "mb": 9.625
+     }
+    }
+   },
+   {
+    "min": 3.57,
+    "gc": true,
+    "proc": {
+     "browser": 121,
+     "gpu-process": 539,
+     "utility:NetworkService": 60,
+     "utility:StorageService": 7,
+     "renderer": 806
+    },
+    "heapMb": 6.2,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 893,
+       "destroyed": 488,
+       "gced": 490
+      },
+      "view": {
+       "made": 2380,
+       "destroyed": 0,
+       "gced": 2378
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 316,
+       "destroyed": 116,
+       "gced": 116
+      },
+      "bindGroup": {
+       "made": 4332,
+       "destroyed": 0,
+       "gced": 4215
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 1752,
+       "destroyed": 0,
+       "gced": 1752
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 177
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 78,
+    "wasmMb": 155,
+    "tileMb": 34,
+    "imageMb": 38,
+    "labels": {
+     "texture:?2880x1800": {
+      "n": 1,
+      "mb": 19.775390625
+     },
+     "buffer:quads": {
+      "n": 1,
+      "mb": 0.25
+     },
+     "texture:white": {
+      "n": 1,
+      "mb": 0.000003814697265625
+     },
+     "texture:warm": {
+      "n": 1,
+      "mb": 0.00390625
+     },
+     "texture:?512x1": {
+      "n": 1,
+      "mb": 0.001953125
+     },
+     "buffer:vello.scene": {
+      "n": 21,
+      "mb": 23.84912109375
+     },
+     "buffer:vello.config": {
+      "n": 1,
+      "mb": 0.000091552734375
+     },
+     "buffer:vello.reduced_buf": {
+      "n": 14,
+      "mb": 0.02704620361328125
+     },
+     "buffer:vello.tagmonoid_buf": {
+      "n": 14,
+      "mb": 5.923828125
+     },
+     "buffer:vello.path_bbox_buf": {
+      "n": 20,
+      "mb": 0.2497100830078125
+     },
+     "buffer:vello.bump_buf": {
+      "n": 1,
+      "mb": 0.000030517578125
+     },
+     "buffer:vello.lines_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.draw_reduced_buf": {
+      "n": 8,
+      "mb": 0.00079345703125
+     },
+     "buffer:vello.draw_monoid_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.info_bin_data_buf": {
+      "n": 1,
+      "mb": 1
+     },
+     "buffer:vello.clip_inp_buf": {
+      "n": 17,
+      "mb": 0.01935577392578125
+     },
+     "buffer:vello.clip_bic_buf": {
+      "n": 2,
+      "mb": 0.00002288818359375
+     },
+     "buffer:vello.clip_el_buf": {
+      "n": 16,
+      "mb": 0.077392578125
+     },
+     "buffer:vello.clip_bbox_buf": {
+      "n": 17,
+      "mb": 0.0387115478515625
+     },
+     "buffer:vello.draw_bbox_buf": {
+      "n": 21,
+      "mb": 0.218505859375
+     },
+     "buffer:vello.bin_header_buf": {
+      "n": 8,
+      "mb": 0.1015625
+     },
+     "buffer:vello.path_buf": {
+      "n": 8,
+      "mb": 0.40625
+     },
+     "buffer:vello.tile_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.indirect_count": {
+      "n": 1,
+      "mb": 0.0000152587890625
+     },
+     "buffer:vello.seg_counts_buf": {
+      "n": 1,
+      "mb": 16
+     },
+     "buffer:vello.ptcl_buf": {
+      "n": 1,
+      "mb": 32
+     },
+     "buffer:vello.segments_buf": {
+      "n": 1,
+      "mb": 48
+     },
+     "buffer:vello.blend_spill": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:?1024x1024": {
+      "n": 1,
+      "mb": 4
+     },
+     "texture:tile": {
+      "n": 195,
+      "mb": 51.07517623901367
+     },
+     "texture:?512x3": {
+      "n": 40,
+      "mb": 0.234375
+     },
+     "texture:blank effect": {
+      "n": 2,
+      "mb": 16.25
+     },
+     "texture:image": {
+      "n": 262,
+      "mb": 38.8177490234375
+     },
+     "texture:effect": {
+      "n": 174,
+      "mb": 46.76796340942383
+     },
+     "buffer:blur": {
+      "n": 116,
+      "mb": 0.00531005859375
+     },
+     "texture:?512x5": {
+      "n": 4,
+      "mb": 0.0390625
+     },
+     "texture:?512x7": {
+      "n": 3,
+      "mb": 0.041015625
+     },
+     "texture:?512x10": {
+      "n": 10,
+      "mb": 0.1953125
+     },
+     "texture:?2048x2048": {
+      "n": 1,
+      "mb": 16
+     },
+     "texture:?512x16": {
+      "n": 3,
+      "mb": 0.09375
+     },
+     "texture:?512x25": {
+      "n": 86,
+      "mb": 4.19921875
+     },
+     "texture:?4096x4096": {
+      "n": 1,
+      "mb": 64
+     },
+     "texture:?512x39": {
+      "n": 1,
+      "mb": 0.076171875
+     },
+     "buffer:vello.reduced2_buf": {
+      "n": 1,
+      "mb": 0.005859375
+     },
+     "buffer:reduced_scan_buf": {
+      "n": 1,
+      "mb": 0.01171875
+     },
+     "texture:?512x41": {
+      "n": 13,
+      "mb": 1.041015625
+     },
+     "texture:?512x42": {
+      "n": 16,
+      "mb": 1.3125
+     },
+     "texture:?512x64": {
+      "n": 77,
+      "mb": 9.625
+     }
+    }
+   }
+  ],
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fbig.canvas%2Fmedia%2Fimage.png 404"
+   ],
+   "engineErrors": []
+  }
+ },
+ "server": {
+  "heapUsed": 46763856,
+  "rss": 330399744,
+  "external": 13422842,
+  "arrayBuffers": 1119607,
+  "cpuUserMs": 5062.4,
+  "cpuSystemMs": 2263.837
+ }
+}

@@ -1,0 +1,141 @@
+{
+ "_note": "Chrome phys_footprint per process type (MB) before and after 2-3 min of one activity on the real file; later = 35 s idle + 2 forced GCs afterwards.",
+ "with media cards, engine before destroy change": {
+  "gest": {
+   "loops": 97,
+   "before": {
+    "browser": 192,
+    "gpu-process": 482,
+    "utility:NetworkService": 66,
+    "utility:StorageService": 7,
+    "renderer": 736
+   },
+   "after": {
+    "browser": 125,
+    "gpu-process": 426,
+    "utility:NetworkService": 59,
+    "utility:StorageService": 7,
+    "renderer": 627
+   },
+   "engine": {
+    "wasmMB": 76,
+    "tileMB": 13,
+    "imageMB": 13,
+    "cardMB": 32,
+    "stagingMB": 0,
+    "videos": 4
+   }
+  },
+  "pages": {
+   "loops": 119,
+   "before": {
+    "browser": 225,
+    "gpu-process": 474,
+    "utility:NetworkService": 56,
+    "utility:StorageService": 7,
+    "renderer": 669
+   },
+   "after": {
+    "browser": 138,
+    "gpu-process": 889,
+    "utility:NetworkService": 70,
+    "utility:StorageService": 7,
+    "renderer": 907
+   },
+   "engine": {
+    "wasmMB": 141,
+    "tileMB": 16,
+    "imageMB": 26,
+    "cardMB": 0,
+    "stagingMB": 0,
+    "videos": 0
+   }
+  },
+  "media": {
+   "loops": 52,
+   "before": {
+    "browser": 232,
+    "gpu-process": 488,
+    "utility:NetworkService": 57,
+    "utility:StorageService": 7,
+    "renderer": 677
+   },
+   "after": {
+    "browser": 131,
+    "gpu-process": 456,
+    "utility:NetworkService": 75,
+    "utility:StorageService": 7,
+    "renderer": 613
+   },
+   "engine": {
+    "wasmMB": 76,
+    "tileMB": 7,
+    "imageMB": 13,
+    "cardMB": 20,
+    "stagingMB": 7,
+    "videos": 4
+   }
+  }
+ },
+ "no media cards, destroy change": {
+  "pages": {
+   "loops": 119,
+   "before": {
+    "browser": 93,
+    "gpu-process": 411,
+    "utility:NetworkService": 65,
+    "utility:StorageService": 7,
+    "renderer": 706
+   },
+   "after": {
+    "browser": 124,
+    "gpu-process": 834,
+    "utility:NetworkService": 64,
+    "utility:StorageService": 7,
+    "renderer": 959
+   },
+   "engine": {
+    "wasmMB": 153,
+    "tileMB": 16,
+    "imageMB": 26,
+    "cardMB": 0,
+    "stagingMB": 0,
+    "videos": 0
+   }
+  }
+ },
+ "no media cards, destroy change, 35 s later": {
+  "pages": {
+   "loops": 80,
+   "before": {
+    "browser": 100,
+    "gpu-process": 420,
+    "utility:NetworkService": 60,
+    "utility:StorageService": 7,
+    "renderer": 707
+   },
+   "after": {
+    "browser": 128,
+    "gpu-process": 820,
+    "utility:NetworkService": 70,
+    "utility:StorageService": 7,
+    "renderer": 939
+   },
+   "later": {
+    "browser": 119,
+    "gpu-process": 543,
+    "utility:NetworkService": 64,
+    "utility:StorageService": 7,
+    "renderer": 856
+   },
+   "engine": {
+    "wasmMB": 153,
+    "tileMB": 16,
+    "imageMB": 26,
+    "cardMB": 0,
+    "stagingMB": 0,
+    "videos": 0
+   }
+  }
+ }
+}

@@ -1,0 +1,198 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "components",
+   "x": 0,
+   "y": 0,
+   "width": 760,
+   "height": 240,
+   "fill": "#F4F4F5",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "ref",
+     "id": "i1",
+     "ref": "Btn",
+     "x": 24,
+     "y": 24
+    },
+    {
+     "type": "ref",
+     "id": "i2",
+     "ref": "Btn",
+     "x": 24,
+     "y": 80,
+     "fill": "#DC2626",
+     "descendants": {
+      "BtnLabel": {
+       "content": "Delete forever"
+      }
+     }
+    },
+    {
+     "type": "ref",
+     "id": "i3",
+     "ref": "Btn",
+     "x": 24,
+     "y": 136,
+     "cornerRadius": 4,
+     "fill": "#FFFFFF",
+     "stroke": "#18181B",
+     "strokeWidth": 1,
+     "descendants": {
+      "BtnLabel": {
+       "content": "Outline",
+       "fill": "#18181B"
+      },
+      "BtnIcon": {
+       "icon": "check",
+       "fill": "#18181B"
+      }
+     }
+    },
+    {
+     "type": "ref",
+     "id": "r1",
+     "ref": "Row",
+     "x": 240,
+     "y": 24
+    },
+    {
+     "type": "ref",
+     "id": "r2",
+     "ref": "Row",
+     "x": 240,
+     "y": 96,
+     "width": 480,
+     "descendants": {
+      "RowTitle": {
+       "content": "A wider instance with an overridden title"
+      },
+      "RowBtn/BtnLabel": {
+       "content": "Nested override"
+      },
+      "RowDot": {
+       "fill": "#22C55E"
+      }
+     }
+    },
+    {
+     "type": "ref",
+     "id": "r3",
+     "ref": "Row",
+     "x": 240,
+     "y": 168,
+     "opacity": 0.5,
+     "descendants": {
+      "RowBtn": {
+       "enabled": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "type": "frame",
+   "id": "Lib",
+   "name": "Library",
+   "x": 900,
+   "y": 0,
+   "width": 500,
+   "height": 200,
+   "layout": "none",
+   "children": [
+    {
+     "type": "frame",
+     "id": "Btn",
+     "reusable": true,
+     "x": 20,
+     "y": 20,
+     "layout": "horizontal",
+     "gap": 8,
+     "padding": [
+      10,
+      16
+     ],
+     "alignItems": "center",
+     "fill": "#2563EB",
+     "cornerRadius": 10,
+     "children": [
+      {
+       "type": "icon",
+       "id": "BtnIcon",
+       "library": "lucide",
+       "icon": "plus",
+       "width": 16,
+       "height": 16,
+       "fill": "#FFFFFF"
+      },
+      {
+       "type": "text",
+       "id": "BtnLabel",
+       "content": "Add item",
+       "fontFamily": "Inter",
+       "fontSize": 14,
+       "fontWeight": "600",
+       "fill": "#FFFFFF"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "Row",
+     "reusable": true,
+     "x": 20,
+     "y": 100,
+     "width": 380,
+     "layout": "horizontal",
+     "gap": 12,
+     "padding": 12,
+     "alignItems": "center",
+     "fill": "#FFFFFF",
+     "cornerRadius": 12,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 2
+       },
+       "blur": 8,
+       "color": "#0000001F"
+      }
+     ],
+     "children": [
+      {
+       "type": "ellipse",
+       "id": "RowDot",
+       "width": 12,
+       "height": 12,
+       "fill": "#F97316"
+      },
+      {
+       "type": "text",
+       "id": "RowTitle",
+       "content": "Row component",
+       "fontFamily": "Inter",
+       "fontSize": 14,
+       "fontWeight": "500",
+       "fill": "#18181B",
+       "textGrowth": "fixed-width",
+       "width": "fill_container"
+      },
+      {
+       "type": "ref",
+       "id": "RowBtn",
+       "ref": "Btn"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

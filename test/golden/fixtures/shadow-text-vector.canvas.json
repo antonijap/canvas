@@ -1,0 +1,138 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "shadow-text-vector",
+   "x": 0,
+   "y": 0,
+   "width": 560,
+   "height": 150,
+   "fill": "#F4F4F5",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "text",
+     "id": "t1",
+     "x": 24,
+     "y": 24,
+     "content": "Shadow",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "800",
+     "fill": "#18181B",
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 4
+       },
+       "blur": 8,
+       "color": "#2563EBB3"
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "id": "t2",
+     "x": 24,
+     "y": 90,
+     "content": "Hard offset",
+     "fontFamily": "Inter",
+     "fontSize": 24,
+     "fontWeight": "600",
+     "fill": "#FFFFFF",
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 2,
+        "y": 2
+       },
+       "blur": 0,
+       "color": "#18181B"
+      }
+     ]
+    },
+    {
+     "type": "icon",
+     "id": "ic1",
+     "x": 260,
+     "y": 30,
+     "width": 72,
+     "height": 72,
+     "library": "lucide",
+     "icon": "heart",
+     "fill": "#DC2626",
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 6
+       },
+       "blur": 10,
+       "color": "#DC262680"
+      }
+     ]
+    },
+    {
+     "type": "path",
+     "id": "ps",
+     "x": 360,
+     "y": 30,
+     "width": 80,
+     "height": 80,
+     "geometry": "M40 0 L50 30 L80 30 L56 48 L66 80 L40 60 L14 80 L24 48 L0 30 L30 30 Z",
+     "viewBox": [
+      0,
+      0,
+      80,
+      80
+     ],
+     "fill": "#FACC15",
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 6
+       },
+       "blur": 12,
+       "color": "#00000073"
+      }
+     ]
+    },
+    {
+     "type": "polygon",
+     "id": "pg",
+     "x": 460,
+     "y": 30,
+     "width": 80,
+     "height": 80,
+     "polygonCount": 6,
+     "fill": "#22C55E",
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 6,
+        "y": 6
+       },
+       "blur": 0,
+       "color": "#14532D"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

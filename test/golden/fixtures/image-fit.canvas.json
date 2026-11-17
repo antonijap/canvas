@@ -1,0 +1,229 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "image-fit",
+   "x": 0,
+   "y": 0,
+   "width": 600,
+   "height": 380,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "rectangle",
+     "id": "r1",
+     "x": 20,
+     "y": 20,
+     "width": 170,
+     "height": 80,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "cover"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r2",
+     "x": 20,
+     "y": 115,
+     "width": 70,
+     "height": 130,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "cover"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r3",
+     "x": 105,
+     "y": 115,
+     "width": 85,
+     "height": 130,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "cover"
+      }
+     ],
+     "cornerRadius": 24
+    },
+    {
+     "type": "rectangle",
+     "id": "r4",
+     "x": 215,
+     "y": 20,
+     "width": 170,
+     "height": 80,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "contain"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r5",
+     "x": 215,
+     "y": 115,
+     "width": 70,
+     "height": 130,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "contain"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r6",
+     "x": 300,
+     "y": 115,
+     "width": 85,
+     "height": 130,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "contain"
+      }
+     ],
+     "cornerRadius": 24
+    },
+    {
+     "type": "rectangle",
+     "id": "r7",
+     "x": 410,
+     "y": 20,
+     "width": 170,
+     "height": 80,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "stretch"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r8",
+     "x": 410,
+     "y": 115,
+     "width": 70,
+     "height": 130,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "stretch"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r9",
+     "x": 495,
+     "y": 115,
+     "width": 85,
+     "height": 130,
+     "fill": [
+      "#E4E4E7",
+      {
+       "type": "image",
+       "url": "assets/pattern.png",
+       "mode": "stretch"
+      }
+     ],
+     "cornerRadius": 24
+    },
+    {
+     "type": "ellipse",
+     "id": "e10",
+     "x": 20,
+     "y": 265,
+     "width": 100,
+     "height": 100,
+     "fill": {
+      "type": "image",
+      "url": "assets/pattern.png",
+      "mode": "cover"
+     }
+    },
+    {
+     "type": "rectangle",
+     "id": "r11",
+     "x": 140,
+     "y": 265,
+     "width": 150,
+     "height": 100,
+     "fill": [
+      "#FDE68A",
+      {
+       "type": "image",
+       "url": "assets/alpha.png",
+       "mode": "contain"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r12",
+     "x": 310,
+     "y": 265,
+     "width": 130,
+     "height": 100,
+     "fill": [
+      "#18181B",
+      {
+       "type": "image",
+       "url": "assets/alpha.png",
+       "mode": "cover",
+       "opacity": 0.5
+      }
+     ],
+     "cornerRadius": 12
+    },
+    {
+     "type": "rectangle",
+     "id": "r13",
+     "x": 460,
+     "y": 265,
+     "width": 120,
+     "height": 100,
+     "fill": {
+      "type": "image",
+      "url": "assets/pattern.png"
+     },
+     "stroke": "#18181B",
+     "strokeWidth": 3,
+     "strokeAlignment": "inner",
+     "cornerRadius": 16
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+[package]
+name = "canvas-glsl"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Build tool: GLSL fragment code to WGSL through naga (Paper Shaders library, scripts/paper/gen.ts)"
+
+[[bin]]
+name = "canvas-glsl"
+path = "src/main.rs"
+
+[dependencies]
+naga = { version = "=30.0.2", default-features = false, features = ["glsl-in", "wgsl-out"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

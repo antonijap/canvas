@@ -1,0 +1,604 @@
+{
+ "views": {
+  "fill-solid": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "gradient-linear": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "gradient-radial": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "gradient-angular": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "stroke-align": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "stroke-sides": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "stroke-vector": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "radius-uniform": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "radius-per-corner": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "clip": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "opacity": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "blend-fill": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "fill-modes": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "mask": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "shadow-drop": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "shadow-inner": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "shadow-text-vector": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "blur-layer": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "blur-background": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "image-fit": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "image-minify": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "0.33x@2",
+    "zoom": 0.33,
+    "dpr": 2
+   },
+   {
+    "name": "3x",
+    "zoom": 3,
+    "dpr": 1,
+    "x": 420,
+    "y": 160,
+    "w": 480,
+    "h": 360
+   }
+  ],
+  "text-inter-sizes": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "text-sf-sizes": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "text-weights": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "text-letter-spacing": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "text-line-height": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   }
+  ],
+  "text-align": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   }
+  ],
+  "text-wrap": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   }
+  ],
+  "text-decoration": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "layout-auto": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "layout-extras": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "nested-frames": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "components": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "variables-theme": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "shapes": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
+  "zoom-ladder": [
+   {
+    "name": "0.1x",
+    "zoom": 0.1,
+    "dpr": 1
+   },
+   {
+    "name": "0.1x@2",
+    "zoom": 0.1,
+    "dpr": 2
+   },
+   {
+    "name": "0.33x",
+    "zoom": 0.33,
+    "dpr": 1
+   },
+   {
+    "name": "0.33x@2",
+    "zoom": 0.33,
+    "dpr": 2
+   },
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "2x",
+    "zoom": 2,
+    "dpr": 1,
+    "x": 20,
+    "y": 180,
+    "w": 640,
+    "h": 440
+   },
+   {
+    "name": "8x",
+    "zoom": 8,
+    "dpr": 1,
+    "x": 40,
+    "y": 200,
+    "w": 640,
+    "h": 440
+   },
+   {
+    "name": "8x@2",
+    "zoom": 8,
+    "dpr": 2,
+    "x": 56,
+    "y": 216,
+    "w": 400,
+    "h": 300
+   },
+   {
+    "name": "32x",
+    "zoom": 32,
+    "dpr": 1,
+    "x": 56,
+    "y": 278,
+    "w": 640,
+    "h": 440
+   },
+   {
+    "name": "32x-edge",
+    "zoom": 32,
+    "dpr": 1,
+    "x": 1076,
+    "y": 24,
+    "w": 640,
+    "h": 440
+   }
+  ],
+  "tile-seams": [
+   {
+    "name": "1.37x",
+    "zoom": 1.37,
+    "dpr": 1,
+    "x": 513.87,
+    "y": 586.86,
+    "w": 640,
+    "h": 440,
+    "tiles": true
+   },
+   {
+    "name": "0.77x@2",
+    "zoom": 0.77,
+    "dpr": 2,
+    "x": 1096.1,
+    "y": 496.1,
+    "w": 360,
+    "h": 260,
+    "tiles": true
+   },
+   {
+    "name": "2.613x-b",
+    "zoom": 2.613,
+    "dpr": 1,
+    "x": 1836.97,
+    "y": 1091.47,
+    "w": 640,
+    "h": 440,
+    "tiles": true
+   },
+   {
+    "name": "0.9x",
+    "zoom": 0.9,
+    "dpr": 1,
+    "x": 782.22,
+    "y": 893.33,
+    "w": 640,
+    "h": 440,
+    "tiles": true
+   },
+   {
+    "name": "1.5x@2",
+    "zoom": 1.5,
+    "dpr": 2,
+    "x": 1245.33,
+    "y": 937.33,
+    "w": 360,
+    "h": 260,
+    "tiles": true
+   },
+   {
+    "name": "7.3x",
+    "zoom": 7.3,
+    "dpr": 1,
+    "x": 1218.63,
+    "y": 811.51,
+    "w": 640,
+    "h": 440,
+    "tiles": true
+   }
+  ],
+  "tile-seams-smooth": [
+   {
+    "name": "1.37x",
+    "zoom": 1.37,
+    "dpr": 1,
+    "x": 513.87,
+    "y": 586.86,
+    "w": 640,
+    "h": 440,
+    "tiles": true
+   },
+   {
+    "name": "0.77x@2",
+    "zoom": 0.77,
+    "dpr": 2,
+    "x": 1096.1,
+    "y": 496.1,
+    "w": 360,
+    "h": 260,
+    "tiles": true
+   },
+   {
+    "name": "2.613x-b",
+    "zoom": 2.613,
+    "dpr": 1,
+    "x": 1836.97,
+    "y": 1091.47,
+    "w": 640,
+    "h": 440,
+    "tiles": true
+   },
+   {
+    "name": "7.3x",
+    "zoom": 7.3,
+    "dpr": 1,
+    "x": 1218.63,
+    "y": 811.51,
+    "w": 640,
+    "h": 440,
+    "tiles": true
+   }
+  ]
+ },
+ "notes": {
+  "blend-fill": "A blend mode per fill: the engine mixes each paint in its own layer, the DOM renderer with background-blend-mode (which only blends with the paints of the same box, so the two may differ where the box is translucent).",
+  "fill-modes": "Crop, Tile and Rotate 90 in the engine and the DOM renderer; corner smoothing is engine-only (the DOM draws a circular corner).",
+  "mask": "Use as mask: the ellipse cuts the layers above it; the grey under it shows outside.",
+  "image-fit": "The format has no tile mode (cover, contain, stretch only), so tiling has no fixture.",
+  "text-letter-spacing": "Auto tracking is stored as a plain letterSpacing number; the values here come from src/tracking.ts autoTracking().",
+  "text-wrap": "The format has no truncation or ellipsis property; a fixed-width-height box overflows in both renderers.",
+  "layout-extras": "Canvas-only auto layout (wrap, min/max, evenly, baseline, first on top, negative gap, included stroke, hug with a fill child): html.ts draws without these, so fidelity is a known gap and the regression baseline is the check.",
+  "tile-seams": "Hairlines and text differ from Chrome everywhere at these zooms (see findings), so this fixture is judged on the seam check: mismatches within 2 px of a tile edge against the rest of the view."
+ }
+}

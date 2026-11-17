@@ -1,0 +1,125 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "text-decoration",
+   "x": 0,
+   "y": 0,
+   "width": 760,
+   "height": 200,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "text",
+     "id": "t1",
+     "x": 20,
+     "y": 16,
+     "content": "Underlined text with descenders gjpqy",
+     "fontFamily": "Inter",
+     "fontSize": 22,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "underline": true
+    },
+    {
+     "type": "text",
+     "id": "t2",
+     "x": 20,
+     "y": 52,
+     "content": "Struck through text",
+     "fontFamily": "Inter",
+     "fontSize": 22,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "strikethrough": true
+    },
+    {
+     "type": "text",
+     "id": "t3",
+     "x": 20,
+     "y": 88,
+     "content": "Both at once, 13px",
+     "fontFamily": "Inter",
+     "fontSize": 13,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "underline": true,
+     "strikethrough": true
+    },
+    {
+     "type": "text",
+     "id": "t4",
+     "x": 20,
+     "y": 120,
+     "content": "Gradient text",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "800",
+     "fill": {
+      "type": "gradient",
+      "gradientType": "linear",
+      "colors": [
+       {
+        "color": "#EF4444",
+        "position": 0
+       },
+       {
+        "color": "#FACC15",
+        "position": 0.33
+       },
+       {
+        "color": "#22C55E",
+        "position": 0.66
+       },
+       {
+        "color": "#3B82F6",
+        "position": 1
+       }
+      ],
+      "rotation": 90
+     }
+    },
+    {
+     "type": "text",
+     "id": "t5",
+     "x": 400,
+     "y": 16,
+     "content": "Outlined",
+     "fontFamily": "Inter",
+     "fontSize": 56,
+     "fontWeight": "800",
+     "fill": "#FDE68A",
+     "stroke": "#18181B",
+     "strokeWidth": 2
+    },
+    {
+     "type": "text",
+     "id": "t6",
+     "x": 400,
+     "y": 100,
+     "content": "Half opaque",
+     "fontFamily": "Inter",
+     "fontSize": 36,
+     "fontWeight": "700",
+     "fill": "#2563EB80"
+    },
+    {
+     "type": "text",
+     "id": "t7",
+     "x": 400,
+     "y": 150,
+     "content": "SF underlined",
+     "fontFamily": "SF Pro",
+     "fontSize": 24,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "underline": true
+    }
+   ]
+  }
+ ]
+}

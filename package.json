@@ -1,0 +1,45 @@
+{
+  "name": "canvas",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A lightweight local design canvas: boards, pan and zoom, click-to-inspect, components, variables and text styles. Agents design in it through Canvas MCP.",
+  "type": "module",
+  "scripts": {
+    "app": "scripts/app.sh",
+    "start": "node src/server.ts",
+    "build:engine": "engine/build.sh",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "tokens": "node scripts/gen-swift-tokens.ts",
+    "bench": "node bench/speed.ts",
+    "bench:baseline": "node bench/run.ts",
+    "bench:latency": "node bench/latency.ts",
+    "bench:cache": "node bench/cache.ts",
+    "mcp": "node mcp/server.ts",
+    "fidelity": "node fidelity/run.ts",
+    "test:golden": "node test/golden/run.ts",
+    "qa": "node qa/run.ts",
+    "qa:matrix": "node qa/run.ts --matrix",
+    "qa:coverage": "node qa/coverage.ts",
+    "qa:native": "node qa/native/run.ts",
+    "qa:swarm": "node qa/swarm.ts",
+    "qa:release": "node qa/release.ts",
+    "release:app": "scripts/release-app.sh"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "@iconify-json/feather": "1.2.1",
+    "@iconify-json/lucide": "1.2.151",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "bin": {
+    "canvas-mcp": "mcp/server.ts"
+  }
+}

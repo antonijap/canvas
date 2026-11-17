@@ -1,0 +1,24 @@
+node_modules/
+# pnpm app builds the Mac app here (scripts/app.sh)
+/build/
+.planning/
+bench/out/
+fidelity/out/
+test/golden/out/
+/vdoc.json
+
+# QA runner screenshots and traces
+qa/out/
+# Apple system fonts copied for mockups: not ours to redistribute
+design/**/fonts/
+.claude/worktrees/
+.DS_Store
+# Canvas's save log and its lock, beside a document (src/doc/doclog.ts): working files, never committed
+.*.canvas-log
+.*.canvas-lock
+
+# Release checklist: private and customer names to scrub for, kept out of the repo (qa/release.ts)
+qa/release-private.txt
+
+# The app is built from source (pnpm app, or apps/macos/build.sh); a committed binary carries the signer's identity.
+apps/macos/Canvas.app/

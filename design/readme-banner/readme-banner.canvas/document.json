@@ -1,0 +1,526 @@
+{
+  "version": "2.21",
+  "children": [
+    {
+      "type": "frame",
+      "id": "banner",
+      "name": "A. Blueprint",
+      "x": 0,
+      "y": 0,
+      "width": 1600,
+      "height": 600,
+      "clip": true,
+      "layout": "none",
+      "fill": {
+        "type": "gradient",
+        "gradientType": "linear",
+        "rotation": 0,
+        "colors": [
+          {
+            "color": "#072C72",
+            "position": 0
+          },
+          {
+            "color": "#0B45A3",
+            "position": 1
+          }
+        ]
+      },
+      "children": [
+        {
+          "type": "ellipse",
+          "id": "glow",
+          "name": "Glow",
+          "x": -60,
+          "y": -100,
+          "width": 800,
+          "height": 800,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "radial",
+            "colors": [
+              {
+                "color": "#3AA6FF59",
+                "position": 0
+              },
+              {
+                "color": "#3AA6FF00",
+                "position": 1
+              }
+            ]
+          }
+        },
+        {
+          "type": "path",
+          "id": "grid_minor",
+          "name": "Grid minor",
+          "x": 0,
+          "y": 0,
+          "width": 1600,
+          "height": 600,
+          "viewBox": [
+            0,
+            0,
+            1600,
+            600
+          ],
+          "fill": "#00000000",
+          "stroke": "#FFFFFF12",
+          "strokeWidth": 1,
+          "geometry": "M0 0V600 M24 0V600 M48 0V600 M72 0V600 M96 0V600 M120 0V600 M144 0V600 M168 0V600 M192 0V600 M216 0V600 M240 0V600 M264 0V600 M288 0V600 M312 0V600 M336 0V600 M360 0V600 M384 0V600 M408 0V600 M432 0V600 M456 0V600 M480 0V600 M504 0V600 M528 0V600 M552 0V600 M576 0V600 M600 0V600 M624 0V600 M648 0V600 M672 0V600 M696 0V600 M720 0V600 M744 0V600 M768 0V600 M792 0V600 M816 0V600 M840 0V600 M864 0V600 M888 0V600 M912 0V600 M936 0V600 M960 0V600 M984 0V600 M1008 0V600 M1032 0V600 M1056 0V600 M1080 0V600 M1104 0V600 M1128 0V600 M1152 0V600 M1176 0V600 M1200 0V600 M1224 0V600 M1248 0V600 M1272 0V600 M1296 0V600 M1320 0V600 M1344 0V600 M1368 0V600 M1392 0V600 M1416 0V600 M1440 0V600 M1464 0V600 M1488 0V600 M1512 0V600 M1536 0V600 M1560 0V600 M1584 0V600 M0 0H1600 M0 24H1600 M0 48H1600 M0 72H1600 M0 96H1600 M0 120H1600 M0 144H1600 M0 168H1600 M0 192H1600 M0 216H1600 M0 240H1600 M0 264H1600 M0 288H1600 M0 312H1600 M0 336H1600 M0 360H1600 M0 384H1600 M0 408H1600 M0 432H1600 M0 456H1600 M0 480H1600 M0 504H1600 M0 528H1600 M0 552H1600 M0 576H1600 M0 600H1600"
+        },
+        {
+          "type": "path",
+          "id": "grid_major",
+          "name": "Grid major",
+          "x": 0,
+          "y": 0,
+          "width": 1600,
+          "height": 600,
+          "viewBox": [
+            0,
+            0,
+            1600,
+            600
+          ],
+          "fill": "#00000000",
+          "stroke": "#FFFFFF26",
+          "strokeWidth": 1,
+          "geometry": "M0 0V600 M120 0V600 M240 0V600 M360 0V600 M480 0V600 M600 0V600 M720 0V600 M840 0V600 M960 0V600 M1080 0V600 M1200 0V600 M1320 0V600 M1440 0V600 M1560 0V600 M0 0H1600 M0 120H1600 M0 240H1600 M0 360H1600 M0 480H1600 M0 600H1600"
+        },
+        {
+          "type": "path",
+          "id": "construction",
+          "name": "Construction lines",
+          "x": 0,
+          "y": 0,
+          "width": 1600,
+          "height": 600,
+          "viewBox": [
+            0,
+            0,
+            1600,
+            600
+          ],
+          "fill": "#00000000",
+          "stroke": "#FFFFFF33",
+          "strokeWidth": 1,
+          "geometry": "M60 300H620 M340 20V580 M142 102L538 498 M538 102L142 498 M340 50A250 250 0 1 1 339.9 50 Z"
+        },
+        {
+          "type": "path",
+          "id": "marks",
+          "name": "Registration marks",
+          "x": 0,
+          "y": 0,
+          "width": 1600,
+          "height": 600,
+          "viewBox": [
+            0,
+            0,
+            1600,
+            600
+          ],
+          "fill": "#00000000",
+          "stroke": "#FFFFFF8C",
+          "strokeWidth": 1.5,
+          "geometry": "M24 48V24H48 M1552 24H1576V48 M1576 552V576H1552 M48 576H24V552"
+        },
+        {
+          "type": "rectangle",
+          "id": "icon",
+          "name": "3D icon",
+          "x": -3,
+          "y": -66,
+          "width": 687,
+          "height": 687,
+          "fill": {
+            "type": "image",
+            "url": "images/icon-3d.png",
+            "mode": "contain"
+          }
+        },
+        {
+          "type": "text",
+          "id": "fig",
+          "name": "Figure label",
+          "x": 256,
+          "y": 566,
+          "content": "FIG. 01  CANVAS.APP",
+          "fontFamily": "JetBrainsMono Nerd Font",
+          "fontSize": 12,
+          "fontWeight": "400",
+          "letterSpacing": 1.8,
+          "lineHeight": 1,
+          "fill": "#9EC5FFB3"
+        },
+        {
+          "type": "frame",
+          "id": "copy",
+          "name": "Copy",
+          "x": 700,
+          "y": 210,
+          "layout": "vertical",
+          "gap": 22,
+          "children": [
+            {
+              "type": "text",
+              "id": "headline",
+              "name": "Headline",
+              "content": "The Only Canvas\nYou’ll Need",
+              "fontFamily": "SF Pro Display",
+              "fontSize": 88,
+              "fontWeight": "700",
+              "letterSpacing": 0,
+              "lineHeight": 1.02,
+              "fill": "#FFFFFF"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "titleblock",
+          "name": "Title block",
+          "x": 1336,
+          "y": 508,
+          "width": 216,
+          "layout": "vertical",
+          "stroke": "#FFFFFF59",
+          "strokeWidth": 1,
+          "children": [
+            {
+              "type": "frame",
+              "id": "tb_row1",
+              "name": "Row",
+              "width": "fill_container",
+              "layout": "horizontal",
+              "justifyContent": "space_between",
+              "padding": [
+                9,
+                12,
+                9,
+                12
+              ],
+              "stroke": "#FFFFFF59",
+              "strokeWidth": {
+                "bottom": 1
+              },
+              "children": [
+                {
+                  "type": "text",
+                  "id": "tb_a",
+                  "content": "SHEET",
+                  "fontFamily": "JetBrainsMono Nerd Font",
+                  "fontSize": 11,
+                  "fontWeight": "400",
+                  "letterSpacing": 1.5,
+                  "lineHeight": 1,
+                  "fill": "#9EC5FFB3"
+                },
+                {
+                  "type": "text",
+                  "id": "tb_b",
+                  "content": "01 / 01",
+                  "fontFamily": "JetBrainsMono Nerd Font",
+                  "fontSize": 11,
+                  "fontWeight": "400",
+                  "letterSpacing": 1.5,
+                  "lineHeight": 1,
+                  "fill": "#FFFFFF"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "tb_row2",
+              "name": "Row",
+              "width": "fill_container",
+              "layout": "horizontal",
+              "justifyContent": "space_between",
+              "padding": [
+                9,
+                12,
+                9,
+                12
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "tb_c",
+                  "content": "SCALE",
+                  "fontFamily": "JetBrainsMono Nerd Font",
+                  "fontSize": 11,
+                  "fontWeight": "400",
+                  "letterSpacing": 1.5,
+                  "lineHeight": 1,
+                  "fill": "#9EC5FFB3"
+                },
+                {
+                  "type": "text",
+                  "id": "tb_d",
+                  "content": "1 : 1",
+                  "fontFamily": "JetBrainsMono Nerd Font",
+                  "fontSize": 11,
+                  "fontWeight": "400",
+                  "letterSpacing": 1.5,
+                  "lineHeight": 1,
+                  "fill": "#FFFFFF"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "banner_paper",
+      "name": "B. Paper grid",
+      "x": 0,
+      "y": 700,
+      "width": 1600,
+      "height": 600,
+      "clip": true,
+      "layout": "none",
+      "fill": "#F7F9FC",
+      "children": [
+        {
+          "type": "ellipse",
+          "id": "p_glow",
+          "name": "Glow",
+          "x": -60,
+          "y": -100,
+          "width": 800,
+          "height": 800,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "radial",
+            "colors": [
+              {
+                "color": "#3AA6FF29",
+                "position": 0
+              },
+              {
+                "color": "#3AA6FF00",
+                "position": 1
+              }
+            ]
+          }
+        },
+        {
+          "type": "path",
+          "id": "p_grid_minor",
+          "name": "Grid minor",
+          "x": 0,
+          "y": 0,
+          "width": 1600,
+          "height": 600,
+          "viewBox": [
+            0,
+            0,
+            1600,
+            600
+          ],
+          "fill": "#00000000",
+          "stroke": "#0A6CFF12",
+          "strokeWidth": 1,
+          "geometry": "M4 0V600 M28 0V600 M52 0V600 M76 0V600 M100 0V600 M124 0V600 M148 0V600 M172 0V600 M196 0V600 M220 0V600 M244 0V600 M268 0V600 M292 0V600 M316 0V600 M340 0V600 M364 0V600 M388 0V600 M412 0V600 M436 0V600 M460 0V600 M484 0V600 M508 0V600 M532 0V600 M556 0V600 M580 0V600 M604 0V600 M628 0V600 M652 0V600 M676 0V600 M700 0V600 M724 0V600 M748 0V600 M772 0V600 M796 0V600 M820 0V600 M844 0V600 M868 0V600 M892 0V600 M916 0V600 M940 0V600 M964 0V600 M988 0V600 M1012 0V600 M1036 0V600 M1060 0V600 M1084 0V600 M1108 0V600 M1132 0V600 M1156 0V600 M1180 0V600 M1204 0V600 M1228 0V600 M1252 0V600 M1276 0V600 M1300 0V600 M1324 0V600 M1348 0V600 M1372 0V600 M1396 0V600 M1420 0V600 M1444 0V600 M1468 0V600 M1492 0V600 M1516 0V600 M1540 0V600 M1564 0V600 M1588 0V600 M0 12H1600 M0 36H1600 M0 60H1600 M0 84H1600 M0 108H1600 M0 132H1600 M0 156H1600 M0 180H1600 M0 204H1600 M0 228H1600 M0 252H1600 M0 276H1600 M0 300H1600 M0 324H1600 M0 348H1600 M0 372H1600 M0 396H1600 M0 420H1600 M0 444H1600 M0 468H1600 M0 492H1600 M0 516H1600 M0 540H1600 M0 564H1600 M0 588H1600"
+        },
+        {
+          "type": "path",
+          "id": "p_grid_major",
+          "name": "Grid major",
+          "x": 0,
+          "y": 0,
+          "width": 1600,
+          "height": 600,
+          "viewBox": [
+            0,
+            0,
+            1600,
+            600
+          ],
+          "fill": "#00000000",
+          "stroke": "#0A6CFF24",
+          "strokeWidth": 1,
+          "geometry": "M100 0V600 M220 0V600 M340 0V600 M460 0V600 M580 0V600 M700 0V600 M820 0V600 M940 0V600 M1060 0V600 M1180 0V600 M1300 0V600 M1420 0V600 M1540 0V600 M0 60H1600 M0 180H1600 M0 300H1600 M0 420H1600 M0 540H1600"
+        },
+        {
+          "type": "path",
+          "id": "p_construction",
+          "name": "Construction lines",
+          "x": 0,
+          "y": 0,
+          "width": 1600,
+          "height": 600,
+          "viewBox": [
+            0,
+            0,
+            1600,
+            600
+          ],
+          "fill": "#00000000",
+          "stroke": "#0A6CFF38",
+          "strokeWidth": 1,
+          "geometry": "M60 300H620 M340 20V580 M142 102L538 498 M538 102L142 498 M340 50A250 250 0 1 1 339.9 50 Z"
+        },
+        {
+          "type": "path",
+          "id": "p_marks",
+          "name": "Registration marks",
+          "x": 0,
+          "y": 0,
+          "width": 1600,
+          "height": 600,
+          "viewBox": [
+            0,
+            0,
+            1600,
+            600
+          ],
+          "fill": "#00000000",
+          "stroke": "#0A3A8E73",
+          "strokeWidth": 1.5,
+          "geometry": "M24 48V24H48 M1552 24H1576V48 M1576 552V576H1552 M48 576H24V552"
+        },
+        {
+          "type": "rectangle",
+          "id": "p_icon",
+          "name": "3D icon",
+          "x": -3,
+          "y": -66,
+          "width": 687,
+          "height": 687,
+          "fill": {
+            "type": "image",
+            "url": "images/icon-3d.png",
+            "mode": "contain"
+          }
+        },
+        {
+          "type": "text",
+          "id": "p_fig",
+          "name": "Figure label",
+          "x": 256,
+          "y": 566,
+          "content": "FIG. 01  CANVAS.APP",
+          "fontFamily": "JetBrainsMono Nerd Font",
+          "fontSize": 12,
+          "fontWeight": "400",
+          "letterSpacing": 1.8,
+          "lineHeight": 1,
+          "fill": "#3F6DB8"
+        },
+        {
+          "type": "frame",
+          "id": "p_copy",
+          "name": "Copy",
+          "x": 700,
+          "y": 204,
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "text",
+              "id": "p_headline",
+              "name": "Headline",
+              "content": "The Only Canvas\nYou’ll Need",
+              "fontFamily": "SF Pro Display",
+              "fontSize": 102,
+              "fontWeight": "700",
+              "letterSpacing": 0,
+              "lineHeight": 1.1765,
+              "fill": "#0B1B3A"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "banner_plain",
+      "name": "C. Plain light",
+      "x": 0,
+      "y": 1400,
+      "width": 1600,
+      "height": 600,
+      "clip": true,
+      "layout": "none",
+      "fill": {
+        "type": "gradient",
+        "gradientType": "linear",
+        "rotation": 0,
+        "colors": [
+          {
+            "color": "#EEF2F8",
+            "position": 0
+          },
+          {
+            "color": "#FFFFFF",
+            "position": 1
+          }
+        ]
+      },
+      "children": [
+        {
+          "type": "ellipse",
+          "id": "c_glow",
+          "name": "Glow",
+          "x": -60,
+          "y": -100,
+          "width": 800,
+          "height": 800,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "radial",
+            "colors": [
+              {
+                "color": "#3AA6FF1F",
+                "position": 0
+              },
+              {
+                "color": "#3AA6FF00",
+                "position": 1
+              }
+            ]
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "c_icon",
+          "name": "3D icon",
+          "x": -3,
+          "y": -66,
+          "width": 687,
+          "height": 687,
+          "fill": {
+            "type": "image",
+            "url": "images/icon-3d.png",
+            "mode": "contain"
+          }
+        },
+        {
+          "type": "frame",
+          "id": "c_copy",
+          "name": "Copy",
+          "x": 700,
+          "y": 210,
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "text",
+              "id": "c_headline",
+              "name": "Headline",
+              "content": "The Only Canvas\nYou’ll Need",
+              "fontFamily": "SF Pro Display",
+              "fontSize": 88,
+              "fontWeight": "700",
+              "letterSpacing": 0,
+              "lineHeight": 1.02,
+              "fill": "#101828"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+# Tests for every pull request and every push to main.
+#
+# Safety rules for this file (pull requests come from strangers):
+# - Runs on `pull_request`, never `pull_request_target`: a fork's code runs with a read-only token and no secrets.
+# - No secrets are used here, ever. Nothing is published, deployed or commented from this workflow.
+# - Every action is pinned to a full commit SHA (a moved tag cannot change what runs). Dependabot proposes updates.
+# - Dependencies install from the lockfile only, with install scripts off.
+# - Workflows from outside contributors wait for the maintainer's approval before they run (repo setting, see
+#   scripts/github-protect.sh).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    # macOS minutes cost ten times more on a private repository: CI runs once the repository is public.
+    if: ${{ !github.event.repository.private }}
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 12.16.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies (lockfile only, no install scripts)
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Typecheck
+        run: pnpm -s typecheck
+
+      - name: Rust toolchain for the engine
+        run: |
+          rustup target add wasm32-unknown-unknown
+          want="$(sed -n 's/^wasm-bindgen = "=\{0,1\}\([0-9.]*\)".*/\1/p' engine/Cargo.toml | head -1)"
+          cargo install wasm-bindgen-cli --version "$want" --locked
+
+      - name: Build the engine
+        run: engine/build.sh
+
+      - name: Unit tests
+        run: pnpm -s test
+
+      - name: Engine unit tests
+        working-directory: engine
+        run: cargo test --locked
+
+      - name: Shell unit tests (plain executables, see docs/developer-guide.md)
+        working-directory: apps/macos
+        run: |
+          set -e
+          out="$RUNNER_TEMP/swift-tests"; mkdir -p "$out"
+          t() { swiftc -parse-as-library "$@" -o "$out/t" && "$out/t"; }
+          t DesignSystem/ColorMath.swift Tests/ColorMathTests.swift
+          t ShellLogic.swift Tests/ShellLogicTests.swift
+          t LayersLogic.swift Tests/LayersLogicTests.swift
+          t ShellLogic.swift PaletteLogic.swift Tests/PaletteLogicTests.swift
+          t ShellLogic.swift SettingsLogic.swift Tests/SettingsTests.swift

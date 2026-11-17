@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>golden engine page</title>
+<style>html,body{margin:0;background:#fff;overflow:hidden}canvas{position:absolute;left:0;top:0;display:block}</style>
+<script type="module">
+// One board through the Canvas engine, with the board's origin at world (0, 0). showView puts the
+// camera where the DOM reference puts its transform, so the two screenshots line up pixel for pixel.
+// Same loading steps as fidelity/engine-page.html; this one adds zoom. See engine/API.md.
+import init, * as wasm from "/engine/pkg/canvas_engine.js";
+
+let ready;
+window.engineReady = () => (ready ??= init().then(() => typeof wasm.Engine === "function"));
+const j = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(u + " -> " + r.status); return r.json(); };
+
+let engine, canvas, current;
+const fontsDone = new Set();
+const bitmaps = new Map();
+
+async function ensureEngine() {
+  if (engine) return engine;
+  canvas = document.createElement("canvas");
+  canvas.style.width = "64px"; canvas.style.height = "64px";
+  document.body.appendChild(canvas);
+  engine = await wasm.Engine.create(canvas);
+  engine.setBackground("#FFFFFF");
+  engine.setTextDefaults(13, 1.45); // the truth page's body font, as on the Canvas page
+  return engine;
+}
+
+window.loadBoard = async ({ file, id }) => {
+  await window.engineReady();
+  const e = await ensureEngine();
+  const scene = await j("/api/scene?file=" + encodeURIComponent(file) + "&id=" + encodeURIComponent(id));
+  const fontErrors = [];
+  for (const f of scene.fonts ?? []) {
+    if (fontsDone.has(f.url)) continue;
+    fontsDone.add(f.url);
+    const r = await fetch(f.url);
+    if (r.ok) e.registerFont(f.family, Number(r.headers.get("x-font-weight")) || 0, r.headers.get("x-font-style") || "", new Uint8Array(await r.arrayBuffer()));
+    else fontErrors.push(f.family + " " + f.weight + " -> " + r.status);
+  }
+  if (current) e.removeBoard(current);
+  current = file + "#" + id;
+  const info = e.setBoard(current, 0, 0, JSON.stringify(scene));
+  await Promise.all((scene.images ?? []).map(async (url) => {
+    try {
+      let bm = bitmaps.get(url);
+      if (!bm) { bm = await createImageBitmap(await (await fetch(url)).blob()); bitmaps.set(url, bm); }
+      e.registerImage(url, bm, bm.width, bm.height);
+    } catch (err) { fontErrors.push("image " + url + ": " + err); }
+  }));
+  return { root: info.root, ink: info.ink, nodes: info.nodes, missingFonts: info.missingFonts, warnings: [...(scene.warnings ?? []), ...(info.warnings ?? [])], loadErrors: fontErrors };
+};
+
+/** Screen = world * z + (camX, camY), in a w x h CSS px viewport at `dpr`. Resolves when the engine has nothing left to draw. */
+window.showView = async (camX, camY, z, w, h, dpr) => {
+  canvas.style.width = w + "px"; canvas.style.height = h + "px";
+  engine.resize(w, h, dpr);
+  engine.setCamera(camX, camY, z);
+  let frames = 0;
+  // frame() is true while tiles are still rendering or the camera is settling (150 ms, then exact-scale tiles).
+  for (; frames < 1200 && engine.frame(); frames++) await new Promise((r) => requestAnimationFrame(r));
+  await new Promise((r) => setTimeout(r, 200));
+  for (; frames < 2400 && engine.frame(); frames++) await new Promise((r) => requestAnimationFrame(r));
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const s = engine.stats();
+  return { frames, errors: s.errors ?? [], tilesMissing: s.tilesMissing, standIns: s.standIns, scale: s.scale, exactScale: s.exactScale, adapter: s.adapter };
+};
+</script>

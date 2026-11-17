@@ -1,0 +1,179 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "radius-per-corner",
+   "x": 0,
+   "y": 0,
+   "width": 520,
+   "height": 230,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "rectangle",
+     "id": "r1",
+     "x": 20,
+     "y": 20,
+     "width": 110,
+     "height": 80,
+     "fill": "#18181B",
+     "cornerRadius": [
+      24,
+      0,
+      0,
+      0
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r2",
+     "x": 145,
+     "y": 20,
+     "width": 110,
+     "height": 80,
+     "fill": "#18181B",
+     "cornerRadius": [
+      0,
+      24,
+      0,
+      24
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r3",
+     "x": 270,
+     "y": 20,
+     "width": 110,
+     "height": 80,
+     "fill": "#18181B",
+     "cornerRadius": [
+      40,
+      8,
+      40,
+      8
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r4",
+     "x": 395,
+     "y": 20,
+     "width": 110,
+     "height": 80,
+     "fill": "#18181B",
+     "cornerRadius": [
+      80,
+      80,
+      0,
+      0
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r5",
+     "x": 20,
+     "y": 120,
+     "width": 110,
+     "height": 80,
+     "fill": "#DBEAFE",
+     "stroke": "#1D4ED8",
+     "strokeWidth": 4,
+     "strokeAlignment": "inner",
+     "cornerRadius": [
+      30,
+      2,
+      16,
+      8
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r6",
+     "x": 145,
+     "y": 120,
+     "width": 110,
+     "height": 80,
+     "fill": "#DBEAFE",
+     "stroke": "#1D4ED8",
+     "strokeWidth": 4,
+     "strokeAlignment": "outer",
+     "cornerRadius": [
+      30,
+      2,
+      16,
+      8
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r7",
+     "x": 270,
+     "y": 120,
+     "width": 110,
+     "height": 80,
+     "fill": "#FFFFFF",
+     "cornerRadius": [
+      30,
+      2,
+      16,
+      8
+     ],
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 6
+       },
+       "blur": 14,
+       "color": "#00000055"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f10",
+     "x": 395,
+     "y": 120,
+     "width": 110,
+     "height": 80,
+     "layout": "none",
+     "fill": "#FDE68A",
+     "clip": true,
+     "cornerRadius": [
+      36,
+      0,
+      36,
+      0
+     ],
+     "children": [
+      {
+       "type": "rectangle",
+       "id": "r8",
+       "x": -10,
+       "y": -10,
+       "width": 70,
+       "height": 60,
+       "fill": "#EF4444"
+      },
+      {
+       "type": "ellipse",
+       "id": "e9",
+       "x": 50,
+       "y": 30,
+       "width": 80,
+       "height": 70,
+       "fill": "#3B82F6"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

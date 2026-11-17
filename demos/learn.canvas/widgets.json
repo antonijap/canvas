@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "id": "learn",
+      "name": "Learn",
+      "boards": [
+        "welcome",
+        "move_around",
+        "select",
+        "move_copy",
+        "auto_layout",
+        "style",
+        "text",
+        "components",
+        "agent",
+        "cards_pages",
+        "share"
+      ]
+    },
+    {
+      "id": "playground",
+      "name": "Playground",
+      "boards": [
+        "playground"
+      ]
+    }
+  ],
+  "widgets": [
+    {
+      "id": "w_hjve7o5t",
+      "kind": "todo",
+      "name": "Your progress",
+      "x": 684,
+      "y": 3090,
+      "w": 360,
+      "h": 380,
+      "locked": false,
+      "config": {
+        "title": "Your progress",
+        "hideDone": false,
+        "items": [
+          {
+            "id": "i_8xkoq0",
+            "text": "Move around",
+            "done": false
+          },
+          {
+            "id": "i_wavfry",
+            "text": "Select",
+            "done": false
+          },
+          {
+            "id": "i_xsdqin",
+            "text": "Move and copy",
+            "done": false
+          },
+          {
+            "id": "i_7maapl",
+            "text": "Auto layout",
+            "done": false
+          },
+          {
+            "id": "i_ois56v",
+            "text": "Style",
+            "done": false
+          },
+          {
+            "id": "i_xy7zpr",
+            "text": "Text",
+            "done": false
+          },
+          {
+            "id": "i_1gt9ia",
+            "text": "Components",
+            "done": false
+          },
+          {
+            "id": "i_r7nzde",
+            "text": "Work with an agent",
+            "done": false
+          },
+          {
+            "id": "i_1mdr7p",
+            "text": "Cards and pages",
+            "done": false
+          },
+          {
+            "id": "i_sptst6",
+            "text": "Share and export",
+            "done": false
+          }
+        ]
+      },
+      "page": "learn"
+    }
+  ]
+}

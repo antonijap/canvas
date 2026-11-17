@@ -1,0 +1,1878 @@
+{
+ "soak": {
+  "minutes": 30,
+  "loops": 645,
+  "edits": 12900,
+  "editFail": 0,
+  "frameP95PerLoop": {
+   "n": 645,
+   "min": 16.7,
+   "p50": 16.7,
+   "p95": 16.8,
+   "p99": 16.8,
+   "max": 16.8,
+   "mean": 16.74
+  },
+  "over33": 4,
+  "blankFrames": 124,
+  "samples": [
+   {
+    "min": 0,
+    "jsHeapMb": 2.8,
+    "domNodes": 1979,
+    "listeners": 453,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8,
+     "imageMB": 13.6,
+     "effectMB": 3.4,
+     "wasmMB": 90.3,
+     "tiles": 30,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 32.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2149,
+    "chromeFootprintMb": 1602,
+    "chromeCpuSec": 5.06,
+    "serverHeapMb": 35,
+    "serverRssMb": 564
+   },
+   {
+    "min": 0.54,
+    "jsHeapMb": 4,
+    "domNodes": 1989,
+    "listeners": 453,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 19.6,
+     "imageMB": 15,
+     "effectMB": 0,
+     "wasmMB": 91.8,
+     "tiles": 53,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2058,
+    "chromeFootprintMb": 1549,
+    "chromeCpuSec": 14.03,
+    "serverHeapMb": 69,
+    "serverRssMb": 429
+   },
+   {
+    "min": 1.08,
+    "jsHeapMb": 3.9,
+    "domNodes": 2381,
+    "listeners": 629,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 116.3,
+     "tiles": 0,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2309,
+    "chromeFootprintMb": 1640,
+    "chromeCpuSec": 27.69,
+    "serverHeapMb": 42,
+    "serverRssMb": 485
+   },
+   {
+    "min": 1.53,
+    "jsHeapMb": 4.1,
+    "domNodes": 7242,
+    "listeners": 1187,
+    "timers": 6,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 9.4,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 116.3,
+     "tiles": 23,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2216,
+    "chromeFootprintMb": 1421,
+    "chromeCpuSec": 35.17,
+    "serverHeapMb": 101,
+    "serverRssMb": 506
+   },
+   {
+    "min": 2,
+    "jsHeapMb": 4.8,
+    "domNodes": 9032,
+    "listeners": 1461,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.5,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 21,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2354,
+    "chromeFootprintMb": 1604,
+    "chromeCpuSec": 45.66,
+    "serverHeapMb": 84,
+    "serverRssMb": 526
+   },
+   {
+    "min": 2.51,
+    "jsHeapMb": 4.4,
+    "domNodes": 2785,
+    "listeners": 805,
+    "timers": 0,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 9.5,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 24,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2094,
+    "chromeFootprintMb": 1631,
+    "chromeCpuSec": 55.81,
+    "serverHeapMb": 100,
+    "serverRssMb": 553
+   },
+   {
+    "min": 3.05,
+    "jsHeapMb": 4.3,
+    "domNodes": 2985,
+    "listeners": 893,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1573,
+    "chromeFootprintMb": 1564,
+    "chromeCpuSec": 68.68,
+    "serverHeapMb": 42,
+    "serverRssMb": 468
+   },
+   {
+    "min": 3.52,
+    "jsHeapMb": 5.6,
+    "domNodes": 10811,
+    "listeners": 1849,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 2.8,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1717,
+    "chromeFootprintMb": 1538,
+    "chromeCpuSec": 80.18,
+    "serverHeapMb": 98,
+    "serverRssMb": 501
+   },
+   {
+    "min": 4.04,
+    "jsHeapMb": 3.7,
+    "domNodes": 3377,
+    "listeners": 1069,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 6.6,
+     "imageMB": 4.3,
+     "effectMB": 0.5,
+     "wasmMB": 122.4,
+     "tiles": 15,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1707,
+    "chromeFootprintMb": 1506,
+    "chromeCpuSec": 93,
+    "serverHeapMb": 44,
+    "serverRssMb": 478
+   },
+   {
+    "min": 4.51,
+    "jsHeapMb": 3.8,
+    "domNodes": 3581,
+    "listeners": 1157,
+    "timers": 0,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1715,
+    "chromeFootprintMb": 1695,
+    "chromeCpuSec": 102.69,
+    "serverHeapMb": 112,
+    "serverRssMb": 523
+   },
+   {
+    "min": 5.06,
+    "jsHeapMb": 4.3,
+    "domNodes": 3785,
+    "listeners": 1245,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 0,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1805,
+    "chromeFootprintMb": 1852,
+    "chromeCpuSec": 114.72,
+    "serverHeapMb": 54,
+    "serverRssMb": 500
+   },
+   {
+    "min": 5.53,
+    "jsHeapMb": 4.6,
+    "domNodes": 11597,
+    "listeners": 2201,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 7,
+     "imageMB": 6.1,
+     "effectMB": 3.3,
+     "wasmMB": 122.4,
+     "tiles": 16,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1723,
+    "chromeFootprintMb": 1700,
+    "chromeCpuSec": 124.49,
+    "serverHeapMb": 47,
+    "serverRssMb": 502
+   },
+   {
+    "min": 6.04,
+    "jsHeapMb": 4.4,
+    "domNodes": 9361,
+    "listeners": 1953,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1669,
+    "chromeFootprintMb": 1633,
+    "chromeCpuSec": 132.93,
+    "serverHeapMb": 53,
+    "serverRssMb": 513
+   },
+   {
+    "min": 6.52,
+    "jsHeapMb": 4.3,
+    "domNodes": 4381,
+    "listeners": 1509,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 0,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1822,
+    "chromeFootprintMb": 1830,
+    "chromeCpuSec": 146.3,
+    "serverHeapMb": 49,
+    "serverRssMb": 501
+   },
+   {
+    "min": 7.07,
+    "jsHeapMb": 4.4,
+    "domNodes": 4385,
+    "listeners": 1509,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 9.4,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 24,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1759,
+    "chromeFootprintMb": 1803,
+    "chromeCpuSec": 155.47,
+    "serverHeapMb": 137,
+    "serverRssMb": 552
+   },
+   {
+    "min": 7.51,
+    "jsHeapMb": 4.2,
+    "domNodes": 11558,
+    "listeners": 2403,
+    "timers": 6,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1771,
+    "chromeFootprintMb": 1758,
+    "chromeCpuSec": 165.96,
+    "serverHeapMb": 113,
+    "serverRssMb": 531
+   },
+   {
+    "min": 8.03,
+    "jsHeapMb": 4.6,
+    "domNodes": 11764,
+    "listeners": 2491,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1678,
+    "chromeFootprintMb": 1734,
+    "chromeCpuSec": 176.47,
+    "serverHeapMb": 63,
+    "serverRssMb": 531
+   },
+   {
+    "min": 8.55,
+    "jsHeapMb": 5.3,
+    "domNodes": 4985,
+    "listeners": 1773,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2017,
+    "chromeFootprintMb": 2061,
+    "chromeCpuSec": 187.75,
+    "serverHeapMb": 136,
+    "serverRssMb": 595
+   },
+   {
+    "min": 9.02,
+    "jsHeapMb": 4.5,
+    "domNodes": 13260,
+    "listeners": 2791,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.9,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 21,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1751,
+    "chromeFootprintMb": 1691,
+    "chromeCpuSec": 197.29,
+    "serverHeapMb": 79,
+    "serverRssMb": 528
+   },
+   {
+    "min": 9.51,
+    "jsHeapMb": 6.3,
+    "domNodes": 9171,
+    "listeners": 2383,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 3.3,
+     "imageMB": 4.3,
+     "effectMB": 0.2,
+     "wasmMB": 122.4,
+     "tiles": 10,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2011,
+    "chromeFootprintMb": 1972,
+    "chromeCpuSec": 208.74,
+    "serverHeapMb": 91,
+    "serverRssMb": 536
+   },
+   {
+    "min": 10.03,
+    "jsHeapMb": 4,
+    "domNodes": 5581,
+    "listeners": 2037,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1776,
+    "chromeFootprintMb": 1832,
+    "chromeCpuSec": 219.34,
+    "serverHeapMb": 168,
+    "serverRssMb": 577
+   },
+   {
+    "min": 10.59,
+    "jsHeapMb": 4.1,
+    "domNodes": 5781,
+    "listeners": 2125,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 0,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1900,
+    "chromeFootprintMb": 1893,
+    "chromeCpuSec": 231.38,
+    "serverHeapMb": 60,
+    "serverRssMb": 560
+   },
+   {
+    "min": 11.03,
+    "jsHeapMb": 4.7,
+    "domNodes": 15148,
+    "listeners": 3267,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 6.6,
+     "imageMB": 4.3,
+     "effectMB": 0.5,
+     "wasmMB": 122.4,
+     "tiles": 15,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1933,
+    "chromeFootprintMb": 1870,
+    "chromeCpuSec": 240.67,
+    "serverHeapMb": 100,
+    "serverRssMb": 572
+   },
+   {
+    "min": 11.52,
+    "jsHeapMb": 5.4,
+    "domNodes": 5985,
+    "listeners": 2213,
+    "timers": 0,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2044,
+    "chromeFootprintMb": 2053,
+    "chromeCpuSec": 248.45,
+    "serverHeapMb": 139,
+    "serverRssMb": 583
+   },
+   {
+    "min": 12.09,
+    "jsHeapMb": 4.7,
+    "domNodes": 6385,
+    "listeners": 2389,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 0,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2028,
+    "chromeFootprintMb": 2065,
+    "chromeCpuSec": 262.21,
+    "serverHeapMb": 53,
+    "serverRssMb": 532
+   },
+   {
+    "min": 12.53,
+    "jsHeapMb": 4.7,
+    "domNodes": 8514,
+    "listeners": 2637,
+    "timers": 6,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1923,
+    "chromeFootprintMb": 1855,
+    "chromeCpuSec": 269.47,
+    "serverHeapMb": 85,
+    "serverRssMb": 566
+   },
+   {
+    "min": 13.03,
+    "jsHeapMb": 4.6,
+    "domNodes": 6585,
+    "listeners": 2477,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1917,
+    "chromeFootprintMb": 1920,
+    "chromeCpuSec": 280.34,
+    "serverHeapMb": 65,
+    "serverRssMb": 609
+   },
+   {
+    "min": 13.51,
+    "jsHeapMb": 5.3,
+    "domNodes": 12731,
+    "listeners": 3247,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.4,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1945,
+    "chromeFootprintMb": 1855,
+    "chromeCpuSec": 289.87,
+    "serverHeapMb": 50,
+    "serverRssMb": 543
+   },
+   {
+    "min": 14.02,
+    "jsHeapMb": 6.1,
+    "domNodes": 8640,
+    "listeners": 2839,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 3.3,
+     "imageMB": 4.3,
+     "effectMB": 0.2,
+     "wasmMB": 122.4,
+     "tiles": 10,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1941,
+    "chromeFootprintMb": 1997,
+    "chromeCpuSec": 302.23,
+    "serverHeapMb": 121,
+    "serverRssMb": 588
+   },
+   {
+    "min": 14.57,
+    "jsHeapMb": 5.4,
+    "domNodes": 7185,
+    "listeners": 2741,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1954,
+    "chromeFootprintMb": 2197,
+    "chromeCpuSec": 314.91,
+    "serverHeapMb": 141,
+    "serverRssMb": 578
+   },
+   {
+    "min": 15.02,
+    "jsHeapMb": 4.7,
+    "domNodes": 16284,
+    "listeners": 3795,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 9.4,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 24,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1567,
+    "chromeFootprintMb": 1847,
+    "chromeCpuSec": 322.13,
+    "serverHeapMb": 103,
+    "serverRssMb": 471
+   },
+   {
+    "min": 15.52,
+    "jsHeapMb": 4.7,
+    "domNodes": 7585,
+    "listeners": 2917,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 0,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1843,
+    "chromeFootprintMb": 2064,
+    "chromeCpuSec": 335.5,
+    "serverHeapMb": 55,
+    "serverRssMb": 517
+   },
+   {
+    "min": 16.01,
+    "jsHeapMb": 4.8,
+    "domNodes": 10282,
+    "listeners": 3227,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1559,
+    "chromeFootprintMb": 1887,
+    "chromeCpuSec": 343.8,
+    "serverHeapMb": 115,
+    "serverRssMb": 502
+   },
+   {
+    "min": 16.54,
+    "jsHeapMb": 7.4,
+    "domNodes": 13235,
+    "listeners": 3625,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.9,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 21,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1799,
+    "chromeFootprintMb": 2060,
+    "chromeCpuSec": 355.43,
+    "serverHeapMb": 94,
+    "serverRssMb": 415
+   },
+   {
+    "min": 17.02,
+    "jsHeapMb": 5.2,
+    "domNodes": 7987,
+    "listeners": 3093,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1952,
+    "chromeFootprintMb": 2210,
+    "chromeCpuSec": 365.18,
+    "serverHeapMb": 140,
+    "serverRssMb": 460
+   },
+   {
+    "min": 17.57,
+    "jsHeapMb": 4.3,
+    "domNodes": 8181,
+    "listeners": 3181,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1705,
+    "chromeFootprintMb": 2109,
+    "chromeCpuSec": 377.67,
+    "serverHeapMb": 140,
+    "serverRssMb": 440
+   },
+   {
+    "min": 18.01,
+    "jsHeapMb": 4.3,
+    "domNodes": 8377,
+    "listeners": 3269,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.9,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 21,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1676,
+    "chromeFootprintMb": 1945,
+    "chromeCpuSec": 387.51,
+    "serverHeapMb": 73,
+    "serverRssMb": 436
+   },
+   {
+    "min": 18.53,
+    "jsHeapMb": 8.4,
+    "domNodes": 15048,
+    "listeners": 4101,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 3.3,
+     "imageMB": 4.3,
+     "effectMB": 0.2,
+     "wasmMB": 122.4,
+     "tiles": 10,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2096,
+    "chromeFootprintMb": 2310,
+    "chromeCpuSec": 399.17,
+    "serverHeapMb": 126,
+    "serverRssMb": 484
+   },
+   {
+    "min": 19.05,
+    "jsHeapMb": 5.3,
+    "domNodes": 8785,
+    "listeners": 3445,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1949,
+    "chromeFootprintMb": 2264,
+    "chromeCpuSec": 409.95,
+    "serverHeapMb": 91,
+    "serverRssMb": 460
+   },
+   {
+    "min": 19.53,
+    "jsHeapMb": 5.8,
+    "domNodes": 13630,
+    "listeners": 4003,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 9.4,
+     "imageMB": 6.9,
+     "effectMB": 2.8,
+     "wasmMB": 122.4,
+     "tiles": 24,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1778,
+    "chromeFootprintMb": 1963,
+    "chromeCpuSec": 417.82,
+    "serverHeapMb": 82,
+    "serverRssMb": 415
+   },
+   {
+    "min": 20.02,
+    "jsHeapMb": 6.4,
+    "domNodes": 14035,
+    "listeners": 4179,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 3.3,
+     "imageMB": 4.3,
+     "effectMB": 0.2,
+     "wasmMB": 122.4,
+     "tiles": 10,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1850,
+    "chromeFootprintMb": 2008,
+    "chromeCpuSec": 431.02,
+    "serverHeapMb": 75,
+    "serverRssMb": 521
+   },
+   {
+    "min": 20.54,
+    "jsHeapMb": 5.6,
+    "domNodes": 9185,
+    "listeners": 3621,
+    "timers": 0,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2054,
+    "chromeFootprintMb": 2314,
+    "chromeCpuSec": 439.73,
+    "serverHeapMb": 144,
+    "serverRssMb": 485
+   },
+   {
+    "min": 21.02,
+    "jsHeapMb": 5.3,
+    "domNodes": 13688,
+    "listeners": 4205,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1849,
+    "chromeFootprintMb": 1985,
+    "chromeCpuSec": 451.01,
+    "serverHeapMb": 111,
+    "serverRssMb": 536
+   },
+   {
+    "min": 21.51,
+    "jsHeapMb": 5.1,
+    "domNodes": 14972,
+    "listeners": 4417,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.8,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 23,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1913,
+    "chromeFootprintMb": 2155,
+    "chromeCpuSec": 461.22,
+    "serverHeapMb": 59,
+    "serverRssMb": 522
+   },
+   {
+    "min": 22.04,
+    "jsHeapMb": 4.9,
+    "domNodes": 9785,
+    "listeners": 3885,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1892,
+    "chromeFootprintMb": 2217,
+    "chromeCpuSec": 473.09,
+    "serverHeapMb": 144,
+    "serverRssMb": 606
+   },
+   {
+    "min": 22.52,
+    "jsHeapMb": 5.1,
+    "domNodes": 15897,
+    "listeners": 4655,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.5,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 21,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1896,
+    "chromeFootprintMb": 2080,
+    "chromeCpuSec": 483.13,
+    "serverHeapMb": 129,
+    "serverRssMb": 489
+   },
+   {
+    "min": 23.01,
+    "jsHeapMb": 8.6,
+    "domNodes": 14524,
+    "listeners": 4557,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 3.3,
+     "imageMB": 4.3,
+     "effectMB": 0.2,
+     "wasmMB": 122.4,
+     "tiles": 10,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2131,
+    "chromeFootprintMb": 2305,
+    "chromeCpuSec": 494.02,
+    "serverHeapMb": 87,
+    "serverRssMb": 588
+   },
+   {
+    "min": 23.54,
+    "jsHeapMb": 5.7,
+    "domNodes": 10385,
+    "listeners": 4149,
+    "timers": 0,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2146,
+    "chromeFootprintMb": 2459,
+    "chromeCpuSec": 505.1,
+    "serverHeapMb": 73,
+    "serverRssMb": 521
+   },
+   {
+    "min": 24.02,
+    "jsHeapMb": 5.3,
+    "domNodes": 14686,
+    "listeners": 4645,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 1889,
+    "chromeFootprintMb": 2052,
+    "chromeCpuSec": 513.27,
+    "serverHeapMb": 80,
+    "serverRssMb": 490
+   },
+   {
+    "min": 24.52,
+    "jsHeapMb": 7.2,
+    "domNodes": 14585,
+    "listeners": 4759,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 3.3,
+     "imageMB": 4.3,
+     "effectMB": 0.2,
+     "wasmMB": 122.4,
+     "tiles": 10,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2235,
+    "chromeFootprintMb": 2404,
+    "chromeCpuSec": 526.46,
+    "serverHeapMb": 81,
+    "serverRssMb": 546
+   },
+   {
+    "min": 25.06,
+    "jsHeapMb": 4.5,
+    "domNodes": 10781,
+    "listeners": 4325,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 1912,
+    "chromeFootprintMb": 2183,
+    "chromeCpuSec": 535.44,
+    "serverHeapMb": 57,
+    "serverRssMb": 522
+   },
+   {
+    "min": 25.54,
+    "jsHeapMb": 4.9,
+    "domNodes": 13105,
+    "listeners": 4661,
+    "timers": 6,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2025,
+    "chromeFootprintMb": 2171,
+    "chromeCpuSec": 546.71,
+    "serverHeapMb": 123,
+    "serverRssMb": 581
+   },
+   {
+    "min": 26.04,
+    "jsHeapMb": 4.9,
+    "domNodes": 12773,
+    "listeners": 4687,
+    "timers": 4,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.7,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 22,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2021,
+    "chromeFootprintMb": 2189,
+    "chromeCpuSec": 557.13,
+    "serverHeapMb": 113,
+    "serverRssMb": 531
+   },
+   {
+    "min": 26.57,
+    "jsHeapMb": 5.8,
+    "domNodes": 11385,
+    "listeners": 4589,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2379,
+    "chromeFootprintMb": 2623,
+    "chromeCpuSec": 568.94,
+    "serverHeapMb": 144,
+    "serverRssMb": 593
+   },
+   {
+    "min": 27.02,
+    "jsHeapMb": 5.5,
+    "domNodes": 13746,
+    "listeners": 4925,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.2,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 20,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2024,
+    "chromeFootprintMb": 2241,
+    "chromeCpuSec": 578.61,
+    "serverHeapMb": 99,
+    "serverRssMb": 593
+   },
+   {
+    "min": 27.51,
+    "jsHeapMb": 5.3,
+    "domNodes": 11785,
+    "listeners": 4765,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 0,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2298,
+    "chromeFootprintMb": 2527,
+    "chromeCpuSec": 590.02,
+    "serverHeapMb": 67,
+    "serverRssMb": 588
+   },
+   {
+    "min": 28.08,
+    "jsHeapMb": 5.8,
+    "domNodes": 11985,
+    "listeners": 4853,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8,
+     "imageMB": 6.7,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 19,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2268,
+    "chromeFootprintMb": 2500,
+    "chromeCpuSec": 601.98,
+    "serverHeapMb": 160,
+    "serverRssMb": 634
+   },
+   {
+    "min": 28.54,
+    "jsHeapMb": 5.4,
+    "domNodes": 14129,
+    "listeners": 5101,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 9.4,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 24,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 7.9,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2063,
+    "chromeFootprintMb": 2198,
+    "chromeCpuSec": 609.75,
+    "serverHeapMb": 77,
+    "serverRssMb": 568
+   },
+   {
+    "min": 29.04,
+    "jsHeapMb": 5,
+    "domNodes": 12381,
+    "listeners": 5029,
+    "timers": 1,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 0,
+     "imageMB": 0,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 0,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 14.3,
+     "stagingMB": 7.9,
+     "playing": 4,
+     "cards": 28
+    },
+    "chromeRssMb": 2177,
+    "chromeFootprintMb": 2321,
+    "chromeCpuSec": 623.46,
+    "serverHeapMb": 59,
+    "serverRssMb": 569
+   },
+   {
+    "min": 29.54,
+    "jsHeapMb": 5.2,
+    "domNodes": 16704,
+    "listeners": 5525,
+    "timers": 5,
+    "intervals": 5,
+    "videos": 4,
+    "engine": {
+     "tileMB": 8.8,
+     "imageMB": 6.9,
+     "effectMB": 0,
+     "wasmMB": 122.4,
+     "tiles": 23,
+     "boards": 20,
+     "nodes": 4550,
+     "errors": 0
+    },
+    "cards": {
+     "cardMB": 9.5,
+     "stagingMB": 0,
+     "playing": 0,
+     "cards": 28
+    },
+    "chromeRssMb": 2155,
+    "chromeFootprintMb": 2267,
+    "chromeCpuSec": 631.73,
+    "serverHeapMb": 152,
+    "serverRssMb": 584
+   }
+  ],
+  "end": {
+   "jsHeapMb": 4.7,
+   "domNodes": 12577,
+   "listeners": 5117,
+   "timers": 4,
+   "intervals": 5,
+   "videos": 4,
+   "engine": {
+    "tileMB": 8.2,
+    "imageMB": 6.9,
+    "effectMB": 0,
+    "wasmMB": 122.4,
+    "tiles": 20,
+    "boards": 20,
+    "nodes": 4550,
+    "errors": 0
+   },
+   "cards": {
+    "cardMB": 9.5,
+    "stagingMB": 7.9,
+    "playing": 0,
+    "cards": 28
+   },
+   "chromeRssMb": 2127,
+   "chromeFootprintMb": 2272,
+   "chromeCpuSec": 643.34
+  },
+  "integrity": {
+   "ok": true,
+   "nodes": 28668,
+   "dupes": [],
+   "wrong": [],
+   "bytes": 17614773
+  },
+  "idle": {
+   "pageTaskMsPerSec": 5.3,
+   "chromeCpuPct": 1.9,
+   "engineFramesTotal": 94795
+  },
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404"
+   ],
+   "engineErrors": []
+  }
+ },
+ "_note": "Page code before the fixes (listener/DOM leak in video cards)."
+}

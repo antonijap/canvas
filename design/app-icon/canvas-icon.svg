@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs>
+  <linearGradient id="bg" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#3AA6FF"/><stop offset="0.5" stop-color="#0A84FF"/><stop offset="1" stop-color="#0062E0"/>
+  </linearGradient>
+  <radialGradient id="glow" cx="512" cy="120" r="640" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#fff" stop-opacity="0.12"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="obj" x1="0" y1="290" x2="0" y2="730" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#EAF4FF"/><stop offset="1" stop-color="#BBD9FF"/>
+  </linearGradient>
+  <linearGradient id="gridFade" x1="0" y1="100" x2="0" y2="924" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0.55"/>
+  </linearGradient>
+  <mask id="gridMask"><rect width="1024" height="1024" fill="url(#gridFade)"/></mask>
+  <pattern id="minor" width="41.2" height="41.2" patternUnits="userSpaceOnUse" x="100" y="100">
+    <path d="M0 0V41.2M0 0H41.2" stroke="#fff" stroke-width="2" stroke-opacity="0.1" fill="none"/>
+  </pattern>
+  <pattern id="major" width="164.8" height="164.8" patternUnits="userSpaceOnUse" x="100" y="100">
+    <path d="M0 0V164.8M0 0H164.8" stroke="#fff" stroke-width="3" stroke-opacity="0.22" fill="none"/>
+  </pattern>
+  <clipPath id="bodyClip"><path d="M627.36 100c103.83 0 155.75 0 195.41 20.21a185.4 185.4 0 0 1 81.02 81.02c20.21 39.66 20.21 91.58 20.21 195.41L924 627.36c0 103.83 0 155.75 -20.21 195.41a185.4 185.4 0 0 1 -81.02 81.02c-39.66 20.21 -91.58 20.21 -195.41 20.21L396.64 924c-103.83 0 -155.75 0 -195.41 -20.21a185.4 185.4 0 0 1 -81.02 -81.02c-20.21 -39.66 -20.21 -91.58 -20.21 -195.41L100 396.64c0 -103.83 0 -155.75 20.21 -195.41a185.4 185.4 0 0 1 81.02 -81.02c39.66 -20.21 91.58 -20.21 195.41 -20.21Z"/></clipPath>
+  <filter id="bodyShadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="14"/><feOffset dy="12"/>
+    <feComponentTransfer><feFuncA type="linear" slope="0.3"/></feComponentTransfer>
+    <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="bodyEdge" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse">
+    <feComponentTransfer in="SourceAlpha" result="inv"><feFuncA type="table" tableValues="1 0"/></feComponentTransfer>
+    <feGaussianBlur in="inv" stdDeviation="2" result="ib"/><feOffset in="ib" dy="4" result="t"/>
+    <feComposite in="t" in2="SourceAlpha" operator="in" result="t2"/>
+    <feFlood flood-color="#fff" flood-opacity="0.2"/><feComposite in2="t2" operator="in" result="tl"/>
+    <feGaussianBlur in="inv" stdDeviation="10" result="ib2"/><feOffset in="ib2" dy="-8" result="b"/>
+    <feComposite in="b" in2="SourceAlpha" operator="in" result="b2"/>
+    <feFlood flood-color="#00307A" flood-opacity="0.3"/><feComposite in2="b2" operator="in" result="bs"/>
+    <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="bs"/><feMergeNode in="tl"/></feMerge>
+  </filter>
+  <filter id="drop" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse">
+    <feGaussianBlur in="SourceAlpha" stdDeviation="32" result="b1"/><feOffset in="b1" dx="12" dy="38" result="o1"/>
+    <feFlood flood-color="#00307A" flood-opacity="0.5"/><feComposite in2="o1" operator="in" result="amb"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="14" result="b2"/><feOffset in="b2" dx="4" dy="16" result="o2"/>
+    <feFlood flood-color="#00307A" flood-opacity="0.3"/><feComposite in2="o2" operator="in" result="mid"/>
+    <feGaussianBlur in="SourceAlpha" stdDeviation="4" result="b3"/><feOffset in="b3" dy="5" result="o3"/>
+    <feFlood flood-color="#00307A" flood-opacity="0.4"/><feComposite in2="o3" operator="in" result="con"/>
+    <feMerge><feMergeNode in="amb"/><feMergeNode in="mid"/><feMergeNode in="con"/></feMerge>
+  </filter>
+  <filter id="puff" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse">
+    <feComponentTransfer in="SourceAlpha" result="inv"><feFuncA type="table" tableValues="1 0"/></feComponentTransfer>
+    <feGaussianBlur in="inv" stdDeviation="20" result="ib"/><feOffset in="ib" dx="-7" dy="-22" result="io"/>
+    <feComposite in="io" in2="SourceAlpha" operator="in" result="ic"/>
+    <feFlood flood-color="#8FBFF5" flood-opacity="1"/><feComposite in2="ic" operator="in" result="shade"/>
+    <feGaussianBlur in="inv" stdDeviation="9" result="hb"/><feOffset in="hb" dx="4" dy="9" result="ho"/>
+    <feComposite in="ho" in2="SourceAlpha" operator="in" result="hc"/>
+    <feFlood flood-color="#fff" flood-opacity="0.9"/><feComposite in2="hc" operator="in" result="hil"/>
+    <feMorphology in="SourceAlpha" operator="erode" radius="3" result="er"/>
+    <feComposite in="SourceAlpha" in2="er" operator="out" result="ring"/>
+    <feFlood flood-color="#fff" flood-opacity="0.95"/><feComposite in2="ring" operator="in" result="rim"/>
+    <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="shade"/><feMergeNode in="hil"/><feMergeNode in="rim"/></feMerge>
+  </filter>
+</defs>
+<g filter="url(#bodyShadow)"><path d="M627.36 100c103.83 0 155.75 0 195.41 20.21a185.4 185.4 0 0 1 81.02 81.02c20.21 39.66 20.21 91.58 20.21 195.41L924 627.36c0 103.83 0 155.75 -20.21 195.41a185.4 185.4 0 0 1 -81.02 81.02c-39.66 20.21 -91.58 20.21 -195.41 20.21L396.64 924c-103.83 0 -155.75 0 -195.41 -20.21a185.4 185.4 0 0 1 -81.02 -81.02c-20.21 -39.66 -20.21 -91.58 -20.21 -195.41L100 396.64c0 -103.83 0 -155.75 20.21 -195.41a185.4 185.4 0 0 1 81.02 -81.02c39.66 -20.21 91.58 -20.21 195.41 -20.21Z" fill="url(#bg)" filter="url(#bodyEdge)"/></g>
+<g clip-path="url(#bodyClip)">
+  <rect width="1024" height="1024" fill="url(#glow)"/>
+  <g mask="url(#gridMask)">
+    <rect width="1024" height="1024" fill="url(#minor)"/><rect width="1024" height="1024" fill="url(#major)"/>
+    <path d="M161.8 161.8L862.2 862.2M862.2 161.8L161.8 862.2M512 141.2V882.8000000000001M141.2 512H882.8000000000001" stroke="#fff" stroke-opacity="0.26" stroke-width="3" fill="none"/>
+    <circle cx="512" cy="512" r="288.40000000000003" stroke="#fff" stroke-opacity="0.26" stroke-width="3" fill="none"/>
+  </g>
+  <g filter="url(#drop)"><path d="M573.6 278c58.25 0 87.37 0 109.62 11.34a104 104 0 0 1 45.45 45.45c11.34 22.25 11.34 51.37 11.34 109.62L740 567.6c0 58.25 0 87.37 -11.34 109.62a104 104 0 0 1 -45.45 45.45c-22.25 11.34 -51.37 11.34 -109.62 11.34L450.4 734c-58.25 0 -87.37 0 -109.62 -11.34a104 104 0 0 1 -45.45 -45.45c-11.34 -22.25 -11.34 -51.37 -11.34 -109.62L284 444.4c0 -58.25 0 -87.37 11.34 -109.62a104 104 0 0 1 45.45 -45.45c22.25 -11.34 51.37 -11.34 109.62 -11.34ZM587.8 347c29.12 0 43.68 0 54.81 5.67a52 52 0 0 1 22.72 22.72c5.67 11.12 5.67 25.68 5.67 54.81L671 581.8c0 29.12 0 43.68 -5.67 54.81a52 52 0 0 1 -22.72 22.72c-11.12 5.67 -25.68 5.67 -54.81 5.67L436.2 665c-29.12 0 -43.68 0 -54.81 -5.67a52 52 0 0 1 -22.72 -22.72c-5.67 -11.12 -5.67 -25.68 -5.67 -54.81L353 430.2c0 -29.12 0 -43.68 5.67 -54.81a52 52 0 0 1 22.72 -22.72c11.12 -5.67 25.68 -5.67 54.81 -5.67Z" transform="rotate(-8 512 506)" fill-rule="evenodd"/></g>
+  <g filter="url(#puff)"><path d="M573.6 278c58.25 0 87.37 0 109.62 11.34a104 104 0 0 1 45.45 45.45c11.34 22.25 11.34 51.37 11.34 109.62L740 567.6c0 58.25 0 87.37 -11.34 109.62a104 104 0 0 1 -45.45 45.45c-22.25 11.34 -51.37 11.34 -109.62 11.34L450.4 734c-58.25 0 -87.37 0 -109.62 -11.34a104 104 0 0 1 -45.45 -45.45c-11.34 -22.25 -11.34 -51.37 -11.34 -109.62L284 444.4c0 -58.25 0 -87.37 11.34 -109.62a104 104 0 0 1 45.45 -45.45c22.25 -11.34 51.37 -11.34 109.62 -11.34ZM587.8 347c29.12 0 43.68 0 54.81 5.67a52 52 0 0 1 22.72 22.72c5.67 11.12 5.67 25.68 5.67 54.81L671 581.8c0 29.12 0 43.68 -5.67 54.81a52 52 0 0 1 -22.72 22.72c-11.12 5.67 -25.68 5.67 -54.81 5.67L436.2 665c-29.12 0 -43.68 0 -54.81 -5.67a52 52 0 0 1 -22.72 -22.72c-5.67 -11.12 -5.67 -25.68 -5.67 -54.81L353 430.2c0 -29.12 0 -43.68 5.67 -54.81a52 52 0 0 1 22.72 -22.72c11.12 -5.67 25.68 -5.67 54.81 -5.67Z" transform="rotate(-8 512 506)" fill="url(#obj)" fill-rule="evenodd"/></g>
+</g>
+</svg>

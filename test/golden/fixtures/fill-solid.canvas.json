@@ -1,0 +1,136 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "fill-solid",
+   "x": 0,
+   "y": 0,
+   "width": 480,
+   "height": 240,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "rectangle",
+     "id": "r1",
+     "x": 20,
+     "y": 20,
+     "width": 100,
+     "height": 80,
+     "fill": "#EF4444"
+    },
+    {
+     "type": "rectangle",
+     "id": "r2",
+     "x": 130,
+     "y": 20,
+     "width": 100,
+     "height": 80,
+     "fill": "#22C55E80"
+    },
+    {
+     "type": "rectangle",
+     "id": "r3",
+     "x": 180,
+     "y": 60,
+     "width": 100,
+     "height": 80,
+     "fill": "#3B82F6CC"
+    },
+    {
+     "type": "rectangle",
+     "id": "r4",
+     "x": 300,
+     "y": 20,
+     "width": 100,
+     "height": 80,
+     "fill": [
+      {
+       "type": "color",
+       "color": "#FACC15"
+      },
+      {
+       "type": "color",
+       "color": "#A855F766"
+      }
+     ]
+    },
+    {
+     "type": "ellipse",
+     "id": "e5",
+     "x": 20,
+     "y": 130,
+     "width": 120,
+     "height": 80,
+     "fill": "#14B8A6"
+    },
+    {
+     "type": "ellipse",
+     "id": "e6",
+     "x": 100.5,
+     "y": 140.5,
+     "width": 80.25,
+     "height": 60.75,
+     "fill": "#F9731699"
+    },
+    {
+     "type": "rectangle",
+     "id": "r7",
+     "x": 300,
+     "y": 130,
+     "width": 0.5,
+     "height": 80,
+     "fill": "#000000"
+    },
+    {
+     "type": "rectangle",
+     "id": "r8",
+     "x": 310,
+     "y": 130,
+     "width": 1,
+     "height": 80,
+     "fill": "#000000"
+    },
+    {
+     "type": "rectangle",
+     "id": "r9",
+     "x": 320.5,
+     "y": 130,
+     "width": 1,
+     "height": 80,
+     "fill": "#000000"
+    },
+    {
+     "type": "rectangle",
+     "id": "r10",
+     "x": 330,
+     "y": 130.5,
+     "width": 60,
+     "height": 1,
+     "fill": "#000000"
+    },
+    {
+     "type": "rectangle",
+     "id": "r11",
+     "x": 330,
+     "y": 140,
+     "width": 60,
+     "height": 0.5,
+     "fill": "#000000"
+    },
+    {
+     "type": "rectangle",
+     "id": "r12",
+     "x": 400,
+     "y": 130,
+     "width": 60,
+     "height": 80,
+     "fill": "#F00"
+    }
+   ]
+  }
+ ]
+}

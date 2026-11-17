@@ -1,0 +1,204 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "gradient-angular",
+   "x": 0,
+   "y": 0,
+   "width": 520,
+   "height": 230,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "rectangle",
+     "id": "r1",
+     "x": 20,
+     "y": 20,
+     "width": 150,
+     "height": 90,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "angular",
+      "colors": [
+       {
+        "color": "#EF4444",
+        "position": 0
+       },
+       {
+        "color": "#FACC15",
+        "position": 0.33
+       },
+       {
+        "color": "#22C55E",
+        "position": 0.66
+       },
+       {
+        "color": "#3B82F6",
+        "position": 1
+       }
+      ]
+     }
+    },
+    {
+     "type": "rectangle",
+     "id": "r2",
+     "x": 185,
+     "y": 20,
+     "width": 150,
+     "height": 90,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "angular",
+      "colors": [
+       {
+        "color": "#EF4444",
+        "position": 0
+       },
+       {
+        "color": "#FACC15",
+        "position": 0.33
+       },
+       {
+        "color": "#22C55E",
+        "position": 0.66
+       },
+       {
+        "color": "#3B82F6",
+        "position": 1
+       }
+      ],
+      "rotation": 90
+     }
+    },
+    {
+     "type": "rectangle",
+     "id": "r3",
+     "x": 350,
+     "y": 20,
+     "width": 150,
+     "height": 90,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "angular",
+      "colors": [
+       {
+        "color": "#18181B",
+        "position": 0
+       },
+       {
+        "color": "#18181B",
+        "position": 0.25
+       },
+       {
+        "color": "#F4F4F5",
+        "position": 0.25
+       },
+       {
+        "color": "#F4F4F5",
+        "position": 0.5
+       },
+       {
+        "color": "#EF4444",
+        "position": 0.5
+       },
+       {
+        "color": "#EF4444",
+        "position": 1
+       }
+      ]
+     }
+    },
+    {
+     "type": "ellipse",
+     "id": "e4",
+     "x": 20,
+     "y": 125,
+     "width": 90,
+     "height": 90,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "angular",
+      "colors": [
+       {
+        "color": "#22C55E",
+        "position": 0
+       },
+       {
+        "color": "#22C55E00",
+        "position": 1
+       }
+      ],
+      "rotation": -45
+     }
+    },
+    {
+     "type": "rectangle",
+     "id": "r5",
+     "x": 185,
+     "y": 125,
+     "width": 150,
+     "height": 90,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "angular",
+      "colors": [
+       {
+        "color": "#3B82F6",
+        "position": 0
+       },
+       {
+        "color": "#FACC15",
+        "position": 0.5
+       },
+       {
+        "color": "#3B82F6",
+        "position": 1
+       }
+      ],
+      "center": {
+       "x": 0.3,
+       "y": 0.7
+      }
+     }
+    },
+    {
+     "type": "rectangle",
+     "id": "r6",
+     "x": 350,
+     "y": 125,
+     "width": 150,
+     "height": 90,
+     "cornerRadius": 45,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "angular",
+      "colors": [
+       {
+        "color": "#EF4444",
+        "position": 0
+       },
+       {
+        "color": "#FACC15",
+        "position": 0.33
+       },
+       {
+        "color": "#22C55E",
+        "position": 0.66
+       },
+       {
+        "color": "#3B82F6",
+        "position": 1
+       }
+      ],
+      "rotation": 200,
+      "opacity": 0.6
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1641 @@
+{
+  "version": "2.21",
+  "themes": {
+    "mode": [
+      "light",
+      "dark"
+    ]
+  },
+  "variables": {
+    "brand": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#4F46E5",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#A5B4FC",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "surface": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#FFFFFF",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#111827",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "ink": {
+      "type": "color",
+      "value": [
+        {
+          "value": "#111827",
+          "theme": {
+            "mode": "light"
+          }
+        },
+        {
+          "value": "#F9FAFB",
+          "theme": {
+            "mode": "dark"
+          }
+        }
+      ]
+    },
+    "radius": {
+      "type": "number",
+      "value": 12
+    },
+    "space": {
+      "type": "number",
+      "value": 16
+    }
+  },
+  "children": [
+    {
+      "type": "frame",
+      "id": "lay_nest",
+      "name": "Frames and groups",
+      "x": 0,
+      "y": 0,
+      "width": 560,
+      "height": 420,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "lay_nest_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Frames in frames, a group, a group holding a 45 degree layer at 0,0, a nested group",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "frame",
+          "id": "fr_outer",
+          "name": "Outer frame",
+          "x": 24,
+          "y": 60,
+          "width": 220,
+          "height": 170,
+          "fill": "#EEF2FF",
+          "cornerRadius": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "fr_inner",
+              "name": "Inner frame",
+              "x": 24,
+              "y": 24,
+              "width": 130,
+              "height": 90,
+              "fill": "#C7D2FE",
+              "cornerRadius": 6,
+              "children": [
+                {
+                  "type": "rectangle",
+                  "id": "r_inner",
+                  "name": "Inner rect",
+                  "x": 16,
+                  "y": 16,
+                  "width": 40,
+                  "height": 40,
+                  "fill": "#4F46E5"
+                }
+              ],
+              "layout": "none"
+            }
+          ],
+          "layout": "none"
+        },
+        {
+          "type": "group",
+          "id": "g_pair",
+          "name": "Group",
+          "x": 290,
+          "y": 60,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "r_g1",
+              "name": "Group A",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#F59E0B"
+            },
+            {
+              "type": "rectangle",
+              "id": "r_g2",
+              "name": "Group B",
+              "x": 76,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#10B981"
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "id": "g_rot",
+          "name": "Rotated group",
+          "x": 340,
+          "y": 190,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "r_rot45",
+              "name": "Rotated 45",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#EF4444",
+              "rotation": 45
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "id": "g_outer",
+          "name": "Nested group",
+          "x": 24,
+          "y": 270,
+          "children": [
+            {
+              "type": "group",
+              "id": "g_inner",
+              "name": "Inner group",
+              "x": 0,
+              "y": 0,
+              "children": [
+                {
+                  "type": "rectangle",
+                  "id": "r_n1",
+                  "name": "Nested A",
+                  "x": 0,
+                  "y": 0,
+                  "width": 50,
+                  "height": 50,
+                  "fill": "#0EA5E9"
+                },
+                {
+                  "type": "rectangle",
+                  "id": "r_n2",
+                  "name": "Nested B",
+                  "x": 64,
+                  "y": 0,
+                  "width": 50,
+                  "height": 50,
+                  "fill": "#6366F1"
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "r_n3",
+              "name": "Nested C",
+              "x": 0,
+              "y": 64,
+              "width": 114,
+              "height": 30,
+              "fill": "#A855F7"
+            }
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "r_free",
+          "name": "Free rect",
+          "x": 300,
+          "y": 300,
+          "width": 70,
+          "height": 50,
+          "fill": "#14B8A6",
+          "cornerRadius": 6
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "lay_auto",
+      "name": "Auto layout",
+      "x": 640,
+      "y": 0,
+      "width": 620,
+      "height": 460,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "lay_auto_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Rows and columns: gap, padding, hug, fill, an absolute child; a plain frame to add auto layout to",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "frame",
+          "id": "al_row",
+          "name": "Row (hug)",
+          "x": 24,
+          "y": 60,
+          "width": "fit_content",
+          "height": "fit_content",
+          "layout": "horizontal",
+          "gap": 12,
+          "padding": 16,
+          "fill": "#F1F5F9",
+          "cornerRadius": 8,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "al_a",
+              "name": "Row A",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#F43F5E"
+            },
+            {
+              "type": "rectangle",
+              "id": "al_b",
+              "name": "Row B",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#F59E0B"
+            },
+            {
+              "type": "rectangle",
+              "id": "al_c",
+              "name": "Row C",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#22C55E"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "al_col",
+          "name": "Column",
+          "x": 24,
+          "y": 180,
+          "width": 220,
+          "height": "fit_content",
+          "layout": "vertical",
+          "gap": 8,
+          "padding": [
+            12,
+            16,
+            12,
+            16
+          ],
+          "fill": "#F1F5F9",
+          "cornerRadius": 8,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "al_fill1",
+              "name": "Fill 1",
+              "x": 0,
+              "y": 0,
+              "width": "fill_container",
+              "height": 32,
+              "fill": "#93C5FD"
+            },
+            {
+              "type": "text",
+              "id": "al_txt",
+              "name": "Column text",
+              "x": 0,
+              "y": 0,
+              "content": "Hug text in a column",
+              "fill": "#18181B",
+              "fontFamily": "Inter",
+              "fontSize": 13,
+              "fontWeight": "400",
+              "letterSpacing": -0.04,
+              "lineHeight": 1.45,
+              "metadata": {
+                "type": "canvas",
+                "canvasLetterSpacing": "auto"
+              }
+            },
+            {
+              "type": "rectangle",
+              "id": "al_fill2",
+              "name": "Fill 2",
+              "x": 0,
+              "y": 0,
+              "width": "fill_container",
+              "height": 32,
+              "fill": "#60A5FA"
+            },
+            {
+              "type": "rectangle",
+              "id": "al_abs",
+              "name": "Absolute",
+              "x": 170,
+              "y": -10,
+              "width": 24,
+              "height": 24,
+              "fill": "#1D4ED8",
+              "layoutPosition": "absolute",
+              "cornerRadius": 12
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "al_fillrow",
+          "name": "Fill row",
+          "x": 300,
+          "y": 60,
+          "width": 290,
+          "height": "fit_content",
+          "layout": "horizontal",
+          "gap": 8,
+          "padding": 8,
+          "fill": "#ECFDF5",
+          "cornerRadius": 8,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "al_f1",
+              "name": "Fill",
+              "x": 0,
+              "y": 0,
+              "width": "fill_container",
+              "height": 40,
+              "fill": "#34D399"
+            },
+            {
+              "type": "rectangle",
+              "id": "al_f2",
+              "name": "Fixed",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 40,
+              "fill": "#059669"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "fr_plain",
+          "name": "Plain frame",
+          "x": 300,
+          "y": 180,
+          "width": 240,
+          "height": 150,
+          "fill": "#FEF3C7",
+          "cornerRadius": 8,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "fp_a",
+              "name": "Plain A",
+              "x": 20,
+              "y": 20,
+              "width": 50,
+              "height": 50,
+              "fill": "#D97706"
+            },
+            {
+              "type": "rectangle",
+              "id": "fp_b",
+              "name": "Plain B",
+              "x": 100,
+              "y": 40,
+              "width": 50,
+              "height": 50,
+              "fill": "#B45309"
+            }
+          ],
+          "layout": "none"
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "lay_clip",
+      "name": "Clip",
+      "x": 1340,
+      "y": 0,
+      "width": 440,
+      "height": 260,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": false,
+      "children": [
+        {
+          "type": "text",
+          "id": "lay_clip_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Clip on (left) cuts the circle, clip off (right) lets it spill",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "frame",
+          "id": "clip_on",
+          "name": "Clip on",
+          "x": 24,
+          "y": 70,
+          "width": 160,
+          "height": 120,
+          "fill": "#E0E7FF",
+          "clip": true,
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "clip_on_dot",
+              "name": "Spill",
+              "x": 100,
+              "y": 60,
+              "width": 100,
+              "height": 100,
+              "fill": "#4F46E5"
+            }
+          ],
+          "layout": "none"
+        },
+        {
+          "type": "frame",
+          "id": "clip_off",
+          "name": "Clip off",
+          "x": 230,
+          "y": 70,
+          "width": 160,
+          "height": 120,
+          "fill": "#E0E7FF",
+          "clip": false,
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "clip_off_dot",
+              "name": "Spill",
+              "x": 100,
+              "y": 60,
+              "width": 100,
+              "height": 100,
+              "fill": "#4F46E5"
+            }
+          ],
+          "layout": "none"
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "lay_text",
+      "name": "Text",
+      "x": 0,
+      "y": 520,
+      "width": 560,
+      "height": 380,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "lay_text_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Long text, auto width, auto height, fixed size",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "id": "tx_long",
+          "name": "Long text",
+          "x": 24,
+          "y": 56,
+          "content": "Canvas is a design tool built for language models and the people who work with them. This paragraph is long on purpose: it wraps inside a fixed width and grows downwards as you type, so resizing its width reflows every line.",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "400",
+          "letterSpacing": -0.09,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          },
+          "textGrowth": "fixed-width",
+          "width": 300
+        },
+        {
+          "type": "text",
+          "id": "tx_auto",
+          "name": "Auto width",
+          "x": 24,
+          "y": 230,
+          "content": "Auto width grows sideways",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "400",
+          "letterSpacing": -0.18,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          },
+          "textGrowth": "auto"
+        },
+        {
+          "type": "text",
+          "id": "tx_height",
+          "name": "Auto height",
+          "x": 24,
+          "y": 270,
+          "content": "Auto height: fixed width, height follows the lines",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "400",
+          "letterSpacing": -0.09,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          },
+          "textGrowth": "fixed-width",
+          "width": 200
+        },
+        {
+          "type": "text",
+          "id": "tx_fixed",
+          "name": "Fixed size",
+          "x": 360,
+          "y": 56,
+          "content": "Fixed size box",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 14,
+          "fontWeight": "400",
+          "letterSpacing": -0.09,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          },
+          "textGrowth": "fixed-width-height",
+          "width": 160,
+          "height": 40
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "lay_xform",
+      "name": "Transforms",
+      "x": 640,
+      "y": 540,
+      "width": 520,
+      "height": 300,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "lay_xform_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Rotated and flipped layers",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "xf_rot",
+          "name": "Rotated 30",
+          "x": 40,
+          "y": 80,
+          "width": 80,
+          "height": 50,
+          "fill": "#F97316",
+          "rotation": 30
+        },
+        {
+          "type": "rectangle",
+          "id": "xf_flipx",
+          "name": "Flipped X",
+          "x": 200,
+          "y": 80,
+          "width": 100,
+          "height": 60,
+          "flipX": true,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "linear",
+            "rotation": 90,
+            "colors": [
+              {
+                "color": "#0EA5E9",
+                "position": 0
+              },
+              {
+                "color": "#F43F5E",
+                "position": 1
+              }
+            ]
+          }
+        },
+        {
+          "type": "text",
+          "id": "xf_flipy",
+          "name": "Flipped Y",
+          "x": 330,
+          "y": 90,
+          "content": "Flipped Y",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 20,
+          "fontWeight": "700",
+          "letterSpacing": -0.33,
+          "lineHeight": 1.35,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          },
+          "flipY": true
+        },
+        {
+          "type": "ellipse",
+          "id": "xf_ell",
+          "name": "Rotated ellipse",
+          "x": 60,
+          "y": 190,
+          "width": 120,
+          "height": 50,
+          "rotation": -20,
+          "fill": "#8B5CF6"
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "lay_resize",
+      "name": "Resize targets",
+      "x": 1240,
+      "y": 540,
+      "width": 640,
+      "height": 440,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "lay_resize_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Handles on a rectangle, a frame, a text, a group, and a group holding a 45 degree layer",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "rz_rect",
+          "name": "Resize rect",
+          "x": 60,
+          "y": 70,
+          "width": 100,
+          "height": 80,
+          "fill": "#38BDF8"
+        },
+        {
+          "type": "frame",
+          "id": "rz_frame",
+          "name": "Resize frame",
+          "x": 260,
+          "y": 70,
+          "width": 120,
+          "height": 90,
+          "fill": "#FDE68A",
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "rz_frame_kid",
+              "name": "Frame child",
+              "x": 20,
+              "y": 20,
+              "width": 40,
+              "height": 40,
+              "fill": "#D97706"
+            }
+          ],
+          "layout": "none"
+        },
+        {
+          "type": "text",
+          "id": "rz_text",
+          "name": "Resize text",
+          "x": 460,
+          "y": 80,
+          "content": "Resize text",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "400",
+          "letterSpacing": -0.18,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          },
+          "textGrowth": "fixed-width-height",
+          "width": 120,
+          "height": 40
+        },
+        {
+          "type": "group",
+          "id": "rz_group",
+          "name": "Resize group",
+          "x": 60,
+          "y": 250,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "rz_ga",
+              "name": "RG A",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#A3E635"
+            },
+            {
+              "type": "rectangle",
+              "id": "rz_gb",
+              "name": "RG B",
+              "x": 80,
+              "y": 20,
+              "width": 60,
+              "height": 60,
+              "fill": "#65A30D"
+            }
+          ]
+        },
+        {
+          "type": "ellipse",
+          "id": "rz_ell",
+          "name": "Resize ellipse",
+          "x": 420,
+          "y": 160,
+          "width": 110,
+          "height": 70,
+          "fill": "#C084FC"
+        },
+        {
+          "type": "rectangle",
+          "id": "rz_img",
+          "name": "Resize image",
+          "x": 60,
+          "y": 350,
+          "width": 100,
+          "height": 70,
+          "fill": {
+            "type": "image",
+            "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAG0lEQVR4XmP4Oo/7P9/Sl/9hNAMyByTIQFAFAIGHKcG3a15jAAAAAElFTkSuQmCC",
+            "mode": "fill"
+          }
+        },
+        {
+          "type": "ref",
+          "id": "rz_inst",
+          "name": "Resize instance",
+          "ref": "cmp_button",
+          "x": 200,
+          "y": 350
+        },
+        {
+          "type": "rectangle",
+          "id": "rz_rot",
+          "name": "Resize rotated",
+          "x": 330,
+          "y": 350,
+          "width": 90,
+          "height": 50,
+          "fill": "#F97316",
+          "rotation": 30
+        },
+        {
+          "type": "group",
+          "id": "rz_grot",
+          "name": "Group with rotated layer",
+          "x": 330,
+          "y": 260,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "rz_grot_a",
+              "name": "RR rotated",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#FB7185",
+              "rotation": 45
+            },
+            {
+              "type": "rectangle",
+              "id": "rz_grot_b",
+              "name": "RR plain",
+              "x": 60,
+              "y": 0,
+              "width": 60,
+              "height": 60,
+              "fill": "#BE123C"
+            }
+          ]
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "ref",
+      "id": "top_inst",
+      "name": "Top-level instance",
+      "ref": "cmp_button",
+      "x": 0,
+      "y": 960
+    },
+    {
+      "type": "text",
+      "id": "top_text",
+      "name": "Top-level text",
+      "x": 240,
+      "y": 964,
+      "content": "A top-level text has no label",
+      "fill": "#A1A1AA",
+      "fontFamily": "Inter",
+      "fontSize": 16,
+      "fontWeight": "400",
+      "letterSpacing": -0.18,
+      "lineHeight": 1.45,
+      "metadata": {
+        "type": "canvas",
+        "canvasLetterSpacing": "auto"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "cmp_main",
+      "name": "Main components",
+      "x": 0,
+      "y": 0,
+      "width": 520,
+      "height": 240,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "cmp_main_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Button: a main component with two variants (text and fill)",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "frame",
+          "id": "cmp_button",
+          "name": "Button/Primary",
+          "reusable": true,
+          "x": 24,
+          "y": 70,
+          "width": "fit_content",
+          "height": "fit_content",
+          "layout": "horizontal",
+          "padding": [
+            10,
+            20
+          ],
+          "gap": 8,
+          "alignItems": "center",
+          "fill": "#111827",
+          "cornerRadius": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "cmp_button_label",
+              "name": "Label",
+              "x": 0,
+              "y": 0,
+              "content": "Button",
+              "fill": "#FFFFFF",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600",
+              "letterSpacing": -0.09,
+              "lineHeight": 1.45,
+              "metadata": {
+                "type": "canvas",
+                "canvasLetterSpacing": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "cmp_button_sec",
+          "name": "Button/Secondary",
+          "reusable": true,
+          "x": 180,
+          "y": 70,
+          "width": "fit_content",
+          "height": "fit_content",
+          "layout": "horizontal",
+          "padding": [
+            10,
+            20
+          ],
+          "gap": 8,
+          "alignItems": "center",
+          "fill": "#E5E7EB",
+          "cornerRadius": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "cmp_button_sec_label",
+              "name": "Label",
+              "x": 0,
+              "y": 0,
+              "content": "Cancel",
+              "fill": "#111827",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600",
+              "letterSpacing": -0.09,
+              "lineHeight": 1.45,
+              "metadata": {
+                "type": "canvas",
+                "canvasLetterSpacing": "auto"
+              }
+            }
+          ]
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "cmp_inst",
+      "name": "Instances",
+      "x": 600,
+      "y": 0,
+      "width": 620,
+      "height": 400,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "cmp_inst_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Instances with fill, text and font overrides; a detached copy; instances in auto layout",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "ref",
+          "id": "inst_plain",
+          "name": "Button/Primary",
+          "ref": "cmp_button",
+          "x": 24,
+          "y": 64
+        },
+        {
+          "type": "ref",
+          "id": "inst_fill",
+          "name": "Button/Primary",
+          "ref": "cmp_button",
+          "x": 24,
+          "y": 124,
+          "fill": "#DC2626"
+        },
+        {
+          "type": "ref",
+          "id": "inst_text",
+          "name": "Button/Primary",
+          "ref": "cmp_button",
+          "x": 24,
+          "y": 184,
+          "descendants": {
+            "cmp_button_label": {
+              "content": "Text override"
+            }
+          }
+        },
+        {
+          "type": "ref",
+          "id": "inst_font",
+          "name": "Button/Primary",
+          "ref": "cmp_button",
+          "x": 24,
+          "y": 244,
+          "descendants": {
+            "cmp_button_label": {
+              "fontWeight": "400",
+              "fontSize": 18
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "det_button",
+          "name": "Button (detached)",
+          "x": 300,
+          "y": 64,
+          "width": "fit_content",
+          "height": "fit_content",
+          "layout": "horizontal",
+          "padding": [
+            10,
+            20
+          ],
+          "gap": 8,
+          "alignItems": "center",
+          "fill": "#7C3AED",
+          "cornerRadius": 8,
+          "children": [
+            {
+              "type": "text",
+              "id": "det_label",
+              "name": "Label",
+              "x": 0,
+              "y": 0,
+              "content": "Detached",
+              "fill": "#FFFFFF",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "600",
+              "letterSpacing": -0.09,
+              "lineHeight": 1.45,
+              "metadata": {
+                "type": "canvas",
+                "canvasLetterSpacing": "auto"
+              }
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "inst_row",
+          "name": "Instances row",
+          "x": 300,
+          "y": 160,
+          "width": "fit_content",
+          "height": "fit_content",
+          "layout": "horizontal",
+          "gap": 8,
+          "padding": 12,
+          "fill": "#F3F4F6",
+          "cornerRadius": 10,
+          "children": [
+            {
+              "type": "ref",
+              "id": "inst_r1",
+              "name": "Button/Primary",
+              "ref": "cmp_button"
+            },
+            {
+              "type": "ref",
+              "id": "inst_r2",
+              "name": "Button/Secondary",
+              "ref": "cmp_button_sec"
+            }
+          ]
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "sty_vars",
+      "name": "Variables",
+      "x": 0,
+      "y": 0,
+      "width": 520,
+      "height": 280,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "sty_vars_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Colour and number variables; the right frame uses the dark theme",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "var_rect",
+          "name": "Brand ($brand)",
+          "x": 24,
+          "y": 70,
+          "width": 120,
+          "height": 80,
+          "fill": "$brand",
+          "cornerRadius": "$radius"
+        },
+        {
+          "type": "frame",
+          "id": "var_dark",
+          "name": "Dark theme",
+          "x": 200,
+          "y": 60,
+          "width": 280,
+          "height": 180,
+          "fill": "$surface",
+          "theme": {
+            "mode": "dark"
+          },
+          "layout": "vertical",
+          "gap": "$space",
+          "padding": "$space",
+          "cornerRadius": 12,
+          "children": [
+            {
+              "type": "rectangle",
+              "id": "var_rect_dark",
+              "name": "Brand dark",
+              "x": 0,
+              "y": 0,
+              "width": 120,
+              "height": 60,
+              "fill": "$brand",
+              "cornerRadius": "$radius"
+            },
+            {
+              "type": "text",
+              "id": "var_txt_dark",
+              "name": "Dark text",
+              "x": 0,
+              "y": 0,
+              "content": "Dark surface",
+              "fill": "$ink",
+              "fontFamily": "Inter",
+              "fontSize": 14,
+              "fontWeight": "400",
+              "letterSpacing": -0.09,
+              "lineHeight": 1.45,
+              "metadata": {
+                "type": "canvas",
+                "canvasLetterSpacing": "auto"
+              }
+            }
+          ]
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "sty_type",
+      "name": "Text styles",
+      "x": 600,
+      "y": 0,
+      "width": 560,
+      "height": 360,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "sty_type_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Repeated styles become text styles; tight tracking at -2%",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "id": "ts_h1a",
+          "name": "H1",
+          "x": 24,
+          "y": 56,
+          "content": "Heading one",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 32,
+          "fontWeight": "700",
+          "letterSpacing": -0.69,
+          "lineHeight": 1.2,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "id": "ts_h1b",
+          "name": "H1",
+          "x": 24,
+          "y": 104,
+          "content": "Another heading",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 32,
+          "fontWeight": "700",
+          "letterSpacing": -0.69,
+          "lineHeight": 1.2,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "id": "ts_body_a",
+          "name": "Body",
+          "x": 24,
+          "y": 160,
+          "content": "Body text at sixteen",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "400",
+          "letterSpacing": -0.18,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "id": "ts_body_b",
+          "name": "Body",
+          "x": 24,
+          "y": 188,
+          "content": "More body text",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 16,
+          "fontWeight": "400",
+          "letterSpacing": -0.18,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "id": "ts_cap_a",
+          "name": "Caption",
+          "x": 24,
+          "y": 224,
+          "content": "CAPTION",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "600",
+          "letterSpacing": 0.01,
+          "lineHeight": 1.5,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "text",
+          "id": "ts_tight",
+          "name": "Tight -2%",
+          "x": 24,
+          "y": 260,
+          "content": "Tight -2%",
+          "fill": "#18181B",
+          "fontFamily": "Inter",
+          "fontSize": 40,
+          "fontWeight": "700",
+          "letterSpacing": -0.8,
+          "lineHeight": 1.1
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "sty_paint",
+      "name": "Paint",
+      "x": 0,
+      "y": 420,
+      "width": 760,
+      "height": 200,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "sty_paint_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Fills, strokes, shadow, blur, per-corner radius, opacity",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "pt_solid",
+          "name": "Solid",
+          "x": 24,
+          "y": 70,
+          "width": 80,
+          "height": 80,
+          "fill": "#2563EB"
+        },
+        {
+          "type": "rectangle",
+          "id": "pt_grad",
+          "name": "Gradient",
+          "x": 124,
+          "y": 70,
+          "width": 80,
+          "height": 80,
+          "fill": {
+            "type": "gradient",
+            "gradientType": "linear",
+            "rotation": 135,
+            "colors": [
+              {
+                "color": "#F59E0B",
+                "position": 0
+              },
+              {
+                "color": "#EC4899",
+                "position": 1
+              }
+            ]
+          }
+        },
+        {
+          "type": "rectangle",
+          "id": "pt_stroke",
+          "name": "Stroke",
+          "x": 224,
+          "y": 70,
+          "width": 80,
+          "height": 80,
+          "fill": "#FFFFFF",
+          "stroke": "#0F172A",
+          "strokeWidth": 3,
+          "strokeAlignment": "inner"
+        },
+        {
+          "type": "rectangle",
+          "id": "pt_shadow",
+          "name": "Shadow",
+          "x": 324,
+          "y": 70,
+          "width": 80,
+          "height": 80,
+          "fill": "#FFFFFF",
+          "cornerRadius": 10,
+          "effect": [
+            {
+              "type": "shadow",
+              "offset": {
+                "x": 0,
+                "y": 8
+              },
+              "blur": 24,
+              "spread": 0,
+              "color": "#0F172A40"
+            }
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "pt_blur",
+          "name": "Blur",
+          "x": 424,
+          "y": 70,
+          "width": 80,
+          "height": 80,
+          "fill": "#10B981",
+          "effect": [
+            {
+              "type": "blur",
+              "radius": 8
+            }
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "pt_corners",
+          "name": "Per-corner radius",
+          "x": 524,
+          "y": 70,
+          "width": 80,
+          "height": 80,
+          "fill": "#6366F1",
+          "cornerRadius": [
+            0,
+            12,
+            24,
+            40
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "pt_opacity",
+          "name": "Opacity 50%",
+          "x": 624,
+          "y": 70,
+          "width": 80,
+          "height": 80,
+          "fill": "#EF4444",
+          "opacity": 0.5
+        }
+      ],
+      "layout": "none"
+    },
+    {
+      "type": "frame",
+      "id": "crd_board",
+      "name": "Cards",
+      "x": 0,
+      "y": 0,
+      "width": 1180,
+      "height": 90,
+      "fill": "#FFFFFF",
+      "cornerRadius": 12,
+      "clip": true,
+      "children": [
+        {
+          "type": "text",
+          "id": "crd_board_cap",
+          "name": "Caption",
+          "x": 24,
+          "y": 20,
+          "content": "Every widget kind sits below this board: to-do, note, PostHog (unconfigured), shader, video",
+          "fill": "#71717A",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "500",
+          "letterSpacing": -0.04,
+          "lineHeight": 1.45,
+          "metadata": {
+            "type": "canvas",
+            "canvasLetterSpacing": "auto"
+          }
+        }
+      ],
+      "layout": "none"
+    }
+  ]
+}

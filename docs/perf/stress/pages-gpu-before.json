@@ -1,0 +1,771 @@
+{
+ "probe-gpu": {
+  "switches": 118,
+  "rows": [
+   {
+    "min": 0,
+    "gc": true,
+    "proc": {
+     "browser": 186,
+     "gpu-process": 422,
+     "utility:NetworkService": 63,
+     "utility:StorageService": 7,
+     "renderer": 798
+    },
+    "heapMb": 2.9,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 871,
+       "destroyed": 726,
+       "gced": 728
+      },
+      "view": {
+       "made": 1242,
+       "destroyed": 0,
+       "gced": 1240
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 416,
+       "destroyed": 282,
+       "gced": 282
+      },
+      "bindGroup": {
+       "made": 4099,
+       "destroyed": 0,
+       "gced": 4068
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 463,
+       "destroyed": 0,
+       "gced": 463
+      }
+     },
+     "liveMb": {
+      "buffer": 171,
+      "texture": 77
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 20,
+    "wasmMb": 90,
+    "tileMb": 8,
+    "imageMb": 13
+   },
+   {
+    "min": 0.5,
+    "gc": false,
+    "proc": {
+     "browser": 106,
+     "gpu-process": 1035,
+     "utility:NetworkService": 72,
+     "utility:StorageService": 7,
+     "renderer": 908
+    },
+    "heapMb": 6,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 5357,
+       "destroyed": 5097,
+       "gced": 5095
+      },
+      "view": {
+       "made": 5884,
+       "destroyed": 0,
+       "gced": 5874
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 788,
+       "destroyed": 584,
+       "gced": 584
+      },
+      "bindGroup": {
+       "made": 24082,
+       "destroyed": 0,
+       "gced": 23973
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 2412,
+       "destroyed": 0,
+       "gced": 2408
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 143
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 46,
+    "wasmMb": 154,
+    "tileMb": 16,
+    "imageMb": 26
+   },
+   {
+    "min": 1.01,
+    "gc": false,
+    "proc": {
+     "browser": 349,
+     "gpu-process": 1042,
+     "utility:NetworkService": 74,
+     "utility:StorageService": 7,
+     "renderer": 856
+    },
+    "heapMb": 15.4,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 9751,
+       "destroyed": 9606,
+       "gced": 9118
+      },
+      "view": {
+       "made": 10547,
+       "destroyed": 0,
+       "gced": 9964
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 1154,
+       "destroyed": 950,
+       "gced": 902
+      },
+      "bindGroup": {
+       "made": 43417,
+       "destroyed": 0,
+       "gced": 40971
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 4385,
+       "destroyed": 0,
+       "gced": 4146
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 125
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 20,
+    "wasmMb": 154,
+    "tileMb": 8,
+    "imageMb": 13
+   },
+   {
+    "min": 1.52,
+    "gc": false,
+    "proc": {
+     "browser": 135,
+     "gpu-process": 800,
+     "utility:NetworkService": 76,
+     "utility:StorageService": 7,
+     "renderer": 966
+    },
+    "heapMb": 8.7,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 14097,
+       "destroyed": 14078,
+       "gced": 13755
+      },
+      "view": {
+       "made": 15006,
+       "destroyed": 0,
+       "gced": 14775
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 1440,
+       "destroyed": 1236,
+       "gced": 1234
+      },
+      "bindGroup": {
+       "made": 62304,
+       "destroyed": 0,
+       "gced": 61194
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 6292,
+       "destroyed": 0,
+       "gced": 6197
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 110
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 12,
+    "wasmMb": 154,
+    "tileMb": 9,
+    "imageMb": 0
+   },
+   {
+    "min": 2.01,
+    "gc": false,
+    "proc": {
+     "browser": 139,
+     "gpu-process": 1012,
+     "utility:NetworkService": 74,
+     "utility:StorageService": 7,
+     "renderer": 853
+    },
+    "heapMb": 3.9,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 18628,
+       "destroyed": 18483,
+       "gced": 18455
+      },
+      "view": {
+       "made": 19908,
+       "destroyed": 0,
+       "gced": 19846
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 1838,
+       "destroyed": 1634,
+       "gced": 1634
+      },
+      "bindGroup": {
+       "made": 82581,
+       "destroyed": 0,
+       "gced": 82295
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 8366,
+       "destroyed": 0,
+       "gced": 8336
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 125
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 20,
+    "wasmMb": 154,
+    "tileMb": 8,
+    "imageMb": 13
+   },
+   {
+    "min": 2.52,
+    "gc": false,
+    "proc": {
+     "browser": 130,
+     "gpu-process": 796,
+     "utility:NetworkService": 70,
+     "utility:StorageService": 7,
+     "renderer": 824
+    },
+    "heapMb": 4.1,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 23202,
+       "destroyed": 23183,
+       "gced": 23167
+      },
+      "view": {
+       "made": 24788,
+       "destroyed": 0,
+       "gced": 24732
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 2152,
+       "destroyed": 1948,
+       "gced": 1948
+      },
+      "bindGroup": {
+       "made": 103188,
+       "destroyed": 0,
+       "gced": 102968
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 10466,
+       "destroyed": 0,
+       "gced": 10442
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 110
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 12,
+    "wasmMb": 160,
+    "tileMb": 9,
+    "imageMb": 0
+   },
+   {
+    "min": 3,
+    "gc": false,
+    "proc": {
+     "browser": 142,
+     "gpu-process": 1046,
+     "utility:NetworkService": 74,
+     "utility:StorageService": 7,
+     "renderer": 865
+    },
+    "heapMb": 16.3,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 27501,
+       "destroyed": 27356,
+       "gced": 26848
+      },
+      "view": {
+       "made": 29329,
+       "destroyed": 0,
+       "gced": 28692
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 2488,
+       "destroyed": 2284,
+       "gced": 2234
+      },
+      "bindGroup": {
+       "made": 122011,
+       "destroyed": 0,
+       "gced": 119350
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 12411,
+       "destroyed": 0,
+       "gced": 12146
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 125
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 20,
+    "wasmMb": 160,
+    "tileMb": 8,
+    "imageMb": 13
+   },
+   {
+    "min": 3.01,
+    "gc": true,
+    "proc": {
+     "browser": 127,
+     "gpu-process": 789,
+     "utility:NetworkService": 68,
+     "utility:StorageService": 7,
+     "renderer": 789
+    },
+    "heapMb": 3.4,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 27501,
+       "destroyed": 27356,
+       "gced": 27358
+      },
+      "view": {
+       "made": 29329,
+       "destroyed": 0,
+       "gced": 29327
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 2488,
+       "destroyed": 2284,
+       "gced": 2284
+      },
+      "bindGroup": {
+       "made": 122011,
+       "destroyed": 0,
+       "gced": 121980
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 12411,
+       "destroyed": 0,
+       "gced": 12411
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 125
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 20,
+    "wasmMb": 160,
+    "tileMb": 8,
+    "imageMb": 13
+   },
+   {
+    "min": 3.56,
+    "gc": true,
+    "proc": {
+     "browser": 127,
+     "gpu-process": 469,
+     "utility:NetworkService": 68,
+     "utility:StorageService": 7,
+     "renderer": 789
+    },
+    "heapMb": 3.4,
+    "gpu": {
+     "kinds": {
+      "texture": {
+       "made": 27501,
+       "destroyed": 27356,
+       "gced": 27358
+      },
+      "view": {
+       "made": 29329,
+       "destroyed": 0,
+       "gced": 29327
+      },
+      "sampler": {
+       "made": 1,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "bgl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "pl": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "shader": {
+       "made": 23,
+       "destroyed": 0,
+       "gced": 23
+      },
+      "rpipeline": {
+       "made": 4,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "buffer": {
+       "made": 2488,
+       "destroyed": 2284,
+       "gced": 2284
+      },
+      "bindGroup": {
+       "made": 122011,
+       "destroyed": 0,
+       "gced": 121980
+      },
+      "cpipeline": {
+       "made": 20,
+       "destroyed": 0,
+       "gced": 0
+      },
+      "encoder": {
+       "made": 12411,
+       "destroyed": 0,
+       "gced": 12411
+      }
+     },
+     "liveMb": {
+      "buffer": 196,
+      "texture": 125
+     },
+     "gcMb": {
+      "buffer": 0,
+      "texture": 0
+     }
+    },
+    "boards": 20,
+    "wasmMb": 160,
+    "tileMb": 8,
+    "imageMb": 13
+   }
+  ],
+  "errors": {
+   "exceptions": [],
+   "pageErrors": [],
+   "warnings": [
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fmedia%2Ffavicon-32.png 404",
+    "warning: [canvas] image /asset?p=%3Cstress-dir%3E%2Fbig.canvas%2Fmedia%2Fimage.png 404"
+   ],
+   "engineErrors": []
+  }
+ },
+ "server": {
+  "heapUsed": 46771808,
+  "rss": 429162496,
+  "external": 13329207,
+  "arrayBuffers": 1119607,
+  "cpuUserMs": 24428.117,
+  "cpuSystemMs": 7309.488
+ }
+}

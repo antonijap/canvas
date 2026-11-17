@@ -1,0 +1,230 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Paper parity</title>
+<style>
+  body { font: 12px/1.4 -apple-system, system-ui, sans-serif; margin: 16px; background: #111; color: #ddd; }
+  table { border-collapse: collapse; }
+  td, th { padding: 2px 8px; border-bottom: 1px solid #333; text-align: left; }
+  .bad { color: #f77; }
+  canvas { vertical-align: middle; }
+</style>
+<p id="status">loading…</p>
+<table id="out"><tr><th>shader</th><th>preset</th><th>SSIM</th><th>mean |Δ|</th><th>max |Δ|</th><th>ms gl / gpu</th><th>Paper (WebGL2) · ours (WebGPU)</th></tr></table>
+<script type="module">
+// Dev-only (scripts/paper/parity.ts). Paper's GLSL in WebGL2 vs our WGSL in WebGPU, same params, t = 2 s.
+const qs = new URLSearchParams(location.search);
+// Card size (px, texel 1) and time: ?w=384&h=216&t=5 checks a wide card and another moment.
+const W = Number(qs.get("w") ?? 256), H = Number(qs.get("h") ?? 256), T = Number(qs.get("t") ?? 2), PARAM_FLOATS = 128;
+const status = (s) => { document.getElementById("status").textContent = s; };
+const { cases, wrapper, wgsl } = await (await fetch("/cases.json")).json();
+const noise = new Uint8Array(await (await fetch("/noise.rgba")).arrayBuffer());
+
+// ---------- WebGL2: Paper's own GLSL, uniforms as Paper's ShaderMount sets them ----------
+const glc = document.createElement("canvas");
+glc.width = W; glc.height = H;
+const gl = glc.getContext("webgl2", { antialias: false, depth: false, stencil: false, premultipliedAlpha: true, preserveDrawingBuffer: true });
+const quad = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+function tex(unit, w, h, data) {
+  const t = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  return t;
+}
+const noiseGl = tex(0, 128, 128, noise); // already premultiplied, like Paper's upload
+const emptyGl = tex(1, 1, 1, new Uint8Array(4)); // Paper's transparent pixel when there is no image
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+function renderGl(c) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, c.vert));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, c.frag));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  gl.useProgram(p);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  const loc = gl.getAttribLocation(p, "a_position");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const all = { ...c.uniforms, u_time: (c.frame + T * 1000 * c.speed) * 0.001, u_resolution: [W, H], u_pixelRatio: 1 };
+  const count = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < count; i++) {
+    const info = gl.getActiveUniform(p, i);
+    const name = info.name.replace(/\[0\]$/, "");
+    const l = gl.getUniformLocation(p, info.name);
+    if (name === "u_noiseTexture") { gl.uniform1i(l, 0); continue; }
+    if (name === "u_image") { gl.uniform1i(l, 1); continue; }
+    const v = all[name];
+    if (v === undefined) continue;
+    const flat = Array.isArray(v) ? v.flat() : [typeof v === "boolean" ? (v ? 1 : 0) : v];
+    switch (info.type) {
+      case gl.FLOAT: gl.uniform1fv(l, flat); break;
+      case gl.FLOAT_VEC2: gl.uniform2fv(l, flat); break;
+      case gl.FLOAT_VEC3: gl.uniform3fv(l, flat); break;
+      case gl.FLOAT_VEC4: {
+        const n = info.size * 4, a = new Float32Array(n);
+        a.set(flat.slice(0, n));
+        gl.uniform4fv(l, a);
+        break;
+      }
+      case gl.BOOL: case gl.INT: gl.uniform1i(l, flat[0]); break;
+      default: throw new Error("uniform type " + info.type + " " + name);
+    }
+  }
+  gl.viewport(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  const px = new Uint8Array(W * H * 4);
+  gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.deleteProgram(p);
+  // GL rows are bottom-up.
+  const out = new Uint8Array(W * H * 4);
+  for (let y = 0; y < H; y++) out.set(px.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
+  return out;
+}
+
+// ---------- WebGPU: our WGSL inside the engine's WRAPPER, the engine's bind group ----------
+const adapter = await navigator.gpu?.requestAdapter();
+if (!adapter) { status("No WebGPU"); throw new Error("no WebGPU"); }
+const device = await adapter.requestDevice();
+const bgl = device.createBindGroupLayout({ entries: [
+  { binding: 0, visibility: GPUShaderStage.FRAGMENT | GPUShaderStage.VERTEX, buffer: { type: "uniform" } },
+  { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: "float" } },
+  { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: "filtering" } },
+] });
+const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl] });
+const noiseTex = device.createTexture({ size: [128, 128], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+device.queue.writeTexture({ texture: noiseTex }, noise, { bytesPerRow: 512 }, [128, 128]);
+const smp = device.createSampler({ magFilter: "linear", minFilter: "linear", addressModeU: "clamp-to-edge", addressModeV: "clamp-to-edge" });
+const ubuf = device.createBuffer({ size: (12 + PARAM_FLOATS) * 4, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+const bind = device.createBindGroup({ layout: bgl, entries: [{ binding: 0, resource: { buffer: ubuf } }, { binding: 1, resource: noiseTex.createView() }, { binding: 2, resource: smp }] });
+const pipes = new Map();
+async function pipeline(id) {
+  if (pipes.has(id)) return pipes.get(id);
+  const module = device.createShaderModule({ code: wgsl[id] + "\n" + wrapper });
+  const info = await module.getCompilationInfo();
+  const errs = info.messages.filter((m) => m.type === "error");
+  if (errs.length) throw new Error(errs.map((m) => `${m.lineNum}:${m.linePos} ${m.message}`).join("; "));
+  const p = await device.createRenderPipelineAsync({ layout, vertex: { module, entryPoint: "canvas_vs" }, fragment: { module, entryPoint: "canvas_fs", targets: [{ format: "rgba8unorm" }] }, primitive: {} });
+  pipes.set(id, p);
+  return p;
+}
+async function renderGpu(c, w = W, h = H, texel = 1) {
+  const p = await pipeline(c.id);
+  const u = new Float32Array(12 + PARAM_FLOATS);
+  u.set([w * texel, h * texel, T, 0.033, 0, 0, 0, 0, texel, texel, 60, 0]);
+  u.set(c.packed.slice(0, PARAM_FLOATS), 12);
+  device.queue.writeBuffer(ubuf, 0, u);
+  const target = device.createTexture({ size: [w, h], format: "rgba8unorm", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+  const row = Math.ceil((w * 4) / 256) * 256;
+  const rb = device.createBuffer({ size: row * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const enc = device.createCommandEncoder();
+  const pass = enc.beginRenderPass({ colorAttachments: [{ view: target.createView(), loadOp: "clear", storeOp: "store", clearValue: [0, 0, 0, 0] }] });
+  pass.setPipeline(p);
+  pass.setBindGroup(0, bind);
+  pass.draw(3);
+  pass.end();
+  enc.copyTextureToBuffer({ texture: target }, { buffer: rb, bytesPerRow: row }, [w, h]);
+  device.queue.submit([enc.finish()]);
+  await rb.mapAsync(GPUMapMode.READ);
+  const src = new Uint8Array(rb.getMappedRange());
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) out.set(src.subarray(y * row, y * row + w * 4), y * w * 4);
+  rb.unmap();
+  rb.destroy();
+  target.destroy();
+  return out;
+}
+
+// ---------- SSIM (8x8 windows, step 4, per RGBA channel of the premultiplied pixels, averaged) ----------
+function ssim(a, b) {
+  const C1 = (0.01 * 255) ** 2, C2 = (0.03 * 255) ** 2;
+  let sum = 0, n = 0;
+  for (let ch = 0; ch < 4; ch++) {
+    for (let y = 0; y + 8 <= H; y += 4) for (let x = 0; x + 8 <= W; x += 4) {
+      let ma = 0, mb = 0;
+      for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { const k = ((y + j) * W + x + i) * 4 + ch; ma += a[k]; mb += b[k]; }
+      ma /= 64; mb /= 64;
+      let va = 0, vb = 0, cov = 0;
+      for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { const k = ((y + j) * W + x + i) * 4 + ch; const da = a[k] - ma, db = b[k] - mb; va += da * da; vb += db * db; cov += da * db; }
+      va /= 63; vb /= 63; cov /= 63;
+      sum += ((2 * ma * mb + C1) * (2 * cov + C2)) / ((ma * ma + mb * mb + C1) * (va + vb + C2));
+      n++;
+    }
+  }
+  return sum / n;
+}
+function diffs(a, b) {
+  let s = 0, m = 0;
+  for (let i = 0; i < a.length; i++) { const d = Math.abs(a[i] - b[i]); s += d; if (d > m) m = d; }
+  return { mean: s / a.length, max: m };
+}
+async function png(px, w, h, type = "image/png") {
+  const oc = new OffscreenCanvas(w, h);
+  // Straight alpha for the PNG.
+  const s = new Uint8ClampedArray(px.length);
+  for (let i = 0; i < px.length; i += 4) { const a = px[i + 3]; s[i + 3] = a; for (let c = 0; c < 3; c++) s[i + c] = a ? Math.min(255, Math.round((px[i + c] * 255) / a)) : 0; }
+  oc.getContext("2d").putImageData(new ImageData(s, w, h), 0, 0);
+  return oc.convertToBlob(type === "image/png" ? { type } : { type, quality: 0.82 });
+}
+function show(px, w, h) {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h; c.style.width = "96px"; c.style.height = (96 * h / w) + "px";
+  const s = new Uint8ClampedArray(px.length);
+  for (let i = 0; i < px.length; i += 4) { const a = px[i + 3]; s[i + 3] = a; for (let k = 0; k < 3; k++) s[i + k] = a ? Math.min(255, Math.round((px[i + k] * 255) / a)) : 0; }
+  c.getContext("2d").putImageData(new ImageData(s, w, h), 0, 0);
+  return c;
+}
+
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+const results = [];
+const table = document.getElementById("out");
+const thumbs = qs.get("thumbs") !== "0";
+for (const [i, c] of cases.entries()) {
+  status(`${i + 1}/${cases.length} ${c.id} ${c.preset}`);
+  const r = { id: c.id, preset: c.preset };
+  try {
+    let t0 = performance.now();
+    const a = renderGl(c);
+    const glMs = performance.now() - t0;
+    t0 = performance.now();
+    const b = await renderGpu(c);
+    const gpuMs = performance.now() - t0;
+    Object.assign(r, { ssim: ssim(a, b), ...diffs(a, b), glMs, gpuMs });
+    const tr = table.insertRow();
+    tr.innerHTML = `<td>${c.id}</td><td>${c.preset}</td><td class="${r.ssim < 0.95 ? "bad" : ""}">${r.ssim.toFixed(4)}</td><td>${r.mean.toFixed(2)}</td><td>${r.max}</td><td>${glMs.toFixed(1)} / ${gpuMs.toFixed(1)}</td><td></td>`;
+    tr.cells[6].append(show(a, W, H), " ", show(b, W, H));
+    if (r.ssim < 0.95) {
+      const both = new Uint8Array(W * 2 * H * 4);
+      for (let y = 0; y < H; y++) { both.set(a.subarray(y * W * 4, (y + 1) * W * 4), y * 2 * W * 4); both.set(b.subarray(y * W * 4, (y + 1) * W * 4), (y * 2 + 1) * W * 4); }
+      await fetch(`/diff/${c.id}--${slug(c.preset)}.png`, { method: "POST", body: await png(both, 2 * W, H) });
+    }
+    if (thumbs) {
+      // Rail thumbnail: our WGSL as a card shows it, 160 x 100 card px at 2x.
+      const th = await renderGpu(c, 320, 200, 0.5);
+      await fetch(`/thumb/${c.id}--${slug(c.preset)}.webp`, { method: "POST", body: await png(th, 320, 200, "image/webp") });
+    }
+  } catch (e) {
+    r.error = String(e.message || e).slice(0, 500);
+    table.insertRow().innerHTML = `<td>${c.id}</td><td>${c.preset}</td><td class="bad" colspan="5">${r.error}</td>`;
+  }
+  results.push(r);
+}
+const ok = results.filter((r) => r.ssim !== undefined);
+const summary = { size: `${W}x${H}`, t: T, adapter: adapter.info ? `${adapter.info.vendor} ${adapter.info.architecture}` : "", count: results.length, compiled: ok.length, ssimMin: Math.min(...ok.map((r) => r.ssim)), ssimMean: ok.reduce((s, r) => s + r.ssim, 0) / ok.length, below95: ok.filter((r) => r.ssim < 0.95).length };
+await fetch(`/results?${W}x${H}`, { method: "POST", body: JSON.stringify({ summary, results }, null, 1) });
+status(`done: ${JSON.stringify(summary)}`);
+window.parityDone = summary;
+</script>

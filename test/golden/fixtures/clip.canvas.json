@@ -1,0 +1,238 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "clip",
+   "x": 0,
+   "y": 0,
+   "width": 520,
+   "height": 230,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "frame",
+     "id": "f4",
+     "x": 20,
+     "y": 20,
+     "width": 140,
+     "height": 90,
+     "layout": "none",
+     "fill": "#F4F4F5",
+     "clip": true,
+     "children": [
+      {
+       "type": "rectangle",
+       "id": "r1",
+       "x": -20,
+       "y": -20,
+       "width": 80,
+       "height": 70,
+       "fill": "#EF4444"
+      },
+      {
+       "type": "rectangle",
+       "id": "r2",
+       "x": 90,
+       "y": 50,
+       "width": 80,
+       "height": 70,
+       "fill": "#3B82F6"
+      },
+      {
+       "type": "text",
+       "id": "t3",
+       "x": 10,
+       "y": 34,
+       "content": "Clipped text runs out",
+       "fontFamily": "Inter",
+       "fontSize": 20,
+       "fontWeight": "700",
+       "fill": "#18181B"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f8",
+     "x": 180,
+     "y": 20,
+     "width": 140,
+     "height": 90,
+     "layout": "none",
+     "fill": "#F4F4F5",
+     "clip": true,
+     "cornerRadius": 28,
+     "children": [
+      {
+       "type": "rectangle",
+       "id": "r5",
+       "x": -20,
+       "y": -20,
+       "width": 80,
+       "height": 70,
+       "fill": "#EF4444"
+      },
+      {
+       "type": "rectangle",
+       "id": "r6",
+       "x": 90,
+       "y": 50,
+       "width": 80,
+       "height": 70,
+       "fill": "#3B82F6"
+      },
+      {
+       "type": "ellipse",
+       "id": "e7",
+       "x": 40,
+       "y": 20,
+       "width": 120,
+       "height": 120,
+       "fill": "#22C55E99"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f11",
+     "x": 340,
+     "y": 20,
+     "width": 140,
+     "height": 90,
+     "layout": "none",
+     "fill": "#F4F4F5",
+     "clip": false,
+     "children": [
+      {
+       "type": "rectangle",
+       "id": "r9",
+       "x": -20,
+       "y": -20,
+       "width": 80,
+       "height": 70,
+       "fill": "#EF4444"
+      },
+      {
+       "type": "rectangle",
+       "id": "r10",
+       "x": 90,
+       "y": 50,
+       "width": 80,
+       "height": 70,
+       "fill": "#3B82F6"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f15",
+     "x": 20,
+     "y": 125,
+     "width": 200,
+     "height": 90,
+     "layout": "none",
+     "fill": "#E4E4E7",
+     "clip": true,
+     "cornerRadius": 12,
+     "children": [
+      {
+       "type": "frame",
+       "id": "f14",
+       "x": 30,
+       "y": -20,
+       "width": 120,
+       "height": 90,
+       "layout": "none",
+       "fill": "#BBF7D0",
+       "clip": true,
+       "cornerRadius": 20,
+       "children": [
+        {
+         "type": "rectangle",
+         "id": "r12",
+         "x": -30,
+         "y": 20,
+         "width": 200,
+         "height": 30,
+         "fill": "#A855F7"
+        },
+        {
+         "type": "ellipse",
+         "id": "e13",
+         "x": 60,
+         "y": 40,
+         "width": 90,
+         "height": 90,
+         "fill": "#FACC15"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f17",
+     "x": 260,
+     "y": 125,
+     "width": 110,
+     "height": 90,
+     "layout": "none",
+     "fill": "#F4F4F5",
+     "clip": true,
+     "cornerRadius": 45,
+     "children": [
+      {
+       "type": "rectangle",
+       "id": "r16",
+       "x": 30,
+       "y": -10,
+       "width": 60,
+       "height": 120,
+       "fill": "#F97316",
+       "rotation": -20
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f19",
+     "x": 390,
+     "y": 125,
+     "width": 110,
+     "height": 90,
+     "layout": "none",
+     "fill": "#F4F4F5",
+     "clip": true,
+     "cornerRadius": [
+      0,
+      40,
+      0,
+      40
+     ],
+     "stroke": "#18181B",
+     "strokeWidth": 2,
+     "strokeAlignment": "inner",
+     "children": [
+      {
+       "type": "rectangle",
+       "id": "r18",
+       "x": 10,
+       "y": 10,
+       "width": 140,
+       "height": 120,
+       "fill": {
+        "type": "image",
+        "url": "assets/pattern.png",
+        "mode": "cover"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

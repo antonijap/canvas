@@ -1,0 +1,162 @@
+{
+ "version": "2.22",
+ "themes": {
+  "mode": [
+   "light",
+   "dark"
+  ]
+ },
+ "variables": {
+  "bg": {
+   "type": "color",
+   "value": [
+    {
+     "value": "#FFFFFF"
+    },
+    {
+     "value": "#18181B",
+     "theme": {
+      "mode": "dark"
+     }
+    }
+   ]
+  },
+  "fg": {
+   "type": "color",
+   "value": [
+    {
+     "value": "#18181B"
+    },
+    {
+     "value": "#FAFAFA",
+     "theme": {
+      "mode": "dark"
+     }
+    }
+   ]
+  },
+  "accent": {
+   "type": "color",
+   "value": [
+    {
+     "value": "#2563EB"
+    },
+    {
+     "value": "#FACC15",
+     "theme": {
+      "mode": "dark"
+     }
+    }
+   ]
+  },
+  "radius": {
+   "type": "number",
+   "value": 14
+  },
+  "w": {
+   "type": "number",
+   "value": [
+    {
+     "value": 120
+    },
+    {
+     "value": 180,
+     "theme": {
+      "mode": "dark"
+     }
+    }
+   ]
+  }
+ },
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "variables-theme",
+   "x": 0,
+   "y": 0,
+   "width": 520,
+   "height": 150,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "frame",
+     "id": "f3",
+     "x": 20,
+     "y": 20,
+     "width": 230,
+     "height": 110,
+     "layout": "none",
+     "fill": "$bg",
+     "cornerRadius": "$radius",
+     "stroke": "$fg",
+     "strokeWidth": 1,
+     "children": [
+      {
+       "type": "text",
+       "id": "t1",
+       "x": 16,
+       "y": 16,
+       "content": "Light theme",
+       "fontFamily": "Inter",
+       "fontSize": 20,
+       "fontWeight": "700",
+       "fill": "$fg"
+      },
+      {
+       "type": "rectangle",
+       "id": "r2",
+       "x": 16,
+       "y": 60,
+       "width": "$w",
+       "height": 30,
+       "fill": "$accent",
+       "cornerRadius": "$radius"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f6",
+     "x": 270,
+     "y": 20,
+     "width": 230,
+     "height": 110,
+     "layout": "none",
+     "theme": {
+      "mode": "dark"
+     },
+     "fill": "$bg",
+     "cornerRadius": "$radius",
+     "stroke": "$fg",
+     "strokeWidth": 1,
+     "children": [
+      {
+       "type": "text",
+       "id": "t4",
+       "x": 16,
+       "y": 16,
+       "content": "Dark theme",
+       "fontFamily": "Inter",
+       "fontSize": 20,
+       "fontWeight": "700",
+       "fill": "$fg"
+      },
+      {
+       "type": "rectangle",
+       "id": "r5",
+       "x": 16,
+       "y": 60,
+       "width": "$w",
+       "height": 30,
+       "fill": "$accent",
+       "cornerRadius": "$radius"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

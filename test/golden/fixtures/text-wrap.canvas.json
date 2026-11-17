@@ -1,0 +1,145 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "text-wrap",
+   "x": 0,
+   "y": 0,
+   "width": 760,
+   "height": 330,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "rectangle",
+     "id": "r1",
+     "x": 20,
+     "y": 16,
+     "width": 160,
+     "height": 300,
+     "fill": "#F4F4F5"
+    },
+    {
+     "type": "text",
+     "id": "t2",
+     "x": 20,
+     "y": 16,
+     "content": "Wrapping breaks at spaces, hyphen-ated words and aVeryLongUnbreakableIdentifierThatMustBreakAnywhere when it has to.",
+     "fontFamily": "Inter",
+     "fontSize": 15,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "textGrowth": "fixed-width",
+     "width": 160
+    },
+    {
+     "type": "rectangle",
+     "id": "r3",
+     "x": 200,
+     "y": 16,
+     "width": 160,
+     "height": 300,
+     "fill": "#F4F4F5"
+    },
+    {
+     "type": "text",
+     "id": "t4",
+     "x": 200,
+     "y": 16,
+     "content": "Explicit\nnew lines\n\nand a blank line, then   several   spaces   kept.",
+     "fontFamily": "Inter",
+     "fontSize": 15,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "textGrowth": "fixed-width",
+     "width": 160
+    },
+    {
+     "type": "rectangle",
+     "id": "r5",
+     "x": 380,
+     "y": 16,
+     "width": 160,
+     "height": 80,
+     "fill": "#F4F4F5"
+    },
+    {
+     "type": "text",
+     "id": "t6",
+     "x": 380,
+     "y": 16,
+     "content": "Fixed height box: this paragraph is longer than its 80px box, so the lines below the edge overflow it.",
+     "fontFamily": "Inter",
+     "fontSize": 15,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "textGrowth": "fixed-width-height",
+     "width": 160,
+     "height": 80
+    },
+    {
+     "type": "rectangle",
+     "id": "r7",
+     "x": 560,
+     "y": 16,
+     "width": 180,
+     "height": 300,
+     "fill": "#F4F4F5"
+    },
+    {
+     "type": "text",
+     "id": "t8",
+     "x": 560,
+     "y": 16,
+     "content": "Auto width never wraps",
+     "fontFamily": "Inter",
+     "fontSize": 15,
+     "fontWeight": "400",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t9",
+     "x": 560,
+     "y": 50,
+     "content": "Größe naïve café Ærø Łódź São Paulo 東京 emoji-free",
+     "fontFamily": "Inter",
+     "fontSize": 15,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "textGrowth": "fixed-width",
+     "width": 180
+    },
+    {
+     "type": "text",
+     "id": "t10",
+     "x": 560,
+     "y": 130,
+     "content": "fi fl ffi ligatures, 1/2 3/4, “quotes” – dashes… 10×20",
+     "fontFamily": "Inter",
+     "fontSize": 15,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "textGrowth": "fixed-width",
+     "width": 180
+    },
+    {
+     "type": "text",
+     "id": "t11",
+     "x": 560,
+     "y": 220,
+     "content": "SF wraps too: the system font measures words with its own metrics and optical sizes.",
+     "fontFamily": "SF Pro",
+     "fontSize": 15,
+     "fontWeight": "400",
+     "fill": "#18181B",
+     "textGrowth": "fixed-width",
+     "width": 180
+    }
+   ]
+  }
+ ]
+}

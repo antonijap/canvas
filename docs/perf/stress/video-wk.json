@@ -1,0 +1,14 @@
+{
+  "what": "WKWebView (scratch harness, same WebKit as Canvas.app), 1440x900 @2x, a new .canvas with N video cards of teachers-promo.mp4 (3840x2160 H.264, 28 s), fit so all are visible; phys_footprint of the WebContent and GPU processes 20-30 s after, MB. Baseline: the same harness on an empty canvas.",
+  "baseline_empty_canvas": { "webContent": 292, "gpu": 26, "sum": 318 },
+  "before_4k": { "n": 8, "webContent": 1489, "webContentGraphics": 1372, "gpu": 601, "sum": 2090, "overBaseline": 1772, "frameCpuMs": 10 },
+  "after_proxies": { "n": 8, "tierPlayed": 640, "webContent": 431, "webContentGraphics": 380, "gpu": 233, "sum": 664, "overBaseline": 346, "frameCpuMs": 5, "fps": [32, 32, 32, 32] },
+  "static_files_through_engine_8_cards": { "1920x1080": 701, "1280x720": 496, "960x540": 425, "640x360": 356, "3840x2160": 1772 },
+  "one_card_through_engine": { "640x360": 338, "1280x720": 255, "3840x2160": 766 },
+  "plain_html_video_elements_no_engine": { "4x3840x2160": 1298, "4x1280x720": 220, "4x640x360": 82, "1x640x360": 25 },
+  "posters_only_8_cards_no_playback": 118,
+  "rejected": {
+    "copy_from_HTMLVideoElement_instead_of_VideoFrame": "same memory (802 vs 815 at 720p; 2073 vs 2090 at 4K)",
+    "draw_into_2d_canvas_then_copy": "-80 to -180 MB but frame CPU 25 ms vs 10 ms: dropped"
+  }
+}

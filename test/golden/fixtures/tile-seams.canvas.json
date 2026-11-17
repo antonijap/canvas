@@ -1,0 +1,2131 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "tile-seams",
+   "x": 0,
+   "y": 0,
+   "width": 2800,
+   "height": 1900,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "rectangle",
+     "id": "r1",
+     "x": 0,
+     "y": 0,
+     "width": 2800,
+     "height": 1900,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "linear",
+      "colors": [
+       {
+        "color": "#EFF6FF",
+        "position": 0
+       },
+       {
+        "color": "#FDF2F8",
+        "position": 1
+       }
+      ],
+      "rotation": 60
+     }
+    },
+    {
+     "type": "rectangle",
+     "id": "r2",
+     "x": 50,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r3",
+     "x": 150,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r4",
+     "x": 250,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r5",
+     "x": 350,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r6",
+     "x": 450,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r7",
+     "x": 550,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r8",
+     "x": 650,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r9",
+     "x": 750,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r10",
+     "x": 850,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r11",
+     "x": 950,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r12",
+     "x": 1050,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r13",
+     "x": 1150,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r14",
+     "x": 1250,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r15",
+     "x": 1350,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r16",
+     "x": 1450,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r17",
+     "x": 1550,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r18",
+     "x": 1650,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r19",
+     "x": 1750,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r20",
+     "x": 1850,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r21",
+     "x": 1950,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r22",
+     "x": 2050,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r23",
+     "x": 2150,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r24",
+     "x": 2250,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r25",
+     "x": 2350,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r26",
+     "x": 2450,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r27",
+     "x": 2550,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r28",
+     "x": 2650,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r29",
+     "x": 2750,
+     "y": -200,
+     "width": 2,
+     "height": 2600,
+     "fill": "#1D4ED8",
+     "rotation": 20,
+     "opacity": 0.8
+    },
+    {
+     "type": "rectangle",
+     "id": "r30",
+     "x": 0,
+     "y": 33.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r31",
+     "x": 0,
+     "y": 133.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r32",
+     "x": 0,
+     "y": 233.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r33",
+     "x": 0,
+     "y": 333.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r34",
+     "x": 0,
+     "y": 433.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r35",
+     "x": 0,
+     "y": 533.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r36",
+     "x": 0,
+     "y": 633.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r37",
+     "x": 0,
+     "y": 733.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r38",
+     "x": 0,
+     "y": 833.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r39",
+     "x": 0,
+     "y": 933.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r40",
+     "x": 0,
+     "y": 1033.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r41",
+     "x": 0,
+     "y": 1133.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r42",
+     "x": 0,
+     "y": 1233.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r43",
+     "x": 0,
+     "y": 1333.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r44",
+     "x": 0,
+     "y": 1433.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r45",
+     "x": 0,
+     "y": 1533.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r46",
+     "x": 0,
+     "y": 1633.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r47",
+     "x": 0,
+     "y": 1733.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "rectangle",
+     "id": "r48",
+     "x": 0,
+     "y": 1833.3,
+     "width": 2800,
+     "height": 1,
+     "fill": "#18181B66"
+    },
+    {
+     "type": "text",
+     "id": "t49",
+     "x": 30,
+     "y": 60,
+     "content": "Tile seam 1 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t50",
+     "x": 430,
+     "y": 60,
+     "content": "Tile seam 2 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t51",
+     "x": 830,
+     "y": 60,
+     "content": "Tile seam 3 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t52",
+     "x": 1230,
+     "y": 60,
+     "content": "Tile seam 4 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t53",
+     "x": 1630,
+     "y": 60,
+     "content": "Tile seam 5 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t54",
+     "x": 2030,
+     "y": 60,
+     "content": "Tile seam 6 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t55",
+     "x": 2430,
+     "y": 60,
+     "content": "Tile seam 7 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t56",
+     "x": 30,
+     "y": 250,
+     "content": "Tile seam 8 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t57",
+     "x": 430,
+     "y": 250,
+     "content": "Tile seam 9 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t58",
+     "x": 830,
+     "y": 250,
+     "content": "Tile seam 10 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t59",
+     "x": 1230,
+     "y": 250,
+     "content": "Tile seam 11 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t60",
+     "x": 1630,
+     "y": 250,
+     "content": "Tile seam 12 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t61",
+     "x": 2030,
+     "y": 250,
+     "content": "Tile seam 13 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t62",
+     "x": 2430,
+     "y": 250,
+     "content": "Tile seam 14 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t63",
+     "x": 30,
+     "y": 440,
+     "content": "Tile seam 15 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t64",
+     "x": 430,
+     "y": 440,
+     "content": "Tile seam 16 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t65",
+     "x": 830,
+     "y": 440,
+     "content": "Tile seam 17 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t66",
+     "x": 1230,
+     "y": 440,
+     "content": "Tile seam 18 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t67",
+     "x": 1630,
+     "y": 440,
+     "content": "Tile seam 19 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t68",
+     "x": 2030,
+     "y": 440,
+     "content": "Tile seam 20 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t69",
+     "x": 2430,
+     "y": 440,
+     "content": "Tile seam 21 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t70",
+     "x": 30,
+     "y": 630,
+     "content": "Tile seam 22 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t71",
+     "x": 430,
+     "y": 630,
+     "content": "Tile seam 23 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t72",
+     "x": 830,
+     "y": 630,
+     "content": "Tile seam 24 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t73",
+     "x": 1230,
+     "y": 630,
+     "content": "Tile seam 25 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t74",
+     "x": 1630,
+     "y": 630,
+     "content": "Tile seam 26 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t75",
+     "x": 2030,
+     "y": 630,
+     "content": "Tile seam 27 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t76",
+     "x": 2430,
+     "y": 630,
+     "content": "Tile seam 28 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t77",
+     "x": 30,
+     "y": 820,
+     "content": "Tile seam 29 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t78",
+     "x": 430,
+     "y": 820,
+     "content": "Tile seam 30 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t79",
+     "x": 830,
+     "y": 820,
+     "content": "Tile seam 31 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t80",
+     "x": 1230,
+     "y": 820,
+     "content": "Tile seam 32 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t81",
+     "x": 1630,
+     "y": 820,
+     "content": "Tile seam 33 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t82",
+     "x": 2030,
+     "y": 820,
+     "content": "Tile seam 34 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t83",
+     "x": 2430,
+     "y": 820,
+     "content": "Tile seam 35 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t84",
+     "x": 30,
+     "y": 1010,
+     "content": "Tile seam 36 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t85",
+     "x": 430,
+     "y": 1010,
+     "content": "Tile seam 37 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t86",
+     "x": 830,
+     "y": 1010,
+     "content": "Tile seam 38 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t87",
+     "x": 1230,
+     "y": 1010,
+     "content": "Tile seam 39 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t88",
+     "x": 1630,
+     "y": 1010,
+     "content": "Tile seam 40 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t89",
+     "x": 2030,
+     "y": 1010,
+     "content": "Tile seam 41 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t90",
+     "x": 2430,
+     "y": 1010,
+     "content": "Tile seam 42 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t91",
+     "x": 30,
+     "y": 1200,
+     "content": "Tile seam 43 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t92",
+     "x": 430,
+     "y": 1200,
+     "content": "Tile seam 44 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t93",
+     "x": 830,
+     "y": 1200,
+     "content": "Tile seam 45 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t94",
+     "x": 1230,
+     "y": 1200,
+     "content": "Tile seam 46 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t95",
+     "x": 1630,
+     "y": 1200,
+     "content": "Tile seam 47 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t96",
+     "x": 2030,
+     "y": 1200,
+     "content": "Tile seam 48 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t97",
+     "x": 2430,
+     "y": 1200,
+     "content": "Tile seam 49 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t98",
+     "x": 30,
+     "y": 1390,
+     "content": "Tile seam 50 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t99",
+     "x": 430,
+     "y": 1390,
+     "content": "Tile seam 51 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t100",
+     "x": 830,
+     "y": 1390,
+     "content": "Tile seam 52 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t101",
+     "x": 1230,
+     "y": 1390,
+     "content": "Tile seam 53 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t102",
+     "x": 1630,
+     "y": 1390,
+     "content": "Tile seam 54 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t103",
+     "x": 2030,
+     "y": 1390,
+     "content": "Tile seam 55 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t104",
+     "x": 2430,
+     "y": 1390,
+     "content": "Tile seam 56 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t105",
+     "x": 30,
+     "y": 1580,
+     "content": "Tile seam 57 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t106",
+     "x": 430,
+     "y": 1580,
+     "content": "Tile seam 58 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t107",
+     "x": 830,
+     "y": 1580,
+     "content": "Tile seam 59 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t108",
+     "x": 1230,
+     "y": 1580,
+     "content": "Tile seam 60 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t109",
+     "x": 1630,
+     "y": 1580,
+     "content": "Tile seam 61 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t110",
+     "x": 2030,
+     "y": 1580,
+     "content": "Tile seam 62 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t111",
+     "x": 2430,
+     "y": 1580,
+     "content": "Tile seam 63 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t112",
+     "x": 30,
+     "y": 1770,
+     "content": "Tile seam 64 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t113",
+     "x": 430,
+     "y": 1770,
+     "content": "Tile seam 65 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t114",
+     "x": 830,
+     "y": 1770,
+     "content": "Tile seam 66 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t115",
+     "x": 1230,
+     "y": 1770,
+     "content": "Tile seam 67 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t116",
+     "x": 1630,
+     "y": 1770,
+     "content": "Tile seam 68 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t117",
+     "x": 2030,
+     "y": 1770,
+     "content": "Tile seam 69 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t118",
+     "x": 2430,
+     "y": 1770,
+     "content": "Tile seam 70 Hamburg",
+     "fontFamily": "Inter",
+     "fontSize": 44,
+     "fontWeight": "700",
+     "fill": "#18181B"
+    },
+    {
+     "type": "ellipse",
+     "id": "e119",
+     "x": 120,
+     "y": 130,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e120",
+     "x": 580,
+     "y": 130,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e121",
+     "x": 1040,
+     "y": 130,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e122",
+     "x": 1500,
+     "y": 130,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e123",
+     "x": 1960,
+     "y": 130,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e124",
+     "x": 2420,
+     "y": 130,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e125",
+     "x": 120,
+     "y": 600,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e126",
+     "x": 580,
+     "y": 600,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e127",
+     "x": 1040,
+     "y": 600,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e128",
+     "x": 1500,
+     "y": 600,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e129",
+     "x": 1960,
+     "y": 600,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e130",
+     "x": 2420,
+     "y": 600,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e131",
+     "x": 120,
+     "y": 1070,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e132",
+     "x": 580,
+     "y": 1070,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e133",
+     "x": 1040,
+     "y": 1070,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e134",
+     "x": 1500,
+     "y": 1070,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e135",
+     "x": 1960,
+     "y": 1070,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e136",
+     "x": 2420,
+     "y": 1070,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e137",
+     "x": 120,
+     "y": 1540,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e138",
+     "x": 580,
+     "y": 1540,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e139",
+     "x": 1040,
+     "y": 1540,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e140",
+     "x": 1500,
+     "y": 1540,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e141",
+     "x": 1960,
+     "y": 1540,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "ellipse",
+     "id": "e142",
+     "x": 2420,
+     "y": 1540,
+     "width": 300,
+     "height": 300,
+     "fill": {
+      "type": "gradient",
+      "gradientType": "radial",
+      "colors": [
+       {
+        "color": "#FACC1599",
+        "position": 0
+       },
+       {
+        "color": "#DC262600",
+        "position": 1
+       }
+      ]
+     },
+     "stroke": "#DC2626",
+     "strokeWidth": 1.5
+    },
+    {
+     "type": "rectangle",
+     "id": "r143",
+     "x": 200,
+     "y": 350,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r144",
+     "x": 900,
+     "y": 350,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r145",
+     "x": 1600,
+     "y": 350,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r146",
+     "x": 2300,
+     "y": 350,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r147",
+     "x": 200,
+     "y": 950,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r148",
+     "x": 900,
+     "y": 950,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r149",
+     "x": 1600,
+     "y": 950,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r150",
+     "x": 2300,
+     "y": 950,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r151",
+     "x": 200,
+     "y": 1550,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r152",
+     "x": 900,
+     "y": 1550,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r153",
+     "x": 1600,
+     "y": 1550,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    },
+    {
+     "type": "rectangle",
+     "id": "r154",
+     "x": 2300,
+     "y": 1550,
+     "width": 420,
+     "height": 160,
+     "fill": "#FFFFFFCC",
+     "cornerRadius": 30,
+     "effect": [
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 20
+       },
+       "blur": 60,
+       "color": "#00000059"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,177 @@
+{
+ "version": "2.22",
+ "children": [
+  {
+   "type": "frame",
+   "id": "B",
+   "name": "blur-background",
+   "x": 0,
+   "y": 0,
+   "width": 560,
+   "height": 220,
+   "fill": "#FFFFFF",
+   "layout": "none",
+   "clip": true,
+   "children": [
+    {
+     "type": "rectangle",
+     "id": "r1",
+     "x": 0,
+     "y": 0,
+     "width": 80,
+     "height": 220,
+     "fill": "#EF4444"
+    },
+    {
+     "type": "rectangle",
+     "id": "r2",
+     "x": 80,
+     "y": 0,
+     "width": 80,
+     "height": 220,
+     "fill": "#FACC15"
+    },
+    {
+     "type": "rectangle",
+     "id": "r3",
+     "x": 160,
+     "y": 0,
+     "width": 80,
+     "height": 220,
+     "fill": "#22C55E"
+    },
+    {
+     "type": "rectangle",
+     "id": "r4",
+     "x": 240,
+     "y": 0,
+     "width": 80,
+     "height": 220,
+     "fill": "#14B8A6"
+    },
+    {
+     "type": "rectangle",
+     "id": "r5",
+     "x": 320,
+     "y": 0,
+     "width": 80,
+     "height": 220,
+     "fill": "#3B82F6"
+    },
+    {
+     "type": "rectangle",
+     "id": "r6",
+     "x": 400,
+     "y": 0,
+     "width": 80,
+     "height": 220,
+     "fill": "#A855F7"
+    },
+    {
+     "type": "rectangle",
+     "id": "r7",
+     "x": 480,
+     "y": 0,
+     "width": 80,
+     "height": 220,
+     "fill": "#18181B"
+    },
+    {
+     "type": "text",
+     "id": "t8",
+     "x": 20,
+     "y": 86,
+     "content": "Sharp text under the glass panels",
+     "fontFamily": "Inter",
+     "fontSize": 30,
+     "fontWeight": "800",
+     "fill": "#FFFFFF"
+    },
+    {
+     "type": "frame",
+     "id": "f9",
+     "x": 40,
+     "y": 30,
+     "width": 140,
+     "height": 160,
+     "layout": "none",
+     "fill": "#FFFFFF33",
+     "cornerRadius": 20,
+     "effect": [
+      {
+       "type": "background_blur",
+       "radius": 8
+      }
+     ],
+     "children": []
+    },
+    {
+     "type": "frame",
+     "id": "f11",
+     "x": 210,
+     "y": 30,
+     "width": 140,
+     "height": 160,
+     "layout": "none",
+     "fill": "#FFFFFF4D",
+     "cornerRadius": 20,
+     "stroke": "#FFFFFF99",
+     "strokeWidth": 1,
+     "strokeAlignment": "inner",
+     "effect": [
+      {
+       "type": "background_blur",
+       "radius": 24
+      }
+     ],
+     "children": [
+      {
+       "type": "text",
+       "id": "t10",
+       "x": 16,
+       "y": 16,
+       "content": "Glass",
+       "fontFamily": "Inter",
+       "fontSize": 20,
+       "fontWeight": "700",
+       "fill": "#FFFFFF"
+      }
+     ]
+    },
+    {
+     "type": "frame",
+     "id": "f12",
+     "x": 380,
+     "y": 30,
+     "width": 140,
+     "height": 160,
+     "layout": "none",
+     "fill": "#00000033",
+     "cornerRadius": [
+      60,
+      8,
+      60,
+      8
+     ],
+     "effect": [
+      {
+       "type": "background_blur",
+       "radius": 48
+      },
+      {
+       "type": "shadow",
+       "shadowType": "outer",
+       "offset": {
+        "x": 0,
+        "y": 8
+       },
+       "blur": 24,
+       "color": "#00000066"
+      }
+     ],
+     "children": []
+    }
+   ]
+  }
+ ]
+}

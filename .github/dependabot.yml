@@ -1,0 +1,24 @@
+# Weekly update proposals. Each one is a pull request that goes through CI, the PR guard and the maintainer's review.
+# The cooldown waits a week after a release before proposing it, so a hijacked version has time to be caught.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+  - package-ecosystem: cargo
+    directory: /engine
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5

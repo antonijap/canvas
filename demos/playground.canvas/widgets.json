@@ -1,0 +1,279 @@
+{
+  "version": 1,
+  "pages": [
+    {
+      "id": "layout",
+      "name": "Layout",
+      "boards": [
+        "lay_nest",
+        "lay_auto",
+        "lay_clip",
+        "lay_text",
+        "lay_xform",
+        "lay_resize",
+        "top_inst",
+        "top_text"
+      ]
+    },
+    {
+      "id": "components",
+      "name": "Components",
+      "boards": [
+        "cmp_main",
+        "cmp_inst"
+      ]
+    },
+    {
+      "id": "style",
+      "name": "Style",
+      "boards": [
+        "sty_vars",
+        "sty_type",
+        "sty_paint"
+      ]
+    },
+    {
+      "id": "cards",
+      "name": "Cards",
+      "boards": [
+        "crd_board"
+      ]
+    }
+  ],
+  "widgets": [
+    {
+      "id": "w_m3thhfan",
+      "kind": "todo",
+      "name": "To-do",
+      "x": 0,
+      "y": 140,
+      "w": 300,
+      "h": 340,
+      "locked": false,
+      "config": {
+        "title": "Playground to-dos",
+        "hideDone": false,
+        "items": [
+          {
+            "id": "i_irhnsm",
+            "text": "Drag me by the body",
+            "done": false
+          },
+          {
+            "id": "i_14j0g7",
+            "text": "Resize from every edge",
+            "done": false
+          },
+          {
+            "id": "i_pniyjo",
+            "text": "Check this one off",
+            "done": false
+          },
+          {
+            "id": "i_5v6hf2",
+            "text": "Already done",
+            "done": true
+          },
+          {
+            "id": "i_vi5ffj",
+            "text": "Also done",
+            "done": true
+          }
+        ]
+      },
+      "page": "cards"
+    },
+    {
+      "id": "w_zcg11g11",
+      "kind": "note",
+      "name": "Note",
+      "x": 340,
+      "y": 140,
+      "w": 340,
+      "h": 500,
+      "locked": false,
+      "config": {
+        "text": "# Rich note\n## Second level\nPlain paragraph with **bold** and *italic*.\n- Bullet one\n- Bullet two\n1. First\n2. Second\n- [ ] An open to-do block\n- [x] A done to-do block\n> A quote line\n---\nInline `code` and ~~strike~~ and a [link](https://example.com).",
+        "tone": "yellow"
+      },
+      "page": "cards"
+    },
+    {
+      "id": "w_c00hygle",
+      "kind": "note",
+      "name": "Scratch note",
+      "x": 1060,
+      "y": 140,
+      "w": 300,
+      "h": 200,
+      "locked": false,
+      "config": {
+        "text": "Write here",
+        "tone": "plain"
+      },
+      "page": "cards"
+    },
+    {
+      "id": "w_k18emgux",
+      "kind": "posthog",
+      "name": "PostHog (not set up)",
+      "x": 720,
+      "y": 140,
+      "w": 300,
+      "h": 180,
+      "locked": false,
+      "config": {
+        "host": "us",
+        "projectId": "",
+        "source": "insight",
+        "insight": {
+          "shortId": ""
+        },
+        "query": {
+          "kind": "HogQLQuery",
+          "query": ""
+        },
+        "secret": {
+          "service": "canvas-widget",
+          "account": "posthog.personal"
+        },
+        "display": {
+          "label": "",
+          "format": "auto",
+          "spark": true,
+          "compare": false,
+          "chart": "number",
+          "top": 0,
+          "headline": "auto",
+          "color": "auto"
+        },
+        "refreshSec": 300
+      },
+      "page": "cards"
+    },
+    {
+      "id": "sh_i9f19bxz",
+      "kind": "shader",
+      "name": "Mesh gradient",
+      "x": 720,
+      "y": 360,
+      "w": 300,
+      "h": 180,
+      "locked": false,
+      "config": {
+        "rev": "e38c5f03bdaf",
+        "autoplay": true,
+        "quarantined": false,
+        "paper": {
+          "shader": "mesh-gradient",
+          "preset": "Default",
+          "params": {
+            "fit": "contain",
+            "scale": 1,
+            "rotation": 0,
+            "offsetX": 0,
+            "offsetY": 0,
+            "originX": 0.5,
+            "originY": 0.5,
+            "worldWidth": 0,
+            "worldHeight": 0,
+            "speed": 1,
+            "frame": 0,
+            "colors": [
+              "#e0eaff",
+              "#241d9a",
+              "#f75092",
+              "#9f50d3"
+            ],
+            "distortion": 0.8,
+            "swirl": 0.1,
+            "grainMixer": 0,
+            "grainOverlay": 0
+          }
+        },
+        "uniforms": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0.5,
+          0.5,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0.878431,
+          0.917647,
+          1,
+          1,
+          0.141176,
+          0.113725,
+          0.603922,
+          1,
+          0.968627,
+          0.313725,
+          0.572549,
+          1,
+          0.623529,
+          0.313725,
+          0.827451,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          4,
+          0.8,
+          0.1
+        ]
+      },
+      "page": "cards"
+    },
+    {
+      "id": "w_s0alcba2",
+      "kind": "video",
+      "name": "Test pattern",
+      "x": 0,
+      "y": 520,
+      "w": 320,
+      "h": 180,
+      "locked": false,
+      "config": {
+        "src": "media/clip.mp4",
+        "hash": "2167712631ac",
+        "loop": true,
+        "autoplay": false,
+        "muted": true,
+        "posterTime": 1,
+        "link": null
+      },
+      "page": "cards"
+    }
+  ]
+}

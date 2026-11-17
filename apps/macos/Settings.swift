@@ -1,0 +1,521 @@
+// Canvas > Settings (Cmd+,): a macOS settings window with toolbar tabs, General, Canvas, Agents, Sounds, Performance
+// and Shortcuts, drawn with the design system. The values live in CanvasModel.prefs (SettingsLogic.swift) and
+// CanvasModel.snap (snapping) and theme; changing one saves it and sends it
+// where it is read (the page, the server) at once.
+
+import AppKit
+import SwiftUI
+
+// MARK: Window
+
+@MainActor
+final class SettingsWindow {
+    static let shared = SettingsWindow()
+    private var window: NSWindow?
+
+    enum Tab: String, CaseIterable {
+        case general, canvas, agents, sounds, performance, shortcuts
+        var title: String { rawValue.capitalized }
+        var symbol: String {
+            switch self {
+            case .general: "gearshape"
+            case .canvas: "square.on.square.dashed"
+            case .agents: "sparkles"
+            case .sounds: "speaker.wave.2"
+            case .performance: "gauge.with.dots.needle.67percent"
+            case .shortcuts: "keyboard"
+            }
+        }
+    }
+
+    func show(_ model: CanvasModel, tab: Tab? = nil) {
+        if window == nil { window = make(model) }
+        guard let window else { return }
+        if let tab, let tabs = window.contentViewController as? SettingsTabs, let i = Tab.allCases.firstIndex(of: tab) { tabs.selectedTabViewItemIndex = i }
+        if !window.isVisible { window.center() }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func make(_ model: CanvasModel) -> NSWindow {
+        // Read first: adding the first tab selects it, which saves it as the last tab.
+        let saved = UserDefaults.standard.string(forKey: "canvas.settings.tab").flatMap(Tab.init) ?? .general
+        let tabs = SettingsTabs()
+        tabs.tabStyle = .toolbar
+        for t in Tab.allCases {
+            let host = NSHostingController(rootView: SettingsPane(model: model, tab: t))
+            host.sizingOptions = [.preferredContentSize]
+            host.title = t.title
+            let item = NSTabViewItem(viewController: host)
+            item.label = t.title
+            item.image = NSImage(systemSymbolName: t.symbol, accessibilityDescription: t.title)
+            item.identifier = t.rawValue
+            tabs.addTabViewItem(item)
+        }
+        let w = NSWindow(contentViewController: tabs)
+        w.styleMask = [.titled, .closable]
+        w.toolbarStyle = .preference
+        w.isReleasedWhenClosed = false
+        w.setFrameAutosaveName("CanvasSettings")
+        tabs.selectedTabViewItemIndex = Tab.allCases.firstIndex(of: saved) ?? 0
+        tabs.fit(animated: false)
+        return w
+    }
+}
+
+/// Toolbar tabs whose window takes each pane's own height, top edge kept, like the system's settings windows.
+final class SettingsTabs: NSTabViewController {
+    override func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
+        super.tabView(tabView, didSelect: item)
+        if let id = item?.identifier as? String { UserDefaults.standard.set(id, forKey: "canvas.settings.tab") }
+        fit(animated: view.window?.isVisible ?? false)
+    }
+
+    func fit(animated: Bool) {
+        guard let vc = tabViewItems[safe: selectedTabViewItemIndex]?.viewController else { return }
+        let size = vc.view.fittingSize
+        guard let w = view.window ?? NSApp.windows.first(where: { $0.contentViewController === self }), size.height > 0 else { return }
+        let content = NSRect(origin: .zero, size: NSSize(width: SettingsPane.width, height: size.height))
+        var frame = w.frameRect(forContentRect: content)
+        frame.origin = NSPoint(x: w.frame.minX, y: w.frame.maxY - frame.height)
+        w.setFrame(frame, display: true, animate: animated)
+    }
+}
+
+private extension Array {
+    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
+}
+
+// MARK: Panes
+
+struct SettingsPane: View {
+    static let width: CGFloat = 560
+    @ObservedObject var model: CanvasModel
+    let tab: SettingsWindow.Tab
+
+    var body: some View {
+        Group {
+            switch tab {
+            case .general: GeneralSettings(model: model)
+            case .canvas: CanvasSettings(model: model)
+            case .agents: AgentSettings(model: model)
+            case .sounds: SoundSettings(model: model)
+            case .performance: PerformanceSettings(model: model)
+            case .shortcuts: ShortcutSettings()
+            }
+        }
+        .frame(width: SettingsPane.width)
+        .background(Palette.canvasBg)
+    }
+}
+
+struct GeneralSettings: View {
+    @ObservedObject var model: CanvasModel
+    var body: some View {
+        SettingsStack {
+            SettingsCard(title: "Appearance") {
+                SettingsRow("Theme") {
+                    SettingsSegments(items: AppTheme.allCases.map { ($0.title, $0) }, selection: model.theme) { model.theme = $0 }.frame(width: 240)
+                }
+            }
+            SettingsCard(title: "Zoom") {
+                SettingsRow("Open files at") {
+                    SettingsSegments(items: OpenView.allCases.map { ($0.title, $0) }, selection: model.prefs.openView) { model.prefs.openView = $0 }.frame(width: 280)
+                }
+                SettingsDivider()
+                SettingsRow("Scroll to zoom", detail: "Scrolling zooms; \u{2318} and scroll pans") {
+                    SettingsSwitch(isOn: $model.prefs.scrollZooms)
+                }
+            }
+        }
+    }
+}
+
+struct CanvasSettings: View {
+    @ObservedObject var model: CanvasModel
+    var body: some View {
+        SettingsStack {
+            SettingsCard(title: "Snapping") {
+                SettingsRow("Snap to objects", detail: "Hold \u{2318} while dragging to skip it") { SettingsSwitch(isOn: $model.snap.objects) }
+                SettingsDivider()
+                SettingsRow("Snap to pixel grid") { SettingsSwitch(isOn: $model.snap.pixel) }
+                SettingsDivider()
+                SettingsRow("Show smart guides") { SettingsSwitch(isOn: $model.snap.guides) }
+            }
+            SettingsCard(title: "Nudge") {
+                SettingsRow("Big nudge", detail: "Shift and an arrow key") {
+                    StepperField(value: model.snap.bigNudge, range: 1...1000, step: 1, unit: "px", label: "Big nudge") { model.snap.bigNudge = SnapLimits.bigNudge($0) }
+                }
+            }
+            SettingsCard(title: "Boards") {
+                SettingsRow("Show board names") { SettingsSwitch(isOn: $model.prefs.boardLabels) }
+            }
+        }
+    }
+}
+
+struct AgentSettings: View {
+    @ObservedObject var model: CanvasModel
+    @State private var installed: Set<String>?
+
+    var body: some View {
+        SettingsStack {
+            ConnectAgentCard(model: model)
+            SettingsCard(title: "Ask about the selection") {
+                SettingsRow("Default agent") {
+                    SettingsSegments(items: AgentHarness.allCases.map { ($0.title, $0) }, selection: model.prefs.harness) { model.prefs.harness = $0 }.frame(width: 220)
+                }
+                ForEach(AgentHarness.allCases) { h in
+                    SettingsDivider()
+                    SettingsRow(h.title, detail: h == model.prefs.harness ? "Runs first" : "Runs when the other is missing") {
+                        InstallState(installed: installed.map { $0.contains(h.rawValue) })
+                    }
+                }
+                SettingsDivider()
+                SettingsRow("Stop a run after") {
+                    StepperField(value: model.prefs.runCapMin, range: SettingsLimits.runCap, step: 1, unit: "min", label: "Run time cap in minutes") { model.prefs.runCapMin = $0 }
+                }
+            }
+            SettingsCard(title: "Agent cursor") {
+                SettingsRow("Show the agent\u{2019}s cursor", detail: "Follows each edit an agent makes on the canvas") { SettingsSwitch(isOn: $model.prefs.agentCursor) }
+                SettingsDivider()
+                SettingsRow("Speed") {
+                    SettingsSegments(items: CursorSpeed.allCases.map { ($0.title, $0) }, selection: model.prefs.cursorSpeed) { model.prefs.cursorSpeed = $0 }
+                        .frame(width: 220).disabled(!model.prefs.agentCursor).opacity(model.prefs.agentCursor ? 1 : 0.5)
+                }
+            }
+        }
+        .task { await loadInstalled() }
+    }
+
+    private func loadInstalled() async {
+        var req = URLRequest(url: model.base.appendingPathComponent("api/agent/harnesses"))
+        req.timeoutInterval = 5
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let list = j["harnesses"] as? [[String: Any]] else { installed = []; return }
+        installed = Set(list.compactMap { $0["id"] as? String })
+    }
+}
+
+/// The commands that register Canvas MCP (as "canvas") with Claude Code and Codex, each with Copy, and whether an
+/// agent is talking to Canvas now. The Welcome card shows the same (GET /api/mcp/setup, src/onboarding.ts).
+struct ConnectAgentCard: View {
+    @ObservedObject var model: CanvasModel
+    @State private var setup: [String: Any] = [:]
+    @State private var copied: String?
+
+    var body: some View {
+        SettingsCard(title: "Connect an agent") {
+            ForEach([("Claude Code", "claude"), ("Codex", "codex")], id: \.1) { title, key in
+                if key != "claude" { SettingsDivider() }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text(title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1)
+                        Spacer(minLength: 12)
+                        FieldButton(title: copied == key ? "Copied" : "Copy", symbol: copied == key ? "checkmark" : "doc.on.doc") { copy(key) }
+                            .disabled(setup[key] == nil)
+                    }
+                    Text(setup[key] as? String ?? "Asking Canvas\u{2026}")
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.fg)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field.opacity(0.6)))
+                }
+                .padding(.horizontal, 14).padding(.vertical, 12)
+            }
+            SettingsDivider()
+            SettingsRow("Status", detail: connected ? nil : "Run a command above in Terminal, then start a new agent session") {
+                HStack(spacing: 6) {
+                    Circle().fill(connected ? Palette.ok : Palette.mutedFg.opacity(0.5)).frame(width: 8, height: 8)
+                    Text(connected ? "Connected\((setup["client"] as? String).map { ": \($0)" } ?? "")" : "Not connected")
+                        .font(Typography.body).foregroundStyle(connected ? Palette.fg : Palette.mutedFg).lineLimit(1)
+                }
+                .frame(height: Metric.field)
+            }
+        }
+        // While the pane shows: the status follows the agent within a couple of seconds.
+        .task {
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private var connected: Bool { setup["connected"] as? Bool == true }
+
+    private func load() async {
+        var req = URLRequest(url: model.base.appendingPathComponent("api/mcp/setup"))
+        req.timeoutInterval = 4
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        setup = j
+    }
+
+    private func copy(_ key: String) {
+        guard let text = setup[key] as? String else { return }
+        canvasPasteboard.clearContents()
+        canvasPasteboard.setString(text, forType: .string)
+        copied = key
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copied == key { copied = nil } }
+    }
+}
+
+/// Installed or not, neutral: a check for installed, plain text for missing.
+private struct InstallState: View {
+    let installed: Bool?
+    var body: some View {
+        HStack(spacing: 6) {
+            if installed == true { Image(systemName: "checkmark.circle.fill").glyph(GlyphSize.row).foregroundStyle(Palette.fg) }
+            Text(installed == nil ? "Checking" : installed! ? "Installed" : "Not installed")
+                .font(Typography.body).foregroundStyle(installed == true ? Palette.fg : Palette.mutedFg).lineLimit(1)
+        }
+        .frame(height: Metric.field)
+    }
+}
+
+struct SoundSettings: View {
+    @ObservedObject var model: CanvasModel
+    var body: some View {
+        SettingsStack {
+            SettingsCard(title: "When an agent finishes") {
+                SettingsRow("Play a sound") { SettingsSwitch(isOn: $model.prefs.finishSound) }
+                SettingsDivider()
+                SettingsRow("Volume") {
+                    HStack(spacing: 8) {
+                        Slider(value: $model.prefs.soundVolume, in: 0...1).controlSize(.small).frame(width: 160, height: Metric.field)
+                            .accessibilityLabel("Volume")
+                        FieldButton(title: "Preview", symbol: "play.fill") { _ = FinishSound.play("Glass", volume: model.prefs.soundVolume) }
+                    }
+                    .disabled(!model.prefs.finishSound).opacity(model.prefs.finishSound ? 1 : 0.5)
+                }
+            }
+        }
+    }
+}
+
+struct PerformanceSettings: View {
+    @ObservedObject var model: CanvasModel
+    var body: some View {
+        SettingsStack {
+            SettingsCard(title: "Tabs") {
+                SettingsRow("Tabs kept open", detail: "Switch back instantly; each one uses memory") {
+                    StepperField(value: model.prefs.keptTabs, range: SettingsLimits.keptTabs, step: 1, unit: nil, label: "Tabs kept open") { model.prefs.keptTabs = $0 }
+                }
+            }
+            SettingsCard(title: "Board snapshots") {
+                SettingsRow("Cache size", detail: used) {
+                    HStack(spacing: 8) {
+                        StepperField(value: model.prefs.snapshotMB, range: SettingsLimits.snapshotMB, step: SettingsLimits.snapshotStep, unit: "MB", label: "Snapshot cache size in megabytes") { model.prefs.snapshotMB = $0 }
+                        FieldButton(title: "Clear", symbol: nil) { model.snapshots("clear") }
+                    }
+                }
+            }
+        }
+        .onAppear { model.snapshots("usage") }
+    }
+
+    private var used: String? {
+        guard let b = model.snapshotBytes else { return nil }
+        return b == 0 ? "Empty" : ByteCountFormatter.string(fromByteCount: Int64(b), countStyle: .file) + " used"
+    }
+}
+
+struct ShortcutSettings: View {
+    var body: some View {
+        ScrollView {
+            SettingsStack {
+                ForEach(ShortcutCatalog.all) { g in
+                    SettingsCard(title: g.title) {
+                        ForEach(Array(g.rows.enumerated()), id: \.element.id) { i, r in
+                            if i > 0 { SettingsDivider() }
+                            SettingsRow(r.title, compact: true) { Keycaps(keys: r.keys) }
+                        }
+                    }
+                }
+            }
+        }
+        .scrollIndicators(.automatic)
+        .frame(height: 560)
+    }
+}
+
+// MARK: Pieces
+
+/// The pane's column: cards 20 pt apart, 24 pt from the window's edges.
+struct SettingsStack<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20, content: content)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A titled surface: no border, a layered shadow lifts it off the window.
+struct SettingsCard<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg).lineLimit(1).padding(.leading, 14)
+            VStack(spacing: 0, content: content)
+                .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.popover))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.05), radius: 0.5, y: 0.5)
+                .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+                .shadow(color: .black.opacity(0.05), radius: 12, y: 6)
+        }
+    }
+}
+
+/// Edge to edge: the rows carry the padding, the line runs the card's full width.
+struct SettingsDivider: View {
+    var body: some View { Rectangle().fill(Palette.line).frame(height: 1).frame(maxWidth: .infinity) }
+}
+
+struct SettingsRow<Control: View>: View {
+    let title: String
+    var detail: String?
+    var compact = false
+    @ViewBuilder var control: () -> Control
+
+    init(_ title: String, detail: String? = nil, compact: Bool = false, @ViewBuilder control: @escaping () -> Control) {
+        self.title = title; self.detail = detail; self.compact = compact; self.control = control
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1).qaText(title)
+                if let detail { Text(detail).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1) }
+            }
+            Spacer(minLength: 12)
+            control()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, compact ? 6 : 10)
+        .frame(minHeight: compact ? 40 : 48)
+    }
+}
+
+struct SettingsSwitch: View {
+    static let on = Color(light: 0x3F3F46, dark: 0x8E8E93)
+    @Binding var isOn: Bool
+    var body: some View {
+        // Neutral when on: blue belongs to the canvas selection.
+        Toggle("", isOn: $isOn).labelsHidden().toggleStyle(.switch).controlSize(.small).tint(SettingsSwitch.on).frame(height: Metric.field)
+    }
+}
+
+/// Text segments in one field-height well; the chosen one is neutral grey (never the accent).
+struct SettingsSegments<Tag: Hashable>: View {
+    let items: [(String, Tag)]
+    let selection: Tag
+    let onSelect: (Tag) -> Void
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(items.indices, id: \.self) { i in
+                let (title, tag) = items[i]
+                Button { onSelect(tag) } label: {
+                    Text(title).font(Typography.label).lineLimit(1).qaText(title)
+                        .foregroundStyle(selection == tag ? Palette.fg : Palette.mutedFg)
+                        .frame(maxWidth: .infinity).frame(height: Metric.field - 4)
+                        .background(RoundedRectangle(cornerRadius: Metric.radiusField - 2, style: .continuous)
+                            .fill(selection == tag ? Palette.popover : .clear)
+                            .shadow(color: .black.opacity(selection == tag ? 0.12 : 0), radius: 1, y: 0.5))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(title)
+                .accessibilityAddTraits(selection == tag ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field.opacity(0.6)))
+    }
+}
+
+/// A number you can type or step: the field and its minus and plus share the field height.
+struct StepperField: View {
+    let value: Int
+    let range: ClosedRange<Int>
+    let step: Int
+    let unit: String?
+    let label: String
+    let onChange: (Int) -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            MiniButton(symbol: "minus", help: "Less", enabled: value > range.lowerBound, inRow: true) { onChange(max(range.lowerBound, value - step)) }
+            FieldBox {
+                TextField("", value: Binding(get: { value }, set: { onChange(SettingsLimits.clamp($0, range)) }), format: .number)
+                    .textFieldStyle(.plain).font(Typography.body).monospacedDigit().multilineTextAlignment(.trailing)
+                    .accessibilityLabel(label)
+                if let unit { Text(unit).font(Typography.body).foregroundStyle(Palette.mutedFg).lineLimit(1) }
+            }
+            .frame(width: unit == nil ? 56 : 84)
+            MiniButton(symbol: "plus", help: "More", enabled: value < range.upperBound, inRow: true) { onChange(min(range.upperBound, value + step)) }
+        }
+    }
+}
+
+/// A plain action at field height, so it lines up with the fields beside it.
+struct FieldButton: View {
+    let title: String
+    let symbol: String?
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let symbol { Image(systemName: symbol).glyph(GlyphSize.field) }
+                Text(title).font(Typography.label).lineLimit(1)
+            }
+            .foregroundStyle(Palette.fg)
+            .padding(.horizontal, 12).frame(height: Metric.field)
+            .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(hovering ? Palette.active : Palette.field.opacity(0.6)))
+            .contentShape(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
+    }
+}
+
+/// A shortcut as tight keycaps: one cap per key, SF Symbols for modifiers, Return and arrows.
+struct Keycaps: View {
+    let keys: [String]
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(Array(keys.enumerated()), id: \.offset) { _, k in
+                Group {
+                    if let s = ShortcutCatalog.symbols[k] {
+                        Image(systemName: s).font(.system(size: 10, weight: .semibold))
+                    } else {
+                        Text(k).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    }
+                }
+                .foregroundStyle(Palette.fg)
+                .frame(minWidth: 20, minHeight: 20)
+                .padding(.horizontal, k.count > 1 ? 5 : 0)
+                .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(Palette.active))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(keys.joined(separator: " "))
+    }
+}
+
+/// The finish cue (finish_work, Bridge.swift "sound") and its preview in Settings > Sounds.
+enum FinishSound {
+    @discardableResult
+    static func play(_ name: String, volume: Double) -> Bool {
+        guard let sound = (NSSound(named: NSSound.Name(name)) ?? NSSound(named: NSSound.Name("Hero")))?.copy() as? NSSound else { return false }
+        sound.volume = Float(SettingsLimits.volume(volume))
+        return sound.play()
+    }
+}

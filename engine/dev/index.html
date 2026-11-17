@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engine vs DOM</title>
+<style>
+:root { --bg: #f6f6f6; --fg: #18181b; --muted: #71717a; --rim: #e4e4e7; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--fg); font: 13px/1.45 -apple-system, system-ui, sans-serif; }
+#bar { position: fixed; left: 0; right: 0; top: 0; height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 10px; background: #fff; border-bottom: 1px solid var(--rim); z-index: 5; }
+#bar select { max-width: 360px; font: inherit; }
+#bar .dim { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#panes { position: fixed; left: 0; right: 0; top: 33px; bottom: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rim); }
+.pane { position: relative; overflow: hidden; background: var(--bg); touch-action: none; }
+.pane > .tag { position: absolute; left: 8px; top: 6px; z-index: 3; color: var(--muted); font-weight: 600; pointer-events: none; }
+#engine { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.board { position: absolute; }
+.hl { position: absolute; border: 1px solid #0d99ff; pointer-events: none; display: none; z-index: 4; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <b>Engine vs DOM</b>
+  <select id="boards"></select>
+  <span class="dim" id="info">starting…</span>
+  <span class="dim" id="hover"></span>
+</div>
+<div id="panes">
+  <div class="pane" id="left"><span class="tag">engine (vello / WebGPU)</span><canvas id="engine"></canvas><div class="hl" id="hlE"></div></div>
+  <div class="pane" id="right"><span class="tag">DOM (html.ts)</span><div id="world"></div><div class="hl" id="hlD"></div></div>
+</div>
+<script type="module" src="./dev.js"></script>
+</body>
+</html>
