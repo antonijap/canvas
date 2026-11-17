@@ -148,7 +148,7 @@ function start(host) {
 #view.cm-mode .cm-ui,#view.cm-mode .cm-ui *{cursor:default!important}
 #view.cm-mode .cm-ui textarea{cursor:text!important}
 #view.cm-mode .cm-ui button,#view.cm-mode .cm-pin,#view.cm-mode .cm-pin *{cursor:pointer!important}
-.cm-t,.cm-bar>span,.cm-hint>b,.cm-hint>.cm-soft,.cm-chip span,.cm-server span,.cm-who b,.cm-who time,.cm-gone b,.cm-gone .cm-gl{text-box:trim-both cap alphabetic}
+.cm-t,.cm-bar>span,.cm-hint>b,.cm-hint>.cm-soft,.cm-chip span,.cm-who b,.cm-who time,.cm-gone b,.cm-gone .cm-gl{text-box:trim-both cap alphabetic}
 .cm-t.ex{text-box-edge:ex alphabetic}
 @media (prefers-reduced-motion: reduce){.cm-av,.cm-agent,.cm-send{transition:none}.cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1}}`;
   document.head.appendChild(css);
@@ -616,7 +616,7 @@ function start(host) {
     }
   }
 
-  /** The shared bar (design board 5): who commented, the server and whether it is reachable. Only for a shared file. */
+  /** The shared bar (design board 5): who commented and whether the server is reachable. Only for a shared file. */
   const STATUS = { connected: ["ok", "Connected"], offline: ["", "Offline. Comments are kept and sent when the server is back"], signedOut: ["warn", "Signed out. Sign in in Settings > Cloud"], signInAgain: ["warn", "Sign in again in Settings > Cloud"], forbidden: ["warn", "No access to this team"], tooOld: ["warn", "The server is too old for this Canvas"], tooNew: ["warn", "The server is newer than this Canvas. Update Canvas"] };
   function drawShared() {
     const s = st.sync;
@@ -637,11 +637,12 @@ function start(host) {
       shared.append(g);
     }
     const [tone, say] = STATUS[s.status] || STATUS.offline;
+    // The server's state only: its name belongs to this Mac's settings, not to the file (Home names it).
     const srv = h("div", "cm-server");
     const dot = h("span", "cm-dot" + (tone ? " " + tone : ""));
-    srv.append(dot, h("span", "", s.host));
+    srv.append(dot);
     srv.title = say;
-    shared.setAttribute("aria-label", `${s.host}: ${say}`);
+    shared.setAttribute("aria-label", `Shared: ${say}`);
     shared.dataset.status = s.status;
     shared.append(srv);
   }

@@ -1,5 +1,5 @@
-// QA for a shared file's comments (src/page/comments.js, src/cloud-sync.ts): the bar with the people who commented, the
-// server's name and a dot; a pending comment waits with a clock; a refused one says why with Retry and Discard. The sync
+// QA for a shared file's comments (src/page/comments.js, src/cloud-sync.ts): the bar with the people who commented and a
+// dot for the server's state (the server's name stays out of the file); a pending comment waits with a clock; a refused one says why with Retry and Discard. The sync
 // state is stood in for here (the page reads it from GET /api/comments); the real server is run by qa/cloud-e2e.ts.
 // Pictures go to qa/out/comments-shared-*.png and comments-pending-*.png.
 import fs from "node:fs";
@@ -13,11 +13,11 @@ async function shot(t: T, name: string, clip?: Rect) {
   fs.writeFileSync(path.join(OUT, `${name}.png`), await t.shot(clip ? { x: clip.x, y: clip.y, width: clip.w, height: clip.h } : undefined));
 }
 
-sc("comments", "a shared file shows the bar (people, server, a dot), a pending comment waits with a clock, a refused one says why", { covers: ["comments:shared-bar", "comments:pending", "comments:rejected"] }, async (t: T) => {
+sc("comments", "a shared file shows the bar (people and a status dot, no server name), a pending comment waits with a clock, a refused one says why", { covers: ["comments:shared-bar", "comments:pending", "comments:rejected"] }, async (t: T) => {
   await t.focus("lay_nest");
   const uid = () => crypto.randomUUID();
   const doc = uid(), th = uid();
-  const [anna, ben, mia] = [{ email: "anna@studio.test", name: "Antonija" }, { email: "ben@studio.test", name: "Ben" }, { email: "mia@studio.test", name: "Mia" }];
+  const [anna, ben, mia] = [{ email: "anna@studio.test", name: "Anna" }, { email: "ben@studio.test", name: "Ben" }, { email: "mia@studio.test", name: "Mia" }];
   const c = (author: object, body: string, min: number) => ({ id: uid(), thread: th, author, body, createdAt: new Date(Date.now() - min * 60_000).toISOString() });
   const comments = [c(anna, "Can this feel less loud? Maybe the outline style from the Free card.", 120), c(ben, "Agree. Outline, but keep the blue text so it still reads as the main action.", 60), c(anna, "Let's try it. Ben, can you check it next to the Free card?", 0), c(mia, "A reply the server refused because the thread was locked", 0)];
   const thread = { id: th, doc, anchor: { nodeId: "r_free", x: 0.5, y: 0.5, board: "lay_nest", preview: { name: "Free rect", type: "rectangle" } }, createdAt: comments[0].createdAt, createdBy: anna, comments };
@@ -42,9 +42,10 @@ sc("comments", "a shared file shows the bar (people, server, a dot), a pending c
     const bar = await t.ev<any>(`(() => {
       const q = (s, r = document) => r.querySelector(s), box = (e) => { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; };
       const bar = q(".cm-shared"), view = document.getElementById("view").getBoundingClientRect();
-      return { bar: box(bar), avatars: [...bar.querySelectorAll(".cm-av")].map(box), dot: box(q(".cm-dot")), host: box(q(".cm-server span:last-child")), text: bar.innerText, view: { r: view.right, t: view.top }, title: q(".cm-server").title };
+      return { bar: box(bar), avatars: [...bar.querySelectorAll(".cm-av")].map(box), dot: box(q(".cm-dot")), text: bar.innerText, label: bar.getAttribute("aria-label"), view: { r: view.right, t: view.top }, title: q(".cm-server").title };
     })()`);
-    t.eq(bar.text.replace(/\s+/g, " ").trim(), "A B M studio-canvas.workers.dev", `the bar names the people who commented and the server (${theme})`);
+    t.eq(bar.text.replace(/\s+/g, " ").trim(), "A B M", `the bar shows the people who commented and no server name (${theme})`);
+    t.ok(!/studio-canvas/.test(bar.label + bar.title), "the server's name is not in the bar's label or tooltip either");
     t.eq(bar.bar.h, 36, "the bar is 36 px high");
     t.eq(bar.avatars.map((a: any) => [a.w, a.h]), [[24, 24], [24, 24], [24, 24]], "avatars are 24 px");
     t.near(bar.avatars[1].x - (bar.avatars[0].x + 24), -6, 0.6, "avatars overlap by 6 px");
@@ -53,9 +54,9 @@ sc("comments", "a shared file shows the bar (people, server, a dot), a pending c
     t.ok(bar.bar.y >= islands + 8 - 1, "and under the toolbar island, not over it");
     t.eq([bar.dot.w, bar.dot.h], [7, 7], "the dot is 7 px");
     t.near(bar.dot.cy, bar.bar.cy, 0.6, "the dot is centred in the bar");
-    t.near(bar.host.cy, bar.bar.cy, 1, "the server name is centred in the bar");
     t.near(bar.avatars[0].cy, bar.bar.cy, 0.6, "the avatars are centred in the bar");
-    t.near(bar.dot.x - (bar.avatars[2].x + 24), 10, 0.6, "10 px between the people and the server");
+    t.near(bar.dot.x - (bar.avatars[2].x + 24), 10, 0.6, "10 px between the people and the dot");
+    t.near(bar.bar.x + bar.bar.w - (bar.dot.x + 7), 12, 0.6, "the dot ends the bar, 12 px from its edge");
     t.ok(/Offline/.test(bar.title), "the dot's tooltip says Offline");
     await shot(t, `comments-shared-offline-${theme}`, { x: bar.view.r - 340, y: bar.view.t, w: 340, h: bar.bar.y + 48 - bar.view.t });
     for (const [status, connected, want] of [["connected", true, "rgb(22, 163, 74)"], ["signInAgain", false, "rgb(217, 119, 6)"]] as const) {

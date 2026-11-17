@@ -278,7 +278,7 @@ private struct HomeSidebar: View {
                 .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 6)
                 .qaText("Team servers")
             if configured {
-                HomeRow(symbol: "cloud", title: ServerName.display(serverUrl), selected: store.section == .server, dot: dot) { store.section = .server }
+                HomeRow(symbol: "cloud", title: ServerName.label(serverUrl, name: model.prefs.cloudName), selected: store.section == .server, dot: dot) { store.section = .server }
             }
             HomeRow(symbol: "plus", title: "Add a team server", selected: false, muted: true) {
                 SettingsWindow.shared.show(model, tab: .cloud)
@@ -454,7 +454,7 @@ private struct HomeCardView: View {
     @State private var hovering = false
 
     var body: some View {
-        let where_ = HomeLogic.whereLabel(server: card.server)
+        let where_ = HomeLogic.whereLabel(server: card.server, current: model.prefs.cloudUrl, name: model.prefs.cloudName)
         VStack(alignment: .leading, spacing: 10) {
             Button { if card.exists, NSApp.currentEvent?.type != .rightMouseUp { model.open(card.path) } } label: {
                 HomeThumbnail(store: store, card: card)
@@ -600,7 +600,7 @@ private struct HomeServerView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(ServerName.display(serverUrl)).font(Typography.display).lineLimit(1).foregroundStyle(Palette.fg).qaText(ServerName.display(serverUrl))
+            Text(ServerName.label(serverUrl, name: model.prefs.cloudName)).font(Typography.display).lineLimit(1).foregroundStyle(Palette.fg).qaText(ServerName.label(serverUrl, name: model.prefs.cloudName))
             Spacer(minLength: 8)
             FieldButton(title: "Cloud settings", symbol: "gearshape") { SettingsWindow.shared.show(model, tab: .cloud) }.qaID("home-cloud-settings", label: "Cloud settings")
         }
