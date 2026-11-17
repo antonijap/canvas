@@ -24,4 +24,7 @@ qa/release-private.txt
 apps/macos/Canvas.app/
 
 # Internal mockup with Apple symbol artwork: kept on this Mac, never in the repo.
-design/chat-to-selection/
+
+# The one design file for the app (a page per feature). Holds Apple symbol pictures, so it stays local.
+design/app.canvas/
+design/chat-boards.py
