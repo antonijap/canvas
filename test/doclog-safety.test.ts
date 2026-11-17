@@ -752,4 +752,33 @@ describe("last cases", () => {
       }
     }
   });
+
+  // Found by the two-server fuzz (docs/evidence/speed.md, "Save log, last cases").
+  test("a log of ours loaded at a new path (the package moved) and made stale before it was folded: its edits are kept", async () => {
+    const p = pkg("movedstale");
+    const s = await spawn(p.root);
+    let h: Awaited<ReturnType<typeof holdLock>> | undefined;
+    try {
+      const a = client(s.base, p.pkg);
+      await a.open();
+      assert.equal((await a.update("B0N1", { name: "E1" })).status, 200);
+      assert.equal((await a.flush()).status, 200);
+      const m = moved(p, "Moved.canvas");
+      // Another Canvas holds the lock, so the fold of the log this server now loads at the new path waits...
+      h = await holdLock(L.lockPathOf(m.docPath), 1500);
+      assert.equal((await client(s.base, m.pkg).open()).status, 200);
+      assert.equal(await shown(s.base, m.pkg, "B0N1"), "E1", "the log applies at the new path");
+      // ...while a sync client writes the same bytes again (another file: the log is stale for it).
+      fs.writeFileSync(m.docPath + ".sync", fs.readFileSync(m.docPath));
+      fs.renameSync(m.docPath + ".sync", m.docPath);
+      await h.released;
+      await sleep(500);
+      await client(s.base, m.pkg).flush();
+      assert.ok(await until(() => !fs.existsSync(m.logPath), 8000), "the log is settled");
+      assert.ok(keptAnywhere(m, "B0N1", "E1"), "E1 is in document.json or a recovery copy");
+    } finally {
+      h?.kill();
+      await stop(s);
+    }
+  });
 });
