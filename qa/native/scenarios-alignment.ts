@@ -450,6 +450,33 @@ sc("comments", "alignment: in the app's page, the pins, the bars, the thread's h
   report(t, bad);
 });
 
+sc("comments", "in the app, a pin dragged with the real mouse lands on the layer under its tip, and comment mode's cursor is the 2x add pin", { covers: ["comments:move", "comments:add-pin"] }, async (t: NT) => {
+  const doc = crypto.randomUUID(), A = crypto.randomUUID();
+  const at = new Date().toISOString();
+  fs.writeFileSync(path.join(t.file, "comments.json"), JSON.stringify({ format: 1, doc, seq: 0, outbox: [], threads: [
+    { id: A, doc, anchor: { nodeId: "r_free", x: 0.5, y: 0.5, board: "lay_nest" }, createdAt: at, createdBy: { name: "Anna" }, comments: [{ id: crypto.randomUUID(), thread: A, author: { name: "Anna" }, body: "Move me", createdAt: at }] },
+  ] }));
+  await t.js(`return window.canvasHost.comments.reload();`);
+  const b = await t.js<{ x: number; y: number }>(`return window.__canvas.boardPos("lay_nest");`);
+  await t.look(b.x, b.y);
+  await t.waitJs(`!!document.querySelector('.cm-pin[data-thread="${A}"]')`, "the pin");
+  const st = await t.state();
+  const pin = await t.js<{ x: number; y: number; w: number; h: number }>(`const r = document.querySelector('.cm-pin[data-thread="${A}"]').getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height };`);
+  const p = { x: pin.x + st.webFrame.x, y: pin.y + st.webFrame.y, w: pin.w, h: pin.h };
+  const target = await t.rect("fr_outer");
+  const grab = { x: p.x + p.w / 2, y: p.y + p.h / 2 };
+  const drop = { x: target.x + target.w * 0.5, y: target.y + target.h * 0.5 };
+  await t.drag(grab, { x: drop.x + (grab.x - p.x), y: drop.y + (grab.y - (p.y + p.h)) });
+  const a = await t.waitDisk(() => { try { const f = JSON.parse(fs.readFileSync(path.join(t.file, "comments.json"), "utf8")); return f.threads[0].anchor.nodeId === "fr_outer" ? f.threads[0].anchor : null; } catch { return null; } }, "the anchor on the layer it was dropped on");
+  t.near(a.x, 0.5, 0.03, "the drop point as a fraction of the layer, x");
+  t.near(a.y, 0.5, 0.03, "the drop point as a fraction of the layer, y");
+  // The app's WebKit takes the 2x cursor (an image set); a browser that does not keeps the 1x one.
+  await t.js(`window.canvasHost.comments.setMode(true); return true;`);
+  const cursor = await t.js<string>(`return getComputedStyle(document.getElementById("view")).cursor;`);
+  t.ok(/image-set/.test(cursor), `comment mode's cursor is the image set with the 2x add pin (${cursor.slice(0, 40)})`);
+  await t.js(`window.canvasHost.comments.setMode(false); return true;`);
+});
+
 sc("first-run", "alignment: in the app's page, the welcome card's row button centres its words on the agent's name, light and dark", { covers: ["first-run:alignment"] }, async (t: NT) => {
   fresh("native-welcome");
   const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -600, y: 0, w: 400, h: 180 })).widget;

@@ -16,6 +16,35 @@ export function anchorFor({ nodeId, rect, point, page, board, info }) {
 }
 const round = (n) => Math.round(n * 1e4) / 1e4;
 
+// ---------- moving a pin by dragging it ----------
+// A press on a pin opens its thread; once the pointer travels past DRAG_SLOP it drags the pin instead. The pin's tip
+// keeps the offset it was grabbed at, and on the drop the thread is anchored again at the tip by anchorFor, the rule a
+// new comment there would get (the layer under it, else the page). The change is one thread.move op.
+
+/** How far (pt) a press on a pin travels before it is a drag, not a click. */
+export const DRAG_SLOP = 4;
+export const isDrag = (from, to) => Math.hypot(to.x - from.x, to.y - from.y) > DRAG_SLOP;
+/** Where the pointer was pressed, relative to the pin's tip. */
+export const grabOffset = (pointer, tip) => ({ x: pointer.x - tip.x, y: pointer.y - tip.y });
+/** The tip of a pin being dragged, for the pointer now. */
+export const tipAt = (pointer, grab) => ({ x: pointer.x - grab.x, y: pointer.y - grab.y });
+
+/** Two anchors that put a pin in the same place (same page, layer and point): a drop there sends nothing. */
+export const sameAnchor = (a, b) => !!a && !!b && (a.page || null) === (b.page || null) && (a.nodeId || null) === (b.nodeId || null) && a.x === b.x && a.y === b.y;
+
+/**
+ * Whether this Canvas may drag a thread's pin. A file that is not shared is the person's own: any pin. A shared file
+ * follows the server's rule (cloud/protocol.ts mayApply, thread.move): the thread's author, matched by email, or the
+ * Cloud owner. sync: the page's sync info ({ role, me }) or null.
+ */
+export function mayMove(t, sync) {
+  if (!sync) return true;
+  if (sync.role === "viewer") return false;
+  if (sync.role === "owner") return true;
+  const mine = sync.me && sync.me.email, by = t && t.createdBy && t.createdBy.email;
+  return !!mine && !!by && mine === by;
+}
+
 /** A thread that shows: not deleted, and resolved ones only while "Show resolved" is on. */
 export const visibleThreads = (threads, showResolved) => threads.filter((t) => !t.deletedAt && (showResolved || !t.resolvedAt));
 
@@ -28,6 +57,7 @@ export function refusalReason(refusal, role) {
   if (code === "forbidden") {
     if (role === "viewer") return "You can view this file but not comment on it";
     if (["comment.edit", "comment.delete", "thread.delete"].includes(kind)) return "Only the person who wrote it can change it";
+    if (kind === "thread.move") return "Only the person who wrote it or the Cloud owner can move it";
   }
   if (code === "conflict" && /\b(thread|comment)\b.*\bdeleted\b/i.test(message || "")) return "This thread was deleted";
   if (code === "quota") return "Too many comments at once. Canvas will try again";

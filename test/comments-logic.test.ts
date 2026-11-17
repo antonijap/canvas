@@ -106,3 +106,45 @@ test("the card sits right of its pin, flips left at the edge and stays inside th
   assert.equal(L.popoverAt({ x: 900, y: 200 }, { w: 340, h: 200 }, 1000, 800).x, 900 - 18 - 340);
   assert.equal(L.popoverAt({ x: 100, y: 780 }, { w: 340, h: 200 }, 1000, 800).y, 800 - 200 - 8);
 });
+
+test("a press on a pin is a click until it travels past the slop, then a drag", () => {
+  assert.equal(L.DRAG_SLOP, 4);
+  assert.equal(L.isDrag({ x: 10, y: 10 }, { x: 13, y: 10 }), false, "3 pt is still a click");
+  assert.equal(L.isDrag({ x: 10, y: 10 }, { x: 12.5, y: 12.5 }), false, "3.5 pt diagonally too");
+  assert.equal(L.isDrag({ x: 10, y: 10 }, { x: 14.5, y: 10 }), true, "past 4 pt it drags");
+  assert.equal(L.isDrag({ x: 10, y: 10 }, { x: 10, y: 5 }), true, "any direction");
+});
+
+test("a dragged pin's tip keeps the offset it was grabbed at, so it never jumps under the pointer", () => {
+  // Grabbed 12 right of and 15 above its tip: the tip stays 12 left of and 15 below the pointer.
+  const grab = L.grabOffset({ x: 112, y: 185 }, { x: 100, y: 200 });
+  assert.deepEqual(grab, { x: 12, y: -15 });
+  assert.deepEqual(L.tipAt({ x: 300, y: 50 }, grab), { x: 288, y: 65 });
+  assert.deepEqual(L.tipAt({ x: 112, y: 185 }, grab), { x: 100, y: 200 }, "no motion, no move");
+});
+
+test("a dropped pin re-anchors like a new comment at its tip: the layer under it, else the page", () => {
+  const onLayer = L.anchorFor({ nodeId: "C", rect: { x: 0, y: 0, w: 200, h: 100 }, point: { x: 50, y: 25 }, page: "p1", board: "B2", info: { name: "Card", type: "frame" } });
+  assert.deepEqual(onLayer, { page: "p1", nodeId: "C", x: 0.25, y: 0.25, board: "B2", preview: { name: "Card", type: "frame", width: 200, height: 100 } });
+  assert.equal(L.sameAnchor(onLayer, { ...onLayer, preview: { name: "Old name" } }), true, "same layer and point: nothing to send");
+  assert.equal(L.sameAnchor(onLayer, { ...onLayer, x: 0.2501 }), false, "a new point is a move");
+  assert.equal(L.sameAnchor(onLayer, { ...onLayer, nodeId: "D" }), false, "a new layer is a move");
+  assert.equal(L.sameAnchor({ x: 10, y: 20, page: "p1" }, { x: 10, y: 20, page: "p1" }), true);
+  assert.equal(L.sameAnchor({ x: 10, y: 20, page: "p1" }, { x: 10, y: 20, page: "p2" }), false, "another page is a move");
+});
+
+test("who may drag a pin: anyone in a file that is not shared; in a shared one its author or the owner", () => {
+  const anna = { email: "anna@studio.test", name: "Anna" };
+  const t = thread({ createdBy: anna });
+  assert.equal(L.mayMove(t, null), true, "a local file is the person's own");
+  assert.equal(L.mayMove(t, { role: "commenter", me: anna }), true, "the author");
+  assert.equal(L.mayMove(t, { role: "owner", me: { email: "ben@studio.test", name: "Ben" } }), true, "the Cloud owner");
+  assert.equal(L.mayMove(t, { role: "editor", me: { email: "ben@studio.test", name: "Ben" } }), false, "an editor, not the author");
+  assert.equal(L.mayMove(t, { role: "viewer", me: anna }), false, "a viewer");
+  assert.equal(L.mayMove(t, { role: "commenter", me: null }), false, "nobody signed in");
+  assert.equal(L.mayMove(thread({ createdBy: { name: "Anna" } }), { role: "commenter", me: anna }), false, "a thread with no author email is nobody's on a server");
+});
+
+test("a move refused by the server says who may move it", () => {
+  assert.equal(L.refusalReason({ code: "forbidden", message: "x", kind: "thread.move" }, "commenter"), "Only the person who wrote it or the Cloud owner can move it");
+});
