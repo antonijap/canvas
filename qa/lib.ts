@@ -40,6 +40,10 @@ export async function startServer(dir: string): Promise<Scratch> {
       CANVAS_MCP_NO_SPAWN: "1",
       // Backups of every write go here, not into ~/Library/Application Support/Canvas (scratch runs had left thousands of folders there).
       CANVAS_STATE_DIR: path.join(dir, ".canvas-state"),
+      // The agents' own config (whether canvas is registered, for the welcome card's Connect) is a scratch one: never
+      // this Mac's, so a run reads the same on every machine and never writes the person's config.
+      CLAUDE_CONFIG_DIR: path.join(dir, ".claude-config"),
+      CODEX_HOME: path.join(dir, ".codex-home"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
