@@ -51,7 +51,7 @@ sc("first-run", "the welcome card shows the canvas MCP commands, copies one, and
   await shot(t, "web-welcome-connected", { x: r.x - 20, y: r.y - 20, w: r.w + 40, h: r.h + 40 });
 });
 
-sc("first-run", "Connect on the welcome card registers an agent, says the next step, and shows an error with Copy still there", { covers: ["first-run:connect"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone" } }, async (t: T) => {
+sc("first-run", "Connect on the welcome card registers an agent, says the next step, and shows an error with Copy still there", { covers: ["first-run:connect"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone", reopen: "Added comes from the live page's stubbed connect answer; the reopened tab reads the scratch agent config, where nothing is registered" } }, async (t: T) => {
   const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -600, y: 0, w: 460, h: 500 })).widget;
   t.subject = ["widget:" + w.id];
   // The endpoint changes the person's agent config: the page's fetch is stubbed here (test/mcp-connect.test.ts runs
