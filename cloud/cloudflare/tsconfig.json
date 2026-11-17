@@ -11,5 +11,5 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "test", "../protocol.ts"]
+  "include": ["src", "test", "../protocol.ts", "../core"]
 }

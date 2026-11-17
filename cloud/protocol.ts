@@ -14,9 +14,17 @@ export type Role = "owner" | "editor" | "commenter" | "viewer";
 export const CAN_COMMENT: Record<Role, boolean> = { owner: true, editor: true, commenter: true, viewer: false };
 
 export interface Author {
-  /** Verified by the server (Cloudflare Access); absent on a comment made in a local file that never synced. */
+  /**
+   * On a Cloudflare server: verified by Cloudflare Access. On a Cloud hosted on a Mac: a label the host typed, not
+   * verified, and `id` is who it is. Absent on a comment made in a local file that never synced.
+   */
   email?: string;
   name: string;
+  /**
+   * A Cloud hosted on a Mac: the person's id there, random and never reused. When set, it decides whose comment this is
+   * (mayApply), not the email. Optional and additive: a side that does not know it ignores it, so no protocol bump.
+   */
+  id?: string;
   /** An agent (Claude Code, Codex) wrote it through MCP, not a person. Set by whoever records the comment. */
   agent?: boolean;
 }
@@ -277,8 +285,9 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
  */
 export function mayApply(op: Op, role: Role, me: Author, threads: Thread[]): boolean {
   if (!CAN_COMMENT[role]) return false;
-  const own = (id: Uuid) => threads.some((t) => t.comments.some((c) => c.id === id && !!c.author.email && c.author.email === me.email));
-  const ownThread = (id: Uuid) => threads.some((t) => t.id === id && !!t.createdBy.email && t.createdBy.email === me.email);
+  const same = (a: Author) => (a.id || me.id ? !!a.id && a.id === me.id : !!a.email && a.email === me.email);
+  const own = (id: Uuid) => threads.some((t) => t.comments.some((c) => c.id === id && same(c.author)));
+  const ownThread = (id: Uuid) => threads.some((t) => t.id === id && same(t.createdBy));
   const admin = role === "owner" || role === "editor";
   switch (op.kind) {
     case "comment.edit": return own(op.comment);
