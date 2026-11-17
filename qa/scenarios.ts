@@ -103,7 +103,8 @@ sc("move", "drag moves a layer; undo and redo are one step each", { covers: ["mo
 
 sc("move", "Shift locks the drag to one axis", { covers: ["move-axis-lock:one","move-axis-lock:mouse"] }, async (t: T) => {
   await t.focus("lay_nest");
-  await dragBy(t, "r_free", 60, 14, { late: { shift: true, meta: true } });
+  // Control: no snapping, so the move is exactly the pointer's.
+  await dragBy(t, "r_free", 60, 14, { late: { shift: true, ctrl: true } });
   await t.flush();
   const n = t.node("r_free")!;
   t.eq(n.y, 300, "y unchanged");
@@ -138,7 +139,7 @@ sc("move", "cross-board selection: a short drag keeps each layer in its board", 
   await t.look(-20, -20, 0.5);
   await t.select(["r_free", "rz_rect"]);
   const before = { a: t.node("r_free")!, b: t.node("rz_rect")! };
-  await dragBy(t, "rz_rect", 15, 10, { late: { meta: true } });
+  await dragBy(t, "rz_rect", 15, 10, { late: { ctrl: true } }); // Control: no snapping
   await t.flush();
   t.eq(t.parentOf("r_free"), "lay_nest", "r_free stays in its board");
   t.eq(t.parentOf("rz_rect"), "lay_resize", "rz_rect stays in its board");
@@ -292,11 +293,16 @@ sc("resize", "text: 4 edges and 4 corners", { covers: ["resize:text","undo-redo:
 sc("resize", "ellipse: 4 edges and 4 corners", { covers: ["resize:ellipse","undo-redo:ellipse"] }, async (t: T) => { await t.focus("lay_resize"); await resizeEveryHandle(t, "rz_ell"); });
 sc("resize", "image: 4 edges and 4 corners", { covers: ["resize:image","undo-redo:image"] }, async (t: T) => { await t.focus("lay_resize"); await resizeEveryHandle(t, "rz_img"); });
 sc("resize", "instance: 4 edges and 4 corners", { covers: ["resize:instance","undo-redo:instance"] }, async (t: T) => { await t.focus("lay_resize"); await resizeEveryHandle(t, "rz_inst"); });
-sc("resize", "text: a side edge makes it auto height, a top edge fixed size", { covers: ["resize-text-growth:text","resize-text-growth:mouse"] }, async (t: T) => {
+sc("resize", "text: a side edge makes auto width fixed size and keeps auto height, a bottom edge fixed size", { covers: ["resize-text-growth:text","resize-text-growth:mouse"] }, async (t: T) => {
   await t.focus("lay_text");
+  const h0 = (await t.rect("tx_auto")).h;
   await pullHandle(t, "tx_auto", "e");
   await t.flush();
-  t.eq(t.node("tx_auto")!.textGrowth, "fixed-width", "east edge on auto width text");
+  t.eq(t.node("tx_auto")!.textGrowth, "fixed-width-height", "east edge on auto width text");
+  t.near((await t.rect("tx_auto")).h, h0, 0.5, "it keeps the height it had");
+  await pullHandle(t, "tx_height", "e");
+  await t.flush();
+  t.eq(t.node("tx_height")!.textGrowth, "fixed-width", "east edge on auto height text keeps auto height");
   await pullHandle(t, "tx_height", "s");
   await t.flush();
   t.eq(t.node("tx_height")!.textGrowth, "fixed-width-height", "south edge");

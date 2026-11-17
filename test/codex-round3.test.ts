@@ -54,16 +54,16 @@ describe("1. group refit resolves automatic sizes", () => {
   });
 });
 
-describe("2. rotated text side resize keeps Auto height", () => {
+describe("2. rotated text side resize keeps Auto height; auto width becomes Fixed size", () => {
   test("a side drag writes no height and keeps fixed-width", () => {
     const props = { width: 60, height: 40, x: 3, y: 4 };
     L.rotatedTextWrites(props, "e", "fixed-width");
     assert.deepEqual(props, { width: 60, x: 3, y: 4 });
   });
-  test("a side drag of auto-width text makes it Auto height", () => {
+  test("a side drag of auto-width text makes it Fixed size at the height it had", () => {
     const props = { width: 60, height: 40, x: 3, y: 4 };
     L.rotatedTextWrites(props, "w", "auto");
-    assert.deepEqual(props, { width: 60, x: 3, y: 4, textGrowth: "fixed-width" });
+    assert.deepEqual(props, { width: 60, height: 40, x: 3, y: 4, textGrowth: "fixed-width-height" });
   });
   test("a top, bottom or corner drag makes it Fixed size", () => {
     for (const h of ["n", "se"]) {

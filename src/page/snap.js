@@ -22,10 +22,10 @@ export function snapSettings(v) {
 }
 
 /**
- * Object snapping is off for this drag: Control (hold it to turn off snapping to geometry
- * and objects for now) or Cmd (Canvas's key before; it means nothing else on a move). Pixel rounding stays.
+ * Object snapping is off for this drag while Control is held (the common convention). Cmd does not bypass:
+ * on a move it lets a layer drop into a frame smaller than itself (autolayout-logic.js dropTarget). Pixel rounding stays.
  */
-export const bypassSnap = (e) => !!(e && (e.ctrlKey || e.metaKey));
+export const bypassSnap = (e) => !!(e && e.ctrlKey);
 
 /** The sorted lines of one axis. kind: 0 start edge, 1 centre, 2 end edge. */
 function axisLines(rects, pos, size) {

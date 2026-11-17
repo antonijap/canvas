@@ -163,13 +163,13 @@ Canvas shortcuts in the app and browser:
 | Control+Cmd+M | Use as mask: each selected layer cuts the layers above it in its parent to its shape; again to stop. One undo step |
 | Shift+Up / Shift+Down in a hex field | Lighter / darker by 10% lightness (Up / Down alone: 1%), the opacity kept |
 | Double-click an image layer | Crop: drag the image to move it, a corner to scale it (aspect kept); Return, Esc or a click outside writes Crop (`src/page/image-crop.js`) |
-| Esc | Cancel a move or resize, else select parent, else deselect |
+| Esc | Cancel a move or resize, else deselect, a nested layer too (Shift+Return or \ selects the parent) |
 | K | Scale tool on/off (V or Esc leaves it) |
 | Opt+Cmd+Shift+R | Resize board to fit content |
 | Shift + click, drag on empty canvas | Add to selection, marquee select (a board only when enclosed whole; one it touches gives the layers it touches) |
 | Cmd + click, Cmd + drag | The deepest layer under the pointer; deep marquee: the deepest layers it touches |
 | Shift held while dragging | Move on one axis only |
-| Cmd held while dragging | Bypass snapping |
+| Control held while moving or resizing | Bypass snapping to objects |
 | Option + drag (or Option pressed mid-drag) | Drag copies, the originals stay; one undo step |
 | Drag a Widgets panel row or shader tile onto the canvas | Adds that card centred where it drops, selected; one undo step (a click adds it in the middle of the view) |
 | A shader tile dragged over a layer | Outlines the frame, rectangle or ellipse under the pointer (text and icons pass it to the layer around them; the selected layer wins when the pointer is over it); the drop makes the shader that layer's fill, on top of its fills (a shader already there is replaced). Inside an instance it is an override. One undo step. Over empty canvas, or with Option held, it adds a shader card instead |
@@ -208,7 +208,7 @@ Handles on the selection (one drag is one undo step, written on release; Esc can
 | Drag | Action |
 |---|---|
 | Inside a selected auto layout frame | Its padding zones and gaps show tinted pink, the one under the pointer striped (`src/page/autolayout.js`) |
-| A padding zone's pink bar | That side's padding. Option: the opposite side too. Shift: all four. Click: type a value |
+| A padding zone's pink bar | That side's padding. Option: the opposite side too. Option+Shift: all four. Shift alone: steps by the big nudge. Click: type a value |
 | A gap's pink bar | The gap (it may go negative). Shift: big-nudge steps. Click: type a value |
 | A corner knob of a selected frame or rectangle (40 px or more on screen, upright, radius not a token) | Corner radius of all four corners, toward the centre rounds more. Option: that corner alone (`src/page/radius.js`) |
 

@@ -89,9 +89,10 @@ describe("snapRect", () => {
 });
 
 describe("bypassing snapping while dragging", () => {
-  test("Control and Cmd turn object snapping off for that drag; Option and Shift do not", () => {
+  test("Control turns object snapping off for that drag; Cmd, Option and Shift do not", () => {
     assert.equal(S.bypassSnap({ ctrlKey: true }), true);
-    assert.equal(S.bypassSnap({ metaKey: true }), true);
+    assert.equal(S.bypassSnap({ ctrlKey: true, metaKey: true }), true);
+    assert.equal(S.bypassSnap({ metaKey: true }), false);
     assert.equal(S.bypassSnap({ altKey: true, shiftKey: true }), false);
     assert.equal(S.bypassSnap(null), false);
   });
