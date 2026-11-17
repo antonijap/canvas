@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { activeRuns, buildCommand, DENIED_TOOLS, MAX_RUNS, MOBBIN_TOOLS, OUTPUT_MAX, startRun, stopRun, type AgentCtx, type HarnessInfo } from "../src/agent-run.ts";
 import { loadDoc } from "../src/engine.ts";
-import { runCapMs } from "../src/settings.ts";
+import { runCapMs, setAgentSettings } from "../src/settings.ts";
 import { readThreads } from "../src/threads.ts";
 import { tmpDir } from "./helpers.ts";
 
@@ -135,5 +135,22 @@ process.stdin.on("data", (c) => (s += c)).on("end", () => {
     await assert.rejects(Promise.all([startRun(ctx(), { file: docFile, ids: ["L1"], prompt: "sit" }), startRun(ctx(), { file: docFile, ids: ["L1"], prompt: "sit" })]), /has a run going/);
     for (const v of activeRuns()) stopRun(v.id);
     await ended();
+  });
+
+  test("a run asks for the model and reasoning level chosen in Settings > Agents", async () => {
+    setAgentSettings({ harness: "claude", claude: { model: "opus", effort: "high" } });
+    let seen: string[] = [];
+    try {
+      const c = ctx();
+      const v = await startRun({ ...c, spawn: ((cmd: string, args: string[], opts: object) => { seen = args; return (c.spawn as any)(cmd, args, opts); }) as never }, { file: docFile, ids: ["L3"], prompt: "sit" });
+      assert.equal(seen[seen.indexOf("--model") + 1], "opus", seen.join(" "));
+      assert.equal(seen[seen.indexOf("--effort") + 1], "high", seen.join(" "));
+      assert.ok(v.id);
+      for (let i = 0; i < 100 && !activeRuns().length; i++) await new Promise((r) => setTimeout(r, 20));
+      for (const r of activeRuns()) stopRun(r.id);
+      await ended();
+    } finally {
+      setAgentSettings({});
+    }
   });
 });
