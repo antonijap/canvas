@@ -33,14 +33,21 @@ swiftc "${SWIFT_OPT:--O}" -target "$(uname -m)-apple-macos$MINOS" ${QA_FLAGS[@]+
 # The tunnel helper a hosted Cloud is reached through (cloud/tunnel, the tailcat library at a pinned version). Built
 # from source when Go is installed; without it the build goes on and Settings > Cloud > Host on this Mac is off.
 # CANVAS_REQUIRE_TUNNEL=1 (scripts/release-app.sh) makes a missing helper an error: a release always has it.
-if command -v go >/dev/null 2>&1 && [ -f ../../cloud/tunnel/go.sum ]; then
-  HELPER_OUT="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")/Contents/Resources/canvas-tunnel"
-  (cd ../../cloud/tunnel && CGO_ENABLED=0 go build -mod=readonly -trimpath -ldflags="-s -w" -o "$HELPER_OUT" .)
+# Go: on PATH, else through mise (the Go version cloud/tunnel/go.mod names). The module graph is go.sum's, nothing newer.
+GO=()
+if command -v go >/dev/null 2>&1; then GO=(go)
+elif command -v mise >/dev/null 2>&1 && mise exec go@1.27 -- go version >/dev/null 2>&1; then GO=(mise exec go@1.27 -- go)
+fi
+HELPER_OUT="$(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")/Contents/Resources/canvas-tunnel"
+if [ ${#GO[@]} -gt 0 ] && [ -f ../../cloud/tunnel/go.sum ]; then
+  (cd ../../cloud/tunnel && CGO_ENABLED=0 GOFLAGS=-mod=readonly GOTOOLCHAIN=local "${GO[@]}" build -mod=readonly -trimpath -ldflags="-s -w" -o "$HELPER_OUT" .)
+  # Signed inside the app (ad-hoc here; scripts/release-app.sh signs it again with the release identity).
+  codesign --force --sign - "$HELPER_OUT" 2>/dev/null || true
 elif [ "${CANVAS_REQUIRE_TUNNEL:-}" = "1" ]; then
-  echo "error: no tunnel helper (install Go with mise and run go mod tidy once in cloud/tunnel)" >&2
+  echo "error: no tunnel helper: a release needs Go (mise use -g go@1.27) to build cloud/tunnel" >&2
   exit 1
 else
-  echo "note: no Go or no cloud/tunnel/go.sum, so no tunnel helper: Host on this Mac is unavailable in this build"
+  echo "note: no Go, so no tunnel helper in this build: Settings > Cloud > Host a Cloud is off (mise use -g go@1.27 to build it)"
 fi
 if [ "${QA:-}" = "1" ]; then
   # Its own identity: own preferences and WebKit storage, never mistaken for the real app. No canvas:// scheme:
@@ -53,5 +60,6 @@ fi
 # A stable signing identity keeps macOS privacy grants (Desktop/Documents access) across rebuilds;
 # an ad-hoc signature changes every build and macOS asks again. CANVAS_SIGN_IDENTITY overrides.
 ID="${CANVAS_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)}"
+if [ -f "$HELPER_OUT" ]; then codesign --force --sign "${ID:--}" "$HELPER_OUT" 2>/dev/null || codesign --force --sign - "$HELPER_OUT" 2>/dev/null || true; fi
 codesign --force --sign "${ID:--}" "$APP" 2>/dev/null || codesign --force --sign - "$APP" 2>/dev/null || true
 echo "built $(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
