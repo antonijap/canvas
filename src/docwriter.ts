@@ -2452,14 +2452,20 @@ async function runWrites(st: FileState): Promise<void> {
       // possible). Without that, the write does not happen.
       const baseHash = st.diskHash;
       const prev = prevName(tmp, baseHash);
+      // From here to the rename no load runs (st.renaming holds them back): one in between would make this write stale
+      // after the document was linked, and a link made and taken away again moves the document's ctime, which a save
+      // log's tie reads as a restore in place (doc/doclog.ts).
+      st.renaming = true;
       let kind: "link" | "copy";
       try {
         kind = await preserve(docFile, prev, baseHash);
       } catch (e) {
+        st.renaming = false;
         await fs.promises.rm(tmp, { force: true });
         throw e;
       }
       if (st.epoch !== epoch || (kind === "link" && key3(keyOf(await fs.promises.stat(prev))) !== key3(base!))) {
+        st.renaming = false;
         await fs.promises.rm(prev, { force: true });
         await fs.promises.rm(tmp, { force: true });
         if (kind === "link") ownCtime(st, base);
@@ -2474,13 +2480,13 @@ async function runWrites(st: FileState): Promise<void> {
       try {
         if (st.logFold && st.logSeen !== "none") unmark = await markFold(docFile, hash);
       } catch (e) {
+        st.renaming = false;
         host.markOwn(docFile, null);
         await fs.promises.rm(tmp, { force: true });
         await fs.promises.rm(prev, { force: true });
         if (kind === "link") ownCtime(st, base);
         throw e;
       }
-      st.renaming = true;
       try {
         await fs.promises.rename(tmp, docFile);
       } catch (e) {
