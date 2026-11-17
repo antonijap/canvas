@@ -185,6 +185,8 @@ final class ResourceSampler: @unchecked Sendable {
     @Published private(set) var memoryPeak = Peak()
     @Published private(set) var cpuPeak = Peak()
     @Published private(set) var lastSample: Date?
+    /// The popover under the readout: its button, or Quick actions > Resources (Palette.swift).
+    @Published var popoverOpen = false
 
     private let started = Date()
     private var readings: [CPUReading] = []
@@ -300,19 +302,30 @@ extension MeterLevel {
 }
 
 /// Memory and CPU in the toolbar pill, each after an SF Symbol (memorychip, cpu). Fixed width, so the buttons beside it never move as the numbers change.
+/// Shown only in the warn state (amber or red) or while its popover is open; otherwise it takes no room. The view
+/// itself always stays in the pill: it starts the sampler and anchors the popover.
 struct ResourceReadout: View {
     @ObservedObject var meter: ResourceMeter
     @ObservedObject var model: CanvasModel
-    @State private var open = false
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var open: Bool { meter.popoverOpen }
     private var ready: Bool { meter.lastSample != nil }
     private var memory: String { ready ? ResourceFormat.memory(meter.totalMemory) : "\u{2026}" }
     private var cpu: String { meter.totalCPU.map(ResourceFormat.cpuShort) ?? "\u{2026}" }
 
     var body: some View {
-        Button { open.toggle() } label: {
+        ZStack {
+            Color.clear.frame(width: 0, height: Metric.control)
+            if MeterThresholds.readoutShown(level: meter.level, popoverOpen: open) { readout }
+        }
+        .onAppear { meter.start(model: model) }
+        .popover(isPresented: $meter.popoverOpen, arrowEdge: .bottom) { ResourcePopover(meter: meter, model: model) }
+    }
+
+    private var readout: some View {
+        Button { meter.popoverOpen.toggle() } label: {
             // Two values, each after its own glyph; spacing separates them. Hidden templates reserve the widest
             // value each side can show.
             HStack(spacing: 9) {
@@ -351,113 +364,73 @@ struct ResourceReadout: View {
                                   : "Measuring")
         .accessibilityHint("Shows memory and CPU per process")
         .onHover { h in withAnimation(Motion.fast) { hovering = h } }
-        .onAppear { meter.start(model: model) }
-        .popover(isPresented: $open, arrowEdge: .bottom) { ResourcePopover(meter: meter, model: model) }
     }
 }
 
+/// Two numbers, each over its last 2 minutes, in the text colour. The copy icon puts the plain-text report
+/// (per-process table, peaks, the Mac and the commit) on the clipboard.
 struct ResourcePopover: View {
     @ObservedObject var meter: ResourceMeter
     @ObservedObject var model: CanvasModel
 
-    private static let clock: DateFormatter = { let f = DateFormatter(); f.timeStyle = .short; return f }()
+    private var memory: String { meter.lastSample == nil ? "\u{2026}" : ResourceFormat.memory(meter.totalMemory) }
+    private var cpu: String { meter.totalCPU.map(ResourceFormat.cpu) ?? "\u{2026}" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Resources").font(Typography.section).foregroundStyle(Palette.mutedFg)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("\(memory) memory").font(Typography.title.monospacedDigit()).foregroundStyle(Palette.fg).lineLimit(1)
                 Spacer(minLength: 8)
-                Text("Updates every 2 s").font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                CopyReportButton { copyReport() }
             }
-
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(meter.lastSample == nil ? "\u{2026}" : ResourceFormat.memory(meter.totalMemory))
-                    .font(Typography.title.monospacedDigit()).foregroundStyle(meter.level == .normal ? Palette.fg : meter.level.tint)
-                Text("memory").font(Typography.micro).foregroundStyle(Palette.mutedFg)
-                Spacer(minLength: 8)
-                Text(meter.totalCPU.map(ResourceFormat.cpu) ?? "\u{2026}").font(Typography.title.monospacedDigit()).foregroundStyle(Palette.fg)
-                Text("CPU").font(Typography.micro).foregroundStyle(Palette.mutedFg)
-            }
-            .accessibilityElement(children: .combine)
-
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 5) {
-                GridRow {
-                    Text("Process")
-                    Text("Memory").gridColumnAlignment(.trailing)
-                    Text("CPU").gridColumnAlignment(.trailing)
-                }
-                .font(Typography.micro).foregroundStyle(Palette.mutedFg)
-                .accessibilityHidden(true)
-                ForEach(meter.rows, id: \.role) { r in
-                    let found = !r.pids.isEmpty
-                    GridRow {
-                        Text(r.role.rawValue).foregroundStyle(Palette.fg).help(r.role.detail)
-                        Text(found ? ResourceFormat.memory(r.memory) : "not found")
-                        Text(found ? (r.cpu.map(ResourceFormat.cpu) ?? "\u{2026}") : "")
-                    }
-                    .font(Typography.body.monospacedDigit()).foregroundStyle(found ? Palette.fg : Palette.mutedFg)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(r.role.rawValue + ", " + r.role.detail)
-                    .accessibilityValue(found ? "\(ResourceFormat.memorySpoken(r.memory)), \(r.cpu.map(ResourceFormat.cpuSpoken) ?? "CPU measuring")" : "Not found")
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Divider()
-
-            ChartRow(title: "Memory", values: meter.memoryHistory.normalized(floor: 1), capacity: meter.memoryHistory.capacity,
-                     tint: Palette.sel, peak: peakText(ResourceFormat.memory(UInt64(meter.memoryPeak.value)), meter.memoryPeak.at),
-                     spoken: "Memory, last 2 minutes. Peak since launch \(ResourceFormat.memorySpoken(UInt64(meter.memoryPeak.value)))")
-            ChartRow(title: "CPU", values: meter.cpuHistory.normalized(floor: 100), capacity: meter.cpuHistory.capacity,
-                     tint: Palette.component, peak: peakText(ResourceFormat.cpu(meter.cpuPeak.value), meter.cpuPeak.at),
-                     spoken: "CPU, last 2 minutes. Peak since launch \(ResourceFormat.cpuSpoken(meter.cpuPeak.value))")
-            Text("Charts show the last 2 minutes. Peaks count from launch. 100% CPU is one core.")
-                .font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true)
-
-            HStack {
-                Spacer()
-                PillButton(title: "Copy report", style: .primary) {
-                    let text = meter.report(file: model.currentFile.map { model.name(of: $0) })
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(text, forType: .string)
-                    model.flash("Copied the resource report", level: "success")
-                }
-                .accessibilityHint("Copies a plain-text snapshot to paste into a chat")
-            }
+            Sparkline(values: meter.memoryHistory.normalized(floor: 1), capacity: meter.memoryHistory.capacity, tint: Palette.fg)
+                .frame(height: 34)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Memory, last 2 minutes")
+                .accessibilityValue(ResourceFormat.memorySpoken(meter.totalMemory))
+            Text("\(cpu) CPU").font(Typography.title.monospacedDigit()).foregroundStyle(Palette.fg).lineLimit(1)
+            Sparkline(values: meter.cpuHistory.normalized(floor: 100), capacity: meter.cpuHistory.capacity, tint: Palette.fg)
+                .frame(height: 34)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("CPU, last 2 minutes, 100% is one core")
+                .accessibilityValue(meter.totalCPU.map(ResourceFormat.cpuSpoken) ?? "Measuring")
         }
         .padding(14)
         .frame(width: 280)
     }
 
-    private func peakText(_ value: String, _ at: Date?) -> String {
-        guard let at else { return "" }
-        return "peak \(value) at \(Self.clock.string(from: at))"
+    private func copyReport() {
+        let text = meter.report(file: model.currentFile.map { model.name(of: $0) })
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        model.flash("Copied the resource report", level: "success")
     }
 }
 
-private struct ChartRow: View {
-    let title: String
-    let values: [Double]
-    let capacity: Int
-    let tint: Color
-    let peak: String
-    let spoken: String
+/// The popover's 28 pt copy icon (top right), grey like the other chrome icons.
+private struct CopyReportButton: View {
+    let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).font(Typography.label).foregroundStyle(Palette.fg)
-                Spacer(minLength: 8)
-                Text(peak).font(Typography.micro.monospacedDigit()).foregroundStyle(Palette.mutedFg)
-            }
-            Sparkline(values: values, capacity: capacity, tint: tint).frame(height: 34)
+        Button(action: action) {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: Metric.icon, weight: .medium))
+                .foregroundStyle(hovering ? Palette.fg : Palette.mutedFg)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(hovering ? Palette.hover : .clear))
+                .contentShape(Circle())
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spoken)
+        .buttonStyle(.plain)
+        .chromeHelp("Copy report")
+        .accessibilityLabel("Copy report")
+        .accessibilityHint("Copies a plain-text snapshot to paste into a chat")
+        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
     }
 }
 
-/// Values in 0...1, newest at the right edge, so a short history grows in from the right.
+/// Values in 0...1, newest at the right edge, so a short history grows in from the right. Drawn in `tint` at low
+/// opacity: an area with a slightly stronger top line.
 struct Sparkline: View {
     let values: [Double]
     let capacity: Int
@@ -470,21 +443,19 @@ struct Sparkline: View {
             let pts = values.enumerated().map { i, v in
                 CGPoint(x: w - CGFloat(values.count - 1 - i) * step, y: inset + (h - inset * 2) * (1 - CGFloat(v)))
             }
-            ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Palette.hover)
-                if pts.count > 1 {
+            if pts.count > 1 {
+                ZStack {
                     Path { p in
                         p.move(to: CGPoint(x: pts[0].x, y: h))
                         pts.forEach { p.addLine(to: $0) }
                         p.addLine(to: CGPoint(x: pts[pts.count - 1].x, y: h))
                         p.closeSubpath()
                     }
-                    .fill(LinearGradient(colors: [tint.opacity(0.28), tint.opacity(0.02)], startPoint: .top, endPoint: .bottom))
+                    .fill(tint.opacity(0.12))
                     Path { p in p.addLines(pts) }
-                        .stroke(tint, style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+                        .stroke(tint.opacity(0.3), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
     }
 }

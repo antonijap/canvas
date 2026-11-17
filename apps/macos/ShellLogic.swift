@@ -442,6 +442,17 @@ enum CanvasInsets {
     }
 }
 
+/// A page with nothing on it yet: the canvas shows one line on how to start, and the zoom pill and the properties
+/// toggle wait for content (nothing to zoom or inspect). Only once the page has reported its boards (`loaded`, the
+/// doc message's revision), so a file still opening never flashes the hint.
+enum EmptyPage {
+    static let hint = "Ask your agent for a first board, or drop in a screenshot"
+
+    static func isEmpty(fileOpen: Bool, home: Bool, loaded: Bool, boards: Int, cards: Int) -> Bool {
+        fileOpen && !home && loaded && boards == 0 && cards == 0
+    }
+}
+
 /// Where a tooltip window goes: below and to the right of the pointer like AppKit's own, kept on the screen
 /// (above the pointer when there is no room below). Screen coordinates, origin bottom-left.
 enum TipPlacement {

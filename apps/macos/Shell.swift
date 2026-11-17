@@ -61,13 +61,27 @@ struct RootView: View {
             // Talk to the selection: the spark and progress rings, glass over the canvas, under the islands (Spark.swift).
             if !model.uiHidden && !model.homeShown { SparkLayer(model: model) }
 
+            // An empty page: one line on how to start, centred in the free canvas. Clicks and drops pass through.
+            ZStack {
+                if model.pageEmpty {
+                    Text(EmptyPage.hint).font(Typography.body).foregroundStyle(Palette.mutedFg).multilineTextAlignment(.center)
+                        .padding(.leading, insets[0]).padding(.top, insets[1]).padding(.trailing, insets[2]).padding(.bottom, insets[3])
+                        .transition(.opacity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .allowsHitTesting(false)
+            .animation(Motion.fast, value: model.pageEmpty)
+            .ignoresSafeArea()
+
             GlassEffectContainer(spacing: Metric.islandGap) {
                 ZStack(alignment: .topLeading) {
                     TopBar(model: model)
                     // View > Hide UI (Cmd+backslash): only the canvas and the tabs stay.
                     if !model.uiHidden && !model.homeShown { LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth) }
                     if inspectorShown { Inspector(model: model, fonts: model.fonts) }
-                    if !model.uiHidden && !model.homeShown { ZoomCorner(model: model) }
+                    // Nothing to zoom on an empty page: the pill comes back with the first board.
+                    if !model.uiHidden && !model.homeShown && !model.pageEmpty { ZoomCorner(model: model) }
                     if let t = model.toast {
                         Toast(text: t, kind: model.toastKind, actions: model.toastActions,
                               onCopy: model.toastCopy == nil ? nil : { model.copyToast() }, onHover: { model.toastHovered = $0 })
@@ -144,7 +158,10 @@ struct TopBar: View {
                 HStack(spacing: 0) {
                     ResourceReadout(meter: ResourceMeter.shared, model: model)
                     IconButton(symbol: "magnifyingglass", help: "Quick actions  \u{2318}K") { PaletteController.shared.toggle() }
-                    IconButton(symbol: "sidebar.right", active: model.inspectorOpen, help: model.inspectorOpen ? "Hide properties" : "Show properties") { model.inspectorOpen.toggle() }
+                    // Nothing to inspect on an empty page.
+                    if !model.pageEmpty {
+                        IconButton(symbol: "sidebar.right", active: model.inspectorOpen, help: model.inspectorOpen ? "Hide properties" : "Show properties") { model.inspectorOpen.toggle() }
+                    }
                 }
             }
         }
@@ -319,6 +336,14 @@ struct FontList: View {
 }
 
 // MARK: Right
+
+extension CanvasModel {
+    /// The shown page has no boards and no cards (EmptyPage, ShellLogic.swift). From the page's own state messages
+    /// (doc.boards and widgets are the active page's), so no extra polling.
+    var pageEmpty: Bool {
+        EmptyPage.isEmpty(fileOpen: currentFile != nil, home: homeShown, loaded: !revision.isEmpty, boards: boards.count, cards: widgets.count)
+    }
+}
 
 // MARK: Bottom
 
