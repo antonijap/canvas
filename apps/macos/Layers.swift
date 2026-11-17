@@ -664,9 +664,10 @@ struct LayerDrop: DropDelegate {
 
 // MARK: Rename Layers
 
-/// Rename Layers (Cmd+R with several layers selected): above the canvas, a Match field (optional, a regular
-/// expression or plain text), Rename to with buttons that insert the current name and a number counting up or down,
-/// the number to start from, and a preview of the first names. Return renames them all in one undo step, Esc closes.
+/// Rename Layers (Cmd+R with several layers selected): above the canvas, the Rename to field beside Rename, buttons
+/// that insert the current name and a number counting up or down, the number to start from (once a number is in the
+/// name), Match (optional, a regular expression or plain text; shown on request) and a preview of the first names.
+/// Return renames them all in one undo step, Esc closes.
 struct BatchRenameLayer: View {
     @ObservedObject var model: CanvasModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -697,6 +698,8 @@ private struct BatchRenamePanel: View {
     @State private var match = ""
     @State private var to = "$&"
     @State private var start = ""
+    /// Match is out of the way until asked for; hiding it again clears it, so nothing unseen changes the result.
+    @State private var showMatch = false
     @FocusState private var focus: Field?
     enum Field: Hashable { case match, to, start }
 
@@ -705,58 +708,62 @@ private struct BatchRenamePanel: View {
 
     var body: some View {
         GlassIsland(padding: Metric.islandPad, dense: true) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Rename \(ids.count) layers").font(Typography.title).foregroundStyle(Palette.fg)
-                field("Match", "Optional: text or a pattern", $match, .match)
-                field("Rename to", "New name", $to, .to)
-                HStack(spacing: 6) {
-                    PillButton(title: "Current name") { insert("$&") }.fixedSize()
-                    PillButton(title: "Number \u{2191}") { insert("$n") }.fixedSize()
-                    PillButton(title: "Number \u{2193}") { insert("$N") }.fixedSize()
-                    Spacer(minLength: 8)
-                    Text(to.contains("$N") ? "Stop at" : "Start at").font(Typography.label).foregroundStyle(Palette.mutedFg)
-                    FieldBox {
-                        TextField("1", text: $start).textFieldStyle(.plain).font(Typography.body).focused($focus, equals: .start)
-                            .onSubmit(apply).accessibilityLabel("Number to start from")
-                    }
-                    .frame(width: 56)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    field("New name", $to, .to, label: "Rename to")
+                    FieldButton(title: "Rename", symbol: nil, prominent: true, action: apply).fixedSize()
                 }
-                VStack(alignment: .leading, spacing: 2) {
+                if showMatch { field("Match: text or a pattern", $match, .match, label: "Match") }
+                HStack(spacing: 6) {
+                    InsertPill(title: "Current name") { insert("$&") }
+                    InsertPill(title: "Number \u{2191}") { insert("$n") }
+                    InsertPill(title: "Number \u{2193}") { insert("$N") }
+                    Spacer(minLength: 8)
+                    if BatchRename.counts(to) {
+                        Text(to.contains("$N") ? "Stop at" : "Start at").font(Typography.label).foregroundStyle(Palette.mutedFg)
+                            .lineLimit(1).fixedSize()
+                        TextField("1", text: $start).textFieldStyle(.plain).font(Typography.label).focused($focus, equals: .start)
+                            .onSubmit(apply).onExitCommand { close() }.accessibilityLabel("Number to start from")
+                            .padding(.horizontal, 8).frame(width: 48, height: Self.pill)
+                            .background(RoundedRectangle(cornerRadius: Self.pill / 2, style: .continuous).fill(Palette.field))
+                    }
+                    Button { toggleMatch() } label: {
+                        Text(showMatch ? "Hide match" : "Match\u{2026}").font(Typography.label).foregroundStyle(Palette.mutedFg)
+                            .lineLimit(1).padding(.horizontal, 8).frame(height: Self.pill).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).fixedSize()
+                    .accessibilityLabel(showMatch ? "Hide the Match field" : "Match part of each name")
+                }
+                VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(preview.enumerated()), id: \.offset) { _, c in
-                        HStack(spacing: 8) {
+                        HStack(spacing: 10) {
                             Text(c.old).foregroundStyle(Palette.mutedFg).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
                             Image(systemName: "arrow.right").font(.system(size: 10, weight: .medium)).foregroundStyle(Palette.mutedFg)
-                            Text(c.new).foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
+                            Text(c.new).font(Typography.label).foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.middle).frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .font(Typography.body).frame(height: 22)
+                        .font(.system(size: 12)).frame(height: 22)
                     }
                     if ids.count > preview.count {
                         Text("and \(ids.count - preview.count) more").font(Typography.micro).foregroundStyle(Palette.mutedFg).frame(height: 18)
                     }
                 }
-                .padding(.horizontal, 8).padding(.vertical, 6)
+                .padding(4)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
-                HStack(spacing: 6) {
-                    Spacer()
-                    PillButton(title: "Cancel") { close() }
-                    PillButton(title: "Rename", style: .primary, action: apply)
-                }
             }
-            .padding(6)
+            .padding(8)
         }
         .frame(width: 480)
         .onAppear { DispatchQueue.main.async { focus = .to } }
         .onExitCommand { close() }
     }
 
-    private func field(_ label: String, _ hint: String, _ text: Binding<String>, _ f: Field) -> some View {
-        HStack(spacing: 8) {
-            Text(label).font(Typography.label).foregroundStyle(Palette.mutedFg).frame(width: 72, alignment: .leading)
-            FieldBox {
-                TextField(hint, text: text).textFieldStyle(.plain).font(Typography.body).focused($focus, equals: f)
-                    .onSubmit(apply).onExitCommand { close() }.accessibilityLabel(label)
-            }
+    /// The inserts' and Match's height: one row, one height.
+    private static let pill: CGFloat = 24
+
+    private func field(_ hint: String, _ text: Binding<String>, _ f: Field, label: String) -> some View {
+        FieldBox {
+            TextField(hint, text: text).textFieldStyle(.plain).font(Typography.body).focused($focus, equals: f)
+                .onSubmit(apply).onExitCommand { close() }.accessibilityLabel(label)
         }
     }
 
@@ -765,11 +772,33 @@ private struct BatchRenamePanel: View {
         focus = .to
     }
 
+    private func toggleMatch() {
+        showMatch.toggle()
+        if showMatch { DispatchQueue.main.async { focus = .match } } else { match = ""; focus = .to }
+    }
+
     private func close() { model.batchRename = nil; model.focusCanvas() }
 
     private func apply() {
         let next = BatchRename.names(names, match: match, to: to, start: startValue)
         LayersStore.of(model).renameMany(ids, to: next)
         close()
+    }
+}
+
+/// A token button under Rename to: a small grey capsule.
+private struct InsertPill: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(Typography.label).foregroundStyle(Palette.fg).lineLimit(1)
+                .padding(.horizontal, 10).frame(height: 24)
+                .background(Capsule().fill(hovering ? Palette.field : Palette.active))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain).fixedSize()
+        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
     }
 }

@@ -141,6 +141,8 @@ struct LayersLogicTests {
         check(r("x", match: "(", ["a(b"]) == ["axb"], "a Match that is not a valid pattern matches literally")
         check(r("") == names, "an empty result keeps the old name")
         check(r("$$n") == ["$n", "$n", "$n"], "$$ is a dollar sign")
+        check(BatchRename.counts("$& $n") && BatchRename.counts("Row $NN") && BatchRename.counts("$$$n"), "a number token shows Start at")
+        check(!BatchRename.counts("$&") && !BatchRename.counts("$$n") && !BatchRename.counts("Row n") && !BatchRename.counts("$"), "no number token: Start at stays hidden")
         check(BatchRename.preview(names, match: "", to: "$& $n", start: nil, limit: 2) == [("Card", "Card 1"), ("Card copy", "Card copy 2")].map { BatchRename.Change(old: $0.0, new: $0.1) }, "preview: the first rows")
     }
 
