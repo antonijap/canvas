@@ -98,8 +98,8 @@
                 {
                   "type": "text",
                   "id": "ty",
-                  "name": "This file is a short course: ten lessons",
-                  "content": "This file is a short course: ten lessons, one board each. Every board says what to press and has something to try it on.",
+                  "name": "This file is a short course: eleven less",
+                  "content": "This file is a short course: eleven lessons, one board each. Every board says what to press and has something to try it on.",
                   "fill": "#1D1D1F",
                   "fontFamily": "SF Pro",
                   "fontSize": 15,
@@ -588,8 +588,8 @@
                 {
                   "type": "text",
                   "id": "t1p",
-                  "name": "Using Claude Code or Codex? The card to ",
-                  "content": "Using Claude Code or Codex? The card to the left connects it to Canvas. Lesson 8 shows what to do next.",
+                  "name": "Using Claude Code or Codex? Press Connec",
+                  "content": "Using Claude Code or Codex? Press Connect on the card to the left. Lesson 2 shows the rest.",
                   "fill": "#1D1D1F",
                   "fontFamily": "SF Pro",
                   "fontSize": 15,
@@ -692,6 +692,53 @@
                 {
                   "type": "frame",
                   "id": "wel_row2",
+                  "name": "Connect your agent",
+                  "width": "fill_container",
+                  "gap": 12,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "wel_cn_n1",
+                      "name": "Number",
+                      "width": 22,
+                      "height": 22,
+                      "cornerRadius": 11,
+                      "fill": "#F2A900",
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "wel_cn_t2",
+                          "name": "2",
+                          "content": "2",
+                          "fill": "#FFFFFF",
+                          "fontFamily": "SF Pro",
+                          "fontSize": 11,
+                          "fontWeight": "700",
+                          "letterSpacing": 0.06,
+                          "lineHeight": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "wel_cn_t3",
+                      "name": "Connect your agent",
+                      "content": "Connect your agent",
+                      "fill": "#1D1D1F",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 15,
+                      "fontWeight": "500",
+                      "letterSpacing": -0.23,
+                      "lineHeight": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "wel_row3",
                   "name": "Select",
                   "width": "fill_container",
                   "gap": 12,
@@ -704,15 +751,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#F2A900",
+                      "fill": "#34C759",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "t5",
-                          "name": "2",
-                          "content": "2",
+                          "name": "3",
+                          "content": "3",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -738,7 +785,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "wel_row3",
+                  "id": "wel_row4",
                   "name": "Move and copy",
                   "width": "fill_container",
                   "gap": 12,
@@ -751,15 +798,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#34C759",
+                      "fill": "#00B5A3",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "t8",
-                          "name": "3",
-                          "content": "3",
+                          "name": "4",
+                          "content": "4",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -785,7 +832,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "wel_row4",
+                  "id": "wel_row5",
                   "name": "Auto layout",
                   "width": "fill_container",
                   "gap": 12,
@@ -798,15 +845,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#00B5A3",
+                      "fill": "#30B0FF",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "tb",
-                          "name": "4",
-                          "content": "4",
+                          "name": "5",
+                          "content": "5",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -832,7 +879,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "wel_row5",
+                  "id": "wel_row6",
                   "name": "Style",
                   "width": "fill_container",
                   "gap": 12,
@@ -845,15 +892,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#30B0FF",
+                      "fill": "#5E5CE6",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "te",
-                          "name": "5",
-                          "content": "5",
+                          "name": "6",
+                          "content": "6",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -879,7 +926,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "wel_row6",
+                  "id": "wel_row7",
                   "name": "Text",
                   "width": "fill_container",
                   "gap": 12,
@@ -892,15 +939,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#5E5CE6",
+                      "fill": "#AF52DE",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "th",
-                          "name": "6",
-                          "content": "6",
+                          "name": "7",
+                          "content": "7",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -926,7 +973,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "wel_row7",
+                  "id": "wel_row8",
                   "name": "Components",
                   "width": "fill_container",
                   "gap": 12,
@@ -939,15 +986,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#AF52DE",
+                      "fill": "#FF2D92",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "tk",
-                          "name": "7",
-                          "content": "7",
+                          "name": "8",
+                          "content": "8",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -973,7 +1020,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "wel_row8",
+                  "id": "wel_row9",
                   "name": "Work with an agent",
                   "width": "fill_container",
                   "gap": 12,
@@ -986,15 +1033,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#FF2D92",
+                      "fill": "#FF453A",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "tn",
-                          "name": "8",
-                          "content": "8",
+                          "name": "9",
+                          "content": "9",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -1020,7 +1067,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "wel_row9",
+                  "id": "wel_row10",
                   "name": "Cards and pages",
                   "width": "fill_container",
                   "gap": 12,
@@ -1033,15 +1080,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#FF453A",
+                      "fill": "#8E8E93",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "tq",
-                          "name": "9",
-                          "content": "9",
+                          "name": "10",
+                          "content": "10",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -1067,7 +1114,7 @@
                 },
                 {
                   "type": "frame",
-                  "id": "wel_row10",
+                  "id": "wel_row11",
                   "name": "Share and export",
                   "width": "fill_container",
                   "gap": 12,
@@ -1080,15 +1127,15 @@
                       "width": 22,
                       "height": 22,
                       "cornerRadius": 11,
-                      "fill": "#8E8E93",
+                      "fill": "#1D1D1F",
                       "justifyContent": "center",
                       "alignItems": "center",
                       "children": [
                         {
                           "type": "text",
                           "id": "tt",
-                          "name": "10",
-                          "content": "10",
+                          "name": "11",
+                          "content": "11",
                           "fill": "#FFFFFF",
                           "fontFamily": "SF Pro",
                           "fontSize": 11,
@@ -1176,8 +1223,8 @@
                 {
                   "type": "text",
                   "id": "t30",
-                  "name": "Lesson 1 of 10",
-                  "content": "Lesson 1 of 10",
+                  "name": "Lesson 1 of 11",
+                  "content": "Lesson 1 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -2012,10 +2059,660 @@
     },
     {
       "type": "frame",
-      "id": "select",
-      "name": "2. Select",
+      "id": "connect",
+      "name": "2. Connect your agent",
       "x": 2720,
       "y": 0,
+      "width": 1200,
+      "height": 760,
+      "fill": "#FFFFFF",
+      "cornerRadius": 20,
+      "clip": true,
+      "layout": "vertical",
+      "padding": 64,
+      "gap": 40,
+      "children": [
+        {
+          "type": "frame",
+          "id": "connect_head",
+          "name": "Heading",
+          "width": "fill_container",
+          "layout": "vertical",
+          "gap": 14,
+          "children": [
+            {
+              "type": "frame",
+              "id": "connect_eyebrow",
+              "name": "Lesson",
+              "gap": 10,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "connect_num",
+                  "name": "Number",
+                  "width": 26,
+                  "height": 26,
+                  "cornerRadius": 13,
+                  "fill": "#F2A900",
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "cn_ts",
+                      "name": "2",
+                      "content": "2",
+                      "fill": "#FFFFFF",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 13,
+                      "fontWeight": "700",
+                      "letterSpacing": -0.08,
+                      "lineHeight": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "cn_tt",
+                  "name": "Lesson 2 of 11",
+                  "content": "Lesson 2 of 11",
+                  "fill": "#6E6E73",
+                  "fontFamily": "SF Pro",
+                  "fontSize": 13,
+                  "fontWeight": "600",
+                  "letterSpacing": -0.08,
+                  "lineHeight": 1
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "cn_tu",
+              "name": "Title",
+              "content": "Connect your agent",
+              "fill": "#1D1D1F",
+              "fontFamily": "SF Pro",
+              "fontSize": 40,
+              "fontWeight": "700",
+              "letterSpacing": 0.37,
+              "lineHeight": 1
+            },
+            {
+              "type": "text",
+              "id": "cn_tv",
+              "name": "Intro",
+              "content": "Canvas MCP lets Claude Code or Codex see this file and edit it while you watch. You connect it once.",
+              "fill": "#6E6E73",
+              "fontFamily": "SF Pro",
+              "fontSize": 17,
+              "fontWeight": "400",
+              "letterSpacing": -0.43,
+              "lineHeight": 1.29,
+              "textGrowth": "fixed-width",
+              "width": 1072
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "connect_body",
+          "name": "Body",
+          "width": "fill_container",
+          "height": 470,
+          "gap": 48,
+          "children": [
+            {
+              "type": "frame",
+              "id": "connect_steps",
+              "name": "Steps",
+              "width": 480,
+              "layout": "vertical",
+              "gap": 20,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "cn_s1",
+                  "name": "Press Connect on the welcome card, or co",
+                  "width": "fill_container",
+                  "gap": 16,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "cn_ks2",
+                      "name": "Step",
+                      "width": 112,
+                      "height": 24,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "cn_k3",
+                          "name": "Step 1",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 12,
+                          "fill": "#FFFFFF",
+                          "effect": [
+                            {
+                              "type": "shadow",
+                              "offset": {
+                                "x": 0,
+                                "y": 0
+                              },
+                              "blur": 0,
+                              "spread": 1,
+                              "color": "#00000014"
+                            },
+                            {
+                              "type": "shadow",
+                              "offset": {
+                                "x": 0,
+                                "y": 1
+                              },
+                              "blur": 1,
+                              "spread": 0,
+                              "color": "#0000001A"
+                            }
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "cn_t4",
+                              "name": "1",
+                              "content": "1",
+                              "fill": "#1D1D1F",
+                              "fontFamily": "SF Pro",
+                              "fontSize": 12,
+                              "fontWeight": "600",
+                              "letterSpacing": 0,
+                              "lineHeight": 1
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "cn_t5",
+                      "name": "Press Connect on the welcome card, or co",
+                      "content": "Press Connect on the welcome card, or copy its command into Terminal.",
+                      "fill": "#1D1D1F",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 15,
+                      "fontWeight": "400",
+                      "letterSpacing": -0.23,
+                      "lineHeight": 1.33,
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cn_s6",
+                  "name": "Start a new Claude Code or Codex session",
+                  "width": "fill_container",
+                  "gap": 16,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "cn_ks7",
+                      "name": "Step",
+                      "width": 112,
+                      "height": 24,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "cn_k8",
+                          "name": "Step 2",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 12,
+                          "fill": "#FFFFFF",
+                          "effect": [
+                            {
+                              "type": "shadow",
+                              "offset": {
+                                "x": 0,
+                                "y": 0
+                              },
+                              "blur": 0,
+                              "spread": 1,
+                              "color": "#00000014"
+                            },
+                            {
+                              "type": "shadow",
+                              "offset": {
+                                "x": 0,
+                                "y": 1
+                              },
+                              "blur": 1,
+                              "spread": 0,
+                              "color": "#0000001A"
+                            }
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "cn_t9",
+                              "name": "2",
+                              "content": "2",
+                              "fill": "#1D1D1F",
+                              "fontFamily": "SF Pro",
+                              "fontSize": 12,
+                              "fontWeight": "600",
+                              "letterSpacing": 0,
+                              "lineHeight": 1
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "cn_ta",
+                      "name": "Start a new Claude Code or Codex session",
+                      "content": "Start a new Claude Code or Codex session.",
+                      "fill": "#1D1D1F",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 15,
+                      "fontWeight": "400",
+                      "letterSpacing": -0.23,
+                      "lineHeight": 1.33,
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cn_sb",
+                  "name": "The dot on the welcome card turns green.",
+                  "width": "fill_container",
+                  "gap": 16,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "cn_ksc",
+                      "name": "Step",
+                      "width": 112,
+                      "height": 24,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "cn_kd",
+                          "name": "Step 3",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 12,
+                          "fill": "#FFFFFF",
+                          "effect": [
+                            {
+                              "type": "shadow",
+                              "offset": {
+                                "x": 0,
+                                "y": 0
+                              },
+                              "blur": 0,
+                              "spread": 1,
+                              "color": "#00000014"
+                            },
+                            {
+                              "type": "shadow",
+                              "offset": {
+                                "x": 0,
+                                "y": 1
+                              },
+                              "blur": 1,
+                              "spread": 0,
+                              "color": "#0000001A"
+                            }
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "cn_te",
+                              "name": "3",
+                              "content": "3",
+                              "fill": "#1D1D1F",
+                              "fontFamily": "SF Pro",
+                              "fontSize": 12,
+                              "fontWeight": "600",
+                              "letterSpacing": 0,
+                              "lineHeight": 1
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "cn_tf",
+                      "name": "The dot on the welcome card turns green.",
+                      "content": "The dot on the welcome card turns green.",
+                      "fill": "#1D1D1F",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 15,
+                      "fontWeight": "400",
+                      "letterSpacing": -0.23,
+                      "lineHeight": 1.33,
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cn_sg",
+                  "name": "Select something and ask: “What do I hav",
+                  "width": "fill_container",
+                  "gap": 16,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "cn_ksh",
+                      "name": "Step",
+                      "width": 112,
+                      "height": 24,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "cn_ki",
+                          "name": "Step 4",
+                          "width": 24,
+                          "height": 24,
+                          "cornerRadius": 12,
+                          "fill": "#FFFFFF",
+                          "effect": [
+                            {
+                              "type": "shadow",
+                              "offset": {
+                                "x": 0,
+                                "y": 0
+                              },
+                              "blur": 0,
+                              "spread": 1,
+                              "color": "#00000014"
+                            },
+                            {
+                              "type": "shadow",
+                              "offset": {
+                                "x": 0,
+                                "y": 1
+                              },
+                              "blur": 1,
+                              "spread": 0,
+                              "color": "#0000001A"
+                            }
+                          ],
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "cn_tj",
+                              "name": "4",
+                              "content": "4",
+                              "fill": "#1D1D1F",
+                              "fontFamily": "SF Pro",
+                              "fontSize": 12,
+                              "fontWeight": "600",
+                              "letterSpacing": 0,
+                              "lineHeight": 1
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "cn_tk",
+                      "name": "Select something and ask: “What do I hav",
+                      "content": "Select something and ask: “What do I have selected in Canvas?”",
+                      "fill": "#1D1D1F",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 15,
+                      "fontWeight": "400",
+                      "letterSpacing": -0.23,
+                      "lineHeight": 1.33,
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "cn_tl",
+                  "name": "Other apps",
+                  "content": "Other apps, or Canvas not in Applications: getcanvas.cc/download#connect",
+                  "fill": "#6E6E73",
+                  "fontFamily": "SF Pro",
+                  "fontSize": 15,
+                  "fontWeight": "400",
+                  "letterSpacing": -0.23,
+                  "lineHeight": 1.33,
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "connect_try",
+              "name": "Try it",
+              "width": "fill_container",
+              "height": 470,
+              "cornerRadius": 20,
+              "fill": "#F5F5F7",
+              "clip": true,
+              "layout": "none",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "cn_tw",
+                  "name": "Try it label",
+                  "content": "TRY IT",
+                  "fill": "#8E8E93",
+                  "fontFamily": "SF Pro",
+                  "fontSize": 11,
+                  "fontWeight": "700",
+                  "letterSpacing": 0.06,
+                  "lineHeight": 1,
+                  "x": 28,
+                  "y": 26
+                },
+                {
+                  "type": "text",
+                  "id": "cn_tx",
+                  "name": "Try it prompt",
+                  "content": "Select the card, then ask your agent: What do I have selected in Canvas?",
+                  "fill": "#1D1D1F",
+                  "fontFamily": "SF Pro",
+                  "fontSize": 15,
+                  "fontWeight": "500",
+                  "letterSpacing": -0.23,
+                  "lineHeight": 1.33,
+                  "textGrowth": "fixed-width",
+                  "width": 500,
+                  "x": 28,
+                  "y": 46
+                },
+                {
+                  "type": "frame",
+                  "id": "connect_pill",
+                  "name": "Connected",
+                  "x": 28,
+                  "y": 110,
+                  "height": 32,
+                  "padding": [
+                    0,
+                    14
+                  ],
+                  "gap": 8,
+                  "cornerRadius": 16,
+                  "fill": "#FFFFFF",
+                  "effect": [
+                    {
+                      "type": "shadow",
+                      "offset": {
+                        "x": 0,
+                        "y": 0
+                      },
+                      "blur": 0,
+                      "spread": 1,
+                      "color": "#00000014"
+                    },
+                    {
+                      "type": "shadow",
+                      "offset": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "blur": 1,
+                      "spread": 0,
+                      "color": "#0000001A"
+                    }
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "cn_em",
+                      "name": "Dot",
+                      "x": 0,
+                      "y": 0,
+                      "width": 8,
+                      "height": 8,
+                      "fill": "#34C759"
+                    },
+                    {
+                      "type": "text",
+                      "id": "cn_tn",
+                      "name": "Connected: Claude",
+                      "content": "Connected: Claude",
+                      "fill": "#1D1D1F",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 13,
+                      "fontWeight": "600",
+                      "letterSpacing": -0.08,
+                      "lineHeight": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "cn_cr",
+                  "name": "Hello card",
+                  "x": 122,
+                  "y": 180,
+                  "width": 300,
+                  "height": 180,
+                  "fill": "#FFFFFF",
+                  "cornerRadius": 16,
+                  "effect": [
+                    {
+                      "type": "shadow",
+                      "offset": {
+                        "x": 0,
+                        "y": 0
+                      },
+                      "blur": 0,
+                      "spread": 1,
+                      "color": "#0000000D"
+                    },
+                    {
+                      "type": "shadow",
+                      "offset": {
+                        "x": 0,
+                        "y": 1
+                      },
+                      "blur": 2,
+                      "spread": 0,
+                      "color": "#0000000F"
+                    },
+                    {
+                      "type": "shadow",
+                      "offset": {
+                        "x": 0,
+                        "y": 8
+                      },
+                      "blur": 24,
+                      "spread": -4,
+                      "color": "#0000001A"
+                    }
+                  ],
+                  "layout": "none",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "cn_io",
+                      "name": "sparkles",
+                      "library": "lucide",
+                      "icon": "sparkles",
+                      "x": 28,
+                      "y": 28,
+                      "width": 28,
+                      "height": 28,
+                      "fill": "#30B0FF"
+                    },
+                    {
+                      "type": "text",
+                      "id": "cn_tp",
+                      "name": "Hello, agent",
+                      "content": "Hello, agent",
+                      "fill": "#1D1D1F",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 22,
+                      "fontWeight": "700",
+                      "letterSpacing": -0.26,
+                      "lineHeight": 1,
+                      "x": 28,
+                      "y": 76
+                    },
+                    {
+                      "type": "text",
+                      "id": "cn_tq",
+                      "name": "Ask what is selected. The answer names t",
+                      "content": "Ask what is selected. The answer names this card.",
+                      "fill": "#6E6E73",
+                      "fontFamily": "SF Pro",
+                      "fontSize": 15,
+                      "fontWeight": "400",
+                      "letterSpacing": -0.23,
+                      "lineHeight": 1.33,
+                      "textGrowth": "fixed-width",
+                      "width": 244,
+                      "x": 28,
+                      "y": 112
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "select",
+      "name": "3. Select",
+      "x": 0,
+      "y": 920,
       "width": 1200,
       "height": 760,
       "fill": "#FFFFFF",
@@ -2047,15 +2744,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#F2A900",
+                  "fill": "#34C759",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "t47",
-                      "name": "2",
-                      "content": "2",
+                      "name": "3",
+                      "content": "3",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -2068,8 +2765,8 @@
                 {
                   "type": "text",
                   "id": "t48",
-                  "name": "Lesson 2 of 10",
-                  "content": "Lesson 2 of 10",
+                  "name": "Lesson 3 of 11",
+                  "content": "Lesson 3 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -2755,8 +3452,8 @@
     {
       "type": "frame",
       "id": "move_copy",
-      "name": "3. Move and copy",
-      "x": 0,
+      "name": "4. Move and copy",
+      "x": 1360,
       "y": 920,
       "width": 1200,
       "height": 760,
@@ -2789,15 +3486,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#34C759",
+                  "fill": "#00B5A3",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "t5e",
-                      "name": "3",
-                      "content": "3",
+                      "name": "4",
+                      "content": "4",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -2810,8 +3507,8 @@
                 {
                   "type": "text",
                   "id": "t5f",
-                  "name": "Lesson 3 of 10",
-                  "content": "Lesson 3 of 10",
+                  "name": "Lesson 4 of 11",
+                  "content": "Lesson 4 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -3546,8 +4243,8 @@
     {
       "type": "frame",
       "id": "auto_layout",
-      "name": "4. Auto layout",
-      "x": 1360,
+      "name": "5. Auto layout",
+      "x": 2720,
       "y": 920,
       "width": 1200,
       "height": 760,
@@ -3580,15 +4277,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#00B5A3",
+                  "fill": "#30B0FF",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "t6k",
-                      "name": "4",
-                      "content": "4",
+                      "name": "5",
+                      "content": "5",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -3601,8 +4298,8 @@
                 {
                   "type": "text",
                   "id": "t6l",
-                  "name": "Lesson 4 of 10",
-                  "content": "Lesson 4 of 10",
+                  "name": "Lesson 5 of 11",
+                  "content": "Lesson 5 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -4423,9 +5120,9 @@
     {
       "type": "frame",
       "id": "style",
-      "name": "5. Style",
-      "x": 2720,
-      "y": 920,
+      "name": "6. Style",
+      "x": 0,
+      "y": 1840,
       "width": 1200,
       "height": 760,
       "fill": "#FFFFFF",
@@ -4457,15 +5154,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#30B0FF",
+                  "fill": "#5E5CE6",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "t7s",
-                      "name": "5",
-                      "content": "5",
+                      "name": "6",
+                      "content": "6",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -4478,8 +5175,8 @@
                 {
                   "type": "text",
                   "id": "t7t",
-                  "name": "Lesson 5 of 10",
-                  "content": "Lesson 5 of 10",
+                  "name": "Lesson 6 of 11",
+                  "content": "Lesson 6 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -5337,8 +6034,8 @@
     {
       "type": "frame",
       "id": "text",
-      "name": "6. Text",
-      "x": 0,
+      "name": "7. Text",
+      "x": 1360,
       "y": 1840,
       "width": 1200,
       "height": 760,
@@ -5371,15 +6068,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#5E5CE6",
+                  "fill": "#AF52DE",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "t9a",
-                      "name": "6",
-                      "content": "6",
+                      "name": "7",
+                      "content": "7",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -5392,8 +6089,8 @@
                 {
                   "type": "text",
                   "id": "t9b",
-                  "name": "Lesson 6 of 10",
-                  "content": "Lesson 6 of 10",
+                  "name": "Lesson 7 of 11",
+                  "content": "Lesson 7 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -6421,8 +7118,8 @@
     {
       "type": "frame",
       "id": "components",
-      "name": "7. Components",
-      "x": 1360,
+      "name": "8. Components",
+      "x": 2720,
       "y": 1840,
       "width": 1200,
       "height": 760,
@@ -6455,15 +7152,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#AF52DE",
+                  "fill": "#FF2D92",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "tab",
-                      "name": "7",
-                      "content": "7",
+                      "name": "8",
+                      "content": "8",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -6476,8 +7173,8 @@
                 {
                   "type": "text",
                   "id": "tac",
-                  "name": "Lesson 7 of 10",
-                  "content": "Lesson 7 of 10",
+                  "name": "Lesson 8 of 11",
+                  "content": "Lesson 8 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -7162,9 +7859,9 @@
     {
       "type": "frame",
       "id": "agent",
-      "name": "8. Work with an agent",
-      "x": 2720,
-      "y": 1840,
+      "name": "9. Work with an agent",
+      "x": 0,
+      "y": 2760,
       "width": 1200,
       "height": 760,
       "fill": "#FFFFFF",
@@ -7196,15 +7893,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#FF2D92",
+                  "fill": "#FF453A",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "tbi",
-                      "name": "8",
-                      "content": "8",
+                      "name": "9",
+                      "content": "9",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -7217,8 +7914,8 @@
                 {
                   "type": "text",
                   "id": "tbj",
-                  "name": "Lesson 8 of 10",
-                  "content": "Lesson 8 of 10",
+                  "name": "Lesson 9 of 11",
+                  "content": "Lesson 9 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -7244,7 +7941,7 @@
               "type": "text",
               "id": "tbl",
               "name": "Intro",
-              "content": "Connect Claude Code or Codex once (the card on the Welcome board has the command). Then point at a layer and ask.",
+              "content": "Connect Claude Code or Codex once (lesson 2). Then point at a layer and ask.",
               "fill": "#6E6E73",
               "fontFamily": "SF Pro",
               "fontSize": 17,
@@ -8033,8 +8730,8 @@
     {
       "type": "frame",
       "id": "cards_pages",
-      "name": "9. Cards and pages",
-      "x": 0,
+      "name": "10. Cards and pages",
+      "x": 1360,
       "y": 2760,
       "width": 1200,
       "height": 760,
@@ -8067,15 +8764,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#FF453A",
+                  "fill": "#8E8E93",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "tca",
-                      "name": "9",
-                      "content": "9",
+                      "name": "10",
+                      "content": "10",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -8088,8 +8785,8 @@
                 {
                   "type": "text",
                   "id": "tcb",
-                  "name": "Lesson 9 of 10",
-                  "content": "Lesson 9 of 10",
+                  "name": "Lesson 10 of 11",
+                  "content": "Lesson 10 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
@@ -8551,8 +9248,8 @@
     {
       "type": "frame",
       "id": "share",
-      "name": "10. Share and export",
-      "x": 1360,
+      "name": "11. Share and export",
+      "x": 2720,
       "y": 2760,
       "width": 1200,
       "height": 760,
@@ -8585,15 +9282,15 @@
                   "width": 26,
                   "height": 26,
                   "cornerRadius": 13,
-                  "fill": "#8E8E93",
+                  "fill": "#1D1D1F",
                   "justifyContent": "center",
                   "alignItems": "center",
                   "children": [
                     {
                       "type": "text",
                       "id": "tdd",
-                      "name": "10",
-                      "content": "10",
+                      "name": "11",
+                      "content": "11",
                       "fill": "#FFFFFF",
                       "fontFamily": "SF Pro",
                       "fontSize": 13,
@@ -8606,8 +9303,8 @@
                 {
                   "type": "text",
                   "id": "tde",
-                  "name": "Lesson 10 of 10",
-                  "content": "Lesson 10 of 10",
+                  "name": "Lesson 11 of 11",
+                  "content": "Lesson 11 of 11",
                   "fill": "#6E6E73",
                   "fontFamily": "SF Pro",
                   "fontSize": 13,
