@@ -216,7 +216,7 @@ type FileState = {
    * The save log on top of document.json that this state holds (doc/doclog.ts): what it holds, its open file once
    * this run appended, and when its first record was written (ours).
    */
-  log?: { info: LogInfo; fh?: fs.promises.FileHandle; checked?: boolean; since?: number };
+  log?: { info: LogInfo; fh?: fs.promises.FileHandle; checked?: boolean; since?: number; /** This state appended every record in it (it made the log): `logged` holds all their edits. */ mine?: boolean };
   /** The log file as this state last saw it: inode:bytes, or "none". Any other is someone else's change. */
   logSeen: string;
   /** Edits saved in our log, not in document.json yet: they go on top of a save that does not know the log. */
@@ -1017,7 +1017,10 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
   const prevOurs = !!prevLog && prevLog.info.owner === OWNER;
   // (No log held, but pending edits carry a seq: the log this state was creating when the disk moved under it.)
   const creating = !prevLog && st.logSeen === "none" && st.pending.some((p) => p.seq !== undefined) && (l.log?.owner ?? l.logHead?.owner) === OWNER;
-  const sameFile = creating || (prevOurs && inoOf(st.logSeen) !== undefined && inoOf(st.logSeen) === inoOf(l.logSeen));
+  const sameIno = prevOurs && inoOf(st.logSeen) !== undefined && inoOf(st.logSeen) === inoOf(l.logSeen);
+  // Covered only when this state wrote every record of that file: a log of ours it loaded (written by this server at
+  // another path, before a move) has records whose edits are in no Pending here, so it is never taken as covered.
+  const sameFile = creating || (sameIno && !!prevLog!.mine);
   const heldSeq = sameFile ? Math.max(prevLog?.info.seq ?? 0, ...st.pending.map((p) => p.seq ?? 0)) : -1;
   // A stale log that is ours, a copy, or one whose owner is gone is settled under the lock: no other Canvas is
   // folding it into a whole write at this moment (it would remove it right after), so whether it is still there says
@@ -1072,17 +1075,24 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
     // Our log is gone (or another file stands in its place) while document.json is still the very bytes it applied
     // to: no whole write folded it (that writes new bytes); something deleted it (a version control clean or stash,
     // a sync or cleanup tool). Its edits are on disk nowhere: back as pending, and written whole.
-    if (prevOurs && prevLogged.length && !sameFile && l.hash === prevLog!.info.base) {
+    if (prevOurs && prevLogged.length && !sameIno && l.hash === prevLog!.info.base) {
       merge = prevLogged;
       compact = true;
     }
+    // The same for a log of ours this state loaded rather than wrote (folding it was due): its records are in what
+    // Canvas showed, nowhere else. That version is kept as a recovery copy.
+    if (prevOurs && !prevLog!.mine && prevLog!.info.records && !sameIno && !l.log && l.hash === prevLog!.info.base && before) {
+      const out = recover(st, before.doc, before.format, "save log gone");
+      report(docFile, `${path.basename(docFile)}: its save log was removed from outside before Canvas folded it${out ? `; Canvas's version with its ${prevLog!.info.records} save${prevLog!.info.records === 1 ? "" : "s"} is saved as ${out}` : ""}`);
+    }
     if (l.log) {
-      st.log = { info: { ...l.log }, since: l.log.owner === OWNER ? (since ?? Date.now()) : Date.now() };
+      st.log = { info: { ...l.log }, since: l.log.owner === OWNER ? (since ?? Date.now()) : Date.now(), mine: false };
       st.logFold = true; // the state holds it: a whole write of this state retires it
       if (l.log.copy) compact = true; // copied with its package: into the copy's document.json at once
       else if (l.log.owner === OWNER) {
         if (sameFile && l.log.seq <= heldSeq) {
           const seq = l.log.seq;
+          st.log.mine = true;
           st.logged = prevLogged.filter((p) => p.seq !== undefined && p.seq <= seq);
           merge = prevLogged.filter((p) => !(p.seq !== undefined && p.seq <= seq));
         } else compact = true; // ours by name, but not this state's: its edits into document.json at once
@@ -1991,7 +2001,7 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
       return "retry";
     }
     const ino = fresh ? (await fresh.stat()).ino : Number(st.logSeen.split(":")[0]);
-    if (fresh) lg = st.log = { info, fh: fresh, checked: true, since: Date.now() };
+    if (fresh) lg = st.log = { info, fh: fresh, checked: true, since: Date.now(), mine: true };
     else lg!.info = info;
     fresh = undefined;
     st.logSeen = `${ino}:${info.size}`;
