@@ -104,6 +104,7 @@ const TOOLS = [
   "list_pages", "create_page", "rename_page", "delete_page", "move_boards_to_page", "set_active_page",
   "make_variations", "list_variations", "keep_variation", "discard_variations", "get_product_brief", "set_product_brief", "get_design_context", "check_variation", "mark_variation",
   "resolve_link",
+  "list_comments", "add_comment", "reply_comment", "resolve_comment",
 ];
 
 describe("tools", () => {

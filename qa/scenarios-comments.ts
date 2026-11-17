@@ -1,0 +1,286 @@
+// QA scenarios for comments (docs/cloud/protocol.md, src/page/comments.js): C then a click pins a thread to the layer
+// under the pointer, the pin follows the layer and the camera, replies and Resolve, Show resolved, a deleted layer's
+// thread sits at its board's corner, and a reopened file shows its comments. Real keys and mouse; the result is read from
+// comments.json on disk and from the pins in the page. Pictures go to qa/out/comments-*.png.
+import fs from "node:fs";
+import path from "node:path";
+import { sc, type Rect, type T } from "./harness.ts";
+import { ROOT, sleep } from "./lib.ts";
+
+const OUT = path.join(ROOT, "qa", "out");
+const file = (t: T): any | null => { try { return JSON.parse(fs.readFileSync(path.join(t.file, "comments.json"), "utf8")); } catch { return null; } };
+const until = async (t: T, ok: () => boolean, what: string) => {
+  for (let i = 0; i < 80; i++) { if (ok()) return; await sleep(100); }
+  throw new Error(`timed out waiting for ${what}`);
+};
+/** Every drawn pin: its thread id, its window box and its classes. */
+const pins = (t: T) => t.ev<{ id: string; x: number; y: number; w: number; h: number; cls: string }[]>(`[...document.querySelectorAll(".cm-pin")].filter((e) => e.style.display !== "none").map((e) => { const r = e.getBoundingClientRect(); return { id: e.dataset.thread, x: r.left, y: r.top, w: r.width, h: r.height, cls: e.className }; })`);
+const pinOf = async (t: T, id?: string) => { const ps = (await pins(t)).filter((p) => p.id !== "draft"); const p = id ? ps.find((x) => x.id === id) : ps[0]; if (!p) throw new Error("no pin" + (id ? " for " + id : "")); return p; };
+/** The tip of a pin (its bottom left corner), in window px: where the comment points. */
+const tip = (p: { x: number; y: number; h: number }) => ({ x: p.x, y: p.y + p.h });
+async function shot(t: T, name: string, clip?: Rect) {
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, `${name}.png`), await t.shot(clip ? { x: clip.x, y: clip.y, width: clip.w, height: clip.h } : undefined));
+}
+/** C, a click on (x, y), the text and Return. Leaves comment mode on. */
+async function comment(t: T, x: number, y: number, text: string) {
+  await t.io.click(x, y);
+  await t.waitFor(`!!document.querySelector(".cm-comp:not([hidden]) textarea")`, "the composer");
+  await t.waitFor(`document.activeElement === document.querySelector(".cm-comp textarea")`, "the composer focused");
+  await t.io.type(text);
+  await t.io.key("Enter");
+}
+const mode = (t: T) => t.ev<boolean>("window.canvasHost.comments.mode");
+const openThread = async (t: T, id?: string) => { const p = await pinOf(t, id); await t.io.click(p.x + p.w / 2, p.y + p.h / 2); await t.waitFor(`!!document.querySelector(".cm-pop:not([hidden]) .cm-field")`, "the thread"); };
+
+sc("comments", "C then a click pins a thread on the layer under the pointer; Return posts, Esc leaves", { covers: ["comments:pin", "comments:keyboard", "comments:page-point"] }, async (t: T) => {
+  await t.focus("lay_nest");
+  await t.clearSel();
+  await t.io.key("c");
+  t.eq(await mode(t), true, "C turns comment mode on");
+  t.ok(await t.ev(`document.getElementById("view").classList.contains("cm-mode")`), "the pointer is the comment cursor");
+  await shot(t, "comments-mode-dark");
+  const c = await t.center("r_free");
+  // The layer under the pointer lights up before the click.
+  await t.io.move(c.x, c.y, 4);
+  await t.waitFor(`(() => { const e = document.querySelector(".cm-hov"); return !!e && e.style.display === "block"; })()`, "the layer under the pointer outlined");
+  const hr = await t.rect("r_free");
+  const ob = await t.ev<Rect>(`(() => { const r = document.querySelector(".cm-hov").getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })()`);
+  t.near(ob.x, hr.x, 2, "the outline is on the layer, x");
+  t.near(ob.w, hr.w, 2, "and as wide");
+  t.ok(/Comment mode/.test(await t.ev<string>(`document.querySelector(".cm-hint").innerText`)), "the hint says Comment mode");
+  // Shift+Return is a new line and posts nothing; Esc cancels the composer; nothing is saved.
+  await t.io.click(c.x, c.y);
+  await t.waitFor(`!!document.querySelector(".cm-comp:not([hidden]) textarea")`, "the composer");
+  t.eq(await t.sel(), [], "a click in comment mode selects nothing");
+  await t.io.type("one");
+  await t.io.key("Enter", { shift: true });
+  await t.io.type("two");
+  t.eq(await t.ev(`document.querySelector(".cm-comp textarea").value`), "one\ntwo", "Shift+Return is a new line");
+  t.eq(file(t), null, "nothing posted yet");
+  await t.io.key("Escape");
+  await t.waitFor(`document.querySelector(".cm-comp").hidden`, "the composer closed");
+  t.eq(file(t), null, "Esc cancelled the draft");
+  t.eq(await mode(t), true, "Esc closed the composer, not the mode");
+  // Return posts: the thread is pinned to the layer under the pointer, off its middle.
+  const r = await t.rect("r_free");
+  await comment(t, r.x + r.w * 0.25, r.y + r.h * 0.75, "Teal is too loud here");
+  await until(t, () => !!file(t)?.threads?.length, "comments.json");
+  const th = file(t).threads[0];
+  t.eq(th.anchor.nodeId, "r_free", "pinned to the layer under the pointer");
+  t.eq(th.anchor.board, "lay_nest", "and its board");
+  t.near(th.anchor.x, 0.25, 0.03, "x as a fraction of the layer");
+  t.near(th.anchor.y, 0.75, 0.03, "y as a fraction of the layer");
+  t.eq(th.anchor.preview.name, "Free rect", "the layer's name is kept");
+  t.eq(th.anchor.preview.type, "rectangle", "and its type");
+  t.eq([th.anchor.preview.width, th.anchor.preview.height], [70, 50], "and its size");
+  t.eq(th.comments[0].body, "Teal is too loud here", "the text");
+  t.ok(typeof file(t).doc === "string" && file(t).doc.length === 36, "a doc uuid");
+  const p = await pinOf(t, th.id);
+  t.near(tip(p).x, r.x + r.w * 0.25, 1.5, "the pin points at the click, x");
+  t.near(tip(p).y, r.y + r.h * 0.75, 1.5, "the pin points at the click, y");
+  // Empty canvas pins to the page point.
+  const bb = await t.rect("lay_nest");
+  await comment(t, bb.x + bb.w + 40, bb.y + 40, "A note on the empty canvas");
+  await until(t, () => file(t)?.threads?.length === 2, "the second thread");
+  const th2 = file(t).threads[1];
+    t.ok(th2.anchor.nodeId === undefined, "an empty click names no layer");
+  const world = await t.ev<{ x: number; y: number }>(`(() => { const h = window.canvasHost, c = h.cam; return { x: (${bb.x + bb.w + 40} - h.viewBox.l - c.x) / c.z, y: (${bb.y + 40} - h.viewBox.t - c.y) / c.z }; })()`);
+  t.near(th2.anchor.x, world.x, 1.5, "the page point, x");
+  t.near(th2.anchor.y, world.y, 1.5, "the page point, y");
+  // Esc leaves comment mode, then Esc as usual.
+  await t.io.key("Escape");
+  t.eq(await mode(t), false, "Esc leaves comment mode");
+  // The usual click selects again.
+  await t.io.click(r.x + 10, r.y + r.h - 6);
+  t.eq(await t.sel(), ["r_free"], "outside comment mode a click selects");
+  // C while typing in the composer types a letter, it does not toggle.
+  await t.io.key("c");
+  await t.io.key("c");
+  t.eq(await mode(t), false, "C twice is on, then off");
+  await t.clearSel();
+});
+
+sc("comments", "a pin follows its layer when it moves or resizes, and the camera", { covers: ["comments:follows-layer", "comments:pin"] }, async (t: T) => {
+  await t.focus("lay_nest");
+  const r0 = await t.rect("r_free");
+  await t.io.key("c");
+  await comment(t, r0.x + r0.w * 0.5, r0.y + r0.h * 0.5, "Follow me");
+  await until(t, () => !!file(t)?.threads?.length, "the thread");
+  const id = file(t).threads[0].id;
+  await t.io.key("Escape");
+  const where = async () => { const [r, p] = [await t.rect("r_free"), await pinOf(t, id)]; return { fx: (tip(p).x - r.x) / r.w, fy: (tip(p).y - r.y) / r.h, r, p }; };
+  let w = await where();
+  t.near(w.fx, 0.5, 0.03, "starts on the middle, x");
+  // Move the layer: the pin goes with it.
+  await t.select(["r_free"]);
+  for (let i = 0; i < 4; i++) await t.io.key("ArrowRight", { shift: true });
+  await t.flush();
+  await until(t, () => (t.node("r_free")!.x as number) >= 340, "the layer moved");
+  await t.frames(3);
+  w = await where();
+  t.near(w.r.x, r0.x + 40, 2, "the layer moved 40 px");
+  t.near(w.fx, 0.5, 0.03, "after a move the pin is still on the middle of the layer, x");
+  t.near(w.fy, 0.5, 0.03, "y");
+  // Resize it: the pin keeps its fractions.
+  for (let i = 0; i < 3; i++) await t.io.key("ArrowRight", { meta: true, shift: true });
+  await t.flush();
+  await until(t, () => (t.node("r_free")!.width as number) > 70, "the layer resized");
+  await t.frames(3);
+  w = await where();
+  t.ok(w.r.w > 80, "the layer is wider");
+  t.near(w.fx, 0.5, 0.03, "after a resize the pin keeps its fraction");
+  // The camera: pan and zoom, the pin stays on the layer.
+  await t.ev(`window.canvasHost.setCam({ z: 2, x: window.canvasHost.cam.x - 120, y: window.canvasHost.cam.y - 40 })`);
+  await t.settle();
+  await t.frames(3);
+  w = await where();
+  t.near(w.fx, 0.5, 0.03, "after a pan and zoom the pin is still on the layer");
+  t.near(w.fy, 0.5, 0.03, "y");
+  // Undo of the canvas does not touch comments.
+  await t.undo();
+  t.eq(file(t).threads.length, 1, "comments are not in the undo history");
+});
+
+sc("comments", "reply, resolve and Show resolved", { covers: ["comments:reply", "comments:resolve", "comments:show-resolved"] }, async (t: T) => {
+  await t.focus("lay_nest");
+  const r = await t.rect("r_free");
+  await t.io.key("c");
+  await comment(t, r.x + r.w / 2, r.y + r.h / 2, "Is this the right teal?");
+  await until(t, () => !!file(t)?.threads?.length, "the thread");
+  const id = file(t).threads[0].id;
+  await t.io.key("Escape");
+  // The pin opens the thread: the comment, a reply box, Resolve and Delete.
+  await openThread(t, id);
+  const text = await t.ev<string>(`document.querySelector(".cm-pop").innerText`);
+  t.ok(/Is this the right teal\?/.test(text) && /Resolve/.test(text), "the thread shows its comment and Resolve");
+  t.ok(await t.ev(`!!document.querySelector('.cm-pop [aria-label="More"]')`), "and a More menu");
+  await t.io.type("Yes, keep it");
+  await t.io.key("Enter");
+  await until(t, () => file(t).threads[0].comments.length === 2, "the reply");
+  t.eq(file(t).threads[0].comments[1].body, "Yes, keep it", "the reply is saved");
+  await t.waitFor(`document.querySelectorAll(".cm-pop .cm-item").length === 2`, "the reply in the thread");
+  await shot(t, "comments-thread-dark");
+  // Resolve hides the pin and closes the thread.
+  await t.ev(`document.querySelector('.cm-pop [aria-label="Resolve thread"]').click()`);
+  await until(t, () => !!file(t).threads[0].resolvedAt, "resolved on disk");
+  await t.waitFor(`![...document.querySelectorAll(".cm-pin")].some((e) => e.dataset.thread === ${JSON.stringify(id)} && e.style.display !== "none")`, "the pin hidden");
+  // Show resolved brings it back, faded; Reopen puts it back.
+  await t.waitFor(`document.querySelector(".cm-bar.on")?.innerText.includes("0 open")`, "the bar says 0 open");
+  await t.ev(`[...document.querySelectorAll(".cm-bar button")].find((b) => b.textContent.startsWith("Show 1 resolved")).click()`);
+  await t.waitFor(`document.querySelector('.cm-pin[data-thread="${id}"]')?.classList.contains("resolved")`, "the resolved pin shown");
+  await openThread(t, id);
+  t.ok(/Resolved by/.test(await t.ev<string>(`document.querySelector(".cm-pop").innerText`)), "the thread says who resolved it");
+  await t.ev(`document.querySelector('.cm-pop [aria-label="Reopen thread"]').click()`);
+  await until(t, () => !file(t).threads[0].resolvedAt, "reopened on disk");
+  // Delete: a reply goes (its tombstone stays), then the thread.
+  await t.waitFor(`!!document.querySelector('.cm-pop [aria-label="Delete comment"]')`, "a reply's Delete");
+  await t.ev(`document.querySelector('.cm-pop [aria-label="Delete comment"]').click()`);
+  await until(t, () => !!file(t).threads[0].comments[1].deletedAt, "the reply deleted");
+  t.eq(file(t).threads[0].comments[1].body, "", "its text is gone from the file");
+  await t.ev(`document.querySelector('.cm-pop [aria-label="More"]').click()`);
+  await t.waitFor(`!!document.querySelector('.cm-menu [aria-label="Delete thread"]')`, "the More menu");
+  await t.ev(`document.querySelector('.cm-menu [aria-label="Delete thread"]').click()`);
+  await until(t, () => !!file(t).threads[0].deletedAt, "the thread deleted");
+  await t.waitFor(`document.querySelectorAll(".cm-pin").length === 0`, "no pins");
+});
+
+sc("comments", "a thread whose layer was deleted shows at its board's corner as Layer deleted, never on another layer", { covers: ["comments:layer-deleted"] }, async (t: T) => {
+  await t.focus("lay_nest");
+  const r = await t.rect("r_free");
+  await t.io.key("c");
+  await comment(t, r.x + r.w / 2, r.y + r.h / 2, "Remove this?");
+  await until(t, () => !!file(t)?.threads?.length, "the thread");
+  const id = file(t).threads[0].id;
+  await t.io.key("Escape");
+  await t.select(["r_free"]);
+  await t.io.key("Delete");
+  await t.flush();
+  await until(t, () => !t.node("r_free"), "the layer deleted");
+  await t.waitFor(`document.querySelector('.cm-pin[data-thread="${id}"]')?.classList.contains("gone") && document.querySelector('.cm-pin[data-thread="${id}"]').style.display !== "none"`, "the pin at the board's corner");
+  const b = await t.rect("lay_nest");
+  const p = await pinOf(t, id);
+  t.ok(p.x >= b.x + b.w, `the pin is beside the board, past its right edge (${p.x} vs ${b.x + b.w})`);
+  t.ok(p.y >= b.y - 30 && p.y <= b.y + 120, "near the board's top corner");
+  // No layer is under the pin.
+  const under = await t.ev<string | null>(`window.canvasHost.pick(${p.x + p.w / 2}, ${p.y + p.h / 2})`);
+  t.ok(!under || !under.startsWith("lay_") && under !== "r_n3", "the pin sits on no layer");
+  await openThread(t, id);
+  const text = await t.ev<string>(`document.querySelector(".cm-pop").innerText`);
+  t.ok(/Layer deleted/.test(text), "the thread says Layer deleted");
+  t.ok(/Free rect, a rectangle 70 \u00d7 50/.test(text), "and names the layer by its stored preview");
+  t.ok(/Pin to a layer/.test(text), "and offers Pin to a layer");
+  t.eq(file(t).threads[0].anchor.nodeId, "r_free", "the anchor is untouched: it is never moved to another layer");
+  await shot(t, "comments-deleted-dark");
+  // Pin to a layer: Esc leaves; then again and click another layer moves the thread there by hand.
+  await t.ev(`[...document.querySelectorAll(".cm-pop button")].find((b) => b.textContent === "Pin to a layer").click()`);
+  await t.waitFor(`window.canvasHost.comments.mode`, "pin mode");
+  await t.io.click(...(Object.values(await t.center("fr_outer")) as [number, number]));
+  await until(t, () => file(t).threads[0].anchor.nodeId === "fr_outer", "the thread moved to the layer clicked");
+  t.eq(file(t).threads[0].comments.length, 1, "the comments came along");
+  await t.waitFor(`!document.querySelector('.cm-pin[data-thread="${id}"]')?.classList.contains("gone")`, "the pin on the new layer");
+  await t.io.key("Escape");
+  await t.io.key("Escape");
+  // Undo brings the layer back; the thread stays where it was put by hand.
+  await t.undo();
+  t.eq(file(t).threads[0].anchor.nodeId, "fr_outer", "comments are not in undo");
+});
+
+sc("comments", "reopening the file shows its comments", { covers: ["comments:reopen"] }, async (t: T) => {
+  await t.focus("lay_nest");
+  const r = await t.rect("r_free");
+  await t.io.key("c");
+  await comment(t, r.x + r.w / 2, r.y + r.h / 2, "Still here tomorrow");
+  await until(t, () => !!file(t)?.threads?.length, "the thread");
+  const id = file(t).threads[0].id;
+  await t.io.key("Escape");
+  await t.open();
+  await t.focus("lay_nest");
+  await t.waitFor(`!!document.querySelector('.cm-pin[data-thread="${id}"]')`, "the pin after a reload");
+  await openThread(t, id);
+  t.ok(/Still here tomorrow/.test(await t.ev<string>(`document.querySelector(".cm-pop").innerText`)), "the text after a reload");
+  // A comment an agent makes while the file is open appears without a reload.
+  const th = file(t).threads[0];
+  const reply = await fetch(`${t.srv.base}/api/comments/ops?file=${encodeURIComponent(t.file)}`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-agent": "claude-code" }, body: JSON.stringify({ ops: [{ opId: crypto.randomUUID(), doc: "00000000-0000-4000-8000-000000000000", at: new Date().toISOString(), op: { kind: "comment.add", thread: th.id, comment: crypto.randomUUID(), body: "Looks fine to me" } }] }) });
+  t.eq(reply.status, 200, "the agent's comment is accepted");
+  await t.waitFor(`document.querySelector(".cm-pop").innerText.includes("Looks fine to me") && document.querySelector(".cm-pop").innerText.includes("Claude Code")`, "the agent's reply to appear, named after its client");
+  await t.io.key("Escape");
+});
+
+sc("comments", "light and dark: comment mode, a thread, a deleted layer's pin", { covers: ["comments:light", "comments:dark"] }, async (t: T) => {
+  await t.focus("lay_nest");
+  const r = await t.rect("r_free");
+  await t.io.key("c");
+  await comment(t, r.x + r.w / 2, r.y + r.h / 2, "Light and dark");
+  await until(t, () => !!file(t)?.threads?.length, "the thread");
+  const id = file(t).threads[0].id;
+  await t.io.key("Escape");
+  await t.io.key("Escape");
+  await t.io.key("c");
+  await comment(t, r.x + 40, r.y - 60 < 0 ? r.y + 100 : r.y - 60, "Second pin with a longer comment that wraps onto a second line to show how text sets");
+  await until(t, () => file(t)?.threads?.length === 2, "the second thread");
+  for (const theme of ["light", "dark"]) {
+    await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: theme }] });
+    await t.frames(3);
+    await shot(t, `comments-mode-${theme}`);
+    await t.io.key("Escape");
+    await openThread(t, id);
+    await shot(t, `comments-thread-${theme}`);
+    await t.io.key("Escape");
+    await t.io.key("c");
+    t.eq(await mode(t), true, "back in comment mode");
+  }
+  await t.io.key("Escape");
+  await t.select(["r_free"]);
+  await t.io.key("Delete");
+  await t.flush();
+  await t.waitFor(`document.querySelector('.cm-pin[data-thread="${id}"]')?.classList.contains("gone")`, "the deleted layer's pin");
+  for (const theme of ["light", "dark"]) {
+    await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: theme }] });
+    await t.frames(3);
+    await openThread(t, id);
+    await shot(t, `comments-deleted-${theme}`);
+    await t.io.key("Escape");
+  }
+  await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "dark" }] });
+});

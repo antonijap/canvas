@@ -30,7 +30,10 @@ struct SettingsTests {
 
     static func defaults() {
         let s = AppSettings.load(fresh())
-        check(s == AppSettings(), "nothing stored: the defaults")
+        var expected = AppSettings()
+        expected.commentName = NSFullUserName()
+        check(s == expected, "nothing stored: the defaults, with the Mac's full name as the comment name")
+        check(s.serverSettings["commentName"] as? String == NSFullUserName(), "the server gets the name")
         check(s.harness == .claude, "Claude Code by default")
         check(s.agentCursor, "the agent cursor is on by default")
         check(s.finishSound, "the finish sound is on by default")
@@ -47,12 +50,15 @@ struct SettingsTests {
         s.openView = .fit; s.scrollZooms = true; s.boardLabels = false
         s.harness = .codex; s.agentCursor = false; s.cursorSpeed = .fast; s.runCapMin = 25
         s.setModel(.claude, "opus"); s.setEffort(.claude, "high"); s.setModel(.codex, "gpt-a"); s.setEffort(.codex, "xhigh")
-        s.finishSound = false; s.soundVolume = 0.3; s.keptTabs = 5; s.snapshotMB = 400
+        s.finishSound = false; s.soundVolume = 0.3; s.keptTabs = 5; s.snapshotMB = 400; s.commentName = "Ana Test"
         s.save(d)
         check(AppSettings.load(d) == s, "every value comes back")
         let sent = s.serverSettings
         check((sent["claude"] as? [String: String]) == ["model": "opus", "effort": "high"] && (sent["codex"] as? [String: String]) == ["model": "gpt-a", "effort": "xhigh"], "the server gets each agent's model and reasoning")
         // Off stays off: a stored false is not mistaken for "never set".
+        var cleared = AppSettings(); cleared.commentName = ""
+        cleared.save(d)
+        check(AppSettings.load(d).commentName.isEmpty, "a cleared name stays cleared: it is not refilled with the Mac's name")
         var off = AppSettings(); off.agentCursor = false; off.finishSound = false; off.boardLabels = false
         off.save(d)
         let back = AppSettings.load(d)

@@ -304,7 +304,7 @@ describe("MCP tools", () => {
     // The default is the middle of the layer.
     const mid = await run(c, "add_comment", { file: p, nodeId: "Scr02", body: "Middle" });
     assert.deepEqual([mid.json.thread.anchor.x, mid.json.thread.anchor.y], [0.5, 0.5]);
-    assert.equal(onDisk(p).threads[1].anchor.preview.width, 600);
+    assert.equal(onDisk(p).threads[1].anchor.preview?.width, 600);
 
     // The person replies in the app (the page's route), then the agent reads it.
     await post(p, [env({ kind: "comment.add", thread: t.id, comment: uuid(), body: "No, smaller" })]);
