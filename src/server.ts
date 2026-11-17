@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { boardHtml, type Snapshot } from "./boards.ts";
 import { docDiff, applyDocDiff, docPayload } from "./docdiff.ts";
 import { SnapshotCache } from "./snapcache.ts";
-import { compactWrites, currentDoc, editDoc, writeSettled, finishWrites, flushWrites, hasPendingWrites, journalSynced, persistedRevision, reconcileLoad, resumeWrites, setDocHost, writerHooks } from "./docwriter.ts";
+import { compactWrites, currentDoc, editDoc, writeSettled, finishWrites, flushWrites, hasPendingWrites, journalSynced, persistedRevision, reconcileLoad, restoreSuspected, resumeWrites, setDocHost, writerHooks } from "./docwriter.ts";
 import { PAGE_BRIDGE_JS } from "./bridge-page.ts";
 import { dispatch, docChanged, finishWork, trackChange, handleBridge, originOk, handleDocRoute, noteDoc, emit as bridgeEmit, type BridgeCtx } from "./bridge.ts";
 import { DESIGN_FILE, DocError, displayPath, newCanvas, primeDoc, saveAsCanvas } from "./docpath.ts";
@@ -80,6 +80,9 @@ const cache = new SnapshotCache({
   // A document with edits not yet on disk stays loaded (docwriter.ts holds them only here).
   pinned: (file) => !!clients.get(file)?.size || hasPendingWrites(file),
   reconcile: reconcileLoad,
+  // Only the ctime moved and the bytes are the same, but a save log applies whose tie names another ctime: maybe a
+  // restore in place to the log's base bytes, so the file is loaded again (docwriter.ts restoreSuspected).
+  ctimeOnlyChanges: (f, sig) => restoreSuspected(f, sig),
   // Tabs the app keeps alive but hidden hold no stream: the last few documents stay parsed regardless, so showing
   // such a tab again never waits for a parse; any other idle document goes after half an hour.
   idleMs: 30 * 60_000,

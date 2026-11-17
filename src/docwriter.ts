@@ -37,7 +37,7 @@ import { promisify } from "node:util";
 import zlib from "node:zlib";
 import { boardCache, forgetBoard } from "./boardcache.ts";
 import { boardLacks } from "./doc/boardindex.ts";
-import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logPathOf, logSig, logSigSync, parseLog, readLogSync, removeLogSync, tryLockLog, type LogInfo } from "./doc/doclog.ts";
+import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logPathOf, logSig, logSigSync, parseLog, readLogSync, removeLogSync, tieCtimeOf, tryLockLog, type LogInfo } from "./doc/doclog.ts";
 import { boardDigestStale, snapshotOfDoc, type Snapshot } from "./boards.ts";
 import { backupDirFor, findNode, loadDoc, loadDocAsync, revisionOf, sha, StaleFileError, writeDoc, type LoadedDoc, type CanvasDoc, type DocNode } from "./engine.ts";
 import type { NodeOp, Op } from "./history.ts";
@@ -225,6 +225,11 @@ type FileState = {
   logFold?: boolean;
   /** A log of a version this build does not read is there: never removed, saves are whole. */
   logUnknown?: boolean;
+  /**
+   * Document ctimes this server caused itself while a log was in play (a hard link to the document made and removed
+   * by a whole write that then did not land): not a restore in place (restoreSuspected).
+   */
+  ownCtimes?: Set<string>;
   /** The release of the log lock this write holds (run takes it, and lets go when it ends). */
   unlock?: () => void;
   /** Waiting for the log lock another Canvas holds, to load again under it (settleLater). */
@@ -1089,6 +1094,11 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
         // A copy of another package's log, for bytes that are not the ones it was written for: its edits over these
         // bytes as a recovery copy.
         if (stillThere()) retire = recoverStaleLog(st, l, format);
+      } else if (l.logRestored) {
+        // The file was put back in place to the very bytes the log started from (cp -p, a backup tool): the person
+        // rolled it back. The logged edits are not put on top again (whoever owns the log), and not lost either:
+        // a recovery copy, and the person is told.
+        if (stillThere()) retire = recoverStaleLog(st, l, format, "restored");
       } else if (l.logHead.owner === OWNER) {
         // Someone saved document.json whole without our log's edits (an older build, another app, a sync client): they go on
         // top of their save. Gone meanwhile: a Canvas folded it into the bytes it wrote, which hold them. A log of
@@ -1181,7 +1191,7 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
  * applied to the new bytes are saved as a recovery copy and reported. True when the log may go (its edits are in
  * that copy, or it held none); otherwise it is moved next to the document instead (and true as well).
  */
-function recoverStaleLog(st: FileState, l: LoadedDoc, format: Format): boolean {
+function recoverStaleLog(st: FileState, l: LoadedDoc, format: Format, why?: "restored"): boolean {
   let raw: Buffer | undefined;
   try {
     raw = readLogSync(st.docFile)?.raw;
@@ -1201,9 +1211,12 @@ function recoverStaleLog(st: FileState, l: LoadedDoc, format: Format): boolean {
       return false;
     }
   }
+  const saves = `${p.records.length} save${p.records.length === 1 ? "" : "s"}`;
   report(
     st.docFile,
-    `${path.basename(st.docFile)} was saved by another app after Canvas stopped, without ${p.records.length} save${p.records.length === 1 ? "" : "s"} Canvas had made` +
+    (why === "restored"
+      ? `${path.basename(st.docFile)} was put back to an earlier version by another app (a restore), without the last ${saves} Canvas had made`
+      : `${path.basename(st.docFile)} was saved by another app after Canvas stopped, without ${saves} Canvas had made`) +
       `${out ? `; Canvas's version with ${n === p.records.length ? "them" : `${n} of them`} is saved as ${out}` : ""}${kept ? `; Canvas's save log is kept as ${kept}` : ""}`,
   );
   return true;
@@ -1673,11 +1686,37 @@ async function hashFile(file: string): Promise<string> {
 }
 
 /**
+ * Only the ctime of the document moved (signature `sig`, same inode, size and mtime), while a log with records applies
+ * to it whose tie names another ctime: the file may have been put back in place to the log's base bytes (cp -p, a
+ * backup tool). Then it is loaded again rather than taken as unchanged, and the load decides (a restore: the logged
+ * edits go to a recovery copy, not on top). The snapshot cache asks the same (server.ts).
+ */
+export function restoreSuspected(docFile: string, sig: string): boolean {
+  const st = states.get(docFile);
+  const tie = st?.log?.info.records ? st.log.info.tie : undefined;
+  const c = tieCtimeOf(tie);
+  if (!st || c === undefined) return false;
+  const [ino, , mtime, ctime] = sig.split(":");
+  if (`${ino}:${mtime}` !== tie!.split(":").slice(0, 2).join(":")) return false;
+  return ctime !== c && !st.ownCtimes?.has(ctime);
+}
+
+/** A whole write of ours linked the document and took the link away without replacing it: its ctime is ours. */
+function ownCtime(st: FileState, base: string | undefined): void {
+  if (!st.log || !base) return;
+  try {
+    const now = keyOf(fs.statSync(st.docFile));
+    if (key3(now) === key3(base)) (st.ownCtimes ??= new Set()).add(now.split(":")[3]);
+  } catch {}
+}
+
+/**
  * The disk shows `key` instead of what we noted (only the ctime moved: a tag, a chmod, or a write of ours whose
  * signature is not verified yet): are its bytes the ones we last wrote? The signature must hold still around the read.
  */
 async function sameBytes(st: FileState, key: string): Promise<boolean> {
   if (!st.diskHash || !st.diskKey || key3(key) !== key3(st.diskKey)) return false;
+  if (restoreSuspected(st.docFile, key)) return false;
   try {
     const h = await hashFile(st.docFile);
     return h === st.diskHash && (await statKey(st.docFile)) === key;
@@ -1909,9 +1948,10 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
       // ruled out above. Created exclusively: never over a log someone else just made.
       if (st.logSeen !== "none") await fs.promises.rm(file, { force: true });
       fresh = await fs.promises.open(file, "wx", format.mode || 0o644);
-      // The tie: the document's inode:mtime, and the log file's own inode (a copy of the package has another).
+      // The tie: the document's inode:mtime, the log file's own inode (a copy of the package has another), and the
+      // document's ctime (a restore in place can set the mtime back, never the ctime).
       const k = base!.split(":");
-      const tie = `${k[0]}:${k[2]}:${(await fresh.stat()).ino}`;
+      const tie = `${k[0]}:${k[2]}:${(await fresh.stat()).ino}:${k[3]}`;
       const head = headerOf(docHash, tie, OWNER);
       for (const p of saving) p.seq = seq;
       await writeAt(fresh, Buffer.concat([head, rec.bytes]), 0);
@@ -2400,6 +2440,7 @@ async function runWrites(st: FileState): Promise<void> {
       if (st.epoch !== epoch || (kind === "link" && key3(keyOf(await fs.promises.stat(prev))) !== key3(base!))) {
         await fs.promises.rm(prev, { force: true });
         await fs.promises.rm(tmp, { force: true });
+        if (kind === "link") ownCtime(st, base);
         st.dirty = true;
         if (++looks > 5) throw new Error(`${docFile} keeps changing on disk`);
         continue;
@@ -2413,6 +2454,7 @@ async function runWrites(st: FileState): Promise<void> {
         host.markOwn(docFile, null);
         await fs.promises.rm(tmp, { force: true });
         await fs.promises.rm(prev, { force: true });
+        if (kind === "link") ownCtime(st, base);
         throw e;
       }
       // The written file's full signature (the ctime the rename gave it), read at once.
