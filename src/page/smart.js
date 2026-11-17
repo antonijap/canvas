@@ -19,6 +19,7 @@
 // undo step), drawn at once on the canvas (live.js place, host.placeBoard). Esc cancels a drag.
 
 import * as M from "/page/smart-logic.js";
+import { arrangePlan } from "/page/shortcuts-logic.js";
 
 const host = window.canvasHost;
 if (host && host.file) start(host);
@@ -395,19 +396,25 @@ function start(host) {
   async function tidyUp() {
     const ids = host.selection ? host.selection() : [];
     if (ids.length < 2) { tell("Select two or more layers to tidy up"); return false; }
-    if (ids.some((id) => isW(id) || id.includes("/"))) return false;
+    if (ids.some((id) => isW(id))) { tell("Cards do not tidy up; select layers or boards"); return false; }
     const boards = ids.every((id) => host.boards.has(id));
+    let free = ids;
     if (!boards) {
-      if (ids.some((id) => host.boards.has(id))) return false;
-      const js = await Promise.all(ids.map((id) => ask(id)));
-      if (js.some((j) => !j || j.mode !== "absolute")) { tell("Auto layout places some of these layers; they stay"); return false; }
+      if (ids.some((id) => host.boards.has(id))) { tell("Tidy up boards or layers, not both at once"); return false; }
+      // Layers auto layout places stay where they are; the rest tidy up (arrangePlan). Locked ones count and stay.
+      const js = await Promise.all(ids.map((id) => (id.includes("/") ? null : ask(id))));
+      const info = new Map(ids.map((id, i) => [id, { placed: !js[i] || js[i].mode !== "absolute" }]));
+      const plan = arrangePlan(ids, info, "tidy");
+      if (plan.note) tell(plan.note);
+      if (!plan.ok) return false;
+      free = plan.ids;
     }
-    const rs = ids.map((id) => { const r = rectOf(id); return r ? { id, x: r.x, y: r.y, w: r.w, h: r.h } : null; });
+    const rs = free.map((id) => { const r = rectOf(id); return r ? { id, x: r.x, y: r.y, w: r.w, h: r.h } : null; });
     if (rs.some((r) => !r)) return false;
     const t = M.tidy(rs);
     if (!t) return false;
     const was = cur;
-    cur = { ids, boards, model: t.model, rects: new Map(rs.map((r) => [r.id, r])) };
+    cur = { ids: free, boards, model: t.model, rects: new Map(rs.map((r) => [r.id, r])) };
     commit(null, t.pos, "tidy");
     if (!was) cur = null;
     return true;

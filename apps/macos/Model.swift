@@ -48,6 +48,9 @@ struct Selection {
     var inInstance = false
     /// The node's props that are instance overrides ("descendants": overrides on layers inside it).
     var overrides: [String] = []
+    /// Several layers: how many of them align, distribute and tidy up work with (not placed by auto layout, not
+    /// inside an instance). Nil for one layer, or when the page did not say.
+    var free: Int? = nil
 }
 
 enum RailSection: String, CaseIterable, Identifiable {
@@ -338,7 +341,8 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
                                       width: w, height: h, resolvedType: s["rtype"] as? String,
                                       isComponent: (s["cmp"] as? Bool ?? false) || (ctx?.purple ?? false), context: ctx,
                                       ids: ids, tokens: s["tokens"] as? [String: String] ?? [:], mixed: keepMixed,
-                                      inInstance: s["inst"] as? Bool ?? false, overrides: s["overrides"] as? [String] ?? [])
+                                      inInstance: s["inst"] as? Bool ?? false, overrides: s["overrides"] as? [String] ?? [],
+                                      free: (s["free"] as? NSNumber)?.intValue)
                 if ids.count > 1 { loadMixed(ids, shared: node) }
                 selectedWidgetId = nil; widgetStatus = nil
             } else {

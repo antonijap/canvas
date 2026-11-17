@@ -205,6 +205,33 @@ describe("Option-drag: one undo step through the server", () => {
     assert.equal(back.ref, "Cmp");
   });
 
+  test("align: /api/node says which layers auto layout places; the free ones move in one undo step", async () => {
+    const docFile = await freshDoc("alignmix");
+    const q = `?file=${encodeURIComponent(docFile)}`;
+    const doc = JSON.parse(fs.readFileSync(docFile, "utf8"));
+    doc.children[0].layout = "none";
+    doc.children[0].children = [
+      { type: "frame", id: "Row", x: 0, y: 0, width: 200, height: 40, layout: "horizontal", children: [{ type: "rectangle", id: "InRow", width: 20, height: 20 }] },
+      { type: "rectangle", id: "FreeA", x: 10, y: 100, width: 20, height: 20 },
+      { type: "rectangle", id: "FreeB", x: 80, y: 150, width: 20, height: 20 },
+    ];
+    fs.writeFileSync(docFile, JSON.stringify(doc, null, 2));
+    await call("POST", "/api/update", { file: docFile, id: "Scr01", props: {} });
+    later();
+    history.resetHistory();
+    const placed = async (id: string) => (await call("GET", `/api/node${q}&id=${id}&depth=0`)).body.placed;
+    assert.equal(await placed("InRow"), true, "a layer in an auto layout frame's flow");
+    assert.equal(await placed("FreeA"), false, "a layer in a frame without layout");
+    assert.equal(await placed("Scr01"), false, "a board");
+    // What align (Option+A) sends for the free layers: one /api/move with a group merge key.
+    const m = await call("POST", "/api/move", { file: docFile, items: [{ id: "FreeB", dx: -70, dy: 0 }], round: true, merge: "group:align-test" });
+    assert.equal(m.status, 200, JSON.stringify(m.body));
+    assert.equal(find(JSON.parse(fs.readFileSync(docFile, "utf8")).children, "FreeB")!.x, 10);
+    later();
+    assert.equal((await call("POST", `/api/history/undo${q}`)).status, 200);
+    assert.equal(find(JSON.parse(fs.readFileSync(docFile, "utf8")).children, "FreeB")!.x, 80, "one Undo puts it back");
+  });
+
   test("a place copy is one step: Undo removes the copy and leaves the layer", async () => {
     const docFile = await freshDoc("placecopy");
     const q = `?file=${encodeURIComponent(docFile)}`;
@@ -298,6 +325,36 @@ describe("shortcuts-logic", () => {
     const rs = [{ x: 0, y: 0, w: 10, h: 10 }, { x: 15, y: 0, w: 10, h: 10 }, { x: 90, y: 0, w: 10, h: 10 }];
     assert.deepEqual(S.distributeDeltas(rs, "h"), [{ dx: 0, dy: 0 }, { dx: 30, dy: 0 }, { dx: 0, dy: 0 }]);
     assert.deepEqual(S.distributeDeltas(rs.slice(0, 2), "h"), [{ dx: 0, dy: 0 }, { dx: 0, dy: 0 }], "two layers: nothing to distribute");
+  });
+  test("arrangePlan: layers auto layout places stay out of align, distribute and tidy up; locked ones stay in", () => {
+    const info = new Map([["a", {}], ["b", { placed: true }], ["c", {}], ["d", { placed: true }], ["e", {}], ["k", { locked: true }]]);
+    const free = S.arrangePlan(["a", "b", "c", "d", "e"], info, "align");
+    assert.deepEqual(free.ids, ["a", "c", "e"], "only the layers auto layout does not place");
+    assert.equal(free.stayed, 2);
+    assert.equal(free.ok, true);
+    assert.equal(free.note, "Auto layout keeps 2 of these layers in place");
+    // A locked layer counts (the rest align to it); the server leaves it where it is.
+    assert.deepEqual(S.arrangePlan(["a", "k"], info, "tidy").ids, ["a", "k"]);
+    const placed = S.arrangePlan(["a", "b"], info, "align");
+    assert.equal(placed.ok, false, "one free layer has nothing to align with");
+    assert.match(placed.note, /^Auto layout places these layers/);
+    assert.equal(S.arrangePlan(["a", "c"], info, "distribute").note, "Select three or more layers to distribute");
+    assert.equal(S.arrangePlan(["a", "c", "e"], info, "distribute").ok, true);
+    assert.equal(S.arrangePlan(["a", "c"], info, "tidy").ok, true, "two are enough to tidy up");
+    assert.equal(S.arrangePlan(["a", "c"], info, "align").note, null, "nothing stayed: nothing to say");
+    // Cards (widget:) move by nudge; unknown layers (no info yet) count as free, the server still skips them.
+    assert.deepEqual(S.arrangePlan(["widget:w1", "zz"], info, "align").ids, ["widget:w1", "zz"]);
+    // Every layer in auto layout: a note that says where to change it instead.
+    const all = S.arrangePlan(["b"], info, "tidy");
+    assert.equal(all.ok, false);
+    assert.equal(all.note, "Auto layout places these layers. Change the frame's alignment and gap instead");
+    assert.deepEqual(S.ARRANGE_MIN, { align: 2, distribute: 3, tidy: 2 });
+  });
+  test("align within the free layers' own box: a layer auto layout holds does not stretch it", () => {
+    const rects = { a: { x: 0, y: 0, w: 10, h: 10 }, b: { x: 500, y: 0, w: 10, h: 10 }, c: { x: 100, y: 40, w: 20, h: 10 } };
+    const plan = S.arrangePlan(["a", "b", "c"], new Map([["b", { placed: true }]]), "align");
+    const rs = plan.ids.map((id: string) => rects[id as keyof typeof rects]);
+    assert.deepEqual(S.alignDeltas(rs, S.unionOf(rs), "right"), [{ dx: 110, dy: 0 }, { dx: 0, dy: 0 }]);
   });
   test("resizeBy: Cmd+arrows", () => {
     const r = { x: 0, y: 0, w: 10, h: 20 };

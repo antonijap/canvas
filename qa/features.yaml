@@ -246,12 +246,12 @@ features:
     name: Control+Option+T makes a selection an evenly spaced row, column or grid from its top-left
     area: arrange
     driven: [page, native]
-    cases: [many, board, keyboard, menu]
+    cases: [many, board, keyboard, menu, inspector, context-menu]
   - id: align-distribute
-    name: Option+W/A/S/D/H/V align, Option+Shift+H/V distribute; Shift on an align item aligns to the parent
+    name: Option+W/A/S/D/H/V align, Option+Shift+H/V distribute, the inspector's Arrange row and right-click > Align; Shift on an align item aligns to the parent; layers auto layout places stay
     area: properties
-    driven: [page]
-    cases: [many, in-frame, keyboard, parent]
+    driven: [page, native]
+    cases: [many, in-frame, keyboard, parent, inspector, context-menu, in-autolayout, undo]
   - id: text-style-keys
     name: Cmd+B/I/U, Shift+Cmd+X, font size and text align keys
     area: properties

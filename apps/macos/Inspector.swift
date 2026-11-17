@@ -111,6 +111,8 @@ struct InspectorBody: View {
                 Text("Inside a component instance: read only.").font(Typography.micro).foregroundStyle(Palette.mutedFg)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 8)
             }
+            // Several layers: align, distribute and tidy up first (ArrangeActions).
+            if ArrangeActions.shows(count: s.ids.count) { ArrangeSection(model: model, s: s) }
             // The instance and component block sit right under the layer's name.
             component
             position
@@ -866,5 +868,74 @@ private struct ScaleField: View {
         guard enabled, let raw = NumericInput.evaluate(text.replacingOccurrences(of: "%", with: ""), current: 100) else { return }
         let v = NumericInput.clean(NumericInput.clamp(raw, 1, 10000))
         if v != 100 { apply(v / 100) }
+    }
+}
+
+// MARK: arrange
+
+/// Two or more layers or boards: align (six ways), distribute and tidy up, as two rows of icon buttons in a field
+/// well. Each runs the Arrange menu's page op, so it is one undo step (src/page/shortcuts.js, smart.js); Shift+click
+/// on an align button aligns to the parent frame, as Shift on the menu item does. Buttons stay off when too few of
+/// the layers may move (auto layout places them).
+struct ArrangeSection: View {
+    @ObservedObject var model: CanvasModel
+    let s: Selection
+
+    var body: some View {
+        InspectorSection(title: "Arrange") {
+            HStack(spacing: 8) {
+                ArrangeButtons(actions: ArrangeActions.align, s: s, run: run)
+                    .frame(width: (Metric.propsWidth - 24 - 8) * 2 / 3)
+                ArrangeButtons(actions: ArrangeActions.spread, s: s, run: run)
+            }
+            if let note = ArrangeActions.blockedNote(count: s.ids.count, free: s.free) {
+                Text(note).font(Typography.micro).foregroundStyle(Palette.mutedFg).qaText(note)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    private func run(_ a: ArrangeActions.Action) {
+        let toParent = a.op.hasPrefix("align-") && NSEvent.modifierFlags.contains(.shift)
+        model.run("{cmd:'shortcut',op:'\(a.op)\(toParent ? ":parent" : "")'}")
+    }
+}
+
+private struct ArrangeButtons: View {
+    let actions: [ArrangeActions.Action]
+    let s: Selection
+    let run: (ArrangeActions.Action) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(actions, id: \.op) { a in
+                ArrangeButton(action: a, enabled: ArrangeActions.enabled(a, count: s.ids.count, free: s.free)) { run(a) }
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+    }
+}
+
+private struct ArrangeButton: View {
+    let action: ArrangeActions.Action
+    let enabled: Bool
+    let tap: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Metric.radiusField - 2, style: .continuous)
+        Button(action: tap) {
+            Image(systemName: action.symbol).glyph(12)
+                .foregroundStyle(hovering && enabled ? Palette.fg : Palette.mutedFg)
+                .frame(maxWidth: .infinity).frame(height: Metric.field - 4)
+                .background(shape.fill(hovering && enabled ? Palette.active : .clear))
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain).help(ArrangeActions.help(action))
+        .opacity(enabled ? 1 : 0.4).disabled(!enabled)
+        .accessibilityLabel(action.title)
+        .qaID("arrange", label: action.op)
+        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
     }
 }
