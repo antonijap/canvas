@@ -309,6 +309,8 @@ enum QA {
             model.prefs.commentName = NSFullUserName()
             model.batchRename = nil
             LayersStore.of(model).renaming = nil
+            // A sign-in opens Home on the team server; the next scenario starts on Recents again.
+            HomeStore.shared.section = .recents
             for w in NSApp.windows where w !== window && w.isVisible {
                 if w.contentViewController is SettingsTabs || w.isSheet || w is NSPanel || w.title == "About Canvas" { w.orderOut(nil) }
             }

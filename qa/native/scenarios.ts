@@ -694,11 +694,15 @@ sc("settings", "Cmd+, opens Settings and a change persists", { covers: ["setting
   await t.shot(`${process.cwd()}/qa/out/native/settings-window.png`, "settings");
 });
 
-sc("settings", "Settings > Agents: a model and reasoning menu for each agent, Default until one is picked", { covers: ["settings:agents-model"] }, async (t: NT) => {
+sc("settings", "Settings > Agents: Connect, Models and Cursor parts; a model and reasoning menu for each agent under Models, Default until one is picked", { covers: ["settings:agents-model"] }, async (t: NT) => {
   await t.key(",", ["cmd"]);
   await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
   await settingsTab(t, "Agents");
-  await t.waitText("Model and reasoning", undefined, 4000, "settings");
+  // The pane opens on Connect; Models holds the default agent, each agent's menus and the run cap.
+  await t.mark({ id: "connect-claude", window: "settings" }, 4000).catch(() => null);
+  t.eq((await t.marks({ id: "agents-part", window: "settings" }))[0]?.label, "Connect", "Settings > Agents opens on Connect");
+  await t.click(await t.waitText("Models", undefined, 4000, "settings"), { window: "settings" });
+  await t.waitText("Ask about the selection", undefined, 4000, "settings");
   for (const h of ["claude", "codex"]) {
     const m = await t.mark({ id: `model-${h}`, window: "settings" }, 4000);
     t.ok(m, `the ${h} model menu`);

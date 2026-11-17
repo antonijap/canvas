@@ -72,7 +72,14 @@ export function setToken(url: string, token: string | null): void {
 
 // ---------- the server ----------
 
-interface ServerState { status: Status; email?: string; name?: string; role?: string; server?: string; protocol?: number; at: number }
+interface ServerState { status: Status; email?: string; name?: string; role?: string; server?: string; protocol?: number; at: number; devEmail: string }
+
+/**
+ * How long a status answer is reused, so the team's server is not asked on every look. A connected server is asked
+ * again after a minute (an open room socket to it counts as a newer answer); any other answer after 3 s, so a fix shows
+ * quickly. `fresh` (the app came to the front, Home or Settings opened) asks again once the answer is 3 s old.
+ */
+export const STATUS_REUSE_MS = { connected: 60_000, other: 3_000, fresh: 3_000 };
 const servers = new Map<string, ServerState>();
 
 type Reply = { fail: Status } | { fail?: undefined; res: Response; json: any };
@@ -101,11 +108,21 @@ async function request(origin: string, path: string, init: { method?: string; bo
   return { res, json };
 }
 
-/** Asks the server who we are and whether it speaks our protocol. At most one real request per 3 s. */
-export async function checkServer(origin: string, force = false): Promise<ServerState> {
+/** Asks the server who we are and whether it speaks our protocol, reusing a recent answer (STATUS_REUSE_MS). */
+export async function checkServer(origin: string, force = false, fresh = false): Promise<ServerState> {
+  const devEmail = cloudConfig().devEmail;
   const known = servers.get(origin);
-  if (!force && known && Date.now() - known.at < 3000) return known;
-  const set = (s: Omit<ServerState, "at">) => { const v = { ...s, at: Date.now() }; servers.set(origin, v); return v; };
+  if (!force && known && known.devEmail === devEmail) {
+    const age = Date.now() - known.at;
+    const reuse = fresh ? STATUS_REUSE_MS.fresh : known.status === "connected" ? STATUS_REUSE_MS.connected : STATUS_REUSE_MS.other;
+    if (age < reuse) return known;
+    // A room socket that is up says the same as asking, without a request.
+    if (!fresh && known.status === "connected" && [...sessions.values()].some((s) => s.origin === origin && s.status === "connected")) {
+      known.at = Date.now();
+      return known;
+    }
+  }
+  const set = (s: Omit<ServerState, "at" | "devEmail">) => { const v = { ...s, at: Date.now(), devEmail }; servers.set(origin, v); return v; };
   const info = await request(origin, "/v1/info");
   if (info.fail) return set({ status: info.fail });
   const protocol = Number(info.json?.protocol);
@@ -415,7 +432,7 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
       if (req.method !== "GET") return out(405, { error: "method not allowed" });
       const cfg = cloudConfig();
       if (!cfg.url) return out(200, { configured: false, url: "", host: "", status: "signedOut", dev: false });
-      const st = await checkServer(cfg.url);
+      const st = await checkServer(cfg.url, false, url.searchParams.get("fresh") === "1");
       return out(200, { configured: true, url: cfg.url, host: hostOf(cfg.url), dev: isLocalDev(cfg.url), status: st.status, email: st.email ?? null, name: st.name ?? null, role: st.role ?? null, server: st.server ?? null });
     }
     if (req.method !== "POST") return out(405, { error: "method not allowed" });
