@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { api, BASE, cmd, health, PORT, REPO, spawnServer, status, ToolError, waitHealthy, wantVersion } from "./client.ts";
+import { api, BASE, cmd, health, OTHER_COPY_NOTE, PORT, REPO, spawnServer, staleness, status, ToolError, waitHealthy, wantVersion } from "./client.ts";
 
 /** The app to open: CANVAS_APP, else a built one (the repo commits none): installed, `pnpm app`'s, `apps/macos/build.sh`'s. */
 export const APP_PATH = () => process.env.CANVAS_APP ?? ["/Applications/Canvas.app", path.join(REPO, "build", "Canvas.app"), path.join(REPO, "apps/macos/Canvas.app")].find((p) => fs.existsSync(p)) ?? path.join(REPO, "build", "Canvas.app");
@@ -32,7 +32,9 @@ export async function launchCanvas(o: LaunchOpts) {
   let h = await health();
   let started = false;
   let replaced = false;
-  const stale = Boolean(h && h.version !== want);
+  // A server another copy of Canvas runs (the installed app) is never replaced from here: it is not stale.
+  const otherCopy = Boolean(h && staleness(h).otherCopy);
+  const stale = Boolean(h && staleness(h).stale);
   if (h && stale && o.restartStale) {
     await fetch(`${BASE()}/quit`, { method: "POST", headers: { "x-canvas": "1" }, signal: AbortSignal.timeout(1500) }).catch(() => {});
     // The old server lands its pending writes before it exits (up to 5 s): wait for that, and never start a
@@ -73,9 +75,9 @@ export async function launchCanvas(o: LaunchOpts) {
   if (!useApp && o.foreground) spawn("open", [url], { detached: true, stdio: "ignore" }).unref();
   return {
     mode: useApp ? "app" : "server",
-    server: { port: PORT(), url, started, replaced, version: h.version, stale: h.version !== want },
+    server: { port: PORT(), url, started, replaced, version: h.version, stale: staleness(h).stale, ...(otherCopy ? { otherCopy: true } : {}) },
     app: useApp ? { path: APP_PATH(), launched: appLaunched, shellConnected } : null,
     file: o.file ?? null,
-    note: useApp && !shellConnected ? `The app did not connect within ${waitMs} ms; call canvas_status to check again.` : stale && !o.restartStale ? "The running server is older than the code on disk; pass restartStale:true to replace it." : undefined,
+    note: useApp && !shellConnected ? `The app did not connect within ${waitMs} ms; call canvas_status to check again.` : stale && !o.restartStale ? "The running server is older than the code on disk; pass restartStale:true to replace it." : otherCopy && o.restartStale ? OTHER_COPY_NOTE : undefined,
   };
 }

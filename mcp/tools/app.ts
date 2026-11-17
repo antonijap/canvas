@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { api, BASE, cmd, ensureServer, health, PORT, status, ToolError, wantVersion, type Status } from "../client.ts";
+import { api, BASE, cmd, ensureServer, health, OTHER_COPY_NOTE, PORT, staleness, status, ToolError, wantVersion, type Status } from "../client.ts";
 import { APP_PATH, appInstalled, launchCanvas } from "../launch.ts";
 import * as S from "../schemas.ts";
 import { tool } from "../tool.ts";
@@ -27,13 +27,14 @@ export function tabsFrom(r: any): { tabs: { file: string; name: string; current:
 }
 
 export function register(server: McpServer) {
-  tool(server, "canvas_status", "Is Canvas running? Server, app and open pages in one answer: versions, whether the running server is older than the code on disk, which pages and tabs exist, which page is active. Does not start anything.", {}, async () => {
+  tool(server, "canvas_status", "Is Canvas running? Server, app and open pages in one answer: versions, whether the running server is older than this MCP's code (a server another copy of Canvas runs, such as the installed app, is never stale), which pages and tabs exist, which page is active. Does not start anything.", {}, async () => {
     const h = await health();
     const app = { path: APP_PATH(), installed: appInstalled() };
     if (!h) return { server: { running: false, port: PORT() }, app: { ...app, running: false }, hint: "Nothing answers. launch_canvas starts it; disk-only tools (get_document_summary, lookup_nodes, render_node, widgets) also start a server on their own." };
     const s = await api<Status>("GET", "/api/bridge/status");
+    const { stale, otherCopy } = staleness(h);
     return {
-      server: { running: true, port: PORT(), url: BASE(), version: h.version, codeVersion: wantVersion(), stale: h.version !== wantVersion() },
+      server: { running: true, port: PORT(), url: BASE(), version: h.version, codeVersion: wantVersion(), stale, ...(otherCopy ? { otherCopy: true, note: OTHER_COPY_NOTE } : {}) },
       app: { ...app, running: Boolean(s.shell), shell: s.shell },
       pages: s.pages,
       active: s.active,

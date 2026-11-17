@@ -6,7 +6,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { api, health, PORT, sayHello, setAgentName, wantVersion } from "./client.ts";
+import { api, health, PORT, sayHello, setAgentName, staleness } from "./client.ts";
 import { register as app } from "./tools/app.ts";
 import { register as camera } from "./tools/camera.ts";
 import { register as document } from "./tools/document.ts";
@@ -63,7 +63,7 @@ server.registerResource("state", "canvas://state", { title: "Canvas state", desc
   if (h) {
     const s = await api("GET", "/api/bridge/status");
     const sel = s.active ? await selectionView({ includeNode: false }).catch(() => null) : null;
-    body = { server: { running: true, port: PORT(), version: h.version, stale: h.version !== wantVersion() }, status: s, selection: sel };
+    body = { server: { running: true, port: PORT(), version: h.version, ...staleness(h) }, status: s, selection: sel };
   }
   return { contents: [{ uri: uri.href, mimeType: "application/json", text: JSON.stringify(body, null, 2) }] };
 });

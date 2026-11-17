@@ -298,6 +298,13 @@ export function outline(doc: CanvasDoc, rootId: string | null | undefined, depth
   return lines.join("\n");
 }
 
+/** A `depth` query value for one node's JSON: 0 to 8, 4 when absent or not a number (0 is a real answer, not "absent"). */
+export function nodeDepth(raw: string | null | undefined, fallback = 4): number {
+  if (raw === null || raw === undefined || raw.trim() === "") return fallback;
+  const n = Math.floor(Number(raw));
+  return Number.isFinite(n) ? Math.min(Math.max(n, 0), 8) : fallback;
+}
+
 /** A copy of the node with children cut off below `depth` levels. */
 export function trimmed(n: DocNode, depth: number): DocNode {
   const c: DocNode = { ...n };
@@ -308,7 +315,9 @@ export function trimmed(n: DocNode, depth: number): DocNode {
   return c;
 }
 
-export function findNodes(doc: CanvasDoc, q: { name?: string; type?: string; text?: string; reusable?: boolean; within?: string }, limit = 50) {
+/** `id` matches as a case-insensitive substring of the node id, like name and text. */
+export function findNodes(doc: CanvasDoc, q: { id?: string; name?: string; type?: string; text?: string; reusable?: boolean; within?: string }, limit = 50) {
+  const id = q.id?.toLowerCase();
   const name = q.name?.toLowerCase();
   const text = q.text?.toLowerCase();
   const out: { id: string; type: string; name?: string; text?: string; path: string }[] = [];
@@ -316,6 +325,7 @@ export function findNodes(doc: CanvasDoc, q: { name?: string; type?: string; tex
   const scope: CanvasDoc = q.within && q.within !== ROOT ? { ...doc, children: [findNode(doc, q.within).node] } : doc;
   walk(scope, (n, _p, anc) => {
     if (q.type && n.type !== q.type) return;
+    if (id && !String(n.id ?? "").toLowerCase().includes(id)) return;
     if (name && !String(n.name ?? "").toLowerCase().includes(name)) return;
     if (text && !(typeof n.content === "string" && n.content.toLowerCase().includes(text))) return;
     if (q.reusable !== undefined && (n.reusable === true) !== q.reusable) return;

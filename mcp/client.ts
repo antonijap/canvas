@@ -3,7 +3,7 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { version as codeVersion } from "../src/version.ts";
+import { codeRootId, version as codeVersion } from "../src/version.ts";
 
 /** How often canvas-mcp says hello; src/onboarding.ts calls it gone after OFF_AFTER_MS (50 s) of silence. */
 export const HEARTBEAT_MS = 20_000;
@@ -65,10 +65,13 @@ export function sayHello(): void {
   setInterval(once, HEARTBEAT_MS).unref();
 }
 
-export async function health(timeoutMs = 800): Promise<{ ok: boolean; version: string } | undefined> {
+/** `root`: which copy of the code the server runs (src/version.ts codeRootId); older servers leave it out. */
+export type Health = { ok: boolean; version: string; root?: string };
+
+export async function health(timeoutMs = 800): Promise<Health | undefined> {
   try {
     const r = await fetch(`${BASE()}/health`, { headers: readHeaders(), signal: AbortSignal.timeout(timeoutMs) });
-    return r.ok ? ((await r.json()) as { ok: boolean; version: string }) : undefined;
+    return r.ok ? ((await r.json()) as Health) : undefined;
   } catch {
     return undefined;
   }
@@ -114,7 +117,7 @@ export function spawnServer(file?: string): void {
   child.unref();
 }
 
-export async function waitHealthy(ms: number, want?: string): Promise<{ ok: boolean; version: string } | undefined> {
+export async function waitHealthy(ms: number, want?: string): Promise<Health | undefined> {
   const end = Date.now() + ms;
   for (;;) {
     const h = await health();
@@ -134,6 +137,21 @@ export async function ensureServer(): Promise<void> {
 
 /** The version a running server must report to count as current. CANVAS_MCP_WANT_VERSION pins it (tests do, so edits to src/ mid-run cannot flip the answer). */
 export const wantVersion = (): string => process.env.CANVAS_MCP_WANT_VERSION || codeVersion();
+
+/** This MCP's copy of the code, to compare with Health.root. CANVAS_MCP_WANT_ROOT pins it for tests. */
+export const wantRoot = (): string => process.env.CANVAS_MCP_WANT_ROOT || codeRootId(fileURLToPath(new URL("../src/", import.meta.url)));
+
+/**
+ * Whether the running server is older code of this MCP's own copy, and so worth replacing. A server that another copy
+ * runs (the installed Canvas.app, while this MCP runs from a checkout) is not stale: it runs its own code, and
+ * replacing it would swap the app's server for the checkout's.
+ */
+export function staleness(h: Health): { stale: boolean; otherCopy: boolean } {
+  const otherCopy = Boolean(h.root) && h.root !== wantRoot();
+  return { stale: !otherCopy && h.version !== wantVersion(), otherCopy };
+}
+
+export const OTHER_COPY_NOTE = "The running server is another copy of Canvas (usually the installed app) with its own code. That is expected; it is not stale and is not replaced.";
 
 export type Status = {
   boot: string;

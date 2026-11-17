@@ -70,8 +70,8 @@ after(() => {
 
 describe("canvas server", () => {
   test("health and page", async () => {
-    const health = await get<{ ok: boolean; version: string }>("/health");
-    assert.deepEqual(health, { ok: true, version: (await import("../src/server.ts")).version() });
+    const health = await get<{ ok: boolean; version: string; root: string }>("/health");
+    assert.deepEqual(health, { ok: true, version: (await import("../src/server.ts")).version(), root: (await import("../src/version.ts")).codeRootId() });
     const page = await fetch(`${base}/`).then((r) => r.text());
     assert.match(page, /<b>Canvas<\/b>/);
     assert.match(page, /api\/node/);
