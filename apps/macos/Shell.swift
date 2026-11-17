@@ -38,8 +38,8 @@ private let columnTop: CGFloat = Metric.inset + Metric.pill + Metric.islandGap
 struct RootView: View {
     @ObservedObject var model: CanvasModel
     @State private var windowWidth: CGFloat = 0
-    private var panelOpen: Bool { model.panelOpen && !model.uiHidden }
-    private var inspectorShown: Bool { model.hasInspectable && model.inspectorOpen && !model.uiHidden }
+    private var panelOpen: Bool { model.panelOpen && !model.uiHidden && !model.homeShown }
+    private var inspectorShown: Bool { model.hasInspectable && model.inspectorOpen && !model.uiHidden && !model.homeShown }
 
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
     private var panelWidth: CGFloat? {
@@ -55,16 +55,19 @@ struct RootView: View {
                     Color.clear.onAppear { windowWidth = g.size.width }.onChange(of: g.size.width) { _, w in windowWidth = w }
                 })
 
+            // The Home tab: a native screen over the (hidden, still alive) canvas page (Home.swift).
+            if model.homeShown { HomeView(model: model).ignoresSafeArea() }
+
             // Talk to the selection: the spark and progress rings, glass over the canvas, under the islands (Spark.swift).
-            if !model.uiHidden { SparkLayer(model: model) }
+            if !model.uiHidden && !model.homeShown { SparkLayer(model: model) }
 
             GlassEffectContainer(spacing: Metric.islandGap) {
                 ZStack(alignment: .topLeading) {
                     TopBar(model: model)
                     // View > Hide UI (Cmd+backslash): only the canvas and the tabs stay.
-                    if !model.uiHidden { LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth) }
+                    if !model.uiHidden && !model.homeShown { LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth) }
                     if inspectorShown { Inspector(model: model, fonts: model.fonts) }
-                    if !model.uiHidden { ZoomCorner(model: model) }
+                    if !model.uiHidden && !model.homeShown { ZoomCorner(model: model) }
                     if let t = model.toast {
                         Toast(text: t, kind: model.toastKind, actions: model.toastActions,
                               onCopy: model.toastCopy == nil ? nil : { model.copyToast() }, onHover: { model.toastHovered = $0 })
@@ -110,9 +113,15 @@ struct TopBar: View {
             GlassPill {
                 HStack(spacing: 0) {
                     Color.clear.frame(width: Metric.trafficLights, height: Metric.control) // the traffic lights live here
+                    // Home: always first, never closed. Its name shows while no file is open; the glyph alone after.
+                    PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
+                              help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
+                        .qaID("home-tab", label: "Home")
+                        .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
+                        .animation(Motion.island, value: model.openFiles.isEmpty)
                     FadingScroller(scrollTo: model.currentFile) {
                         ForEach(model.openFiles, id: \.self) { f in
-                            TabChip(title: model.name(of: f), active: f == model.currentFile, missing: model.isMissing(f),
+                            TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, missing: model.isMissing(f),
                                     onClose: { model.close(f) }) { model.openTab(f) }.id(f)
                         }
                     }

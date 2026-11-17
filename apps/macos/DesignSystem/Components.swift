@@ -185,6 +185,40 @@ struct TabChip: View {
     }
 }
 
+/// The pinned first tab (Home): it cannot be closed. With room it shows its glyph and name; `compact` shrinks it to
+/// the glyph in a circle, the width of any control. One glyph size in both, so nothing jumps when it shrinks.
+struct PinnedTab: View {
+    let symbol: String
+    let title: String
+    var compact = false
+    var active = false
+    var help: String = ""
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: symbol).glyph(13).qaID("pinned-tab-icon")
+                    .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
+                if !compact {
+                    Text(title).font(Typography.label).lineLimit(1)
+                        .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
+                }
+            }
+            .padding(.horizontal, compact ? 0 : 12)
+            .frame(width: compact ? Metric.control : nil, height: Metric.control)
+            .background(Capsule().fill(active ? Palette.active : (hovering ? Palette.hover : .clear)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .chromeHelp(help.isEmpty ? title : help)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(active ? .isSelected : [])
+        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
+    }
+}
+
 /// A horizontal strip that hugs its content, then scrolls once the space runs out. A fade marks
 /// each edge that has more behind it, and disappears at the end of the strip.
 struct FadingScroller<Content: View>: View {

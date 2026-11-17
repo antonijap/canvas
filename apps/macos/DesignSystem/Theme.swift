@@ -28,6 +28,10 @@ enum Typography {
     static let section = Font.system(size: 11, weight: .semibold)
     /// The command palette's search field: one step up from a row, so the query reads first.
     static let prompt = Font.system(size: 15)
+    /// A screen's title (Home): one step above the panel titles.
+    static let display = Font.system(size: 22, weight: .semibold)
+    /// A card's title on Home's first-launch cards.
+    static let cardTitle = Font.system(size: 15, weight: .semibold)
 }
 
 /// The app-wide theme. `system` follows macOS; light and dark override it for the whole app,
