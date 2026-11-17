@@ -11,7 +11,7 @@ import path from "node:path";
 import { decodePng, type Img } from "../fidelity/png.ts";
 import { H, W, sc, type T } from "./harness.ts";
 import { sleep } from "./lib.ts";
-import { AlignChecker, ALIGN_OUT, bare, cy, midY } from "./ink.ts";
+import { AlignChecker, ALIGN_OUT, bare, cy, midX, midY } from "./ink.ts";
 import { measureJs, resolve as resolveAt } from "./ink-page.ts";
 
 const K = 2;
@@ -140,7 +140,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
       hint: "b:.cm-hint", hintIcon: "b:.cm-hint > span:first-child svg", hintB: "t:.cm-hint b", hintSoft: "t:.cm-hint .cm-soft", key: "b:.cm-hint .cm-key", keyT: "t:.cm-hint .cm-key",
       comp: "b:.cm-comp", compAv: "b:.cm-compfield .cm-av", compAvT: "t:.cm-compfield .cm-av", compField: "t:.cm-compfield .cm-field",
       chip: "b:.cm-foot .cm-chip", chipT: "t:.cm-foot .cm-chip span", chipIcon: "b:.cm-foot .cm-chip svg", retKey: "b:.cm-foot .cm-key", send: "b:.cm-foot .cm-send",
-      draft: `b:${pin("draft")} .cm-av`, draftT: `t:${pin("draft")} .cm-av`,
+      draft: `b:${pin("draft")}`,
     }));
     k = new AlignChecker("page", th, img, K);
     const hintIcon = k.ink("hint-icon", bare(m.hintIcon), { inset: 0 });
@@ -151,7 +151,10 @@ sc("comments", "alignment: every comment control is optically centred, light and
     k.near("hint: the esc key on the pill's centre line", cy(m.key), cy(m.hint));
     if (m.hint && hintIcon && m.key) k.near("hint: as much room left of the bubble as right of the esc key", hintIcon.x0 - m.hint.x, m.hint.x + m.hint.w - (m.key.x + m.key.w));
     k.label("composer-avatar", m.compAv, m.compAvT, { inset: 1.5 });
-    k.label("draft-pin-avatar", m.draft, m.draftT, { inset: 1.5 });
+    // The add pin's plus sits on the teardrop's centre of area: half a point toward the tip from the box's middle.
+    const plus = m.draft ? k.ink("draft-pin-plus", { x: m.draft.x + 6, y: m.draft.y + 6, w: 16, h: 16, r: 0 }, { inset: 0 }) : (k.bad.push(`draft-pin-plus (${th}): not on screen`), null);
+    k.near("add pin: the plus's middle on the teardrop's centre, x", midX(plus), m.draft ? m.draft.x + 13.5 : null);
+    k.near("add pin: the plus's middle on the teardrop's centre, y", midY(plus), m.draft ? m.draft.y + 14.5 : null);
     k.near("composer: the field's cap middle on the avatar's centre line", m.compField?.cap, cy(m.compAv));
     k.icon("composer-return-key", m.retKey, { inset: 1 });
     k.icon("composer-send", m.send);

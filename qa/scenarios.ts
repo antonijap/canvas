@@ -17,6 +17,7 @@ import "./scenarios-firstrun.ts";
 import "./scenarios-review2.ts";
 import "./scenarios-comments.ts";
 import "./scenarios-comments-shared.ts";
+import "./scenarios-comments-move.ts";
 import "./scenarios-alignment.ts";
 import { buildLink } from "../src/page/link-logic.js";
 

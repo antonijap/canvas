@@ -49,7 +49,7 @@ The same keys work in Canvas.app and the browser version. Settings > Shortcuts s
 | Option + drag | Drag copies |
 | Option + hover | Distances to the hovered layer |
 | K | Scale tool (V or Esc leaves it) |
-| C | Comment mode: the pointer becomes a comment pin and the layer under it is outlined; a click pins a thread there. Return posts, Shift+Return is a new line, Esc cancels the comment, then leaves the mode. Click a pin to open its thread (see [Comments](developer-guide.md#comments)) |
+| C | Comment mode: the pointer becomes a comment pin and the layer under it is outlined; a click pins a thread there. Return posts, Shift+Return is a new line, Esc cancels the comment, then leaves the mode. Click a pin to open its thread; drag it to move it to another layer or spot (see [Comments](developer-guide.md#comments)) |
 | Option+W / A / S / D | Align top / left / bottom / right |
 | Option+H / V | Align horizontal / vertical centres |
 | Option+Shift+H / V | Distribute horizontal / vertical spacing |

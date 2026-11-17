@@ -2,8 +2,9 @@
 // bar) and click to pin a thread to the layer under the pointer; the layer under it lights up first. A pin is a small
 // teardrop with the author's initial; it follows its layer when it moves or resizes and when the camera moves. A click
 // on a pin opens the thread: replies, a Resolve check on the first comment, Delete thread in its right-click menu. A
-// thread whose layer was deleted sits at its board's corner and says so; Pin to a layer puts it on another layer by
-// hand. Esc leaves comment mode.
+// pin is moved by dragging it: on the drop it is pinned again to the layer under its tip (the author's or the Cloud
+// owner's pins only, on a shared file). A thread whose layer was deleted sits at its board's corner and says so; Pin
+// to a layer, or a drag, puts it on another layer by hand. Esc leaves comment mode.
 //
 // The threads live in comments.json inside the .canvas package (src/comments.ts, docs/cloud/protocol.md). This page
 // reads them with GET /api/comments and changes them by sending ops to POST /api/comments/ops; the answer is the
@@ -32,7 +33,37 @@ const ICON = {
   alert: svg('<circle cx="7" cy="7" r="5.4"/><path d="M7 4.2v3.4M7 9.7v.1"/>', 11),
   sparkles: svg('<path d="M5.5 2l1 2.9 2.9 1-2.9 1-1 2.9-1-2.9-2.9-1 2.9-1zM10.8 8.6l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/>', 12),
 };
-const CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30"><path d="M15 2A13 13 0 0 1 28 15A13 13 0 0 1 15 28H5A3 3 0 0 1 2 25V15A13 13 0 0 1 15 2Z" fill="#18181B" stroke="#fff" stroke-width="1.5"/><path d="M15 9v12M9 15h12" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>')}") 3 27, crosshair`;
+// The add pin: what the pointer is in comment mode, and the pin a click leaves while its comment is written. The same
+// 28 pt teardrop as every pin (.cm-pin: radii 14 14 14 3, the popover's colour, --cm-pin's three shadows), with a
+// small light plus where the avatar would be. The plus sits on the teardrop's centre of area, half a point toward its
+// tip from the box's middle, so it looks centred in the shape rather than in the square around it.
+const PLUS = '<path d="M13.5 10.5v8M9.5 14.5h8" stroke-width="1.5" stroke-linecap="round"/>';
+const PIN_PATH = "M14 0A14 14 0 0 1 28 14A14 14 0 0 1 14 28H3A3 3 0 0 1 0 25V14A14 14 0 0 1 14 0Z";
+/** --cm-pin's 0 4px 10px -2px shadow: the pin's shape inset by its -2 px spread. */
+const PIN_INSET = "M14 2A12 12 0 0 1 26 14A12 12 0 0 1 14 26H3A1 1 0 0 1 2 25V14A12 12 0 0 1 14 2Z";
+/** Room around the 28 pt pin in the cursor's image for its shadows (the deepest reaches 12 pt below it), and the hotspot: the tip. */
+const ADD_PAD = { l: 9, t: 5, r: 9, b: 13 };
+const ADD_HOT = { x: ADD_PAD.l, y: ADD_PAD.t + 28 };
+const ADD_THEMES = {
+  light: { fill: "#ffffff", plus: "#6e6e77", rim: 0.078, near: 0.122, far: 0.2 },
+  dark: { fill: "#27272a", plus: "#a1a1aa", rim: 0.6, near: 0.4, far: 0.5 },
+};
+/** The add pin's cursor image as SVG, at `scale` (2 for Retina): CSS box-shadow blur B is a Gaussian of B / 2. */
+function addPinSvg(theme, scale = 1) {
+  const c = ADD_THEMES[theme] || ADD_THEMES.light;
+  const w = ADD_PAD.l + 28 + ADD_PAD.r, hh = ADD_PAD.t + 28 + ADD_PAD.b;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w * scale}" height="${hh * scale}" viewBox="0 0 ${w} ${hh}">`
+    + `<defs><filter id="n" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="1"/></filter><filter id="f" x="-1" y="-1" width="3" height="3"><feGaussianBlur stdDeviation="5"/></filter></defs>`
+    + `<g transform="translate(${ADD_PAD.l} ${ADD_PAD.t})">`
+    + `<path d="${PIN_INSET}" transform="translate(0 4)" fill="#000" fill-opacity="${c.far}" filter="url(#f)"/>`
+    + `<path d="${PIN_PATH}" transform="translate(0 1)" fill="#000" fill-opacity="${c.near}" filter="url(#n)"/>`
+    + `<path d="${PIN_PATH}" fill="none" stroke="#000" stroke-opacity="${c.rim}" stroke-width="1"/>`
+    + `<path d="${PIN_PATH}" fill="${c.fill}"/>`
+    + `<g fill="none" stroke="${c.plus}">${PLUS}</g></g></svg>`;
+}
+const svgUrl = (s) => `url("data:image/svg+xml,${encodeURIComponent(s)}")`;
+/** The comment-mode cursor: the 1x image for any browser, then a crisp 2x one where image sets work (the app's WebKit). */
+const cursorCss = (theme) => `cursor:${svgUrl(addPinSvg(theme))} ${ADD_HOT.x} ${ADD_HOT.y},crosshair!important;cursor:-webkit-image-set(${svgUrl(addPinSvg(theme))} 1x,${svgUrl(addPinSvg(theme, 2))} 2x) ${ADD_HOT.x} ${ADD_HOT.y},crosshair!important`;
 
 function start(host) {
   const { view, file } = host;
@@ -144,10 +175,16 @@ function start(host) {
 .cm-fail .cm-btn{height:20px;min-width:20px;margin-top:-2px;padding:0 7px;font-size:12px}
 .cm-failrow{padding:10px 14px 0}
 .cm-hov{position:absolute;left:0;top:0;display:none;border:1.5px solid var(--c-sel);pointer-events:none;border-radius:3px}
-#view.cm-mode,#view.cm-mode *{cursor:${CURSOR}!important}
+.cm-pin.cm-add{color:var(--c-muted-fg);cursor:default}
+.cm-pin.cm-add svg{position:absolute;left:0;top:0}
+.cm-pin.drag{z-index:1;cursor:grabbing}
+#view.cm-mode,#view.cm-mode *{${cursorCss("light")}}
+@media (prefers-color-scheme: dark){#view.cm-mode,#view.cm-mode *{${cursorCss("dark")}}}
 #view.cm-mode .cm-ui,#view.cm-mode .cm-ui *{cursor:default!important}
 #view.cm-mode .cm-ui textarea{cursor:text!important}
 #view.cm-mode .cm-ui button,#view.cm-mode .cm-pin,#view.cm-mode .cm-pin *{cursor:pointer!important}
+#view.cm-mode .cm-pin.cm-add,#view.cm-mode .cm-pin.cm-add *{cursor:default!important}
+.cm-layer.dragging,.cm-layer.dragging *,#view.cm-mode .cm-pin.drag,#view.cm-mode .cm-pin.drag *{cursor:grabbing!important}
 .cm-t,.cm-bar>span,.cm-hint>b,.cm-hint>.cm-soft,.cm-chip span,.cm-who b,.cm-who time,.cm-gone b,.cm-gone .cm-gl{text-box:trim-both cap alphabetic}
 .cm-t.ex{text-box-edge:ex alphabetic}
 @media (prefers-reduced-motion: reduce){.cm-av,.cm-agent,.cm-send{transition:none}.cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1}}`;
@@ -245,7 +282,12 @@ function start(host) {
     el.dataset.thread = id;
     el.title = "Open comment";
     el.style.display = "none";
-    el.addEventListener("click", (e) => { e.stopPropagation(); if (id === "draft") return; openThread(st.open === id ? null : id); });
+    el.addEventListener("click", (e) => { e.stopPropagation(); if (id === "draft" || dragged === id) return; openThread(st.open === id ? null : id); });
+    el.addEventListener("pointerdown", (e) => pressPin(e, id));
+    el.addEventListener("pointermove", (e) => dragPin(e));
+    el.addEventListener("pointerup", (e) => dropPin(e));
+    el.addEventListener("pointercancel", () => cancelDrag());
+    el.addEventListener("lostpointercapture", () => { if (drag && !drag.done) cancelDrag(); });
     layer.appendChild(el);
     p = { el, x: NaN, y: NaN, vis: false, key: "" };
     pins.set(id, p);
@@ -275,11 +317,77 @@ function start(host) {
       p.el.classList.toggle("open", st.open === t.id);
       p.el.setAttribute("aria-label", `Comment from ${first && first.author ? first.author.name : "someone"}${first ? ": " + first.body.slice(0, 80) : ""}`);
     }
-    if (st.draft) drawPin(pinEl("draft"), null, { name: st.me }, false);
+    if (st.draft) {
+      // The add pin stays where the click left it while the comment is written: the cursor's own shape, set down.
+      const p = pinEl("draft");
+      if (p.key !== "add") { p.key = "add"; p.el.classList.add("cm-add"); p.el.title = ""; p.el.setAttribute("aria-label", "New comment here"); p.el.innerHTML = `<svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" aria-hidden="true">${PLUS}</svg>`; }
+    }
     if (st.open && !L.stillOpen(st.open, list, true)) st.open = null;
     drawThread();
     drawBars();
     schedule();
+  }
+
+  // ---------- moving a pin: press and drag it (a press that stays within L.DRAG_SLOP is a click) ----------
+  // While it moves, the pin's tip keeps the offset it was grabbed at and the layer under the tip lights up. On the drop
+  // the thread is anchored again at the tip by anchorAt, the rule a new comment there gets, and one thread.move op is
+  // sent: it lands in comments.json, or in a shared file's outbox for the Cloud. Comments are not in undo, so neither
+  // is a move. Esc while dragging puts the pin back.
+  let drag = null, dragged = null;
+  function pressPin(e, id) {
+    if (id === "draft" || e.button !== 0 || host.hand || drag) return;
+    const t = thread(id), p = pins.get(id);
+    if (!t || !p || !p.vis || !L.mayMove(t, st.sync)) return;
+    const vb = host.viewBox || { l: 0, t: 0 };
+    const at = { x: e.clientX, y: e.clientY };
+    drag = { id, pid: e.pointerId, from: at, grab: L.grabOffset(at, { x: vb.l + p.x, y: vb.t + p.y }), tip: null, moving: false, done: false, el: p.el };
+    try { p.el.setPointerCapture(e.pointerId); } catch {}
+  }
+  function dragPin(e) {
+    if (!drag || e.pointerId !== drag.pid) return;
+    const at = { x: e.clientX, y: e.clientY };
+    if (!drag.moving) {
+      if (!L.isDrag(drag.from, at)) return;
+      drag.moving = true;
+      drag.el.classList.add("drag");
+      layer.classList.add("dragging");
+      if (st.menu) { st.menu = false; drawMenu(); }
+    }
+    drag.tip = L.tipAt(at, drag.grab);
+    drag.meta = e.metaKey;
+    hovId = (host.pickSelectable ? host.pickSelectable(drag.tip.x, drag.tip.y, !!e.metaKey) : host.pick(drag.tip.x, drag.tip.y)) || null;
+    paintHover();
+    schedule();
+  }
+  function endDrag() {
+    const d = drag;
+    drag = null;
+    if (!d) return null;
+    d.done = true;
+    try { d.el.releasePointerCapture(d.pid); } catch {}
+    d.el.classList.remove("drag");
+    layer.classList.remove("dragging");
+    if (!st.mode) { hovId = null; hov.style.display = "none"; }
+    if (d.moving) { dragged = d.id; setTimeout(() => { if (dragged === d.id) dragged = null; }, 0); }
+    return d;
+  }
+  function cancelDrag() {
+    if (endDrag()) { pins.forEach((p) => { p.x = NaN; }); schedule(); }
+  }
+  function dropPin(e) {
+    if (!drag || e.pointerId !== drag.pid) return;
+    const d = endDrag();
+    if (!d.moving || !d.tip) return;
+    e.stopPropagation();
+    const t = thread(d.id);
+    if (!t) return;
+    const a = anchorAt({ clientX: d.tip.x, clientY: d.tip.y, metaKey: !!d.meta });
+    if (L.sameAnchor(t.anchor, a)) { schedule(); return; }
+    // Shown where it was dropped at once; the answer (the whole list) confirms it, a refusal puts it back.
+    t.anchor = a;
+    if (a.nodeId) gone.delete(a.nodeId);
+    render();
+    sendOps([env({ kind: "thread.move", thread: d.id, anchor: a })]).catch((err) => { tell(err.message); load(); });
   }
 
   let raf = 0;
@@ -297,14 +405,16 @@ function start(host) {
     const put = (id, spot) => {
       const p = pins.get(id);
       if (!p) return;
-      if (!spot) { if (p.vis) { p.el.style.display = "none"; p.vis = false; } return; }
-      const sx = cam.x + spot.x * cam.z, sy = cam.y + spot.y * cam.z;
+      const held = drag && drag.moving && drag.tip && drag.id === id;
+      if (!spot && !held) { if (p.vis) { p.el.style.display = "none"; p.vis = false; } return; }
+      const vb = held ? host.viewBox || { l: 0, t: 0 } : null;
+      const sx = held ? drag.tip.x - vb.l : cam.x + spot.x * cam.z, sy = held ? drag.tip.y - vb.t : cam.y + spot.y * cam.z;
       at.set(id, { x: sx, y: sy });
       const inside = sx > -PIN && sy > -PIN && sx < vw + PIN && sy < vh + PIN * 2;
       if (!inside) { if (p.vis) { p.el.style.display = "none"; p.vis = false; } return; }
       if (!p.vis) { p.el.style.display = ""; p.vis = true; }
       if (p.x !== sx || p.y !== sy) { p.x = sx; p.y = sy; p.el.style.transform = `translate(${Math.round(sx * 4) / 4}px,${Math.round((sy - PIN) * 4) / 4}px)`; }
-      const gn = spot.kind === "board";
+      const gn = !held && spot.kind === "board";
       if (p.el.classList.contains("gone") !== gn) p.el.classList.toggle("gone", gn);
     };
     for (const t of list) put(t.id, spotOf(t, slots));
@@ -676,6 +786,7 @@ function start(host) {
   addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
     if (e.key === "Escape" && !typing(e.target)) {
+      if (drag) { const moving = drag.moving; cancelDrag(); if (moving) { e.preventDefault(); e.stopPropagation(); return; } }
       if (st.menu && st.open) { st.menu = false; drawMenu(); e.preventDefault(); e.stopPropagation(); return; }
       if (st.draft) { closeDraft(); render(); e.preventDefault(); e.stopPropagation(); return; }
       if (st.open) { openThread(null); e.preventDefault(); e.stopPropagation(); return; }
@@ -742,6 +853,8 @@ function start(host) {
     get sync() { return st.sync; },
     setMode,
     reload: load,
+    /** The add pin's cursor (QA draws it beside a pin to check that both are one shape): its SVG and its hotspot. */
+    addPin: { svg: addPinSvg, hot: ADD_HOT },
   };
   load();
 }
