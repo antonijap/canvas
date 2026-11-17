@@ -10,6 +10,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { freePort, ROOT, sleep, startServer, type Scratch } from "./lib.ts";
+import { shareLocal } from "../src/cloud-sync.ts";
 
 const SERVER = path.join(ROOT, "cloud", "cloudflare");
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "canvas-cloud-e2e-")));
@@ -81,7 +82,7 @@ async function main() {
   const put = await fetch(`${direct}/v1/people`, { method: "PUT", headers: { ...dev("anna@studio.test"), "content-type": "application/json" }, body: JSON.stringify([{ match: "ben@studio.test", role: "commenter" }]) });
   line(put.ok, "anna (owner) made ben a commenter through PUT /v1/people");
 
-  // 3. anna's file: a local thread with a reply, a resolved thread and a deleted comment, made before any server
+  // 3. Local threads, a deleted reply and a deleted thread, made before sharing. Keep a copy from before deletion.
   const proxyPort = await freePort();
   const annaRelay = relay(wport, proxyPort);
   await annaRelay.open();
@@ -100,7 +101,7 @@ async function main() {
   const get = async (s: Scratch, file: string) => (await (await fetch(`${s.base}/api/comments?file=${encodeURIComponent(file)}`)).json()) as any;
   const NIL = "00000000-0000-4000-8000-000000000000";
   const op = (o: unknown) => ({ opId: uuid(), doc: NIL, at: new Date().toISOString(), op: o });
-  const t1 = uuid(), c1 = uuid(), c2 = uuid(), t2 = uuid(), c3 = uuid(), c4 = uuid();
+  const t1 = uuid(), c1 = uuid(), c2 = uuid(), t2 = uuid(), c3 = uuid(), c4 = uuid(), t3 = uuid(), c5 = uuid(), c6 = uuid();
   const fileA = pkgA;
   const first = await post(sa, "/api/comments/ops", [
     op({ kind: "thread.create", thread: t1, anchor, comment: c1, body: "First, before any server" }),
@@ -108,30 +109,42 @@ async function main() {
     op({ kind: "thread.create", thread: t2, anchor, comment: c3, body: "Resolved one" }),
     op({ kind: "thread.resolve", thread: t2, resolved: true }),
     op({ kind: "comment.add", thread: t2, comment: c4, body: "Deleted reply" }),
+    op({ kind: "thread.create", thread: t3, anchor, comment: c5, body: "Thread before deletion" }),
+    op({ kind: "comment.add", thread: t3, comment: c6, body: "Reply before deletion" }),
   ], fileA);
   if (first.status !== 200 || first.j.rejected?.length) console.log(JSON.stringify(first));
-  await post(sa, "/api/comments/ops", [op({ kind: "comment.delete", comment: c4 })], fileA);
   const diskA = () => JSON.parse(fs.readFileSync(path.join(pkgA, "comments.json"), "utf8"));
-  line(diskA().threads.length === 2 && !diskA().server, "anna's file has 2 local threads and no server");
+  const oldCopy = diskA();
+  await post(sa, "/api/comments/ops", [op({ kind: "comment.delete", comment: c4 }), op({ kind: "thread.delete", thread: t3 })], fileA);
+  line(diskA().threads.length === 3 && !diskA().server, "anna's file has 3 local threads, including tombstones, and no server");
 
   // 4. anna signs in (dev header) and shares the file
   const st = await (await fetch(`${sa.base}/api/cloud/status`)).json() as any;
   line(st.status === "connected" && st.email === "anna@studio.test" && st.role === "owner", `status says connected as ${st.email}, ${st.role}`);
   const shared = await post(sa, "/api/cloud/share", {}, fileA);
-  line(shared.status === 200 && shared.j.ops === 4, `share sent ${shared.j.ops} ops (2 creates, 1 reply, 1 resolve; the deleted reply stays local)`);
-  await until("the outbox to empty", () => diskA().outbox.length === 0 && diskA().seq >= 4);
+  line(shared.status === 200 && shared.j.ops === 9, `share sent ${shared.j.ops} ops, including the deleted reply and thread`);
+  await until("the outbox to empty", () => diskA().outbox.length === 0 && diskA().seq >= 9);
   const da = diskA();
-  line(da.server.url === annaUrl && da.seq === 4, `comments.json has server.url and seq ${da.seq}`);
-  line(da.threads.map((t: any) => t.id).sort().join() === [t1, t2].sort().join(), "the same thread ids are on the server");
+  line(da.server.url === annaUrl && da.seq === 9, `comments.json has server.url and seq ${da.seq}`);
+  line(da.threads.map((t: any) => t.id).sort().join() === [t1, t2, t3].sort().join(), "the same thread ids are on the server");
   line(da.threads.find((t: any) => t.id === t1).comments.map((c: any) => c.id).join() === [c1, c2].join(), "the same comment ids too");
   line(da.threads.find((t: any) => t.id === t1).anchor.nodeId === "Ttl01" && !!da.threads.find((t: any) => t.id === t2).resolvedAt, "anchors and the resolved state came across");
   line(da.threads[0].comments[0].author.email === "anna@studio.test", "the server's author (anna@studio.test) is on the comments");
+  const tombstones = (f: any) => {
+    const reply = f.threads.find((t: any) => t.id === t2)?.comments.find((c: any) => c.id === c4);
+    const thread = f.threads.find((t: any) => t.id === t3);
+    return !!reply?.deletedAt && reply.body === "" && !!thread?.deletedAt
+      && thread.comments.length === 2 && thread.comments.every((c: any) => !!c.deletedAt && c.body === "");
+  };
+  line(tombstones(da), "confirmed comments.json keeps the deleted reply and every comment of the deleted thread");
+  const history = await (await fetch(`${direct}/v1/docs/${da.doc}/threads?since=1`, { headers: dev("anna@studio.test") })).json() as any;
+  line(history.entries?.some((e: any) => e.op.kind === "comment.delete" && e.op.comment === c4)
+    && history.entries?.some((e: any) => e.op.kind === "thread.delete" && e.op.thread === t3), "server history contains the shared comment.delete and thread.delete ops");
 
   // 5. ben opens a copy (the same document, as a sync folder would give him) and points it at the server directly
   const pkgB = path.join(dirB, "design.canvas");
   fs.cpSync(pkgA, pkgB, { recursive: true });
-  const cb = JSON.parse(fs.readFileSync(path.join(pkgB, "comments.json"), "utf8"));
-  cb.server.url = direct;
+  const cb = shareLocal(oldCopy, direct, { email: "ben@studio.test", name: "Ben" });
   fs.writeFileSync(path.join(pkgB, "comments.json"), JSON.stringify(cb));
   const sb = await startServer(dirB, { CANVAS_CLOUD_URL: direct, CANVAS_CLOUD_DEV_EMAIL: "ben@studio.test", CANVAS_COMMENT_NAME: "Ben" });
   scratch.push(sb);
@@ -139,6 +152,10 @@ async function main() {
   await get(sb, pkgB); // opening the file's comments connects it
   await until("ben connected", async () => (await get(sb, pkgB)).sync?.status === "connected");
   line(true, "ben's copy connected to the same document");
+  await until("the old copy's outbox to empty", () => diskB().outbox.length === 0);
+  line(tombstones(diskB()) && tombstones(diskA()), "syncing an old comments.json cannot resurrect the deleted reply or thread");
+  line(diskB().rejected?.some((r: any) => r.code === "conflict" && r.envelope.op.comment === c4)
+    && diskB().rejected?.some((r: any) => r.code === "conflict" && r.envelope.op.thread === t3), "the server refuses old creates and replies that reuse deleted ids");
 
   // 6. ben comments; it is in anna's comments.json within a second
   const bt = uuid(), bc = uuid();

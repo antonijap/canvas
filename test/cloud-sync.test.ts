@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import type { Applied, CommentsFile, OpEnvelope, Thread } from "../cloud/protocol.ts";
+import { applyOp, checkEnvelope, type Applied, type CommentsFile, type OpEnvelope, type Thread } from "../cloud/protocol.ts";
 import type { SyncFile } from "../src/cloud-sync.ts";
 import { fakeServer, tmpDir } from "./helpers.ts";
 
@@ -148,7 +148,7 @@ describe("what the page shows: confirmed threads plus the outbox", () => {
 });
 
 describe("sharing a file", () => {
-  test("local threads become ops with the same ids and anchors; tombstones stay local", () => {
+  test("sharing sends the same ids, anchors and tombstones and keeps them after confirmation", () => {
     const t1 = uuid(), t2 = uuid(), t3 = uuid(), c1 = uuid(), c2 = uuid(), c3 = uuid(), c4 = uuid(), c5 = uuid();
     const author = { name: "Ana Test" };
     const com = (id: string, thread: string, body: string, deletedAt?: string) => ({ id, thread, author, body, createdAt: at, ...(deletedAt ? { deletedAt } : {}) });
@@ -161,15 +161,63 @@ describe("sharing a file", () => {
       ],
     };
     const ops = S.opsForShare(f).map((e) => e.op);
-    assert.deepEqual(ops.map((o) => o.kind), ["thread.create", "comment.add", "thread.create", "thread.resolve"]);
+    assert.deepEqual(ops.map((o) => o.kind), ["thread.create", "comment.add", "comment.add", "comment.delete", "thread.create", "thread.resolve", "thread.create", "thread.delete"]);
     assert.deepEqual(ops[0], { kind: "thread.create", thread: t1, anchor, comment: c1, body: "one" });
     assert.deepEqual(ops[1], { kind: "comment.add", thread: t1, comment: c2, body: "two" });
-    assert.deepEqual(ops[2], { kind: "thread.create", thread: t2, anchor: { x: 1, y: 2 }, comment: c4, body: "resolved" });
+    assert.deepEqual(ops[2], { kind: "comment.add", thread: t1, comment: c3, body: "Deleted" });
+    assert.deepEqual(ops[3], { kind: "comment.delete", comment: c3 });
+    assert.deepEqual(ops[4], { kind: "thread.create", thread: t2, anchor: { x: 1, y: 2 }, comment: c4, body: "resolved" });
+    assert.deepEqual(ops[6], { kind: "thread.create", thread: t3, anchor, comment: c5, body: "Deleted" });
+    assert.deepEqual(ops[7], { kind: "thread.delete", thread: t3 });
     const shared2 = S.shareLocal(f, "https://team.example.com", ME);
     assert.equal(shared2.server!.url, "https://team.example.com");
-    assert.equal(shared2.outbox.length, 4);
+    assert.equal(shared2.outbox.length, 8);
     assert.equal(shared2.threads.length, 0, "the confirmed side starts empty: the server confirms them");
-    assert.equal(S.viewOf(shared2, fb).length, 2, "and the page still shows both live threads");
+    assert.equal(S.viewOf(shared2, fb).filter((t) => !t.deletedAt).length, 2, "the page still shows both live threads");
+    const server: Thread[] = [];
+    const applied = shared2.outbox.map((e, i) => {
+      assert.equal(checkEnvelope(e), null);
+      assert.equal(applyOp(server, DOC, e.op, ME, at), null);
+      return { seq: i + 1, opId: e.opId, by: ME, at, op: e.op };
+    });
+    S.confirm(shared2, applied);
+    assert.equal(shared2.outbox.length, 0);
+    assert.deepEqual(shared2.threads, server);
+    assert.ok(shared2.threads[0].comments[2].deletedAt);
+    assert.ok(shared2.threads[2].deletedAt);
+
+    const old = structuredClone(f);
+    for (const t of old.threads) {
+      delete t.deletedAt;
+      for (const c of t.comments) { delete c.deletedAt; c.body ||= "Old copy"; }
+    }
+    const stale = S.shareLocal(old, "https://team.example.com", ME, S.opsForShare(old, new Date(at)));
+    S.snapshot(stale, server, applied.length);
+    // An old copy's creates, replies and edits cannot replace the server's tombstones.
+    for (const e of stale.outbox) applyOp(server, DOC, e.op, ME, at);
+    assert.equal(applyOp(server, DOC, { kind: "comment.edit", comment: c3, body: "Old copy" }, ME, at), "comment deleted");
+    assert.equal(applyOp(server, DOC, { kind: "comment.add", thread: t3, comment: uuid(), body: "Old copy" }, ME, at), "thread deleted");
+    assert.deepEqual(S.viewOf(stale, fb), shared2.threads);
+    assert.deepEqual(server, shared2.threads);
+  });
+
+  test("sharing preserves a deleted first comment, an all-deleted thread and every id inside a deleted thread", () => {
+    const original = shared({ server: undefined });
+    const roots = [create(), create(), create()];
+    const replies = roots.map((r) => env({ kind: "comment.add", thread: r.thread, comment: uuid(), body: "Reply" }));
+    for (const [i, r] of roots.entries()) {
+      applyOp(original.threads, DOC, r.e.op, ME, at);
+      applyOp(original.threads, DOC, replies[i].op, ME, at);
+      applyOp(original.threads, DOC, { kind: "comment.delete", comment: r.comment }, ME, at);
+    }
+    applyOp(original.threads, DOC, { kind: "comment.delete", comment: (replies[1].op as { comment: string }).comment }, ME, at);
+    applyOp(original.threads, DOC, { kind: "thread.delete", thread: roots[2].thread }, ME, at);
+    const f = S.shareLocal(original, "https://team.example.com", ME, S.opsForShare(original, new Date(at)));
+    const shown = S.viewOf(f, fb);
+    assert.deepEqual(shown, original.threads);
+    assert.equal(shown[0].comments[1].body, "Reply");
+    assert.equal(shown[1].deletedAt, undefined, "deleting all comments does not delete their thread");
+    for (const e of f.outbox) assert.equal(checkEnvelope(e), null);
   });
 });
 

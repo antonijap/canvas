@@ -7,6 +7,23 @@ import * as L from "../src/page/comments-logic.js";
 
 const thread = (over: Record<string, unknown> = {}) => ({ id: "t", anchor: { nodeId: "A", x: 0.25, y: 0.5, board: "B" }, comments: [], ...over });
 
+test("refusals explain permissions, deletes and limits in plain words", () => {
+  const reason = (code?: string, message?: string, kind = "comment.add", role?: string) => L.refusalReason({ code, message, kind }, role);
+  assert.equal(reason("forbidden", "This role cannot apply the op", "comment.add", "viewer"), "You can view this file but not comment on it");
+  for (const kind of ["comment.edit", "comment.delete", "thread.delete"]) {
+    assert.equal(reason("forbidden", "This role cannot apply the op", kind, "commenter"), "Only the person who wrote it can change it");
+    assert.equal(reason("forbidden", "This role cannot apply the op", kind, "viewer"), "You can view this file but not comment on it");
+  }
+  for (const message of ["thread deleted", "comment deleted", "This thread was deleted", "This comment was deleted"]) {
+    assert.equal(reason("conflict", message), "This thread was deleted");
+  }
+  assert.equal(reason("quota", "Too many ops in one minute"), "Too many comments at once. Canvas will try again");
+  assert.equal(reason("invalid", "body is invalid"), "Canvas could not send this comment");
+  for (const code of ["server", "conflict", "forbidden", "unauthenticated", "not_found", "version", undefined]) {
+    assert.equal(reason(code, "Internal server detail"), "The server did not accept this comment");
+  }
+});
+
 test("a click on a layer is stored as fractions of its box, with the layer's name, type and size", () => {
   const a = L.anchorFor({ nodeId: "A", rect: { x: 100, y: 200, w: 80, h: 40 }, point: { x: 120, y: 230 }, page: "p1", board: "B", info: { name: "Title", type: "text" } });
   assert.deepEqual(a, { page: "p1", nodeId: "A", x: 0.25, y: 0.75, board: "B", preview: { name: "Title", type: "text", width: 80, height: 40 } });
