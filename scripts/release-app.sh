@@ -35,6 +35,11 @@ echo "Building Canvas.app $VERSION"
 # No CANVAS_REPO: a release runs the server inside it, never a checkout's path.
 CANVAS_SIGN_IDENTITY=- CANVAS_APP_OUT="$ROOT/$APP" apps/macos/build.sh >/dev/null
 
+# The binary must open on every macOS Info.plist allows: its build minimum and LSMinimumSystemVersion are the same.
+BIN_MINOS="$(vtool -show-build "$APP/Contents/MacOS/Canvas" | awk '/minos/ {print $2; exit}')"
+APP_MINOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")"
+[ "$BIN_MINOS" = "$APP_MINOS" ] || fail "the app binary needs macOS $BIN_MINOS but Info.plist says $APP_MINOS"
+
 echo "Adding the server, the engine and Node"
 SRV="$APP/Contents/Resources/server"
 mkdir -p "$SRV/engine/src" "$SRV/demos"
