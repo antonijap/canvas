@@ -691,6 +691,19 @@ sc("settings", "Cmd+, opens Settings and a change persists", { covers: ["setting
   await t.shot(`${process.cwd()}/qa/out/native/settings-window.png`, "settings");
 });
 
+sc("settings", "Settings > Agents: a model and reasoning menu for each agent, Default until one is picked", { covers: ["settings:agents-model"] }, async (t: NT) => {
+  await t.key(",", ["cmd"]);
+  await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
+  await settingsTab(t, "Agents");
+  await t.waitText("Model and reasoning", undefined, 4000, "settings");
+  for (const h of ["claude", "codex"]) {
+    const m = await t.mark({ id: `model-${h}`, window: "settings" }, 4000);
+    t.ok(m, `the ${h} model menu`);
+    await t.mark({ id: `effort-${h}`, window: "settings" }, 4000);
+  }
+  await t.shot(`${process.cwd()}/qa/out/native/settings-agents-model.png`, "settings");
+});
+
 sc("settings", "Settings > Privacy: Share usage counts on, Help improve Canvas adds the monthly id, Show what's sent shows today's JSON", { covers: ["settings:privacy"] }, async (t: NT) => {
   await t.key(",", ["cmd"]);
   await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
