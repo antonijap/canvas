@@ -59,6 +59,9 @@ struct AppSettings: Equatable {
     // Performance
     var keptTabs = 3
     var snapshotMB = 200
+    // Privacy: anonymous usage counts (src/usage-counts.ts). Sharing is on by default, without an install id.
+    var shareUsage = true
+    var improveCanvas = false
 
     static let prefix = "canvas.settings."
 
@@ -77,6 +80,8 @@ struct AppSettings: Equatable {
         if has("soundVolume") { s.soundVolume = SettingsLimits.volume(d.double(forKey: k("soundVolume"))) }
         if has("keptTabs") { s.keptTabs = SettingsLimits.clamp(d.integer(forKey: k("keptTabs")), SettingsLimits.keptTabs) }
         if has("snapshotMB") { s.snapshotMB = SettingsLimits.clamp(d.integer(forKey: k("snapshotMB")), SettingsLimits.snapshotMB) }
+        if has("shareUsage") { s.shareUsage = d.bool(forKey: k("shareUsage")) }
+        if has("improveCanvas") { s.improveCanvas = d.bool(forKey: k("improveCanvas")) }
         return s
     }
 
@@ -93,6 +98,8 @@ struct AppSettings: Equatable {
         d.set(soundVolume, forKey: k("soundVolume"))
         d.set(keptTabs, forKey: k("keptTabs"))
         d.set(snapshotMB, forKey: k("snapshotMB"))
+        d.set(shareUsage, forKey: k("shareUsage"))
+        d.set(improveCanvas, forKey: k("improveCanvas"))
     }
 
     /// Every value inside its limits (a typed 0 or 5000 never reaches the page, the server or the defaults).
@@ -118,6 +125,36 @@ struct AppSettings: Equatable {
 
     /// What the server reads (src/settings.ts), sent with the shell's state.
     var serverSettings: [String: Any] { ["harness": harness.rawValue, "runCapMin": runCapMin] }
+
+    /// Help improve Canvas only counts while sharing is on (its switch is off and greyed out then).
+    var improveEffective: Bool { shareUsage && improveCanvas }
+
+    /// What the server's usage counts read (src/usage-counts.ts cleanFacts), sent with the shell's state: the two
+    /// switches and the facts only the app knows. A QA build says so, and its server never sends.
+    func usageFacts(version: String, commit: String?, os: String, qa: Bool) -> [String: Any] {
+        var d: [String: Any] = ["share": shareUsage, "improve": improveEffective, "version": version, "os": os, "qa": qa]
+        if let commit { d["commit"] = commit }
+        return d
+    }
+}
+
+/// Settings > Privacy's link: what the usage counts are, on the website.
+enum UsageLinks {
+    static let privacy = URL(string: "https://getcanvas.cc/privacy#usage")!
+}
+
+/// A crash, for usage counts: a marker set at launch and cleared on a normal quit. Found set at the next launch, the
+/// last run ended without quitting (a crash, or a force quit).
+enum RunMarker {
+    static let key = "canvas.running"
+    /// At launch: whether the last run ended without quitting. Sets the marker for this run.
+    static func launch(_ d: UserDefaults) -> Bool {
+        let crashed = d.bool(forKey: key)
+        d.set(true, forKey: key)
+        return crashed
+    }
+    /// On a normal quit.
+    static func quit(_ d: UserDefaults) { d.set(false, forKey: key) }
 }
 
 /// Settings > Shortcuts: every menu command with a key (from MenuSpec, so the list never drifts from the menus) and

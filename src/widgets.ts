@@ -20,6 +20,7 @@ import { GROUP_MERGE_MS, isGroupMerge } from "./move.ts";
 import { storeFor, type Store, type StoreState, type WriteOpts } from "./widgets/store.ts";
 import { approve } from "./widgets/trust.ts";
 import { WidgetError, type Config, type Reading, type Widget } from "./widgets/types.ts";
+import { countUsage } from "./usage-counts.ts";
 
 export { WidgetError } from "./widgets/types.ts";
 export type { Reading, Widget } from "./widgets/types.ts";
@@ -154,6 +155,7 @@ export async function addWidget(file: string, input: WidgetInput, opts: Opts = {
     list.splice(index, 0, widget);
     return { widgets: list, result: widget };
   }, opts);
+  countUsage(`widget.add.${k.id}`);
   return { rev: state.rev, widget: state.widgets.find((w) => w.id === result!.id)! };
 }
 

@@ -133,7 +133,7 @@ sc("first-run", "a first launch opens the Welcome file; Connected follows an age
     let tab: any;
     for (let i = 0; i < 30 && !tab; i++) {
       const bs = (await f.views("settings")).filter((v) => v.class === "NSToolbarButton").sort((x, y) => x.x - y.x);
-      tab = bs.find((v) => v.label === "Agents") ?? (bs.length === 6 ? bs[2] : undefined);
+      tab = bs.find((v) => v.label === "Agents") ?? (bs.length === 7 ? bs[2] : undefined);
       if (!tab) await sleep(100);
     }
     if (!tab) throw new Fail("no Agents tab in the Settings toolbar");

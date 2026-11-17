@@ -398,7 +398,13 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             return
         }
         guard let url = DocURL.page(base: base, file: file) else { return }
+        let opening = !openFiles.contains(file)
         show(file, url: url)
+        // Usage counts: a document opened in a tab (not a switch to one already open), and the Welcome course.
+        if opening {
+            UsageCount.send("file.open", to: base)
+            if URL(fileURLWithPath: file).lastPathComponent == "Welcome.canvas" { UsageCount.send("course.opened", to: base) }
+        }
     }
 
     // MARK: tabs

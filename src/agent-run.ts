@@ -32,6 +32,7 @@ import { entries, finishAgent, undo, type Entry, type NodeOp } from "./history.t
 import { listPages } from "./pages.ts";
 import { agentSettings, runCapMs } from "./settings.ts";
 import { changeThreads, PROMPT_MAX, readThreads, recentAsks, threadsNow, withOutcome, withRun, type Harness, type Run, type Step, type Thread } from "./threads.ts";
+import { countUsage } from "./usage-counts.ts";
 
 export const OUTPUT_MAX = 20 * 1024 * 1024;
 export const LINE_MAX = 4 * 1024 * 1024;
@@ -600,7 +601,9 @@ export async function startRun(ctx: AgentCtx, inp: StartInput): Promise<RunView>
   // instead of starting a second run on the same layer, or a fourth run.
   starting.add(slot);
   try {
-    return await startReserved(ctx, inp, file, ids, prompt, key, facts);
+    const view = await startReserved(ctx, inp, file, ids, prompt, key, facts);
+    countUsage("agent.prompt");
+    return view;
   } finally {
     starting.delete(slot);
   }
@@ -800,6 +803,7 @@ async function end(ctx: AgentCtx, a: Active, code: number | null) {
   if (stopped) a.view.error = a.stopReason === "timeout" ? `Stopped after ${agentSettings().runCapMin} minute${agentSettings().runCapMin === 1 ? "" : "s"}` : a.stopReason === "output" ? "Stopped: the agent wrote too much output" : undefined;
   else if (failed) a.view.error = t.error ?? "The run failed";
   a.view.endedAt = Date.now();
+  if (a.view.status === "done") countUsage("agent.run_done");
   // The run's undo step closes and takes the summary as its name; one it never glossed is glossed now.
   finishAgent(a.mcpSession, (a.view.detail ?? a.view.summary)?.slice(0, 140));
   if (sum && !t.finishCalled) await ctx.finish(a.view.file, a.view.detail ?? a.view.summary).catch(() => {});

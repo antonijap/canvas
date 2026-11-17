@@ -41,6 +41,7 @@ import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSIO
 import { boardDigestStale, snapshotOfDoc, type Snapshot } from "./boards.ts";
 import { backupDirFor, findNode, loadDoc, loadDocAsync, revisionOf, sha, StaleFileError, writeDoc, type LoadedDoc, type CanvasDoc, type DocNode } from "./engine.ts";
 import type { NodeOp, Op } from "./history.ts";
+import { countUsage } from "./usage-counts.ts";
 
 /** What the writer needs from the snapshot cache (server.ts wires it). Without a host, edits go straight to writeDoc. */
 export type DocHost = {
@@ -1694,6 +1695,8 @@ function settle(st: FileState, key: string, hash: string, v: number, keepJournal
   st.diskKey = `${key}:?`;
   st.diskHash = hash;
   st.diskVersion = v;
+  // Usage counts: one file.save per write that put a changed document on disk.
+  if (v > st.saved) countUsage("file.save");
   st.saved = Math.max(st.saved, v);
   st.bytes = Number(key.split(":")[1]);
   st.pending = st.pending.filter((p) => p.version > v);
@@ -1953,6 +1956,7 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
     st.logSeen = `${ino}:${info.size}`;
     st.logFold = true;
     st.diskVersion = v;
+    if (v > st.saved) countUsage("file.save"); // usage counts: the edits are on disk, in the save log
     st.saved = Math.max(st.saved, v);
     const savedEdits = st.pending.filter((p) => p.version <= v);
     st.pending = st.pending.filter((p) => p.version > v);

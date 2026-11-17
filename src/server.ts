@@ -51,6 +51,7 @@ import { buildIndex, defaultTheme, expand, findNode, FIT_SCRIPT, resolveDocPath,
 import { readBodyText } from "./body.ts";
 import { handleAgentRoute, renderInChild, type AgentCtx } from "./agent-run.ts";
 import { handleOnboardingRoute, noteMcp } from "./onboarding.ts";
+import { countUsage, handleUsageCountsRoute, usage } from "./usage-counts.ts";
 
 export const PORT = () => Number(process.env.CANVAS_PORT ?? 5189);
 const IDLE_EXIT_MS = 30 * 60_000;
@@ -554,6 +555,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
       if (await handleWidgetRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
       if (await handleAgentRoute(req, res, url, agentCtx)) return;
       if (await handleOnboardingRoute(req, res, url, json)) return;
+      if (await handleUsageCountsRoute(req, res, url)) return;
       if (await handleVariationsRoute(req, res, url, varCtx)) return;
       if (await handleBridge(req, res, url, bridgeCtx)) return;
       // Deleting a page deletes its boards: one structure step that the page's own removal joins (src/pages.ts).
@@ -863,6 +865,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
             }
           }
           const file = url.pathname === "/api/canvas/new" ? newCanvas(b.target) : saveAsCanvas(b.file, b.target, warnings);
+          if (url.pathname === "/api/canvas/new") countUsage("file.new");
           fileList = [];
           scanStartedAt = 0;
           return json(res, { ok: true, file, ...(warnings.length ? { warnings } : {}) });
@@ -983,6 +986,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   });
   // Quitting the app sends SIGTERM: edits still being written land first (at most 5 s, then a recovery copy), then the usual exit code.
   for (const [sig, code] of [["SIGTERM", 143], ["SIGINT", 130]] as const) process.once(sig, () => quitSafely(code));
+  // Usage counts (src/usage-counts.ts): written on the way out, sent once a day by a release build.
+  process.on("exit", () => usage.flush());
+  usage.start();
   startServer().then((s) => {
     const port = (s.address() as { port: number }).port;
     const url = `http://127.0.0.1:${port}/${file ? `?file=${encodeURIComponent(file)}` : ""}`;
