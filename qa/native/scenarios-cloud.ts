@@ -93,7 +93,7 @@ sc("settings", "Settings > Cloud: the server address, Sign in against a local de
   }
 });
 
-sc("settings", "Settings > Cloud: a name for the team server shows in Home's sidebar, its view and a shared file's card, a rename follows, an empty name is the host; the shared file itself never names the server", { covers: ["settings:cloud-name", "home:server-name", "comments:shared-bar"] }, async (t: NT) => {
+sc("settings", "Settings > Cloud: a name for the server shows in Home's sidebar, its view and a shared file's card, a rename follows, an empty name is the host; the shared file itself never names the server", { covers: ["settings:cloud-name", "home:server-name", "comments:shared-bar"] }, async (t: NT) => {
   const team = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(req.url === "/v1/info" ? JSON.stringify({ protocol: 1, server: "0.1.0", capabilities: ["comments"] }) : JSON.stringify({ email: "anna@studio.test", name: "anna", role: "owner" }));

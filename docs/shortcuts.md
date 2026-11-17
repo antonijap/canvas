@@ -136,7 +136,7 @@ The same keys work in Canvas.app and the browser version. Settings > Shortcuts s
 | Cmd+Return | Ask an agent about the selection |
 | Shift+Cmd+Return | Three variations |
 | Cmd+, | Settings |
-| Shift+Cmd+0 | Home: the pinned first tab (recent files, files on this Mac, your team server) |
+| Shift+Cmd+0 | Home: the pinned first tab (recent files, files on this Mac, your Cloud) |
 | Cmd+M | Minimise |
 | Cmd+Q | Quit |
 

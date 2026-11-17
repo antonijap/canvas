@@ -92,7 +92,7 @@ struct HomeLogicTests {
         check(all.map(\.name) == ["Brand refresh", "App onboarding", "Pricing page", "Gone"], "newest first, an edit counts: \(all.map(\.name))")
         check(HomeLogic.filter(all, .all).count == 4, "All")
         check(HomeLogic.filter(all, .mac).map(\.name) == ["App onboarding", "Gone"], "On this Mac: files not shared")
-        check(HomeLogic.filter(all, .servers).map(\.name) == ["Brand refresh", "Pricing page"], "On team servers")
+        check(HomeLogic.filter(all, .servers).map(\.name) == ["Brand refresh", "Pricing page"], "Cloud")
         check(HomeLogic.search(all, "PRIC").map(\.name) == ["Pricing page"], "search by part of the name, any case")
         check(HomeLogic.search(all, "  ").count == 4 && HomeLogic.search(all, "").count == 4, "an empty search shows everything")
         check(HomeLogic.search(all, "brand zzz").isEmpty && HomeLogic.search(all, "refresh brand").map(\.name) == ["Brand refresh"], "every word must match, in any order")

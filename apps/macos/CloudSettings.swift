@@ -219,7 +219,7 @@ struct CloudSettings: View {
 
     var body: some View {
         SettingsStack {
-            SettingsCard(title: "Team server") {
+            SettingsCard(title: "Cloud") {
                 SettingsRow("Server address", detail: urlText.isEmpty || valid ? "Your team\u{2019}s own Canvas server" : "Use an https address, like https://studio.workers.dev") {
                     FieldBox {
                         TextField("https://your-team.workers.dev", text: Binding(get: { model.prefs.cloudUrl }, set: { model.prefs.cloudUrl = String($0.prefix(200)) }))
