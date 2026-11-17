@@ -99,6 +99,8 @@ export class CloudHost {
   private readonly failures = { start: 0, count: 0 };
   /** Called after people change (enrolment, removal, revocation), so the tunnel's key list can follow. */
   onPeopleChanged: () => void = () => {};
+  /** The member tunnel's address, set by Canvas once its tunnel is up; a joining device gets it in the join answer. */
+  memberAddr: string | null = null;
 
   constructor(opts: HostOptions) {
     this.opts = opts;
@@ -385,7 +387,8 @@ export class CloudHost {
       if (this.blocked()) return json(429, { code: "quota", message: "Too many failed sign-ins" });
       try {
         const me = this.enroll(this.bearer(req) ?? "", await readJson(req));
-        return json(200, { hostId: this.hostId(), me: { id: me.id, email: me.email, name: me.name, role: me.role } });
+        // The member tunnel's address: what this device uses from now on (the invite's address is for joining only).
+        return json(200, { hostId: this.hostId(), member: this.memberAddr, me: { id: me.id, email: me.email, name: me.name, role: me.role } });
       } catch (e) {
         if (e instanceof HostError && e.status === 401) this.failed();
         throw e;
