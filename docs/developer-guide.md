@@ -106,6 +106,8 @@ The server's MCP name is always `canvas` (title "Canvas" and a one-line descript
 
 Canvas MCP is all an agent needs: `add_nodes` adds new layers and boards from node JSON, `place_nodes` moves layers to another parent, and every edit is a step in Canvas's undo history.
 
+An agent's boards never land on top of each other (`src/placement.ts`). A new board without x/y goes right of everything on its page, 40 px away, level with the page's top board. A board that `add_nodes`, `move_board` or `place_nodes` (to the canvas) would put over a board or card on its page moves right along its row until clear, and the answer says where it landed (`placed`, `note`); `allowOverlap: true` keeps the spot. Boards that hug their content are measured on the page, else their size is estimated from their layers. A person's drags, drops and pastes go where they are put.
+
 ### Tools
 
 Three tiers, so most tools work with the app closed.
@@ -658,6 +660,7 @@ pnpm qa:release --only scrub,docs # some checks: scrub licence security agent fu
 | `CANVAS_CHROME` | found automatically | The Chromium-family browser headless renders and exports use |
 | `CANVAS_NO_WARM` | unset | Set: do not start the headless renderer early (tests and short scripts) |
 | `CANVAS_MCP_NO_SPAWN` | unset | `1`: the MCP never starts a server |
+| `CANVAS_CONNECT_TEMPORARY` | unset | `1`: Connect may register a server inside `.claude/worktrees/` (QA only, with scratch agent configs). Otherwise Connect refuses to register a server inside a temporary worktree: its path goes away and every agent session would lose the MCP |
 | `CANVAS_MCP_NO_APP` | unset | `1`: `launch_canvas` starts only the server |
 | `CANVAS_MCP_WANT_VERSION` | the code version of this checkout | The server version the MCP counts as current: another one is reported `stale`, and `launch_canvas` with `restartStale` replaces it. Agent runs pass the running server's version; tests pin it |
 | `CANVAS_AGENT_LOG` | `~/Library/Logs/Canvas/agent-runs.log` | Where agent runs and variation sets log one line per event: a variation set starting, a fallback to another agent, and every run's end (status, time, edits) |

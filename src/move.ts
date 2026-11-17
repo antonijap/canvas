@@ -22,6 +22,8 @@ import { currentDoc, editDoc } from "./docwriter.ts";
 import { fitTouches, groupsAround, refitGroups } from "./groupfit.ts";
 import { nodeDiff, propsOf, record, type NodeOp } from "./history.ts";
 import { readBodyText } from "./body.ts";
+import { cardBoxes, clearSpot, obstacles, pageMates, topBox, unsizedOnPage, type Placed, type Rect } from "./placement.ts";
+import { buildIndex } from "./engine.ts";
 
 export const NUDGE_MERGE_MS = 1000;
 
@@ -51,7 +53,12 @@ const lockedAt = (f: { node: DocNode; ancestors: DocNode[] }) => f.node.locked =
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 
 export type MoveItem = { id?: string; x?: number; y?: number; dx?: number; dy?: number };
-export type MoveBody = { file?: string; id?: string; x?: number; y?: number; dx?: number; dy?: number; round?: boolean; merge?: string; expectedRevision?: string; items?: MoveItem[] };
+export type MoveBody = { file?: string; id?: string; x?: number; y?: number; dx?: number; dy?: number; round?: boolean; merge?: string; expectedRevision?: string; items?: MoveItem[];
+  /** An agent's board move: keep the spot even where it overlaps another board (default: moved right until clear). */
+  allowOverlap?: boolean;
+  /** World boxes the page measured, for boards that hug their content (the file has no size for them). */
+  rects?: Record<string, Rect>;
+};
 /** How long writes of one gesture with the same merge key keep folding into one undo step. */
 export const GROUP_MERGE_MS = 3000;
 export const isGroupMerge = (m: unknown): m is string => typeof m === "string" && /^group:[\w:.-]{1,80}$/.test(m);
@@ -76,7 +83,12 @@ export function moveNode(docFile: string, b: MoveBody, who: { source: "user" | "
   let mode: MoveMode = "board";
   let at = { x: 0, y: 0 };
   let fitOps: NodeOp[] = [];
+  let placed: Placed | undefined;
   const fit = groupsOf(docFile, [id]);
+  // An agent's board lands clear of the boards and cards on its page (src/placement.ts); a person's drag goes where it is dropped.
+  const avoid = who.source === "mcp" && b.allowOverlap !== true;
+  const mates = avoid ? pageMates(docFile, currentDoc(docFile).doc as Doc, { board: id }) : null;
+  const cards = mates ? cardBoxes(docFile, mates.page, mates.first) : [];
   const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [id, ...fit.touches] }, (doc) => {
     fitOps = [];
     mode = moveModeOf(doc as Doc, id).mode;
@@ -88,6 +100,15 @@ export function moveNode(docFile: string, b: MoveBody, who: { source: "user" | "
     const cx = typeof node.x === "number" ? node.x : 0, cy = typeof node.y === "number" ? node.y : 0;
     let nx = x ?? cx + (dx ?? 0), ny = y ?? cy + (dy ?? 0);
     if (b.round) { nx = Math.round(nx); ny = Math.round(ny); }
+    placed = undefined;
+    if (mates && mode === "board") {
+      const rects = b.rects && typeof b.rects === "object" ? b.rects : {};
+      const index = buildIndex(doc as any);
+      const size = topBox(node, rects[id], index);
+      const spot = clearSpot({ x: nx, y: ny, w: size.w, h: size.h }, [...obstacles(doc as Doc, new Set([id]), mates.boards, rects, index), ...cards]);
+      placed = { id, x: spot.x, y: spot.y, width: size.w, height: size.h, ...(spot.x !== nx ? { movedFrom: { x: nx, y: ny }, clearOf: spot.hit } : {}) };
+      nx = spot.x;
+    }
     at = { x: nx, y: ny };
     const props: Record<string, Json> = {};
     if (nx !== cx || node.x !== undefined) props.x = nx;
@@ -108,7 +129,9 @@ export function moveNode(docFile: string, b: MoveBody, who: { source: "user" | "
       edit: write.edit,
     }, write.revision);
   }
-  return { ok: true as const, id, mode, x: at.x, y: at.y, revision: write.revision };
+  const p = placed as Placed | undefined;
+  const note = p?.movedFrom ? `${id} would have overlapped ${p.clearOf?.join(", ") || "another board"} at ${p.movedFrom.x},${p.movedFrom.y}: moved right to ${p.x},${p.y}. Pass allowOverlap: true to keep a position that overlaps on purpose.` : undefined;
+  return { ok: true as const, id, mode, x: at.x, y: at.y, revision: write.revision, ...(p ? { width: p.width, height: p.height } : {}), ...(p?.movedFrom ? { movedFrom: p.movedFrom, clearOf: p.clearOf } : {}), ...(note ? { note } : {}) };
 }
 
 /** Move several nodes in one write and one undo step (see the top of this file). */
@@ -201,6 +224,8 @@ export function mergeOps(ops: NodeOp[]): NodeOp[] {
 
 export type MoveDeps = {
   prime: (file: string) => Promise<void>;
+  /** World boxes of these nodes as the page showing the file draws them ({} without a page). */
+  measure?: (docFile: string, ids: string[]) => Promise<Record<string, Rect>>;
   docFileOf: (file: string) => string;
   docOf: (docFile: string) => Doc;
   /** The revision Canvas last loaded for this document (the one the page shows). */
@@ -246,6 +271,10 @@ export async function handleMoveRoute(req: http.IncomingMessage, res: http.Serve
     const docFile = deps.docFileOf(b.file);
     const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
     const session = String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined;
+    if (by === "mcp" && deps.measure && b.allowOverlap !== true) {
+      const ids = unsizedOnPage(docFile, deps.docOf(docFile) as Doc, { board: b.id }).filter((x) => !(b.rects && b.rects[x]));
+      if (ids.length) b.rects = { ...(await deps.measure(docFile, ids).catch(() => ({}))), ...(b.rects ?? {}) };
+    }
     const r = moveNode(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
     deps.written(docFile, r.revision, by, b.id);
     deps.moved?.(docFile, b);

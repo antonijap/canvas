@@ -37,7 +37,7 @@ export function register(server: McpServer) {
     }
   });
 
-  tool(server, "move_board", "Move a board (a top-level frame) or an absolutely placed layer: x/y set its position, dx/dy shift it. One undo step, the same write a drag in Canvas makes. Children of an auto-layout frame refuse with auto_layout (their parent places them): reorder them, or move them out, with place_nodes.", {
+  tool(server, "move_board", "Move a board (a top-level frame) or an absolutely placed layer: x/y set its position, dx/dy shift it. One undo step, the same write a drag in Canvas makes. A board whose new spot would overlap another board or card on its page moves right along its row until clear, and the answer says so (note, movedFrom); allowOverlap: true keeps the spot. The answer has the board's final x, y, width and height. Children of an auto-layout frame refuse with auto_layout (their parent places them): reorder them, or move them out, with place_nodes.", {
     file: S.file,
     id: z.string().describe("Board or layer id"),
     x: z.number().optional(),
@@ -45,13 +45,14 @@ export function register(server: McpServer) {
     dx: z.number().optional().describe("Shift right by this many px (negative: left)"),
     dy: z.number().optional().describe("Shift down by this many px (negative: up)"),
     round: z.boolean().optional().describe("Round the result to whole px (default true)"),
+    allowOverlap: z.boolean().optional().describe("Boards: keep the spot even where it overlaps another board (default false: moved right until clear)"),
     expectedRevision: z.string().optional().describe("Revision from your last read"),
   }, async (a) => {
     await ensureServer();
     const file = await resolveFile(a.file);
     if (a.x === undefined && a.y === undefined && a.dx === undefined && a.dy === undefined) throw new ToolError("invalid", "give x and/or y, or dx and/or dy");
-    const r = await api<any>("POST", "/api/move", { file, id: a.id, x: a.x, y: a.y, dx: a.dx, dy: a.dy, round: a.round ?? true, expectedRevision: a.expectedRevision });
-    return { id: r.id, mode: r.mode, x: r.x, y: r.y, revision: r.revision };
+    const r = await api<any>("POST", "/api/move", { file, id: a.id, x: a.x, y: a.y, dx: a.dx, dy: a.dy, round: a.round ?? true, ...(a.allowOverlap ? { allowOverlap: true } : {}), expectedRevision: a.expectedRevision });
+    return { id: r.id, mode: r.mode, x: r.x, y: r.y, ...(typeof r.width === "number" ? { width: r.width, height: r.height } : {}), revision: r.revision, ...(r.movedFrom ? { movedFrom: r.movedFrom, clearOf: r.clearOf } : {}), ...(r.note ? { note: r.note } : {}) };
   });
 
   tool(server, "scale_nodes", "Scale layers with everything inside them, like a scale tool (K): positions, sizes, font sizes, letter spacing, strokes, corner radii, effects, padding and gap of every descendant, and instance overrides. fit_content/fill_container stay modes; token-bound values stay bound (counted in kept); line height stays (a multiple of the font size). Give factor (1.5 = 150%), or the width or height the layers should end at. One undo step. Omit ids to scale the selection.", {

@@ -77,6 +77,18 @@ export function cliError(r: Ran): string {
   return said.length > ERROR_MAX ? said.slice(0, ERROR_MAX - 1) + "…" : said;
 }
 
+/**
+ * A server inside a temporary git worktree (.../.claude/worktrees/<name>/...). Registering it points every Claude
+ * Code and Codex session at a folder that is deleted when the worktree's job is done, and the MCP breaks for all of them.
+ */
+export function temporaryServer(server: string, env = process.env): boolean {
+  // QA runs from worktrees against scratch agent configs (CLAUDE_CONFIG_DIR, a scratch HOME): nothing lasting to break.
+  if (env.CANVAS_CONNECT_TEMPORARY === "1") return false;
+  const parts = path.resolve(server).split(path.sep);
+  return parts.some((p, i) => p === ".claude" && parts[i + 1] === "worktrees" && i + 2 < parts.length - 1);
+}
+export const TEMPORARY_SERVER = "This Canvas runs from a temporary worktree; connect from the installed app or the main checkout.";
+
 const inflight = new Map<Agent, Promise<Connected | NotConnected>>();
 
 /** Registers canvas with the agent. One at a time per agent: a second click waits for the first. */
@@ -90,6 +102,7 @@ export function connectAgent(id: Agent, o: { node: string; server: string; dirs?
 
 async function connectNow(id: Agent, o: { node: string; server: string; dirs?: string[]; timeoutMs?: number }): Promise<Connected | NotConnected> {
   const label = HARNESS_LABEL[id];
+  if (temporaryServer(o.server)) return { ok: false, agent: id, code: "untrusted", error: TEMPORARY_SERVER };
   const cli = locateCli(id, o.dirs);
   if (!cli.ok) {
     if (cli.code === "untrusted") return { ok: false, agent: id, code: "untrusted", error: `Canvas did not run ${cli.path}: it is ${cli.reason}. Copy the command into Terminal instead.` };

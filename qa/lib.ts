@@ -44,6 +44,8 @@ export async function startServer(dir: string, extraEnv: Record<string, string> 
       // this Mac's, so a run reads the same on every machine and never writes the person's config.
       CLAUDE_CONFIG_DIR: path.join(dir, ".claude-config"),
       CODEX_HOME: path.join(dir, ".codex-home"),
+      // Those scratch configs are why Connect may register this checkout even when it is a temporary worktree.
+      CANVAS_CONNECT_TEMPORARY: "1",
       ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
