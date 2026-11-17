@@ -15,7 +15,7 @@ Every change is an op (`thread.create`, `comment.add`, `comment.edit`, `comment.
 - The same `opId` twice is applied once and acknowledged with its first `seq` (safe retries).
 - `applyOp` in `cloud/protocol.ts` is the one implementation of what an op does, used by the app and the server.
 - Conflicts: an edit, reply, resolve or move on a deleted thread or comment is rejected with `conflict`. Edits and resolves on live items: the later `seq` wins.
-- Permissions (`mayApply`): viewers cannot comment; authors edit and delete their own comments; owners and editors may delete any comment or thread.
+- Permissions (`mayApply`): viewers cannot comment; authors edit and delete their own comments; owners and editors may delete any comment or thread. A thread is moved (`thread.move`: its pin dragged, or Pin to a layer) by its author or an owner, not by other editors. That rule is the server's alone: the op and the protocol version are unchanged, so an older app still syncs, and a move it sends for someone else's thread comes back `forbidden`.
 
 ## The local file
 
@@ -23,7 +23,7 @@ Every change is an op (`thread.create`, `comment.add`, `comment.edit`, `comment.
 
 ## Anchors
 
-A thread pins to a layer id and a point on that layer as fractions of its box, so it moves with the layer. If the layer is deleted the thread stays, shown on its board with the stored `preview` and "layer deleted". A thread is never reattached to another layer by itself. Web review threads also carry the published `revision` they were made on.
+A thread pins to a layer id and a point on that layer as fractions of its box, so it moves with the layer. If the layer is deleted the thread stays, shown on its board with the stored `preview` and "layer deleted". A thread is never reattached to another layer by itself. Dragging its pin moves it by hand: on the drop it gets the anchor a new comment at the pin's tip would get (the layer under it, else a page point), sent as one `thread.move`. Web review threads also carry the published `revision` they were made on.
 
 ## Who gets in (on the server)
 

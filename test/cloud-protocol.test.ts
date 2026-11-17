@@ -64,3 +64,21 @@ test("anchors are small and plain: known keys, short strings, a size cap", () =>
   assert.match(checkEnvelope(env({ x: 0, y: 0, preview: { name: "x".repeat(2000) } }))!, /anchor/);
   assert.match(checkEnvelope({ ...env({ x: 0, y: 0 }), at: "x".repeat(100) })!, /at/);
 });
+
+test("moving a thread: its author or the Cloud owner, nobody else", () => {
+  const ts: Thread[] = [];
+  applyOp(ts, doc, { kind: "thread.create", thread: u(1), anchor: { nodeId: "a", x: 0.5, y: 0.5 }, comment: u(2), body: "Hi" }, anna, "t");
+  applyOp(ts, doc, { kind: "comment.add", thread: u(1), comment: u(3), body: "Reply" }, ben, "t");
+  const move = { kind: "thread.move" as const, thread: u(1), anchor: { nodeId: "b", x: 0.1, y: 0.9 } };
+  assert.equal(mayApply(move, "commenter", anna, ts), true, "the author moves her own thread");
+  assert.equal(mayApply(move, "owner", ben, ts), true, "the owner moves anyone's");
+  assert.equal(mayApply(move, "editor", ben, ts), false, "an editor does not move someone else's thread");
+  assert.equal(mayApply(move, "commenter", ben, ts), false, "a reply does not make Ben its author");
+  assert.equal(mayApply(move, "viewer", anna, ts), false, "viewers change nothing");
+  assert.equal(mayApply(move, "commenter", { name: "Anna" }, ts), false, "no email, no claim to a thread");
+  assert.equal(mayApply({ ...move, thread: u(9) }, "commenter", anna, ts), false, "a thread that is not there has no author");
+  // The move itself: the anchor is replaced whole, the comments stay.
+  assert.equal(applyOp(ts, doc, move, anna, "t2"), null);
+  assert.deepEqual(ts[0].anchor, { nodeId: "b", x: 0.1, y: 0.9 });
+  assert.equal(ts[0].comments.length, 2);
+});

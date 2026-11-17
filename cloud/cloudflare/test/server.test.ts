@@ -88,6 +88,26 @@ it("commenters cannot edit another author and editors may delete any comment", a
   await rules([{ match: member, role: "editor" }]);
   expect((await post(doc, [envelope(doc, { kind: "comment.delete", comment: op.op.comment })], member)).acks[0].seq).toBe(2);
 });
+it("a thread is moved by its author or the owner only, and the new anchor is what everyone reads", async () => {
+  const doc = await register();
+  const other = "other@example.com";
+  await rules([{ match: member, role: "commenter" }, { match: other, role: "editor" }]);
+  const op = envelope(doc);
+  if (op.op.kind !== "thread.create") throw new Error("Expected create");
+  expect((await post(doc, [op], member)).acks).toHaveLength(1);
+  const thread = op.op.thread;
+  const move = (anchor: { nodeId?: string; x: number; y: number; board?: string }) => envelope(doc, { kind: "thread.move", thread, anchor });
+  expect((await post(doc, [move({ nodeId: "card", x: 0.5, y: 0.5, board: "b1" })], other)).rejected[0].code).toBe("forbidden");
+  expect((await post(doc, [move({ nodeId: "card", x: 0.25, y: 0.75, board: "b1" })], member)).acks[0].seq).toBe(2);
+  expect((await post(doc, [move({ x: 120, y: 40 })], owner)).acks[0].seq).toBe(3);
+  const read = await (await call(`/v1/docs/${doc}/threads?since=0`, member)).json<{ threads: { anchor: unknown; comments: unknown[] }[] }>();
+  expect(read.threads[0].anchor).toEqual({ x: 120, y: 40 });
+  expect(read.threads[0].comments).toHaveLength(1);
+  const since = await (await call(`/v1/docs/${doc}/threads?since=1`, member)).json<{ entries: { op: { kind: string } }[] }>();
+  expect(since.entries.map(e => e.op.kind)).toEqual(["thread.move", "thread.move"]);
+  await post(doc, [envelope(doc, { kind: "thread.delete", thread })]);
+  expect((await post(doc, [move({ x: 0, y: 0 })], member)).rejected[0].code).toBe("conflict");
+});
 it("applies once per opId with strictly increasing sequence numbers", async () => {
   const doc = await register();
   const first = envelope(doc);

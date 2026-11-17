@@ -271,7 +271,10 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
   }
 }
 
-/** Who may change what: authors edit and delete their own comments; owners and editors may delete any. */
+/**
+ * Who may change what: authors edit and delete their own comments; owners and editors may delete any. A thread is
+ * moved (its pin dragged, or put on a layer again) by its author or an owner, as editing goes: not by other editors.
+ */
 export function mayApply(op: Op, role: Role, me: Author, threads: Thread[]): boolean {
   if (!CAN_COMMENT[role]) return false;
   const own = (id: Uuid) => threads.some((t) => t.comments.some((c) => c.id === id && !!c.author.email && c.author.email === me.email));
@@ -281,6 +284,7 @@ export function mayApply(op: Op, role: Role, me: Author, threads: Thread[]): boo
     case "comment.edit": return own(op.comment);
     case "comment.delete": return own(op.comment) || admin;
     case "thread.delete": return ownThread(op.thread) || admin;
+    case "thread.move": return ownThread(op.thread) || role === "owner";
     default: return true;
   }
 }
