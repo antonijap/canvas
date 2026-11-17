@@ -759,7 +759,7 @@ features:
     name: Settings tabs (General, Canvas, Agents, Sounds, Performance, Privacy, Shortcuts)
     area: chrome
     driven: [native]
-    cases: [$themes, privacy, agents-model, updates, comment-name]
+    cases: [$themes, privacy, agents-model, updates, comment-name, cloud]
   - id: theme
     name: App theme light and dark
     area: chrome
