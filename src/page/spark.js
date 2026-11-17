@@ -27,7 +27,7 @@ function start(host) {
   const q = (o) => new URLSearchParams(o).toString();
   const tell = (t) => { if (host.native) host.post({ toast: t }); else console.warn("[canvas] " + t); };
   const typing = (t) => !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable || !!(t.closest && t.closest("[contenteditable]")));
-  const sym = (name, size, cls = "", logo = false) => `<i class="sk-ic ${cls}" style="--m:url(/api/agent/${logo ? "logo" : "symbols"}/${name}.png);width:${size}px;height:${size}px"></i>`;
+  const sym = (name, size, cls = "") => `<i class="sk-ic ${cls}" style="--m:url(/api/agent/symbols/${name}.png);width:${size}px;height:${size}px"></i>`;
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const GLYPH = { "⌘": "command", "↩": "return", "↑": "arrow.up", "↓": "arrow.down" };
   /** A shortcut as tight keycaps, one cap per key; symbols are SF Symbols centred in the cap. variant: "", "dark", "white". */
@@ -104,10 +104,10 @@ function start(host) {
 .sk-trunc{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:3px 0;margin:-3px 0}
 .sk-group{flex:none;display:flex;align-items:center;gap:2px;height:28px;padding:2px;border-radius:14px;background:#0000000f}
 @media (prefers-color-scheme: dark){.sk-group{background:#ffffff1a}}
-.sk-logo{position:relative;flex:none;width:24px;height:24px;border:0;padding:0;border-radius:12px;background:transparent;color:var(--c-fg);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .16s ease-out}
+/* The agent the ask goes to, by name (no third-party logos): click to switch when both are installed. */
+.sk-logo{position:relative;flex:none;height:24px;border:0;padding:0 8px;border-radius:12px;background:transparent;color:var(--c-muted-fg);font:500 12px/1 var(--c-font-sans);white-space:nowrap;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color .16s ease-out}
 .sk-logo:hover{background:#0000000f}
 @media (prefers-color-scheme: dark){.sk-logo:hover{background:#ffffff14}}
-.sk-logo .sk-ic{width:15px;height:15px}
 .sk-send{position:relative;flex:none;width:24px;height:24px;border-radius:12px;border:0;padding:0;cursor:pointer;color:var(--c-muted-fg);background:transparent;transition:background-color .18s ease-out,color .18s ease-out}
 .sk-send.ready,.sk-send.stop{background:var(--c-fg);color:var(--c-sidebar)}
 .sk-send:disabled{cursor:default}
@@ -487,10 +487,10 @@ function start(host) {
     const hid = harnessId();
     const hl = hid === "codex" ? "Codex" : "Claude Code";
     parts.logo.style.display = hid ? "" : "none";
-    parts.logoIc.style.setProperty("--m", `url(/api/agent/logo/${hid === "codex" ? "codex" : "claude"}.png)`);
+    parts.logo.textContent = hl;
     parts.logo.title = hl + (harnesses.length > 1 ? ": click to switch" : "");
     parts.logo.setAttribute("aria-label", hl);
-    parts.menu.innerHTML = harnesses.map((h) => `<button role="menuitemradio" aria-checked="${h.id === hid}" class="${h.id === hid ? "on" : ""}" data-h="${h.id}">${sym(h.id, 14, "", true)}<span>${esc(h.label)}</span></button>`).join("");
+    parts.menu.innerHTML = harnesses.map((h) => `<button role="menuitemradio" aria-checked="${h.id === hid}" class="${h.id === hid ? "on" : ""}" data-h="${h.id}"><span>${esc(h.label)}</span></button>`).join("");
   }
   function setMenu(on) {
     comp.menu = on && harnesses.length > 1;
@@ -509,13 +509,13 @@ function start(host) {
     el.className = "sk-comp";
     el.tabIndex = -1;
     el.innerHTML = `<div class="sk-thread"></div><div class="sk-row"><span class="sk-mchip" style="display:none"></span><div class="sk-slot"></div>`
-      + `<div class="sk-group"><button class="sk-logo"><i class="sk-ic"></i></button>`
+      + `<div class="sk-group"><button class="sk-logo"></button>`
       + `<button class="sk-send" disabled><span class="g ar">${sym("arrow.up", 11)}</span><span class="g sq"><i></i></span></button></div></div>`
       + `<div class="sk-menu" role="menu"></div>`;
     el.querySelector(".sk-slot").append(field, mirror);
     Object.assign(parts, {
       thread: el.querySelector(".sk-thread"), row: el.querySelector(".sk-row"), chip: el.querySelector(".sk-mchip"),
-      logo: el.querySelector(".sk-logo"), logoIc: el.querySelector(".sk-logo .sk-ic"), send: el.querySelector(".sk-send"), menu: el.querySelector(".sk-menu"),
+      logo: el.querySelector(".sk-logo"), send: el.querySelector(".sk-send"), menu: el.querySelector(".sk-menu"),
     });
     el.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); if (comp.menu) setMenu(false); else closeComp(); } });
     parts.send.addEventListener("click", (e) => {

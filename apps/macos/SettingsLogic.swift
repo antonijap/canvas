@@ -53,6 +53,11 @@ struct AppSettings: Equatable {
     var agentCursor = true
     var cursorSpeed = CursorSpeed.normal
     var runCapMin = 10
+    /// The model and reasoning level each agent runs with ("" = the agent's own default; src/settings.ts checks them).
+    var claudeModel = ""
+    var claudeEffort = ""
+    var codexModel = ""
+    var codexEffort = ""
     // Sounds
     var finishSound = true
     var soundVolume = 0.8
@@ -76,6 +81,10 @@ struct AppSettings: Equatable {
         if has("agentCursor") { s.agentCursor = d.bool(forKey: k("agentCursor")) }
         if let v = d.string(forKey: k("cursorSpeed")).flatMap(CursorSpeed.init) { s.cursorSpeed = v }
         if has("runCapMin") { s.runCapMin = SettingsLimits.clamp(d.integer(forKey: k("runCapMin")), SettingsLimits.runCap) }
+        s.claudeModel = d.string(forKey: k("claudeModel")) ?? ""
+        s.claudeEffort = d.string(forKey: k("claudeEffort")) ?? ""
+        s.codexModel = d.string(forKey: k("codexModel")) ?? ""
+        s.codexEffort = d.string(forKey: k("codexEffort")) ?? ""
         if has("finishSound") { s.finishSound = d.bool(forKey: k("finishSound")) }
         if has("soundVolume") { s.soundVolume = SettingsLimits.volume(d.double(forKey: k("soundVolume"))) }
         if has("keptTabs") { s.keptTabs = SettingsLimits.clamp(d.integer(forKey: k("keptTabs")), SettingsLimits.keptTabs) }
@@ -94,6 +103,10 @@ struct AppSettings: Equatable {
         d.set(agentCursor, forKey: k("agentCursor"))
         d.set(cursorSpeed.rawValue, forKey: k("cursorSpeed"))
         d.set(runCapMin, forKey: k("runCapMin"))
+        d.set(claudeModel, forKey: k("claudeModel"))
+        d.set(claudeEffort, forKey: k("claudeEffort"))
+        d.set(codexModel, forKey: k("codexModel"))
+        d.set(codexEffort, forKey: k("codexEffort"))
         d.set(finishSound, forKey: k("finishSound"))
         d.set(soundVolume, forKey: k("soundVolume"))
         d.set(keptTabs, forKey: k("keptTabs"))
@@ -124,7 +137,15 @@ struct AppSettings: Equatable {
     }
 
     /// What the server reads (src/settings.ts), sent with the shell's state.
-    var serverSettings: [String: Any] { ["harness": harness.rawValue, "runCapMin": runCapMin] }
+    var serverSettings: [String: Any] {
+        ["harness": harness.rawValue, "runCapMin": runCapMin,
+         "claude": ["model": claudeModel, "effort": claudeEffort], "codex": ["model": codexModel, "effort": codexEffort]]
+    }
+
+    func model(_ h: AgentHarness) -> String { h == .claude ? claudeModel : codexModel }
+    func effort(_ h: AgentHarness) -> String { h == .claude ? claudeEffort : codexEffort }
+    mutating func setModel(_ h: AgentHarness, _ v: String) { if h == .claude { claudeModel = v } else { codexModel = v } }
+    mutating func setEffort(_ h: AgentHarness, _ v: String) { if h == .claude { claudeEffort = v } else { codexEffort = v } }
 
     /// Help improve Canvas only counts while sharing is on (its switch is off and greyed out then).
     var improveEffective: Bool { shareUsage && improveCanvas }

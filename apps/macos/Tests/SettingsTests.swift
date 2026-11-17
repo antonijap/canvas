@@ -37,6 +37,7 @@ struct SettingsTests {
         check(s.keptTabs == 3, "three tabs kept alive")
         check(s.snapshotMB == 200, "200 MB of snapshots")
         check(s.runCapMin == 10, "runs stop after 10 minutes")
+        check(s.claudeModel.isEmpty && s.claudeEffort.isEmpty && s.codexModel.isEmpty && s.codexEffort.isEmpty, "each agent runs its own default model")
         check(s.boardLabels && s.openView == .restore && !s.scrollZooms, "canvas defaults")
     }
 
@@ -45,9 +46,12 @@ struct SettingsTests {
         var s = AppSettings()
         s.openView = .fit; s.scrollZooms = true; s.boardLabels = false
         s.harness = .codex; s.agentCursor = false; s.cursorSpeed = .fast; s.runCapMin = 25
+        s.setModel(.claude, "opus"); s.setEffort(.claude, "high"); s.setModel(.codex, "gpt-a"); s.setEffort(.codex, "xhigh")
         s.finishSound = false; s.soundVolume = 0.3; s.keptTabs = 5; s.snapshotMB = 400
         s.save(d)
         check(AppSettings.load(d) == s, "every value comes back")
+        let sent = s.serverSettings
+        check((sent["claude"] as? [String: String]) == ["model": "opus", "effort": "high"] && (sent["codex"] as? [String: String]) == ["model": "gpt-a", "effort": "xhigh"], "the server gets each agent's model and reasoning")
         // Off stays off: a stored false is not mistaken for "never set".
         var off = AppSettings(); off.agentCursor = false; off.finishSound = false; off.boardLabels = false
         off.save(d)
