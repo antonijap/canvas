@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import type { Applied, CommentsFile, OpEnvelope, Thread } from "../cloud/protocol.ts";
+import type { SyncFile } from "../src/cloud-sync.ts";
 import { fakeServer, tmpDir } from "./helpers.ts";
 
 const dir = tmpDir("cloud-sync");
@@ -30,7 +31,7 @@ const BEN = { email: "ben@studio.test", name: "ben" };
 const anchor = { nodeId: "N1", x: 0.5, y: 0.5 };
 const at = "2026-11-17T10:00:00.000Z";
 const env = (op: OpEnvelope["op"]): OpEnvelope => ({ opId: uuid(), doc: DOC, at, op });
-const shared = (over: Partial<S.SyncFile> = {}): S.SyncFile => ({ format: 1, doc: DOC, server: { url: "https://team.example.com" }, seq: 0, threads: [], outbox: [], me: ME, ...over });
+const shared = (over: Partial<SyncFile> = {}): SyncFile => ({ format: 1, doc: DOC, server: { url: "https://team.example.com" }, seq: 0, threads: [], outbox: [], me: ME, ...over });
 const create = (body = "Hello") => { const thread = uuid(), comment = uuid(); return { thread, comment, e: env({ kind: "thread.create", thread, comment, anchor, body }) }; };
 const entry = (seq: number, e: OpEnvelope, by = BEN): Applied => ({ seq, opId: e.opId, by, at: "2026-11-17T10:00:0" + seq + ".000Z", op: e.op });
 const fb = { name: "Ana Test" };
@@ -89,7 +90,7 @@ describe("what the page shows: confirmed threads plus the outbox", () => {
     const a = create("a"), b = create("b"), c = create("c");
     S.confirm(f, [entry(1, a.e), entry(2, b.e)]);
     S.confirm(f, [entry(3, c.e), entry(2, b.e), entry(1, a.e)]);
-    assert.deepEqual(f.threads.map((t) => t.comments[0].body), ["a", "b", "c"]);
+    assert.deepEqual(f.threads.map((t: Thread) => t.comments[0].body), ["a", "b", "c"]);
     assert.equal(f.seq, 3);
   });
 
@@ -103,7 +104,7 @@ describe("what the page shows: confirmed threads plus the outbox", () => {
     const t: Thread = { id: server.thread, doc: DOC, anchor, createdAt: at, createdBy: BEN, comments: [{ id: server.comment, thread: server.thread, author: BEN, body: "server truth", createdAt: at }] };
     S.snapshot(f, [t], 9);
     assert.equal(f.seq, 9);
-    assert.deepEqual(f.threads.map((x) => x.id), [server.thread]);
+    assert.deepEqual(f.threads.map((x: Thread) => x.id), [server.thread]);
     assert.deepEqual(S.viewOf(f, fb).map((x) => x.comments[0].body), ["server truth", "mine"]);
   });
 
@@ -287,6 +288,27 @@ describe("through the local server", () => {
     const r = await post("/api/comments/ops", { ops: [c.e] }, { "x-canvas-source": "mcp", "x-canvas-agent": "claude-code" });
     assert.equal(r.status, 200);
     assert.deepEqual(r.j.threads.find((t: Thread) => t.id === c.thread).comments[0].author, { name: "Claude Code", agent: true });
+    Cl.disconnect(pkg);
+  });
+
+  test("Retry and Discard on a refused comment, through the routes", async () => {
+    Cfg.setCloudConfig({ cloudUrl: "http://127.0.0.1:9", cloudDevEmail: "anna@studio.test" });
+    const a = create("refused one"), b = create("refused two");
+    const f: SyncFile = { format: 1, doc: DOC, server: { url: "http://127.0.0.1:9" }, seq: 0, threads: [], outbox: [], me: ME,
+      rejected: [{ envelope: a.e, code: "forbidden", message: "This role cannot apply the op" }, { envelope: b.e, code: "quota", message: "Too big" }] };
+    fs.writeFileSync(path.join(pkg, "comments.json"), JSON.stringify(f));
+    const g = await (await fetch(`${base}/api/comments?file=${encodeURIComponent(pkg)}`)).json() as any;
+    assert.equal(g.threads.length, 2, "refused comments are still shown");
+    assert.deepEqual(g.sync.rejected.map((r: any) => r.message), ["This role cannot apply the op", "Too big"]);
+    const r1 = await post("/api/comments/retry", { opId: a.e.opId });
+    assert.equal(r1.status, 200);
+    assert.deepEqual(r1.j.sync.pending.map((p: any) => p.opId), [a.e.opId], "Retry puts it back in the outbox");
+    const r2 = await post("/api/comments/discard", { opId: b.e.opId });
+    assert.equal(r2.status, 200);
+    assert.equal(r2.j.threads.length, 1, "Discard drops it");
+    assert.equal((await post("/api/comments/discard", { opId: uuid() })).status, 404);
+    const noHeader = await fetch(`${base}/api/comments/retry?file=${encodeURIComponent(pkg)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ opId: a.e.opId }) });
+    assert.equal(noHeader.status, 403, "x-canvas guarded");
     Cl.disconnect(pkg);
   });
 
