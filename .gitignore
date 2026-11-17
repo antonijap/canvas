@@ -28,3 +28,6 @@ apps/macos/Canvas.app/
 # The one design file for the app (a page per feature). Holds Apple symbol pictures, so it stays local.
 design/app.canvas/
 design/chat-boards.py
+
+# Master UI design file (every screen, now and simplified): local only, never shared to Cloud.
+design/master/
