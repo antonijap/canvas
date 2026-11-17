@@ -54,3 +54,13 @@ test("a new thread cannot reuse an existing comment's id (it would take over tha
   assert.equal(applyOp(ts, doc, { kind: "thread.create", thread: u(3), anchor: { x: 0, y: 0 }, comment: u(2), body: "Ben's" }, ben, "t2"), "comment exists");
   assert.equal(ts.length, 1);
 });
+
+test("anchors are small and plain: known keys, short strings, a size cap", () => {
+  const env = (anchor: unknown) => ({ opId: u(9), doc, at: "2026-11-17T10:00:00.000Z", op: { kind: "thread.create", thread: u(1), comment: u(2), body: "a", anchor } });
+  assert.equal(checkEnvelope(env({ page: "page-1", nodeId: "Btn01", x: 0.5, y: 0.5, board: "b1", preview: { name: "Start free trial", type: "frame", width: 288, height: 44 } })), null);
+  assert.match(checkEnvelope(env({ x: 0, y: 0, extra: "x" }))!, /anchor/);
+  assert.match(checkEnvelope(env({ x: 0, y: 0, nodeId: "x".repeat(201) }))!, /anchor/);
+  assert.match(checkEnvelope(env({ x: 0, y: 0, preview: { name: { deep: "object" } } }))!, /anchor/);
+  assert.match(checkEnvelope(env({ x: 0, y: 0, preview: { name: "x".repeat(2000) } }))!, /anchor/);
+  assert.match(checkEnvelope({ ...env({ x: 0, y: 0 }), at: "x".repeat(100) })!, /at/);
+});
