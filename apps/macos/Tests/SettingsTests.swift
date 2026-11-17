@@ -23,7 +23,7 @@ struct SettingsTests {
     }
 
     static func main() {
-        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts()
+        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -131,5 +131,16 @@ struct SettingsTests {
         for sym in ShortcutCatalog.symbols.keys { check(sym.count == 1, "symbol caps are one glyph") }
         let ids = ShortcutCatalog.all.flatMap { g in g.rows.map { g.title + $0.id } }
         check(Set(ids).count == ids.count, "rows unique within their group")
+    }
+
+    static func connect() {
+        check(ConnectCopy.button(installed: true, registered: false, busy: false) == "Connect", "installed, not added: Connect")
+        check(ConnectCopy.button(installed: true, registered: false, busy: true) == "Connecting\u{2026}", "while the CLI runs")
+        check(ConnectCopy.button(installed: true, registered: true, busy: false) == "Added", "registered for this app: Added")
+        check(ConnectCopy.button(installed: false, registered: false, busy: false) == nil, "not installed: no button, Copy only")
+        check(ConnectCopy.hint == "Press Connect, or copy a command into Terminal. Then start a new agent session.", "the welcome card's words")
+        check(ConnectCopy.elsewhere == "Other apps, or Canvas not in Applications: getcanvas.cc/download#connect", "the welcome card's line for other apps")
+        check(ConnectCopy.elsewhereURL.absoluteString == "https://getcanvas.cc/download#connect", "the download page's connect section")
+        check(ConnectCopy.added("Codex") == "Added. Start a new Codex session.", "the next step")
     }
 }
