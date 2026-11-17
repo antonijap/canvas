@@ -33,7 +33,7 @@ mkdir -p "$OUT"
 
 echo "Building Canvas.app $VERSION"
 # No CANVAS_REPO: a release runs the server inside it, never a checkout's path.
-CANVAS_SIGN_IDENTITY=- CANVAS_APP_OUT="$ROOT/$APP" apps/macos/build.sh >/dev/null
+CANVAS_REQUIRE_TUNNEL=1 CANVAS_SIGN_IDENTITY=- CANVAS_APP_OUT="$ROOT/$APP" apps/macos/build.sh >/dev/null
 
 # The binary must open on every macOS Info.plist allows: its build minimum and LSMinimumSystemVersion are the same.
 BIN_MINOS="$(vtool -show-build "$APP/Contents/MacOS/Canvas" | awk '/minos/ {print $2; exit}')"
@@ -48,6 +48,8 @@ mkdir -p "$SRV/engine/src" "$SRV/demos"
 rsync -a --exclude '.*' src mcp vendor package.json pnpm-lock.yaml pnpm-workspace.yaml "$SRV/"
 # The comments protocol the server shares with a team's own Canvas server (src/comments.ts imports it).
 mkdir -p "$SRV/cloud" && cp cloud/protocol.ts "$SRV/cloud/"
+# A Cloud hosted on a Mac (src/cloud-host.ts) runs cloud/node with the room and team logic it shares with the Worker.
+rsync -a --exclude '.*' cloud/core cloud/node "$SRV/cloud/"
 rsync -a --exclude '.*' engine/pkg "$SRV/engine/"
 cp engine/src/paper_noise.rgba "$SRV/engine/src/"
 rsync -a --exclude '.*' demos/learn.canvas "$SRV/demos/"
@@ -78,6 +80,8 @@ PLIST
 TS=(--timestamp)
 [ "$ID" = "-" ] && TS=()
 codesign --force --options runtime "${TS[@]}" --entitlements "$ENT" --sign "$ID" "$APP/Contents/Resources/node/bin/node"
+# The tunnel helper is signed inside the app, with the hardened runtime, like Node.
+codesign --force --options runtime "${TS[@]}" --sign "$ID" "$APP/Contents/Resources/canvas-tunnel"
 codesign --force --options runtime "${TS[@]}" --sign "$ID" "$APP"
 codesign --verify --deep --strict "$APP" || fail "the built app's signature does not verify"
 
