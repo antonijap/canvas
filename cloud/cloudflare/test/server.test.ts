@@ -94,7 +94,7 @@ it("applies once per opId with strictly increasing sequence numbers", async () =
   const second = envelope(doc);
   expect((await post(doc, [first, first, second])).acks.map(a => a.seq)).toEqual([1, 1, 2]);
   expect((await post(doc, [first])).acks[0].seq).toBe(1);
-  expect(await (await call(`/v1/docs/${doc}/threads?since=1`)).json()).toMatchObject({ seq: 2, threads: [{}, {}] });
+  expect(await (await call(`/v1/docs/${doc}/threads?since=1`)).json()).toMatchObject({ seq: 2, entries: [{ seq: 2, opId: second.opId }] });
 });
 it("reply to a deleted thread conflicts and stores nothing", async () => {
   const doc = await register();
@@ -109,16 +109,20 @@ it("reply to a deleted thread conflicts and stores nothing", async () => {
     expect(JSON.parse(row.json).comments).toHaveLength(1);
   });
 });
-it("rejects body and batch limits and enforces rate limits", async () => {
+it("rejects body and batch limits", async () => {
   const doc = await register();
   const op = envelope(doc);
   if (op.op.kind !== "thread.create") throw new Error("Expected create");
   op.op.body = "a".repeat(LIMITS.bodyChars + 1);
   expect((await post(doc, [op])).rejected[0].code).toBe("invalid");
   expect((await call(`/v1/docs/${doc}/ops`, owner, "POST", { ops: Array.from({ length: LIMITS.opsPerMessage + 1 }, () => envelope(doc)) })).status).toBe(429);
+});
+it("enforces rate limits including invalid ops", async () => {
+  const doc = await register();
+  expect((await post(doc, [null])).rejected[0].code).toBe("invalid");
   expect((await post(doc, Array.from({ length: 100 }, () => envelope(doc)))).acks).toHaveLength(100);
   const rest = await post(doc, Array.from({ length: 21 }, () => envelope(doc)));
-  expect(rest.acks).toHaveLength(20);
+  expect(rest.acks).toHaveLength(19);
   expect(rest.rejected[0].code).toBe("quota");
 });
 it("rechecks a delayed REST sender's role at the Room", async () => {

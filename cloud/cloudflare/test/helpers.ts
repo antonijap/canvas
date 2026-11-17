@@ -9,7 +9,7 @@ export const owner = "owner@example.com";
 export const member = "member@example.com";
 export function call(path: string, email = owner, method = "GET", body?: unknown, headers: Record<string, string> = {}) {
   return worker.fetch(new Request(`http://localhost${path}`, {
-    method, headers: { "x-canvas-dev-email": email, ...headers },
+    method, headers: { "x-canvas-dev-email": email, "Content-Type": "application/json", ...headers },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   }), bindings);
 }
