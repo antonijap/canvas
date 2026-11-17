@@ -671,7 +671,7 @@ private struct PaletteRow: View {
         if item.subtitle != nil { askRow } else { plainRow }
     }
 
-    /// Recent asks (design/chat-to-selection board 7): sparkles.2, the prompt over "Layer on Page" 4 pt below it, when.
+    /// Recent asks (the talk-to-selection design, board 7): sparkles.2, the prompt over "Layer on Page" 4 pt below it, when.
     /// Selected: neutral grey, the icon in the text colour; secondary text stays muted grey (never grey on a tint).
     private var askRow: some View {
         Button(action: action) {

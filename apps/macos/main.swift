@@ -86,6 +86,34 @@ func keepServerUp() {
   if serverFailures >= 3 { reportServerProblem("Canvas\u{2019}s server will not start. Details in ~/Library/Logs/Canvas/server.log.") }
 }
 
+/// The symbols the canvas page draws as masks (src/agent-run.ts serves them), drawn here from the Mac's own symbols
+/// into <state dir>/symbols: the repo ships no Apple artwork. Black on transparent, 144 px, written when missing or
+/// changed (a new macOS may draw a symbol differently).
+let pageSymbols = ["arrow.down", "arrow.up", "checkmark", "chevron.down", "circle", "command", "return", "sparkles.2", "square.dashed", "stop", "terminal"]
+func writeSymbols() {
+  let state = ProcessInfo.processInfo.environment["CANVAS_STATE_DIR"] ?? NSHomeDirectory() + "/Library/Application Support/Canvas"
+  let dir = URL(fileURLWithPath: state).appendingPathComponent("symbols", isDirectory: true)
+  try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  let side = 144
+  for name in pageSymbols {
+    guard let base = NSImage(systemSymbolName: name, accessibilityDescription: nil),
+          let img = base.withSymbolConfiguration(.init(pointSize: 96, weight: .medium)),
+          let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8, samplesPerPixel: 4,
+                                     hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { continue }
+    rep.size = NSSize(width: side, height: side)
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    let s = img.size, k = min(CGFloat(side) / max(s.width, 1), CGFloat(side) / max(s.height, 1))
+    let w = s.width * k, h = s.height * k
+    img.draw(in: NSRect(x: (CGFloat(side) - w) / 2, y: (CGFloat(side) - h) / 2, width: w, height: h))
+    NSGraphicsContext.restoreGraphicsState()
+    guard let png = rep.representation(using: .png, properties: [:]) else { continue }
+    let url = dir.appendingPathComponent(name + ".png")
+    if (try? Data(contentsOf: url)) != png { try? png.write(to: url, options: .atomic) }
+  }
+}
+writeSymbols()
+
 /// This build's version and commit (Info.plist; build.sh writes CanvasCommit from git).
 let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
 let appCommit = Bundle.main.object(forInfoDictionaryKey: "CanvasCommit") as? String

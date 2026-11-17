@@ -1,4 +1,4 @@
-// Talk to the selection, the native half: the spark as real Liquid Glass (design/chat-to-selection, boards 1-6).
+// Talk to the selection, the native half: the spark as real Liquid Glass (the talk-to-selection design, boards 1-6).
 // The page (src/page/spark.js) works out where the spark and any progress rings go, in the same frame as the camera,
 // and posts them on the "canvasSpark" handler only when they change; this draws them over the web view with the
 // system glass. A click goes back to the page ({cmd: "sparkClick", id}), which opens the composer (drawn by the page)

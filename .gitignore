@@ -22,3 +22,6 @@ qa/release-private.txt
 
 # The app is built from source (pnpm app, or apps/macos/build.sh); a committed binary carries the signer's identity.
 apps/macos/Canvas.app/
+
+# Internal mockup with Apple symbol artwork: kept on this Mac, never in the repo.
+design/chat-to-selection/

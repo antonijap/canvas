@@ -1,7 +1,7 @@
 // Talk to the selection, the pure half (src/page/spark.js draws): where the spark and the composer go on screen,
 // and the words for times and progress. Node-tested (test/spark-logic.test.ts).
 //
-// The design (design/chat-to-selection): the spark (28 px) sits 8 px right of the selection box's top-right corner,
+// The design (the talk-to-selection design): the spark (28 px) sits 8 px right of the selection box's top-right corner,
 // top-aligned with the box (the box is drawn 1 px outside the layer). The composer (360 px wide) opens 8 px right of
 // the spark, top-aligned, and never over the selection: with no room on the right it flips to the left of the
 // selection, then below it (clear of the size badge), then above it.

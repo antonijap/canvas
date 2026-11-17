@@ -1,4 +1,4 @@
-// Talk to the selection, on the canvas (design/chat-to-selection). Runs on window.canvasHost next to live.js.
+// Talk to the selection, on the canvas (the talk-to-selection design). Runs on window.canvasHost next to live.js.
 //
 // The spark: a 28 px button with sparkles.2 that sits 8 px right of the selection box's top-right corner. It follows
 // pan, zoom and resize in the same frame (it is placed from the camera loop's "cam" event, no bridge hop), hides while
@@ -58,7 +58,7 @@ function start(host) {
 .sk-cap b{font-size:11px;line-height:1;font-weight:500}
 .sk-keys.dark .sk-cap{background:#ffffff26;color:#ffffffd9}
 .sk-keys.white .sk-cap{background:var(--c-popover);box-shadow:var(--sk-cap)}
-/* The composer (design/chat-to-selection, "Composer variations" F): one pill on the app's normal panel surface (opaque,
+/* The composer (the talk-to-selection design, "Composer variations" F): one pill on the app's normal panel surface (opaque,
    layered shadows, no border, no glass: only the spark is glass). The thread of the conversation sits above the pill.
    At the pill's right end the harness mark and send are one capsule. Magic is grey: no blue in here.
    Motion: transform and opacity only, 160-220 ms, ease-out; reduced motion gets plain crossfades. */

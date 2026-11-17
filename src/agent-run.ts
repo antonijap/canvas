@@ -26,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { docChanged, originOk } from "./bridge.ts";
 import { displayPath } from "./docpath.ts";
+import { stateHome } from "./doc/docfile.ts";
 import { findNode, resolveDocPath, type CanvasDoc, type DocNode } from "./engine.ts";
 import { entries, finishAgent, undo, type Entry, type NodeOp } from "./history.ts";
 import { listPages } from "./pages.ts";
@@ -858,7 +859,30 @@ export class AgentError extends Error {
 
 // ---------- HTTP ----------
 
-const SYMBOLS = path.join(REPO, "src", "page", "symbols");
+/**
+ * The symbols the page draws as masks. The repo ships no Apple artwork: Canvas.app draws these from the Mac's own
+ * symbols at launch into <state dir>/symbols (apps/macos/main.swift writeSymbols). Without them (a browser, before
+ * the app has run) the page gets free icons of the same meaning (Lucide, ISC).
+ */
+const symbolsDir = () => path.join(stateHome(), "symbols");
+export const SYMBOL_FALLBACK: Record<string, string> = {
+  "arrow.down": "arrow-down", "arrow.up": "arrow-up", checkmark: "check", "chevron.down": "chevron-down", circle: "circle",
+  command: "command", return: "corner-down-left", "sparkles.2": "sparkles", "square.dashed": "square-dashed", stop: "square", terminal: "terminal",
+};
+let lucide: Record<string, { body: string }> | null = null;
+/** A free icon for a symbol name, as an SVG mask (black on transparent), or null. */
+export function fallbackSymbol(name: string): string | null {
+  const id = SYMBOL_FALLBACK[name];
+  if (!id) return null;
+  try {
+    lucide ??= (JSON.parse(fs.readFileSync(path.join(REPO, "node_modules", "@iconify-json", "lucide", "icons.json"), "utf8")) as { icons: Record<string, { body: string }> }).icons;
+  } catch { return null; }
+  const body = lucide[id]?.body;
+  if (!body) return null;
+  // A stop is a filled square, as the symbol it stands in for.
+  const filled = name === "stop" ? body.replace(/fill="none"/g, 'fill="black"') : body;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 24 24" color="black">${filled.replace(/currentColor/g, "black")}</svg>`;
+}
 
 /**
  * A JSON object body. The bytes are joined first and decoded once: decoding chunk by chunk turns a character split
@@ -905,11 +929,14 @@ export async function handleAgentRoute(req: http.IncomingMessage, res: http.Serv
       const name = decodeURIComponent(p.slice("/api/agent/symbols/".length));
       if (!/^[a-z0-9.]+\.png$/.test(name)) return reply(404, { error: "not found" }), true;
       try {
-        const b = fs.readFileSync(path.join(SYMBOLS, name));
+        const b = fs.readFileSync(path.join(symbolsDir(), name));
         res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=3600" });
         res.end(b);
       } catch {
-        reply(404, { error: "not found" });
+        const svg = fallbackSymbol(name.slice(0, -4));
+        if (!svg) return reply(404, { error: "not found" }), true;
+        res.writeHead(200, { "content-type": "image/svg+xml", "cache-control": "max-age=300" });
+        res.end(svg);
       }
       return true;
     }
