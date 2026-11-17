@@ -59,6 +59,7 @@ export class QaApp {
       CANVAS_PORT: String(this.port),
       CANVAS_ROOTS: this.docs,
       CANVAS_QA: "1",
+      CANVAS_STATE_DIR: path.join(this.dir, "state"),
       CANVAS_LOG_DIR: this.logs,
       CANVAS_TRUST_FILE: path.join(this.dir, "widget-trust.json"),
       CANVAS_VIDEO_PROXIES: path.join(this.dir, "video-proxies"),

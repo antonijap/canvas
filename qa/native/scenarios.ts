@@ -13,6 +13,7 @@ import { buildLink, parseLink } from "../../src/page/link-logic.js";
 import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";
 import "./scenarios-cloud.ts";
+import "./scenarios-home.ts";
 import { intoInspector } from "./scenarios-leftovers.ts";
 
 /** The canvas area well clear of the panels (window points). */

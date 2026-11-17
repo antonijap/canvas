@@ -1,0 +1,231 @@
+// The Home tab's logic, without any view: the recents list, what a file's comments.json says (open comments and the
+// team server it is shared to), the cards' order, filter and search, the labels, and where a thumbnail is kept.
+// Tests/HomeLogicTests.swift runs all of it. Home.swift draws it.
+
+import CryptoKit
+import Foundation
+
+/// One file the person opened: its path and when (seconds since 1970).
+struct RecentEntry: Codable, Equatable {
+    var path: String
+    var opened: Double
+}
+
+enum Recents {
+    /// The most files the list keeps.
+    static let cap = 50
+    static let key = "canvas.recents"
+
+    /// `path` opened at `at`: it goes first, and the file's older entry goes. Never more than `cap`.
+    static func touch(_ list: [RecentEntry], _ path: String, at: Double, cap: Int = Recents.cap) -> [RecentEntry] {
+        guard !path.isEmpty else { return list }
+        let rest = list.filter { $0.path != path }
+        return Array(([RecentEntry(path: path, opened: at)] + rest).prefix(cap))
+    }
+
+    /// Newest first, whatever order they were stored in; one entry per path (the newest).
+    static func ordered(_ list: [RecentEntry]) -> [RecentEntry] {
+        var seen = Set<String>()
+        return list.sorted { $0.opened > $1.opened }.filter { seen.insert($0.path).inserted }
+    }
+
+    static func remove(_ list: [RecentEntry], _ path: String) -> [RecentEntry] { list.filter { $0.path != path } }
+
+    /// A file moved by Locate: its entry follows it.
+    static func replacing(_ list: [RecentEntry], _ old: String, with new: String) -> [RecentEntry] {
+        var seen = Set<String>()
+        return list.map { $0.path == old ? RecentEntry(path: new, opened: $0.opened) : $0 }.filter { seen.insert($0.path).inserted }
+    }
+
+    static func decode(_ data: Data?) -> [RecentEntry] {
+        guard let data, let list = try? JSONDecoder().decode([RecentEntry].self, from: data) else { return [] }
+        return Array(ordered(list).prefix(cap))
+    }
+    static func encode(_ list: [RecentEntry]) -> Data? { try? JSONEncoder().encode(Array(ordered(list).prefix(cap))) }
+
+    static func load(_ d: UserDefaults = .standard) -> [RecentEntry]? {
+        d.object(forKey: key) == nil ? nil : decode(d.data(forKey: key))
+    }
+    static func save(_ list: [RecentEntry], _ d: UserDefaults = .standard) { d.set(encode(list), forKey: key) }
+}
+
+/// What comments.json says about a file: the open threads (not resolved, not deleted, the ones still in the outbox
+/// included) and the server it is shared to.
+struct CommentSummary: Equatable {
+    var open = 0
+    var server: String?
+    var hasComments = false
+}
+
+enum CommentsRead {
+    /// The biggest comments.json Home reads for a card (the server's own limit is far above this; a bigger one shows no count).
+    static let maxBytes = 8 * 1024 * 1024
+
+    static func summary(_ data: Data?) -> CommentSummary {
+        guard let data, let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any], (j["format"] as? Int) == 1,
+              let threads = j["threads"] as? [[String: Any]] else { return CommentSummary() }
+        var ids = Set<String>()
+        var open = 0
+        for t in threads {
+            if let id = t["id"] as? String { ids.insert(id) }
+            if t["resolvedAt"] == nil && t["deletedAt"] == nil { open += 1 }
+        }
+        // A thread made here and not yet sent lives in the outbox as a thread.create op.
+        for e in j["outbox"] as? [[String: Any]] ?? [] {
+            if let op = e["op"] as? [String: Any], op["kind"] as? String == "thread.create", let id = op["thread"] as? String, ids.insert(id).inserted { open += 1 }
+        }
+        let server = (j["server"] as? [String: Any])?["url"] as? String
+        return CommentSummary(open: open, server: (server?.isEmpty ?? true) ? nil : server, hasComments: !threads.isEmpty || !ids.isEmpty)
+    }
+}
+
+/// How a team server is named on screen.
+enum ServerName {
+    /// The host of an address, without a scheme or path: "studio-canvas.workers.dev". Anything unreadable stays as typed.
+    static func host(_ url: String) -> String {
+        guard let c = URLComponents(string: url.trimmingCharacters(in: .whitespaces)), let h = c.host, !h.isEmpty else { return url }
+        return c.port.map { "\(h):\($0)" } ?? h
+    }
+    /// The short name in lists: a workers.dev address by its first label, any other host whole.
+    static func display(_ url: String) -> String {
+        let h = host(url)
+        if h.hasSuffix(".workers.dev"), let first = h.split(separator: ".").first { return String(first) }
+        return h
+    }
+    /// The same server, whatever the case, scheme or trailing slash.
+    static func same(_ a: String, _ b: String) -> Bool { host(a).lowercased() == host(b).lowercased() && !host(a).isEmpty }
+}
+
+enum HomeFilter: String, CaseIterable {
+    case all, mac, servers
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .mac: "On this Mac"
+        case .servers: "On team servers"
+        }
+    }
+}
+
+/// A file's card, everything the grid draws.
+struct HomeCard: Identifiable, Equatable {
+    var path: String
+    var opened: Double
+    var modified: Double?
+    var exists: Bool
+    var openComments: Int
+    var server: String?
+    var id: String { path }
+    var name: String { HomeLogic.name(path) }
+    var shared: Bool { server != nil }
+}
+
+enum HomeLogic {
+    /// "Pricing page" for ".../Pricing page.canvas".
+    static func name(_ path: String) -> String { URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent }
+
+    /// Newest first. A file edited since it was last opened counts from its edit.
+    static func ordered(_ cards: [HomeCard]) -> [HomeCard] {
+        cards.sorted { max($0.opened, $0.modified ?? 0) > max($1.opened, $1.modified ?? 0) }
+    }
+
+    static func filter(_ cards: [HomeCard], _ f: HomeFilter) -> [HomeCard] {
+        switch f {
+        case .all: return cards
+        case .mac: return cards.filter { !$0.shared }
+        case .servers: return cards.filter { $0.shared }
+        }
+    }
+
+    /// The cards whose name has every word of the query, any case.
+    static func search(_ cards: [HomeCard], _ query: String) -> [HomeCard] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        if words.isEmpty { return cards }
+        return cards.filter { c in words.allSatisfy { c.name.localizedCaseInsensitiveContains($0) } }
+    }
+
+    /// The cards of one server (by host).
+    static func onServer(_ cards: [HomeCard], _ url: String) -> [HomeCard] {
+        cards.filter { $0.server.map { ServerName.same($0, url) } ?? false }
+    }
+
+    /// The place a card names: "This Mac", or the server it is shared to.
+    static func whereLabel(server: String?) -> (text: String, symbol: String) {
+        guard let server, !server.isEmpty else { return ("This Mac", "laptopcomputer") }
+        return (ServerName.display(server), "cloud")
+    }
+
+    /// "Edited 5 min ago" or "Opened yesterday": an edit after the last open wins, by more than a few seconds
+    /// (opening a file saves nothing, but a change the app makes on load should not read as an edit).
+    static func whenLabel(opened: Double, modified: Double?, now: Double) -> String {
+        if let m = modified, m > opened + 30 { return "Edited " + ago(m, now: now) }
+        return "Opened " + ago(opened, now: now)
+    }
+
+    /// The relative time: "just now", "5 min ago", "1 h ago", "yesterday", "3 days ago", "last week", "2 weeks ago", then the date.
+    static func ago(_ t: Double, now: Double, calendar: Calendar = .current) -> String {
+        let s = max(0, now - t)
+        if s < 60 { return "just now" }
+        if s < 3600 { return "\(Int(s / 60)) min ago" }
+        let d0 = calendar.startOfDay(for: Date(timeIntervalSince1970: t)), d1 = calendar.startOfDay(for: Date(timeIntervalSince1970: now))
+        let days = calendar.dateComponents([.day], from: d0, to: d1).day ?? 0
+        if days == 0 { return "\(Int(s / 3600)) h ago" }
+        if days == 1 { return "yesterday" }
+        if days < 7 { return "\(days) days ago" }
+        if days < 14 { return "last week" }
+        if days < 31 { return "\(days / 7) weeks ago" }
+        let f = DateFormatter()
+        f.dateFormat = calendar.isDate(Date(timeIntervalSince1970: t), equalTo: Date(timeIntervalSince1970: now), toGranularity: .year) ? "d MMM" : "d MMM yyyy"
+        return f.string(from: Date(timeIntervalSince1970: t))
+    }
+
+    /// "3" or "12", and "99+" past 99.
+    static func commentBadge(_ n: Int) -> String { n > 99 ? "99+" : String(n) }
+
+    /// "3 open", "1 open", "None open".
+    static func commentsLine(_ n: Int) -> String { n == 0 ? "None open" : "\(n) open" }
+
+    /// The letter on a card with no picture yet.
+    static func initial(_ path: String) -> String {
+        name(path).first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "C"
+    }
+
+    /// "Connected as anna@studio.com, owner".
+    static func connectedLine(email: String?, role: String?) -> String? {
+        guard let email, !email.isEmpty else { return nil }
+        return "Connected as \(email)" + ((role?.isEmpty ?? true) ? "" : ", \(role!)")
+    }
+
+    /// The sidebar dot for the server's status word: connected, offline, or the amber of "sign in again" and the rest.
+    enum Dot: Equatable { case connected, offline, attention }
+    static func dot(status: String, configured: Bool) -> Dot {
+        if !configured { return .offline }
+        switch status {
+        case "connected": return .connected
+        case "offline": return .offline
+        default: return .attention
+        }
+    }
+    static func dotWords(_ d: Dot) -> String {
+        switch d {
+        case .connected: "Connected"
+        case .offline: "Offline"
+        case .attention: "Sign in again"
+        }
+    }
+}
+
+enum Thumbnails {
+    /// The picture's width in pixels (twice the card on a Retina screen, at the card's usual width).
+    static let width = 480
+
+    /// The file name of a path's thumbnail: a hash of the path, so no path or file name is on disk beside it.
+    static func key(_ path: String) -> String {
+        SHA256.hash(data: Data(path.utf8)).prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// <state folder>/thumbnails/<key>.png. Never inside the .canvas package.
+    static func url(state: String, path: String) -> URL {
+        URL(fileURLWithPath: state).appendingPathComponent("thumbnails", isDirectory: true).appendingPathComponent(key(path) + ".png")
+    }
+}
