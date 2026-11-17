@@ -5,6 +5,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+/**
+ * Which copy of Canvas's code this is (the installed app's, a checkout, a worktree): a short hash of the src folder's
+ * path, so a client can tell "older code of my copy" from "another copy's code" without the path itself leaving.
+ */
+export function codeRootId(root = fileURLToPath(new URL(".", import.meta.url))): string {
+  return createHash("sha1").update(path.resolve(root)).digest("hex").slice(0, 12);
+}
+
 export function version(): string {
   const h = createHash("sha1");
   const root = fileURLToPath(new URL(".", import.meta.url));

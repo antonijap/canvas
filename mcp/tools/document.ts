@@ -15,7 +15,8 @@ export async function renderedFor(ids: string[], file: string, client?: string):
     const r = (await cmd({ op: "measure", args: { ids: ids.slice(0, 50) }, client, file, timeoutMs: 8000 })).result as { nodes: { id: string }[] };
     return { boxes: Object.fromEntries(r.nodes.map((n) => [n.id, n])) };
   } catch (e) {
-    return { boxes: {}, note: `No rendered sizes: ${(e as ToolError).code ?? "failed"} (no page shows this file)` };
+    const t = e as ToolError & { hint?: string };
+    return { boxes: {}, note: `No rendered sizes (${t.code ?? "failed"}): ${t.message}${t.hint ? `. ${t.hint}` : ""}` };
   }
 }
 
@@ -48,7 +49,7 @@ export function register(server: McpServer) {
 
   tool(server, "lookup_nodes", "Find nodes by id, name, text content, type or component flag (case-insensitive substrings). Each hit carries its top-level board. rendered:true adds on-screen sizes from the open page.", {
     file: S.file,
-    id: z.string().optional(),
+    id: z.string().optional().describe("An exact id or instance path alone answers that node; otherwise ids containing it"),
     name: z.string().optional(),
     text: z.string().optional().describe("Matches text content"),
     type: z.string().optional().describe("frame, text, ref, rectangle, icon, ..."),

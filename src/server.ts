@@ -25,7 +25,7 @@ import { handleLayersRoute } from "./layers.ts";
 import { handleColorsRoute } from "./colors.ts";
 import { applyAutoTracking, prepareAutoTracking } from "./tracking.ts";
 import { cssVariables } from "./tokens.ts";
-import { version } from "./version.ts";
+import { codeRootId, version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
 import { handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
@@ -49,6 +49,7 @@ import { handleTextRoute } from "./textedit.ts";
 import { fromNudge, fromUpdate, lastEdit, noteEdit, onRepeat, planRepeat, repeatInfo, repeatToast } from "./repeat.ts";
 import { followRename, handleOverrideRoute, OverrideError, overrideInfo, renameFollowers, updateWithOverrides } from "./overrides.ts";
 import { replaceEach, selectionColors } from "./selection-colors.ts";
+import { nodeDepth } from "./doc/tree.ts";
 import { buildIndex, defaultTheme, expand, findNode, FIT_SCRIPT, resolveDocPath, resolveVariable, StaleFileError, updateNode, type Json, type CanvasDoc, type DocNode } from "./engine.ts";
 import { readBodyText } from "./body.ts";
 import { handleAgentRoute, renderInChild, type AgentCtx } from "./agent-run.ts";
@@ -658,7 +659,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
           else bridgeEmit("user_edit", { file: displayPath(docFile), id, props: [], remove: [] });
         },
       })) return;
-      if (url.pathname === "/health") return json(res, { ok: true, version: ver });
+      if (url.pathname === "/health") return json(res, { ok: true, version: ver, root: codeRootId() });
       if (url.pathname === "/quit" && req.method === "POST") {
         // A foreign page can submit a form here (no preflight for a simple POST): it carries neither the header nor our Origin.
         if (req.headers["x-canvas"] !== "1" || !originOk(req)) return json(res, { error: "forbidden" }, 403);
@@ -946,7 +947,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
         return json(res, { ids });
       }
       if (url.pathname === "/api/node") {
-        const hit = nodeAt(snap, url.searchParams.get("id") ?? "", Math.min(Math.max(Number(url.searchParams.get("depth")) || 4, 0), 8));
+        const hit = nodeAt(snap, url.searchParams.get("id") ?? "", nodeDepth(url.searchParams.get("depth")));
         if (!hit) return json(res, { error: `no node "${url.searchParams.get("id")}"` }, 404);
         const ctxId = url.searchParams.get("id") ?? "";
         const context = contextTarget(snap.doc, ctxId);

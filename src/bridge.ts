@@ -102,6 +102,19 @@ function pageRank(c: Client): [number, number, number] {
 }
 
 /** Connected and visible pages first, then by focus, last input, last report. A hidden page is a last resort. */
+/**
+ * Why a live op on `file` has no page, and what to do. The app keeps one page per window, showing the front tab: a
+ * file in a background tab has none, so say which file is in front and how to bring this one forward.
+ */
+export function noPageFor(file?: string): BridgeError {
+  if (!file) return new BridgeError("no_page", "No canvas page is open", "Open one with open_file or launch_canvas.");
+  const front = pickPage({}).page?.state?.file;
+  if (typeof front === "string" && front) {
+    return new BridgeError("no_page", `Canvas shows ${displayPath(front)} in front, not ${file}`, "open_file with this file brings its tab forward; render_node and the disk-only tools work without it.");
+  }
+  return new BridgeError("no_page", `No open canvas page shows ${file}`, "Open it with open_file or launch_canvas; render_node and the disk-only tools work without it.");
+}
+
 export function pickPage(opts: { client?: string; file?: string } = {}): { page?: Client; others: Client[] } {
   if (opts.client) {
     const c = clients.get(opts.client);
@@ -325,7 +338,7 @@ export async function dispatch(req: CmdRequest, ctx: BridgeCtx): Promise<CmdResu
     if (!target) throw new BridgeError("no_shell", "The Canvas app is not connected", "Start it with launch_canvas {mode:'app'}.");
   } else {
     ({ page: target, others } = pickPage({ file: req.file }));
-    if (!target) throw new BridgeError("no_page", req.file ? `No open canvas page shows ${req.file}` : "No canvas page is open", "Open one with open_file or launch_canvas.");
+    if (!target) throw noPageFor(req.file);
   }
   let args = qa ? (req.args ?? {}) : cleanArgs(op, req.args ?? {});
   if (role === "page") args = withBoards(op, args, target, ctx);
@@ -785,13 +798,23 @@ export async function handleDocRoute(url: URL, snap: Snapshot, ctx: BridgeCtx, j
     const index = boardIndex(snap.doc);
     const limit = Math.min(Math.max(Number(q.get("limit")) || 50, 1), 500);
     try {
-      const id = q.get("id");
-      if (id) {
-        const f = findNode(snap.doc, id);
-        const n = f.node;
-        return json({ revision: snap.revision, total: 1, results: [{ id: String(n.id), type: String(n.type), ...(n.name ? { name: String(n.name) } : {}), board: boardOf(index, String(n.id)) ?? null, path: f.ancestors.map((a) => String(a.name ?? a.id)).join(" / ") }] }), true;
+      const id = q.get("id") ?? undefined;
+      const filters = ["name", "type", "text", "reusable", "within"].some((k) => q.has(k));
+      // An exact id or instance path, alone, answers that one node; otherwise id is a substring like name and text.
+      if (id && !filters) {
+        let f: ReturnType<typeof findNode> | null = null;
+        try {
+          f = findNode(snap.doc, id);
+        } catch {
+          // Not an exact id: search ids that contain it below.
+        }
+        if (f) {
+          const n = f.node;
+          return json({ revision: snap.revision, total: 1, results: [{ id: String(n.id), type: String(n.type), ...(n.name ? { name: String(n.name) } : {}), board: boardOf(index, String(n.id)) ?? null, path: f.ancestors.map((a) => String(a.name ?? a.id)).join(" / ") }] }), true;
+        }
       }
-      const r = findNodes(snap.doc, { name: q.get("name") ?? undefined, type: q.get("type") ?? undefined, text: q.get("text") ?? undefined, reusable: q.has("reusable") ? q.get("reusable") === "true" : undefined, within: q.get("within") ?? undefined }, limit);
+      const r = findNodes(snap.doc, { id, name: q.get("name") ?? undefined, type: q.get("type") ?? undefined, text: q.get("text") ?? undefined, reusable: q.has("reusable") ? q.get("reusable") === "true" : undefined, within: q.get("within") ?? undefined }, limit);
+      if (id && !filters && !r.total) return json({ error: { code: "not_found", message: `no node id contains "${id}"` } }, 404), true;
       return json({ revision: snap.revision, total: r.total, results: r.results.map((x) => ({ ...x, board: boardOf(index, x.id) ?? null })) }), true;
     } catch (e) {
       return json({ error: { code: "not_found", message: (e as Error).message } }, 404), true;

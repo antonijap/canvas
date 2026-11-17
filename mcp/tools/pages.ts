@@ -23,10 +23,12 @@ export async function activeFor(file: string): Promise<string | null> {
 }
 
 export function register(server: McpServer) {
-  tool(server, "list_pages", "The document's pages in order, each with its board ids (document order). The first page is the default page: boards no page lists show there. active is the page the open canvas shows, when one is open. Works with Canvas closed.", { file: S.file }, async (a) => {
+  tool(server, "list_pages", "The document's pages in order, each with its board ids (document order). The first page is the default page: boards no page lists show there. active is the page the open canvas shows, when one is open. Works with Canvas closed. The document's revision is in get_document_summary.", { file: S.file }, async (a) => {
     await ensureServer();
     const file = await resolveFile(a.file);
-    const r = await api<any>("GET", `/api/pages?file=${enc(file)}`);
+    // `rev` is the page list's own write guard (a hash of the sidecar Canvas keeps beside the design), not the
+    // document's revision, and no page tool takes it: left out so it is not mistaken for one.
+    const { rev: _rev, ...r } = await api<any>("GET", `/api/pages?file=${enc(file)}`);
     return { ...r, active: await activeFor(file) };
   }, { readOnlyHint: true });
 
