@@ -1,7 +1,9 @@
 // First run: the Welcome file, the commands that register Canvas MCP with Claude Code and Codex, and whether an
 // MCP client is talking to this server right now.
 //
-//   GET  /api/mcp/setup   {name, claude, codex, node, server, connected, client, seenMs}
+//   GET  /api/mcp/setup   {name, claude, codex, node, server, connected, client, seenMs, installed, registered}
+//                         installed/registered: {claude, codex} booleans, for Connect (src/mcp-connect.ts)
+//   POST /api/mcp/connect {agent}: registers canvas with that agent's CLI (src/mcp-connect.ts)
 //   POST /api/mcp/hello   canvas-mcp says it is there (on connect, then every HEARTBEAT_MS while it runs)
 //   POST /api/welcome     {file}: ~/Documents/Canvas/Welcome.canvas, a copy of demos/learn.canvas (the course) with the
 //                         welcome card on it; made once, answered again as it is after that
@@ -18,6 +20,7 @@ import { agentLabel } from "./agent-cursor.ts";
 import { DESIGN_FILE } from "./docpath.ts";
 import { kindOf, validateWidget } from "./widgets/registry.ts";
 import { countUsage } from "./usage-counts.ts";
+import { handleConnectRoute, installedState, registeredState } from "./mcp-connect.ts";
 
 export const MCP_NAME = "canvas";
 /** canvas-mcp says hello every 20 s (HEARTBEAT_MS in mcp/client.ts); the indicator goes off after OFF_AFTER_MS of silence. */
@@ -106,7 +109,7 @@ export const resetMcpSeen = () => { seen = null; counted.clear(); };
 
 export const welcomeDir = () => process.env.CANVAS_WELCOME_DIR ?? path.join(os.homedir(), "Documents", "Canvas");
 export const WELCOME_ID = "welcome";
-export const WELCOME_SIZE = { w: 460, h: 440 };
+export const WELCOME_SIZE = { w: 460, h: 500 };
 
 /** Left of the sample's boards, top edges level: the first thing the fitted view shows. */
 function welcomeAt(doc: { children?: { x?: number; y?: number }[] }) {
@@ -147,9 +150,11 @@ type Json = (res: http.ServerResponse, v: unknown, status?: number) => void;
 
 export async function handleOnboardingRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, json: Json): Promise<boolean> {
   if (url.pathname === "/api/mcp/setup" && req.method === "GET") {
-    json(res, { ...setupCommands(), ...mcpStatus() });
+    const cmds = setupCommands();
+    json(res, { ...cmds, ...mcpStatus(), installed: installedState(), registered: await registeredState({ server: cmds.server }) });
     return true;
   }
+  if (await handleConnectRoute(req, res, url, json, () => { const c = setupCommands(); return { node: c.node, server: c.server }; })) return true;
   if (url.pathname === "/api/mcp/hello" && req.method === "POST") {
     if (req.headers["x-canvas"] !== "1") { json(res, { error: "forbidden" }, 403); return true; }
     json(res, { ok: true, counted: noteMcp(req) });
