@@ -50,6 +50,10 @@ struct AppSettings: Equatable {
     var boardLabels = true
     /// The name on the comments made here (Settings > General). Starts as the Mac's full user name; empty: the server says "Me".
     var commentName = ""
+    /// Settings > Cloud: the team's own Canvas server (https, or http on this Mac for development) and, for a local
+    /// development server only, the email its DEV mode takes in place of a sign-in. The sign-in token is never a setting.
+    var cloudUrl = ""
+    var cloudDevEmail = ""
     // Agents
     var harness = AgentHarness.claude
     var agentCursor = true
@@ -80,6 +84,8 @@ struct AppSettings: Equatable {
         if has("scrollZooms") { s.scrollZooms = d.bool(forKey: k("scrollZooms")) }
         if has("boardLabels") { s.boardLabels = d.bool(forKey: k("boardLabels")) }
         s.commentName = d.string(forKey: k("commentName")) ?? NSFullUserName()
+        s.cloudUrl = d.string(forKey: k("cloudUrl")) ?? ""
+        s.cloudDevEmail = d.string(forKey: k("cloudDevEmail")) ?? ""
         if let v = d.string(forKey: k("harness")).flatMap(AgentHarness.init) { s.harness = v }
         if has("agentCursor") { s.agentCursor = d.bool(forKey: k("agentCursor")) }
         if let v = d.string(forKey: k("cursorSpeed")).flatMap(CursorSpeed.init) { s.cursorSpeed = v }
@@ -103,6 +109,8 @@ struct AppSettings: Equatable {
         d.set(scrollZooms, forKey: k("scrollZooms"))
         d.set(boardLabels, forKey: k("boardLabels"))
         d.set(commentName, forKey: k("commentName"))
+        d.set(cloudUrl, forKey: k("cloudUrl"))
+        d.set(cloudDevEmail, forKey: k("cloudDevEmail"))
         d.set(harness.rawValue, forKey: k("harness"))
         d.set(agentCursor, forKey: k("agentCursor"))
         d.set(cursorSpeed.rawValue, forKey: k("cursorSpeed"))
@@ -143,6 +151,7 @@ struct AppSettings: Equatable {
     /// What the server reads (src/settings.ts), sent with the shell's state.
     var serverSettings: [String: Any] {
         ["harness": harness.rawValue, "runCapMin": runCapMin, "commentName": commentName,
+         "cloudUrl": CloudURL.clean(cloudUrl) ?? "", "cloudDevEmail": CloudURL.isLocal(cloudUrl) ? cloudDevEmail : "",
          "claude": ["model": claudeModel, "effort": claudeEffort], "codex": ["model": codexModel, "effort": codexEffort]]
     }
 
@@ -261,4 +270,46 @@ enum ShortcutCatalog {
     ])
 
     static var all: [Group] { [canvas] + menuGroups }
+}
+
+/// Settings > Cloud: the server address and the words for where sign-in stands. The same rules as src/cloud-config.ts.
+enum CloudURL {
+    /// The origin of an address: https with a dotted host, or http on this Mac. Nil for anything else; a path is dropped.
+    static func clean(_ raw: String) -> String? {
+        guard let u = URLComponents(string: raw.trimmingCharacters(in: .whitespaces)), let scheme = u.scheme?.lowercased(),
+              let host = u.host?.lowercased(), !host.isEmpty, u.user == nil, u.password == nil else { return nil }
+        let port = u.port.map { ":\($0)" } ?? ""
+        if scheme == "https" && host.contains(".") { return "https://\(host)\(u.port == 443 ? "" : port)" }
+        if scheme == "http" && (host == "localhost" || host == "127.0.0.1") { return "http://\(host)\(u.port == 80 ? "" : port)" }
+        return nil
+    }
+    /// http://localhost or http://127.0.0.1: where a server run with DEV=1 takes an email in place of Access.
+    static func isLocal(_ raw: String) -> Bool { clean(raw)?.hasPrefix("http://") ?? false }
+    /// The host (and port) of a cleaned address, as the Keychain item's account.
+    static func host(_ raw: String) -> String {
+        guard let c = clean(raw), let u = URL(string: c), let h = u.host else { return "" }
+        return u.port.map { "\(h):\($0)" } ?? h
+    }
+}
+
+/// What src/cloud.ts says about the server (GET /api/cloud/status): the status word and the line Settings shows for it.
+enum CloudStatusText {
+    static func line(_ status: String, configured: Bool) -> String {
+        if !configured { return "No server" }
+        switch status {
+        case "connected": return "Connected"
+        case "offline": return "Offline"
+        case "signedOut": return "Signed out"
+        case "signInAgain": return "Sign in again"
+        case "forbidden": return "No access to this team"
+        case "tooOld": return "The server is too old"
+        case "tooNew": return "The server is newer than this Canvas"
+        default: return "Offline"
+        }
+    }
+    /// "Signed in as anna@studio.com, owner".
+    static func account(email: String?, role: String?) -> String? {
+        guard let email, !email.isEmpty else { return nil }
+        return "Signed in as \(email)" + ((role?.isEmpty ?? true) ? "" : ", \(role!)")
+    }
 }
