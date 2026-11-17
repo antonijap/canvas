@@ -39,6 +39,8 @@ enum SettingsLimits {
     static let keptTabs = 1...8
     static let snapshotMB = 50...1000
     static let snapshotStep = 50
+    /// The longest name a team server takes (Settings > Cloud).
+    static let serverName = 60
     static func clamp(_ v: Int, _ r: ClosedRange<Int>) -> Int { min(max(v, r.lowerBound), r.upperBound) }
     static func volume(_ v: Double) -> Double { v.isFinite ? min(max(v, 0), 1) : 0.8 }
 }
@@ -54,6 +56,8 @@ struct AppSettings: Equatable {
     /// development server only, the email its DEV mode takes in place of a sign-in. The sign-in token is never a setting.
     var cloudUrl = ""
     var cloudDevEmail = ""
+    /// What the team server is called in Home; empty: its host.
+    var cloudName = ""
     // Agents
     var harness = AgentHarness.claude
     var agentCursor = true
@@ -86,6 +90,7 @@ struct AppSettings: Equatable {
         s.commentName = d.string(forKey: k("commentName")) ?? NSFullUserName()
         s.cloudUrl = d.string(forKey: k("cloudUrl")) ?? ""
         s.cloudDevEmail = d.string(forKey: k("cloudDevEmail")) ?? ""
+        s.cloudName = d.string(forKey: k("cloudName")) ?? ""
         if let v = d.string(forKey: k("harness")).flatMap(AgentHarness.init) { s.harness = v }
         if has("agentCursor") { s.agentCursor = d.bool(forKey: k("agentCursor")) }
         if let v = d.string(forKey: k("cursorSpeed")).flatMap(CursorSpeed.init) { s.cursorSpeed = v }
@@ -111,6 +116,7 @@ struct AppSettings: Equatable {
         d.set(commentName, forKey: k("commentName"))
         d.set(cloudUrl, forKey: k("cloudUrl"))
         d.set(cloudDevEmail, forKey: k("cloudDevEmail"))
+        d.set(cloudName, forKey: k("cloudName"))
         d.set(harness.rawValue, forKey: k("harness"))
         d.set(agentCursor, forKey: k("agentCursor"))
         d.set(cursorSpeed.rawValue, forKey: k("cursorSpeed"))
@@ -134,6 +140,7 @@ struct AppSettings: Equatable {
         s.keptTabs = SettingsLimits.clamp(keptTabs, SettingsLimits.keptTabs)
         s.snapshotMB = SettingsLimits.clamp(snapshotMB, SettingsLimits.snapshotMB)
         s.soundVolume = SettingsLimits.volume(soundVolume)
+        s.cloudName = String(cloudName.prefix(SettingsLimits.serverName))
         return s
     }
 

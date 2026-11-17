@@ -72,6 +72,11 @@ struct HomeLogicTests {
         check(ServerName.display("https://canvas.example.com") == "canvas.example.com", "any other host whole")
         check(ServerName.same("https://Canvas.Example.com", "https://canvas.example.com/x"), "the same server in another spelling")
         check(!ServerName.same("https://a.example.com", "https://b.example.com") && !ServerName.same("", ""), "different servers; nothing is not a server")
+        // The name the person gave the server in Settings > Cloud, else its host.
+        check(ServerName.label("https://studio-canvas.workers.dev", name: "Studio team") == "Studio team", "a given name wins")
+        check(ServerName.label("https://studio-canvas.workers.dev", name: "  Studio  ") == "Studio", "spaces around a name go")
+        check(ServerName.label("https://studio-canvas.workers.dev", name: "") == "studio-canvas", "no name: the host")
+        check(ServerName.label("https://canvas.example.com", name: "   ") == "canvas.example.com", "a blank name is no name")
     }
 
     static func card(_ path: String, opened: Double, modified: Double? = nil, exists: Bool = true, open: Int = 0, server: String? = nil) -> HomeCard {
@@ -100,6 +105,8 @@ struct HomeLogicTests {
         check(HomeLogic.whereLabel(server: nil) == ("This Mac", "laptopcomputer"), "a local file")
         check(HomeLogic.whereLabel(server: "") == ("This Mac", "laptopcomputer"), "an empty address is local")
         check(HomeLogic.whereLabel(server: "https://studio-canvas.workers.dev") == ("studio-canvas", "cloud"), "a shared file names its server")
+        check(HomeLogic.whereLabel(server: "https://studio-canvas.workers.dev", current: "https://Studio-Canvas.workers.dev/", name: "Studio team") == ("Studio team", "cloud"), "a file on the set server takes its name")
+        check(HomeLogic.whereLabel(server: "https://other.workers.dev", current: "https://studio-canvas.workers.dev", name: "Studio team") == ("other", "cloud"), "a file on another server keeps that server's host")
         let cal = Calendar(identifier: .gregorian)
         let now = DateComponents(calendar: cal, year: 2026, month: 11, day: 17, hour: 15).date!.timeIntervalSince1970
         func ago(_ s: Double) -> String { HomeLogic.ago(now - s, now: now, calendar: cal) }

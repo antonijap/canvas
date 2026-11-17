@@ -92,6 +92,11 @@ enum ServerName {
         if h.hasSuffix(".workers.dev"), let first = h.split(separator: ".").first { return String(first) }
         return h
     }
+    /// What the server is called on screen: the name given in Settings > Cloud, else its host as `display` gives it.
+    static func label(_ url: String, name: String) -> String {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return n.isEmpty ? display(url) : n
+    }
     /// The same server, whatever the case, scheme or trailing slash.
     static func same(_ a: String, _ b: String) -> Bool { host(a).lowercased() == host(b).lowercased() && !host(a).isEmpty }
 }
@@ -150,9 +155,10 @@ enum HomeLogic {
     }
 
     /// The place a card names: "This Mac", or the server it is shared to.
-    static func whereLabel(server: String?) -> (text: String, symbol: String) {
+    /// A file on the server set in Settings > Cloud (`current`) takes the name given to it there.
+    static func whereLabel(server: String?, current: String = "", name: String = "") -> (text: String, symbol: String) {
         guard let server, !server.isEmpty else { return ("This Mac", "laptopcomputer") }
-        return (ServerName.display(server), "cloud")
+        return (ServerName.same(server, current) ? ServerName.label(server, name: name) : ServerName.display(server), "cloud")
     }
 
     /// "Edited 5 min ago" or "Opened yesterday": an edit after the last open wins, by more than a few seconds

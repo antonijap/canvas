@@ -276,10 +276,11 @@ enum QA {
             if let t = (a["theme"] as? String).flatMap(AppTheme.init(rawValue:)) { model.theme = t }
             return ["theme": model.theme.rawValue]
         case "qa.cloud":
-            // {url, devEmail}: the team server address and development email, as Settings > Cloud types them.
+            // {url, devEmail, name}: the team server address, development email and name, as Settings > Cloud types them.
             if let u = a["url"] as? String { model.prefs.cloudUrl = u }
             if let e = a["devEmail"] as? String { model.prefs.cloudDevEmail = e }
-            return ["url": model.prefs.cloudUrl, "devEmail": model.prefs.cloudDevEmail]
+            if let n = a["name"] as? String { model.prefs.cloudName = n }
+            return ["url": model.prefs.cloudUrl, "devEmail": model.prefs.cloudDevEmail, "name": model.prefs.cloudName]
         case "qa.exportdir":
             // Shift+Cmd+E's folder: a QA instance never shows the open panel (it would be modal), it exports here.
             exportFolder = a["dir"] as? String

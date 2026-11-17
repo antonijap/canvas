@@ -182,7 +182,9 @@ sc("first-run", "a first launch opens the Welcome file; Connected follows an age
     // main instance (e5rt errors in every later scenario). The Agents tab is the one shown; the screenshot shows its card.
     t.eq(execFileSync("defaults", ["read", fresh.bundleId, "canvas.settings.tab"], { encoding: "utf8" }).trim(), "agents", "the Agents tab shows");
     const sw = (await f.state()).windows.find((w: any) => w.settings);
-    t.ok(sw && sw.height > 700, `the Agents pane, with the Connect an agent card on top, is taller than the others: ${JSON.stringify(sw)}`);
+    // The pane opens on its Connect part (Connect, Models and Cursor show one at a time), with the card.
+    t.ok(sw, "the Settings window is open");
+    t.eq((await f.marks({ id: "agents-part", window: "settings" }))[0]?.label ?? null, "Connect", "Settings > Agents shows its Connect part");
     // The next launch is not a first one: welcomed is stored for this bundle id.
     t.eq(execFileSync("defaults", ["read", fresh.bundleId, "canvas.welcomed"], { encoding: "utf8" }).trim(), "1", "canvas.welcomed stored");
   } finally {

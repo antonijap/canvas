@@ -228,6 +228,15 @@ struct CloudSettings: View {
                     }
                     .frame(width: 260)
                 }
+                SettingsDivider()
+                SettingsRow("Name", detail: "What Home calls this server") {
+                    FieldBox {
+                        TextField(valid ? ServerName.display(urlText) : "Studio", text: Binding(get: { model.prefs.cloudName }, set: { model.prefs.cloudName = String($0.prefix(SettingsLimits.serverName)) }))
+                            .textFieldStyle(.plain).font(Typography.body)
+                            .accessibilityLabel("Server name").qaID("cloud-name")
+                    }
+                    .frame(width: 260)
+                }
                 if local {
                     SettingsDivider()
                     SettingsRow("Development email", detail: "For a local server in DEV mode") {
