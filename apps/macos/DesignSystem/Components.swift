@@ -620,6 +620,16 @@ enum FieldWidth {
     static let percent: CGFloat = 60
 }
 
+/// True inside a field whose token button is showing at its trailing end (InspectorTokens.swift BindOnHover): the
+/// field hides its suffix there, keeping the room, so "%" or "px" never shows through the button.
+private struct BindButtonShownKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var bindButtonShown: Bool {
+        get { self[BindButtonShownKey.self] }
+        set { self[BindButtonShownKey.self] = newValue }
+    }
+}
+
 /// The rounded well every field sits in.
 struct FieldBox<Content: View>: View {
     var disabled = false
@@ -653,6 +663,7 @@ struct NumberField: View {
     var normalize: ((Double) -> Double)? = nil
     let onCommit: (Double) -> Void
     @Environment(\.editTarget) private var target
+    @Environment(\.bindButtonShown) private var bindShown
     @State private var text = ""
     @State private var draft = FieldDraft()
     @State private var scrub: ScrubSession?
@@ -690,6 +701,7 @@ struct NumberField: View {
                     }
                 } else {
                     Text(suffix).font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize()
+                        .opacity(bindShown ? 0 : 1)
                 }
             }
         }

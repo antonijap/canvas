@@ -1394,3 +1394,28 @@ sc("arrange", "the inspector's Spacing field sets the space between evenly space
   const now = await t.fieldNow(f);
   t.eq(now?.value, "30", "the field after");
 });
+
+sc("inspector", "letter spacing: the token button on hover sits beside the number, never over it", { covers: ["inspector:text"] }, async (t: NT) => {
+  await t.selectIds(["tx_auto"]);
+  const check = async (what: string) => {
+    // Posted pointer moves never start a hover: the QA build shows the button as a hovered field would.
+    await t.cmd("qa.hoverbind", { on: true });
+    const f = await t.fieldBelow("Letter spacing", 40);
+    await t.mark({ id: "token-bind" });
+    // Every field shows one now: take the one in the letter spacing box (its row, right of the number's start).
+    const b = (await t.marks({ id: "token-bind" })).find((m) => Math.abs(m.y + m.h / 2 - (f.y + f.h / 2)) < 12 && m.x > f.x);
+    if (!b) throw new Error(`${what}: no token button in the letter spacing field`);
+    t.ok(b.x >= f.x + f.w - 0.5, `${what}: the token button (x ${b.x.toFixed(1)}) starts inside the number field (it ends at ${(f.x + f.w).toFixed(1)})`);
+    // The Auto chip keeps its whole word beside it.
+    const region = { x: f.x - 40, y: f.y - 4, w: 200, h: f.h + 8 };
+    t.ok((await t.findText("Auto", region)).length > 0, `${what}: the Auto chip reads "Auto" with the token button shown`);
+    await t.cmd("qa.hoverbind", { on: false });
+  };
+  await check("Auto on");
+  // A value of your own: "px" shows too, the tightest the field gets.
+  await t.setField(await t.fieldBelow("Letter spacing", 40), "0.37");
+  await t.waitDisk(() => Math.abs((t.node("tx_auto")?.letterSpacing as number) - 0.37) < 0.001, "letterSpacing 0.37");
+  await check("0.37 px");
+  await t.cmd("qa.hoverbind", { on: true });
+  await inspectorShot(t, "letter-spacing-token-button");
+});

@@ -142,6 +142,7 @@ struct TokenBindButton: View {
         // kind the picker says so. Beside a field it only shows when there is something to pick.
         if inField || !model.tokenItems(kind).isEmpty {
             MiniButton(symbol: "hexagon", help: "Use a \(kind.noun) token", enabled: enabled, inRow: !inField, inField: inField) { isOpen.wrappedValue = true }
+                .qaID("token-bind")
                 .popover(isPresented: isOpen, arrowEdge: .leading) {
                     TokenPicker(model: model, kind: kind, current: nil, pick: { onPick($0); isOpen.wrappedValue = false }, detach: nil, close: { isOpen.wrappedValue = false })
                 }
@@ -188,12 +189,20 @@ struct BindOnHover: ViewModifier {
     @Binding var picking: Bool
     /// Room left at the trailing edge for the field's own control (the Auto badge).
     var trailing: CGFloat = 5
+    /// The field draws the button in its own row (so the number never runs under it): only the hover is tracked here.
+    var inline = false
     let onBind: (String) -> Void
+    #if CANVAS_QA
+    @AppStorage(BindQA.key) private var qaFlag = false
+    #else
+    private let qaFlag = false
+    #endif
 
     func body(content: Content) -> some View {
         content
+            .environment(\.bindButtonShown, !inline && enabled && (hovering || picking || BindQA.shown(qaFlag)))
             .overlay(alignment: .trailing) {
-                if enabled && (hovering || picking) {
+                if !inline && enabled && (hovering || picking || BindQA.shown(qaFlag)) {
                     TokenBindButton(model: model, kind: .number, open: $picking, inField: true, onPick: onBind)
                         .padding(.trailing, trailing)
                         .transition(.opacity)
@@ -207,6 +216,13 @@ struct BindOnHover: ViewModifier {
     }
 }
 
+/// QA builds only: qa.hoverbind shows every field's token button as if the pointer were on it. Posted pointer moves
+/// reach the window but never start a hover, so a scenario could not see the button otherwise.
+enum BindQA {
+    static let key = "qaShowBindButtons"
+    static func shown(_ flag: Bool) -> Bool { flag }
+}
+
 /// BindOnHover when there is something to bind to; nothing otherwise.
 struct OptionalBind: ViewModifier {
     let model: CanvasModel?
@@ -214,12 +230,14 @@ struct OptionalBind: ViewModifier {
     @Binding var hovering: Bool
     @Binding var picking: Bool
     let onBind: ((String) -> Void)?
-    /// Room the hover button keeps clear at the field's end (the Auto chip, and "px" beside it when shown).
+    /// Room the hover button keeps clear at the field's end, when it is drawn over the field.
     var trailing: CGFloat = 44
+    /// The field draws the button itself, in its row (TrackingField).
+    var inline = false
 
     func body(content: Content) -> some View {
         if let model, let onBind {
-            content.modifier(BindOnHover(model: model, enabled: enabled, hovering: $hovering, picking: $picking, trailing: trailing, onBind: onBind))
+            content.modifier(BindOnHover(model: model, enabled: enabled, hovering: $hovering, picking: $picking, trailing: trailing, inline: inline, onBind: onBind))
         } else {
             content
         }
@@ -449,6 +467,11 @@ struct TrackingField: View {
     var onBind: ((String) -> Void)? = nil
     @State private var hovering = false
     @State private var picking = false
+    #if CANVAS_QA
+    @AppStorage(BindQA.key) private var qaFlag = false
+    #else
+    private let qaFlag = false
+    #endif
     @Environment(\.editTarget) private var target
     @State private var text = ""
     @State private var draft = FieldDraft()
@@ -482,7 +505,15 @@ struct TrackingField: View {
                         return .handled
                     }
                     .onKeyPress(.escape) { sync(); focused = false; return .handled }
-                if !auto { Text("px").font(Typography.micro).foregroundStyle(Palette.mutedFg) }
+                // The token button on hover takes its own place in the row, where "px" was, left of Auto: the number
+                // is never drawn under it and Auto keeps its width (the column is too narrow for both).
+                if let model, let onBind, enabled && (hovering || picking || BindQA.shown(qaFlag)) {
+                    TokenBindButton(model: model, kind: .number, open: $picking, inField: true, onPick: onBind)
+                        .padding(.horizontal, -3)
+                        .transition(.opacity)
+                } else if !auto {
+                    Text("px").font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                }
                 Button {
                     switch AutoTracking.click(on: auto, value: value, size: size, editable: enabled) {
                     case .turnOff: onAuto(false)
@@ -496,6 +527,7 @@ struct TrackingField: View {
                         .background(Capsule().fill(auto ? Palette.sel.opacity(0.14) : .clear))
                         .overlay(Capsule().stroke(auto ? .clear : Palette.stroke, lineWidth: 1))
                         .contentShape(Capsule())
+                        .fixedSize()
                 }
                 .buttonStyle(.plain)
                 .disabled(!enabled || (!auto && !canTurnOn))
@@ -504,8 +536,7 @@ struct TrackingField: View {
                 .accessibilityAddTraits(.isToggle)
             }
             .help(helpText)
-            // With "px" showing (Auto off) the hover button sits left of it, not over it.
-            .modifier(OptionalBind(model: model, enabled: enabled, hovering: $hovering, picking: $picking, onBind: onBind, trailing: auto ? 44 : 62))
+            .modifier(OptionalBind(model: model, enabled: enabled, hovering: $hovering, picking: $picking, onBind: onBind, inline: true))
         }
         .onAppear(perform: sync)
         .onChange(of: value) { _, _ in if !focused && scrub == nil { sync() } }
