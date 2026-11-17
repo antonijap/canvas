@@ -359,7 +359,15 @@ struct AgentSettings: View {
         var req = URLRequest(url: model.base.appendingPathComponent("api/mcp/setup"))
         req.timeoutInterval = 4
         guard let (data, _) = try? await URLSession.shared.data(for: req),
-              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+              var j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        #if CANVAS_QA
+        // qa.agents: an agent shown as installed with Canvas added, whatever this Mac has (QA.swift).
+        for (group, on) in [("installed", AgentsQA.added), ("registered", AgentsQA.added)] {
+            var g = j[group] as? [String: Any] ?? [:]
+            for key in on { g[key] = true }
+            j[group] = g
+        }
+        #endif
         setup = j
     }
 
