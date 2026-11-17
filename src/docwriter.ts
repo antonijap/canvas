@@ -101,9 +101,10 @@ export const writeConfig = {
   maxRetries: 6,
   /**
    * Documents at least this big save by appending the boards that changed to the save log (doc/doclog.ts) instead of
-   * rewriting the whole file. Infinity: never (CANVAS_SAVE_LOG=0 turns it off; docs/evidence/speed.md, save log review).
+   * rewriting the whole file: 1 MB. Infinity: never (CANVAS_SAVE_LOG=0 turns it off; docs/evidence/speed.md, "Save log,
+   * last cases"). A volume without flock never uses it (doc/doclog.ts logLockable).
    */
-  logMinBytes: process.env.CANVAS_SAVE_LOG === "1" ? 1024 * 1024 : Infinity,
+  logMinBytes: process.env.CANVAS_SAVE_LOG === "0" ? Infinity : 1024 * 1024,
   /** The log is folded into a whole write once it passes this share of the document (or logMaxBytes, if larger)... */
   logMaxShare: 0.25,
   logMaxBytes: 4 * 1024 * 1024,
