@@ -313,7 +313,7 @@ private struct HomeRow: View {
     private func dotColor(_ d: HomeLogic.Dot) -> Color {
         switch d {
         case .connected: Palette.ok
-        case .offline: Palette.mutedFg.opacity(0.5)
+        case .offline, .down: Palette.mutedFg.opacity(0.5)
         case .attention: Palette.warn
         }
     }
@@ -564,7 +564,9 @@ private struct HomeServerView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text(connected ?? CloudStatusText.line(account.state.status, configured: account.state.configured))
                     .font(Typography.body).fontWeight(.medium).foregroundStyle(Palette.fg).lineLimit(1).qaText(connected ?? "Server status")
-                Text(ServerName.host(serverUrl)).font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg).lineLimit(1)
+                // A hosted Cloud has no host to show: the plain line for its state instead ("Studio Cloud isn't open right now").
+                Text(CloudURL.isHosted(serverUrl) ? (CloudStatusText.detail(account.state.status, name: ServerName.label(serverUrl, name: model.prefs.cloudName)) ?? "Hosted on a Mac") : ServerName.host(serverUrl))
+                    .font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg).lineLimit(1)
             }
             Spacer(minLength: 0)
             if account.state.status == "signInAgain" || account.state.status == "signedOut" {

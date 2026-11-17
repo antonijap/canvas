@@ -150,6 +150,7 @@ struct SettingsTests {
         check(CloudURL.isLocal("http://localhost:8787") && !CloudURL.isLocal("https://studio.workers.dev"), "local means http on this Mac")
         check(CloudURL.host("https://studio.workers.dev/x") == "studio.workers.dev" && CloudURL.host("http://localhost:8787") == "localhost:8787", "the host is the Keychain account")
         check(CloudSetup.compact("") && CloudSetup.compact("  ") && !CloudSetup.compact("https://studio.workers.dev"), "the short Cloud pane shows only while no address is saved")
+        hosted()
         check(CloudSetup.hint("") == nil && CloudSetup.hint("https://studio.workers.dev") == nil, "no hint while the field is empty or valid")
         check(CloudSetup.hint("studio") == "Use an https address, like https://studio.workers.dev", "an invalid address says what to type")
         check(CloudSetup.next("studio", devEmail: "") == nil, "Sign in is off until the address is valid")
@@ -187,5 +188,43 @@ struct SettingsTests {
         check(ConnectCopy.otherApps == "Other apps: getcanvas.cc/download#connect", "the line under the Agents card")
         check(ConnectCopy.otherAppsURL.absoluteString == "https://getcanvas.cc/download#connect", "the download page's connect section")
         check(ConnectCopy.added("Codex") == "Added. Start a new Codex session.", "the next step")
+    }
+}
+
+extension SettingsTests {
+    /// A Cloud hosted on a Mac: known by its id, never an http address to another host; invites parsed strictly.
+    static func hosted() {
+        let id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b"
+        check(CloudURL.clean("canvas-cloud://\(id)") == "canvas-cloud://\(id)", "a hosted Cloud by its id")
+        check(CloudURL.clean("CANVAS-CLOUD://\(id.uppercased())") == "canvas-cloud://\(id)", "any case")
+        check(CloudURL.clean("canvas-cloud://studio-mac.local") == nil && CloudURL.clean("canvas-cloud://\(id):5190") == nil, "only an id")
+        check(CloudURL.isHosted("canvas-cloud://\(id)") && !CloudURL.isHosted("https://studio.workers.dev") && !CloudURL.isLocal("canvas-cloud://\(id)"), "hosted is its own kind, never local development")
+        for lan in ["http://192.168.1.20:5190", "http://studio-mac.local:5190", "http://100.101.102.103:5190", "http://studio-mac.tail1234.ts.net:5190", "http://10.0.0.5", "http://0.0.0.0:5190"] {
+            check(CloudURL.clean(lan) == nil, "no plain http to another host: \(lan)")
+        }
+        let tc = "tc" + String(repeating: "A", count: 60), code = "ccj_0123456789abcdef." + String(repeating: "b", count: 43)
+        func link(_ q: [String: String]) -> String {
+            var c = URLComponents(string: "canvas://cloud/join")!
+            c.queryItems = q.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
+            return c.string!
+        }
+        let good = ["v": "1", "name": "Studio Cloud", "host": id, "tc": tc, "code": code]
+        let i = CloudInvite.parse(link(good))
+        check(i?.name == "Studio Cloud" && i?.hostId == id && i?.addr == tc && i?.code == code, "an invite link is read")
+        check(i?.fingerprint == "3956-A61F", "the fingerprint is the one the server shows (src/cloud-tunnel.ts)")
+        check(CloudInvite.parse(link(good.merging(["name": ""]) { $1 }))?.name == "Cloud", "no name: Cloud")
+        check(CloudInvite.parse(link(good.merging(["v": "2"]) { $1 })) == nil, "another version")
+        check(CloudInvite.parse(link(good.merging(["host": "studio-mac"]) { $1 })) == nil, "a host that is not an id")
+        check(CloudInvite.parse(link(good.merging(["tc": "http://192.168.1.20"]) { $1 })) == nil, "an address that is not a tunnel")
+        check(CloudInvite.parse(link(good.merging(["code": "ccd_0123456789abcdef." + String(repeating: "b", count: 43)]) { $1 })) == nil, "a device token is not a join code")
+        check(CloudInvite.parse(link(good).replacingOccurrences(of: "canvas://cloud/join", with: "canvas://open")) == nil, "only canvas://cloud/join")
+        check(CloudStatusText.line("down", configured: true) == "Cloud down" && CloudStatusText.detail("down", name: "Studio Cloud") == "Studio Cloud isn\u{2019}t open right now", "Cloud down, in one plain line")
+        check(CloudDisclosure.lines.count == 4 && CloudDisclosure.lines.allSatisfy { !$0.contains("\u{2014}") && !$0.contains("\u{00B7}") }, "the disclosure, plain")
+        var s = AppSettings()
+        let d = fresh()
+        s.cloudHosting = true; s.save(d)
+        check(AppSettings.load(d).cloudHosting && !AppSettings.load(fresh()).cloudHosting, "hosting is remembered, off by default")
+        s.cloudUrl = "canvas-cloud://\(id)"
+        check(s.serverSettings["cloudUrl"] as? String == "canvas-cloud://\(id)" && s.serverSettings["cloudDevEmail"] as? String == "", "the server gets the hosted Cloud's id and no development email")
     }
 }

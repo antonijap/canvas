@@ -67,6 +67,11 @@ func startServer() {
   let p = Process()
   p.executableURL = URL(fileURLWithPath: node)
   p.arguments = [serverScript]
+  // The tunnel helper a hosted Cloud is reached through (src/cloud-tunnel.ts), when this build has one.
+  var env = ProcessInfo.processInfo.environment
+  if env["CANVAS_TUNNEL_BIN"] == nil, let helper = Bundle.main.resourceURL?.appendingPathComponent("canvas-tunnel").path,
+     FileManager.default.isExecutableFile(atPath: helper) { env["CANVAS_TUNNEL_BIN"] = helper }
+  p.environment = env
   p.standardOutput = FileHandle.nullDevice
   if !FileManager.default.fileExists(atPath: serverLog.path) { FileManager.default.createFile(atPath: serverLog.path, contents: nil) }
   if let log = try? FileHandle(forWritingTo: serverLog) { log.seekToEndOfFile(); p.standardError = log } else { p.standardError = FileHandle.nullDevice }
@@ -225,7 +230,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 var quitAnyway = false
 /// A link that arrived before the server was up: opened once it is, like a Finder file.
 var pendingLink: CanvasLink?
+/// An invite link (canvas://cloud/join) waiting for the server, opened from Finder or a browser before it was up.
+var pendingInvite: CloudInvite?
+/// Settings > Cloud, then the question: joining never happens without the person saying Join.
+@MainActor func openInvite(_ invite: CloudInvite) {
+  SettingsWindow.shared.show(model, tab: .cloud)
+  CloudAccount.shared.confirmJoin(model, invite)
+}
+
 func openCanvasLink(_ url: URL) {
+  if url.host?.lowercased() == "cloud" {
+    guard let invite = CloudInvite.parse(url.absoluteString) else { model.flash("That invite link is not one Canvas can use"); return }
+    if serverReady { MainActor.assumeIsolated { openInvite(invite) } } else { pendingInvite = invite }
+    showMainWindow()
+    return
+  }
   guard let link = CanvasLink.parse(url) else { model.flash("That Canvas link is not one Canvas can open"); return }
   guard FileManager.default.fileExists(atPath: link.file) else {
     model.flash("Canvas cannot find \(URL(fileURLWithPath: link.file).lastPathComponent): it was moved, renamed or deleted")
@@ -1050,6 +1069,9 @@ DispatchQueue.global(qos: .userInitiated).async {
     let defaults = UserDefaults.standard, env = ProcessInfo.processInfo.environment
     let last = defaults.string(forKey: "canvas.lastFile")
     if FirstRun.marksWelcomed(lastFile: last, openFiles: model.openFiles, env: env) { defaults.set(true, forKey: FirstRun.key) }
+    // Hosting was on when Canvas quit: the Cloud starts again.
+    MainActor.assumeIsolated { CloudAccount.shared.resumeHosting(model) }
+    if let invite = pendingInvite { pendingInvite = nil; MainActor.assumeIsolated { openInvite(invite) } }
     if let l = pendingLink { pendingLink = nil; model.openLink(l) }
     else if let f = pendingFinderFile { pendingFinderFile = nil; model.open(f) }
     else if FirstRun.shouldWelcome(welcomed: defaults.bool(forKey: FirstRun.key), lastFile: last, openFiles: model.openFiles, env: env) { openWelcome() }

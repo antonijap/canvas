@@ -139,6 +139,8 @@ struct HomeLogicTests {
         check(HomeLogic.dot(status: "connected", configured: true) == .connected, "green")
         check(HomeLogic.dot(status: "offline", configured: true) == .offline && HomeLogic.dot(status: "connected", configured: false) == .offline, "grey")
         check(HomeLogic.dot(status: "signInAgain", configured: true) == .attention && HomeLogic.dot(status: "signedOut", configured: true) == .attention, "amber")
+        check(HomeLogic.dot(status: "down", configured: true) == .down && HomeLogic.dotWords(.down) == "Cloud down", "a hosted Cloud that does not answer reads Cloud down")
+        check(ServerName.display("canvas-cloud://3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b") == "Cloud", "a hosted Cloud with no name is called Cloud, never by its id")
         check(HomeLogic.dotWords(.attention) == "Sign in again", "words")
     }
 
