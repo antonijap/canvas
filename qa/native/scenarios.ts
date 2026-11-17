@@ -1406,9 +1406,9 @@ sc("inspector", "letter spacing: the token button on hover sits beside the numbe
     const b = (await t.marks({ id: "token-bind" })).find((m) => Math.abs(m.y + m.h / 2 - (f.y + f.h / 2)) < 12 && m.x > f.x);
     if (!b) throw new Error(`${what}: no token button in the letter spacing field`);
     t.ok(b.x >= f.x + f.w - 0.5, `${what}: the token button (x ${b.x.toFixed(1)}) starts inside the number field (it ends at ${(f.x + f.w).toFixed(1)})`);
-    // The Auto chip keeps its whole word beside it.
-    const region = { x: f.x - 40, y: f.y - 4, w: 200, h: f.h + 8 };
-    t.ok((await t.findText("Auto", region)).length > 0, `${what}: the Auto chip reads "Auto" with the token button shown`);
+    // Auto sits beside the caption, above the field, whole.
+    const auto = (await t.findText("Auto", { x: f.x - 40, y: f.y - 30, w: 220, h: 30 }));
+    t.ok(auto.length > 0, `${what}: no "Auto" beside the Letter spacing caption`);
     await t.cmd("qa.hoverbind", { on: false });
   };
   await check("Auto on");

@@ -298,7 +298,7 @@ enum QA {
             model.batchRename = nil
             LayersStore.of(model).renaming = nil
             for w in NSApp.windows where w !== window && w.isVisible {
-                if w.contentViewController is SettingsTabs || w.isSheet || w is NSPanel { w.orderOut(nil) }
+                if w.contentViewController is SettingsTabs || w.isSheet || w is NSPanel || w.title == "About Canvas" { w.orderOut(nil) }
             }
             window.makeFirstResponder(model.webView)
             try await sleep(100)
@@ -324,6 +324,9 @@ enum QA {
         case "popover":
             // A popover the inspector opened (the paint editor, the colour picker): its own window.
             guard let w = NSApp.windows.first(where: { $0.isVisible && String(describing: Swift.type(of: $0)).contains("Popover") }) else { throw QAError(code: "not_found", message: "no popover is open") }
+            return w
+        case "about":
+            guard let w = NSApp.windows.first(where: { $0.isVisible && $0.title == "About Canvas" }) else { throw QAError(code: "not_found", message: "the About window is not open") }
             return w
         case "settings":
             guard let w = NSApp.windows.first(where: { $0.isVisible && $0.contentViewController is SettingsTabs }) else { throw QAError(code: "not_found", message: "the Settings window is not open") }

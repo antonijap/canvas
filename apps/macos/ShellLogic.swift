@@ -1401,6 +1401,23 @@ enum OpenTypeFeatures {
 /// app reads once a day. The report link carries only the app's version and commit, the macOS version and the
 /// architecture, each in the shape the page accepts (it ignores anything else): nothing is sent until the person
 /// presses Send there. The manifest is a plain GET with no identifiers.
+/// Canvas > About Canvas: "Version 0.1.0 (aede106)" and when this build was made (build.sh writes CanvasBuilt, UTC).
+enum AboutInfo {
+    static func versionLine(version: String, commit: String?) -> String {
+        guard let c = commit, !c.isEmpty else { return "Version \(version)" }
+        return "Version \(version) (\(c))"
+    }
+
+    /// The build time in the reader's own date and time format; nil without a readable time.
+    static func builtLine(_ iso: String?, locale: Locale = .current, timeZone: TimeZone = .current) -> String? {
+        guard let iso, let d = ISO8601DateFormatter().date(from: iso) else { return nil }
+        let f = DateFormatter()
+        f.locale = locale; f.timeZone = timeZone
+        f.dateStyle = .medium; f.timeStyle = .short
+        return f.string(from: d)
+    }
+}
+
 enum ReleaseLinks {
     static let site = "https://getcanvas.cc"
     static let download = URL(string: site + "/download")!

@@ -668,3 +668,81 @@ enum FinishSound {
         return sound.play()
     }
 }
+
+// MARK: About
+
+/// Canvas > About Canvas: the icon, the name, the version with its commit, when this build was made, and the two
+/// places to go from here (the website, a bug report with this build's details filled in).
+@MainActor
+final class AboutWindow {
+    static let shared = AboutWindow()
+    private var window: NSWindow?
+
+    func show(website: URL, report: @escaping () -> Void) {
+        if window == nil {
+            let host = NSHostingController(rootView: AboutView(website: website, report: report))
+            host.sizingOptions = [.preferredContentSize]
+            let w = NSWindow(contentViewController: host)
+            w.styleMask = [.titled, .closable, .fullSizeContentView]
+            w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
+            w.title = "About Canvas"
+            w.isMovableByWindowBackground = true
+            w.isReleasedWhenClosed = false
+            w.center()
+            window = w
+        }
+        window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+struct AboutView: View {
+    let website: URL
+    let report: () -> Void
+    private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+    private let commit = Bundle.main.object(forInfoDictionaryKey: "CanvasCommit") as? String
+    private let built = Bundle.main.object(forInfoDictionaryKey: "CanvasBuilt") as? String
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
+                .accessibilityHidden(true)
+            Text("Canvas").font(.system(size: 26, weight: .semibold)).padding(.top, 14)
+            Text("Alpha").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Capsule().fill(Color.primary.opacity(0.07)))
+                .padding(.top, 6)
+            Text(AboutInfo.versionLine(version: version, commit: commit))
+                .font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled).padding(.top, 14)
+                .qaID("about-version", label: AboutInfo.versionLine(version: version, commit: commit))
+            if let b = AboutInfo.builtLine(built) {
+                Text(b).font(.system(size: 13)).foregroundStyle(.secondary).padding(.top, 4).qaID("about-built", label: b)
+            }
+            VStack(spacing: 10) {
+                AboutButton(title: "Website") { NSWorkspace.shared.open(website) }
+                AboutButton(title: "Report a Bug", action: report)
+            }
+            .padding(.top, 24)
+        }
+        .padding(.horizontal, 48).padding(.top, 40).padding(.bottom, 36)
+        .frame(width: 320)
+    }
+}
+
+private struct AboutButton: View {
+    let title: String
+    let action: () -> Void
+    @State private var hovering = false
+    var body: some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary)
+                .frame(maxWidth: .infinity).frame(height: 32)
+                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
+                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
