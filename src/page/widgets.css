@@ -178,7 +178,7 @@
 .wc-lines p{margin:0}
 .wc-cmds{display:flex;flex-direction:column;gap:12px;margin-top:16px}
 .wc-cmd-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:24px;margin-bottom:6px}
-.wc-cmd-name{font-weight:600}
+.wc-cmd-name{font-weight:600;line-height:100%;text-box:trim-both cap alphabetic}
 .wc-btns{display:flex;gap:6px}
 .wc-btn{height:24px;padding:0 10px;border:0;border-radius:999px;background:color-mix(in srgb,var(--c-fg) 8%,transparent);color:var(--c-fg);font:600 12px/24px var(--c-font-sans);cursor:pointer}
 .wc-btn:hover{background:color-mix(in srgb,var(--c-fg) 14%,transparent)}

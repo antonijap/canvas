@@ -202,6 +202,8 @@ private enum HomeMetric {
     static let gap: CGFloat = 20
     static let thumbRatio: CGFloat = 1.6
     static let radiusCard: CGFloat = 12
+    /// The status line's cap height (13 pt medium): a dot beside it sits on its capitals' middle.
+    static let bodyCapHeight = NSFont.systemFont(ofSize: 13, weight: .medium).capHeight
 }
 
 struct HomeView: View {
@@ -301,12 +303,13 @@ private struct HomeRow: View {
             HStack(spacing: 8) {
                 Image(systemName: symbol).glyph(GlyphSize.row + 1)
                     .foregroundStyle(selected ? Palette.fg : (muted ? Palette.mutedFg : Palette.fg.opacity(0.75)))
-                    .frame(width: 16)
-                Text(title).font(Typography.body).fontWeight(selected ? .medium : nil).lineLimit(1)
+                    // Taller than the name's line: the row centres on the line the name's capitals and the glyph share.
+                    .frame(width: 16, height: 20).qaID("home-row-glyph", label: title)
+                Text(title).font(Typography.body).fontWeight(selected ? .medium : nil).lineLimit(1).capCentered(13)
                     .foregroundStyle(muted && !selected ? Palette.mutedFg : Palette.fg).qaText(title)
                 Spacer(minLength: 8)
                 if let dot {
-                    Circle().fill(dotColor(dot)).frame(width: 7, height: 7).help(HomeLogic.dotWords(dot))
+                    StatusDot(color: dotColor(dot), size: 7).help(HomeLogic.dotWords(dot))
                         .qaID("home-server-dot", label: HomeLogic.dotWords(dot))
                 }
             }
@@ -395,7 +398,7 @@ private struct HomeEmpty: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: symbol).glyph(20).foregroundStyle(Palette.mutedFg)
+            Image(systemName: symbol).glyph(20).foregroundStyle(Palette.mutedFg).qaID("home-empty-glyph")
             Text(text).font(Typography.label).foregroundStyle(Palette.mutedFg).qaText(text)
             if let detail { Text(detail).font(Typography.micro).foregroundStyle(Palette.mutedFg).multilineTextAlignment(.center) }
         }
@@ -419,10 +422,12 @@ private struct HomeSegments<Tag: Hashable>: View {
                 Button { onSelect(item.tag) } label: {
                     Text(item.title).font(Typography.label).lineLimit(1).qaText(item.title)
                         .foregroundStyle(selection == item.tag ? Palette.fg : Palette.mutedFg)
+                        .capCentered(12, weight: .medium)
                         .padding(.horizontal, 12).frame(height: Metric.field - 4)
                         .background(RoundedRectangle(cornerRadius: Metric.radiusField - 2, style: .continuous)
                             .fill(selection == item.tag ? Palette.active : .clear))
                         .contentShape(Rectangle())
+                        .qaID("home-segment", label: item.title)
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(selection == item.tag ? .isSelected : [])
@@ -462,7 +467,7 @@ private struct HomeCardView: View {
                 if card.exists {
                     HStack(spacing: 8) {
                         HStack(spacing: 4) {
-                            Image(systemName: where_.symbol).glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg)
+                            Image(systemName: where_.symbol).glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg).qaID("home-card-where-glyph")
                             Text(where_.text).font(Typography.label).foregroundStyle(Palette.fg.opacity(0.8)).lineLimit(1).qaText(where_.text)
                         }
                         .layoutPriority(1)
@@ -471,8 +476,9 @@ private struct HomeCardView: View {
                         Spacer(minLength: 0)
                         if card.openComments > 0 {
                             HStack(spacing: 3) {
-                                Image(systemName: "bubble.left").glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg)
+                                Image(systemName: "bubble.left").glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg).qaID("home-card-comments-glyph")
                                 Text(HomeLogic.commentBadge(card.openComments)).font(Typography.label).monospacedDigit().foregroundStyle(Palette.fg.opacity(0.8))
+                                    .qaID("home-card-count", label: HomeLogic.commentBadge(card.openComments))
                             }
                             .help("\(card.openComments) open comments")
                             .qaID("home-comments", label: HomeLogic.commentBadge(card.openComments))
@@ -528,9 +534,9 @@ private struct HomeFirstLaunch: View {
         HStack(alignment: .top, spacing: HomeMetric.gap) {
             HomeStart(symbol: "graduationcap", tint: HomeTint.course, title: "Learn Canvas",
                       text: "Eleven short lessons, each with something to try. About ten minutes.", button: "Start the course", prominent: true) { model.openCourse() }
-            HomeStart(symbol: "doc.badge.plus", tint: HomeTint.file, title: "New file",
+            HomeStart(symbol: "doc.badge.plus", nudge: CGSize(width: 2, height: 0.5), tint: HomeTint.file, title: "New file",
                       text: "A blank canvas on this Mac. Ask your agent for a first board, or drop in a screenshot.", button: "New file", prominent: false) { model.newCanvas() }
-            HomeStart(symbol: "cloud", tint: HomeTint.team, title: "Work with your team",
+            HomeStart(symbol: "cloud", nudge: CGSize(width: 0, height: -0.5), tint: HomeTint.team, title: "Work with your team",
                       text: "Connect a server your team runs on its own Cloudflare account. Comments sync live.", button: "Add a team server", prominent: false) {
                 SettingsWindow.shared.show(model, tab: .cloud)
             }
@@ -541,6 +547,8 @@ private struct HomeFirstLaunch: View {
 
 private struct HomeStart: View {
     let symbol: String
+    /// Optical nudge: the symbol's drawing sits off its glyph box's middle (doc.badge.plus leans left, cloud sits low).
+    var nudge: CGSize = .zero
     let tint: (bg: Color, ink: Color)
     let title: String
     let text: String
@@ -551,6 +559,7 @@ private struct HomeStart: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: symbol).glyph(18).foregroundStyle(tint.ink)
+                .offset(nudge)
                 .frame(width: 36, height: 36)
                 .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(tint.bg))
                 .qaID("home-start-mark", label: title)
@@ -590,8 +599,11 @@ private struct HomeServerView: View {
         }
         .frame(height: Metric.pill - 8)
 
-        HStack(spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // On the status line's capitals, not between the two lines.
             Circle().fill(dot == .connected ? Palette.ok : dot == .attention ? Palette.warn : Palette.mutedFg.opacity(0.5)).frame(width: 7, height: 7)
+                .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + HomeMetric.bodyCapHeight / 2 }
+                .qaID("home-status-dot")
             VStack(alignment: .leading, spacing: 7) {
                 Text(connected ?? CloudStatusText.line(account.state.status, configured: account.state.configured))
                     .font(Typography.body).fontWeight(.medium).foregroundStyle(Palette.fg).lineLimit(1).qaText(connected ?? "Server status")

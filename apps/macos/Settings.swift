@@ -325,11 +325,13 @@ struct ConnectAgentCard: View {
             }
             SettingsDivider()
             SettingsRow("Status") {
-                HStack(spacing: 6) {
-                    Circle().fill(connected ? Palette.ok : Palette.mutedFg.opacity(0.5)).frame(width: 8, height: 8)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    StatusDot(color: connected ? Palette.ok : Palette.mutedFg.opacity(0.5)).qaID("status-dot")
                     Text(connected ? "Connected\((setup["client"] as? String).map { ": \($0)" } ?? "")" : "Not connected")
                         .font(Typography.body).foregroundStyle(connected ? Palette.fg : Palette.mutedFg).lineLimit(1)
+                        .qaID("status-text", label: connected ? "Connected" : "Not connected")
                 }
+                .capCentered(13)
                 .frame(height: Metric.field)
             }
             VStack(alignment: .leading, spacing: 4) {
@@ -410,11 +412,13 @@ struct ConnectAgentCard: View {
 private struct InstallState: View {
     let installed: Bool?
     var body: some View {
-        HStack(spacing: 6) {
-            if installed == true { Image(systemName: "checkmark.circle.fill").glyph(GlyphSize.row).foregroundStyle(Palette.fg) }
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if installed == true { Image(systemName: "checkmark.circle.fill").glyph(GlyphSize.row).foregroundStyle(Palette.fg).qaID("install-glyph") }
             Text(installed == nil ? "Checking" : installed! ? "Installed" : "Not installed")
                 .font(Typography.body).foregroundStyle(installed == true ? Palette.fg : Palette.mutedFg).lineLimit(1)
+                .qaID("install-text", label: installed == nil ? "Checking" : installed! ? "Installed" : "Not installed")
         }
+        .capCentered(13)
         .frame(height: Metric.field)
     }
 }
@@ -648,6 +652,7 @@ struct SettingsSegments<Tag: Hashable>: View {
                 Button { onSelect(tag) } label: {
                     Text(title).font(Typography.label).lineLimit(1).qaText(title)
                         .foregroundStyle(selection == tag ? Palette.fg : Palette.mutedFg)
+                        .capCentered(12, weight: .medium)
                         .frame(maxWidth: .infinity).frame(height: Metric.field - 4)
                         .background(RoundedRectangle(cornerRadius: Metric.radiusField - 2, style: .continuous)
                             .fill(selection == tag ? Palette.popover : .clear)
@@ -694,18 +699,25 @@ struct FieldButton: View {
     let symbol: String?
     /// The one main action of a screen: the primary colours.
     var prominent = false
+    /// As wide as its column and a control tall (About Canvas).
+    var wide = false
     let action: () -> Void
     @State private var hovering = false
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 6) {
-                if let symbol { Image(systemName: symbol).glyph(GlyphSize.field) }
-                Text(title).font(Typography.label).lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if let symbol { Image(systemName: symbol).glyph(GlyphSize.field).qaID("field-button-glyph", label: title) }
+                Text(title).font(Typography.label).lineLimit(1).qaID("field-button-text", label: title)
             }
+            .capCentered(12, weight: .medium)
             .foregroundStyle(prominent ? Palette.primaryFg : Palette.fg)
-            .padding(.horizontal, 12).frame(height: Metric.field)
+            // Optical padding: a glyph's own side bearing adds about a point on its side, and a closing ellipsis
+            // ends inside its advance, so those sides take a little less (measured: qa/native/scenarios-alignment.ts).
+            .padding(.leading, symbol == nil ? 12 : 11.5).padding(.trailing, title.hasSuffix("\u{2026}") ? 11 : 12)
+            .frame(maxWidth: wide ? .infinity : nil).frame(height: wide ? Metric.control : Metric.field)
             .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous)
                 .fill(prominent ? Palette.primary.opacity(hovering ? 0.88 : 1) : (hovering ? Palette.active : Palette.field.opacity(0.6))))
+            .qaID("field-button", label: title)
             .contentShape(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -785,43 +797,28 @@ struct AboutView: View {
     var body: some View {
         VStack(spacing: 0) {
             Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
-                .accessibilityHidden(true)
-            Text("Canvas").font(.system(size: 26, weight: .semibold)).padding(.top, 14)
-            Text("Alpha").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(Capsule().fill(Color.primary.opacity(0.07)))
+                .accessibilityHidden(true).qaID("about-icon")
+            Text("Canvas").font(Typography.appName).foregroundStyle(Palette.fg).qaText("Canvas").padding(.top, 14)
+            // Optical padding: the A starts at its own edge, the a ends inside its advance.
+            Text("Alpha").font(Typography.section).foregroundStyle(Palette.mutedFg)
+                .padding(.leading, 7.5).padding(.trailing, 6.5).padding(.vertical, 2)
+                .background(Capsule().fill(Palette.active))
+                .qaID("about-alpha")
                 .padding(.top, 6)
             Text(AboutInfo.versionLine(version: version, commit: commit))
-                .font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled).padding(.top, 14)
+                .font(Typography.body).foregroundStyle(Palette.mutedFg).textSelection(.enabled).padding(.top, 14)
                 .qaID("about-version", label: AboutInfo.versionLine(version: version, commit: commit))
             if let b = AboutInfo.builtLine(built) {
-                Text(b).font(.system(size: 13)).foregroundStyle(.secondary).padding(.top, 4).qaID("about-built", label: b)
+                Text(b).font(Typography.body).foregroundStyle(Palette.mutedFg).padding(.top, 4).qaID("about-built", label: b)
             }
             VStack(spacing: 10) {
-                AboutButton(title: "Website") { NSWorkspace.shared.open(website) }
-                AboutButton(title: "Report a Bug", action: report)
+                FieldButton(title: "Website", symbol: nil, wide: true) { NSWorkspace.shared.open(website) }.qaID("about-button", label: "Website")
+                FieldButton(title: "Report a Bug", symbol: nil, wide: true, action: report).qaID("about-button", label: "Report a Bug")
             }
             .padding(.top, 24)
         }
         .padding(.horizontal, 48).padding(.top, 40).padding(.bottom, 36)
         .frame(width: 320)
-    }
-}
-
-private struct AboutButton: View {
-    let title: String
-    let action: () -> Void
-    @State private var hovering = false
-    var body: some View {
-        Button(action: action) {
-            Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(.primary)
-                .frame(maxWidth: .infinity).frame(height: 32)
-                .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(hovering ? 0.08 : 0.04)))
-                .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-                .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
 

@@ -14,6 +14,7 @@ import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";
 import "./scenarios-cloud.ts";
 import "./scenarios-home.ts";
+import "./scenarios-alignment.ts";
 import { intoInspector } from "./scenarios-leftovers.ts";
 
 /** The canvas area well clear of the panels (window points). */

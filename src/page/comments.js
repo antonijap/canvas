@@ -37,6 +37,9 @@ const CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http:/
 function start(host) {
   const { view, file } = host;
   const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  /** A one-line label: its box trimmed to the capitals (an x for lowercase-only, cls "cm-t ex"), so a flex row centres the letters themselves. */
+  const lbl = (text, cls = "cm-t") => h("span", cls, text);
+  const txtBtn = (cls, text) => { const b = h("button", cls); b.type = "button"; b.append(lbl(text)); return b; };
   const btnEl = (cls, html, label) => { const b = h("button", cls); b.type = "button"; b.innerHTML = html; if (label) { b.setAttribute("aria-label", label); b.title = label; } return b; };
   const tell = (t) => { if (host.native) host.post({ toast: t }); else console.warn("[canvas] " + t); };
   const typing = (t) => !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
@@ -61,24 +64,26 @@ function start(host) {
 .cm-pop{width:340px}.cm-comp{width:320px}
 .cm-pop[hidden],.cm-comp[hidden]{display:none}
 .cm-head{display:flex;align-items:center;gap:6px;padding:10px 10px 10px 14px}
-.cm-chip{display:inline-flex;align-items:center;gap:5px;height:22px;min-width:0;padding:0 7px;border-radius:7px;background:var(--cm-chip);color:color-mix(in srgb,var(--c-fg) 75%,transparent);font:500 12px/100% var(--c-font-sans)}
+.cm-chip{display:inline-flex;align-items:center;gap:5px;height:22px;min-width:0;padding:0 7px 0 6px;border-radius:7px;background:var(--cm-chip);color:color-mix(in srgb,var(--c-fg) 75%,transparent);font:500 12px/100% var(--c-font-sans)}
 .cm-chip svg{flex:none;color:var(--c-muted-fg)}
 .cm-chip span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:3px 0;margin:-3px 0}
 .cm-sp{flex:1;min-width:0;height:1px}
 .cm-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:26px;min-width:26px;padding:0;border:0;border-radius:8px;background:var(--cm-chip);color:var(--c-fg);font:500 12px/100% var(--c-font-sans);cursor:pointer;white-space:nowrap}
 .cm-btn.txt{padding:0 9px}
+.cm-btn.txt:has(svg){padding-left:7.5px}
 .cm-btn:hover{background:var(--c-active)}
 .cm-btn.on{background:var(--c-fg);color:var(--c-popover)}
 .cm-btn.dim{color:var(--c-muted-fg)}
 .cm-sep{height:1px;background:var(--cm-line);width:100%}
 .cm-list{display:flex;flex-direction:column;gap:14px;padding:14px;max-height:340px;overflow-y:auto}
 .cm-item{display:flex;gap:10px;align-items:flex-start}
-.cm-item .cm-av,.cm-item .cm-agent{margin-top:3px}
+.cm-item .cm-av,.cm-item .cm-agent{margin-top:1px}
 .cm-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding-top:3px}
-.cm-who{display:flex;align-items:center;gap:6px;min-height:18px;line-height:100%}
+.cm-who{position:relative;display:flex;align-items:baseline;gap:6px;min-height:18px;line-height:100%;padding-top:4.5px}
+.cm-who:has(.cm-btn){padding-right:26px}
 .cm-who b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;padding:3px 0;margin:-3px 0}
 .cm-who time{flex:none;color:var(--cm-time);font-size:12px}
-.cm-who .cm-btn{margin-left:auto;opacity:0;height:20px;min-width:20px;background:transparent;color:var(--c-muted-fg)}
+.cm-who .cm-btn{position:absolute;right:0;top:-1px;opacity:0;height:20px;min-width:20px;background:transparent;color:var(--c-muted-fg)}
 .cm-item:hover .cm-who .cm-btn,.cm-item:focus-within .cm-who .cm-btn{opacity:1}
 .cm-text{color:var(--cm-body);white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.385}
 .cm-note{padding:10px 14px;color:var(--c-muted-fg);font-size:12px;line-height:100%}
@@ -91,7 +96,7 @@ function start(host) {
 .cm-send.ready{background:#18181b;color:#fff}
 .cm-send:disabled{cursor:default}
 .cm-compfield{display:flex;gap:10px;padding:14px 14px 10px}
-.cm-compfield .cm-av{margin-top:0}
+.cm-compfield .cm-av{margin-top:1px}
 .cm-compfield .cm-fieldwrap{flex:1;min-width:0;padding-top:3px}
 .cm-foot{display:flex;align-items:center;gap:8px;padding:4px 12px 12px 14px}
 .cm-key{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 5px;border-radius:4px;background:var(--cm-chip);color:var(--c-muted-fg);font:500 11px/100% var(--c-font-sans)}
@@ -99,20 +104,22 @@ function start(host) {
 .cm-menu button{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--c-danger);font:500 12px/100% var(--c-font-sans);cursor:pointer;text-align:left}
 .cm-menu button:hover{background:var(--c-hover)}
 .cm-gone{display:flex;flex-direction:column;gap:10px;padding:12px 10px 10px 14px;border-radius:16px 16px 0 0;background:#fff7ed;color:#c2410c}
-.cm-gone .cm-top{display:flex;align-items:center;gap:10px}
+.cm-gone .cm-top{display:flex;align-items:center;gap:10px;min-height:22px}
 .cm-gone .cm-acts{display:flex;align-items:center;gap:6px}
-.cm-gone .cm-ghost{flex:none;color:#ea580c}
+.cm-gone .cm-ghost{flex:none;display:flex;margin-left:-1.5px;color:#ea580c}
 .cm-gone .cm-gt{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;line-height:100%}
 .cm-gone b{font-weight:600;color:#9a3412;font-size:13px;line-height:100%}
 .cm-gone .cm-gl{font-size:12px;line-height:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:3px 0;margin:-3px 0}
 .cm-gone .cm-btn{background:#ffedd5;color:#9a3412}
+.cm-gone .cm-acts .cm-btn.txt:first-child{padding-left:8.5px}
 .cm-gone .cm-btn:hover{background:#fed7aa}
 @media (prefers-color-scheme: dark){.cm-gone{background:#fb923c24;color:#fdba74}.cm-gone .cm-ghost{color:#fb923c}.cm-gone b{color:#fed7aa}.cm-gone .cm-btn{background:#fb923c2e;color:#fed7aa}.cm-gone .cm-btn:hover{background:#fb923c47}}
 .cm-bar,.cm-hint{position:absolute;left:50%;translate:-50% 0;display:none;align-items:center;gap:10px;white-space:nowrap;font-size:13px;line-height:100%;pointer-events:none}
-.cm-bar{height:36px;padding:0 6px 0 12px;border-radius:12px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:12px;font-weight:500;pointer-events:auto}
+.cm-bar{height:36px;padding:0 5px 0 11px;border-radius:12px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:12px;font-weight:500;pointer-events:auto}
 .cm-bar.on,.cm-hint.on{display:flex}
 .cm-bar svg{color:var(--c-muted-fg)}
-.cm-hint{height:36px;padding:0 12px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
+.cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
+.cm-hint{height:36px;padding:0 12px 0 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
 .cm-hint b{font-weight:600}
 .cm-hint .cm-soft{color:#ffffffa6}
 .cm-hint .cm-key{background:#ffffff26;color:#ffffffcc}
@@ -127,16 +134,19 @@ function start(host) {
 .cm-dot.ok{background:#16a34a}.cm-dot.warn{background:#d97706}
 .cm-state{display:inline-flex;align-items:center;gap:4px;min-width:0;color:var(--c-muted-fg);font-size:12px;line-height:100%}
 .cm-state svg{flex:none}
+.cm-state.wait{display:inline;white-space:nowrap}.cm-state.wait svg{vertical-align:calc(.5cap - 5.5px);margin-right:4px}
 .cm-fail{display:flex;align-items:flex-start;gap:8px;color:var(--c-danger);font-size:12px;line-height:16px}
 .cm-fail .cm-state{flex:1;align-items:flex-start;color:inherit;line-height:16px;white-space:normal;overflow-wrap:anywhere}
-.cm-fail .cm-state svg{margin-top:2.5px}
-.cm-fail .cm-btn{height:20px;min-width:20px;padding:0 7px;font-size:12px}
+.cm-fail .cm-state svg{margin-top:2px}
+.cm-fail .cm-btn{height:20px;min-width:20px;margin-top:-2px;padding:0 7px;font-size:12px}
 .cm-failrow{padding:10px 14px 0}
 .cm-hov{position:absolute;left:0;top:0;display:none;border:1.5px solid var(--c-sel);pointer-events:none;border-radius:3px}
 #view.cm-mode,#view.cm-mode *{cursor:${CURSOR}!important}
 #view.cm-mode .cm-ui,#view.cm-mode .cm-ui *{cursor:default!important}
 #view.cm-mode .cm-ui textarea{cursor:text!important}
 #view.cm-mode .cm-ui button,#view.cm-mode .cm-pin,#view.cm-mode .cm-pin *{cursor:pointer!important}
+.cm-t,.cm-bar>span,.cm-hint>b,.cm-hint>.cm-soft,.cm-chip span,.cm-server span,.cm-who b,.cm-who time,.cm-gone b,.cm-gone .cm-gl{text-box:trim-both cap alphabetic}
+.cm-t.ex{text-box-edge:ex alphabetic}
 @media (prefers-reduced-motion: reduce){.cm-av,.cm-agent,.cm-send{transition:none}.cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1}}`;
   document.head.appendChild(css);
 
@@ -219,7 +229,8 @@ function start(host) {
   // ---------- pins ----------
   function avatar(author, cls = "") {
     if (L.isAgent(author)) { const a = h("span", "cm-agent " + cls); a.innerHTML = ICON.sparkles; return a; }
-    const a = h("span", "cm-av " + cls, L.initialOf(author && author.name));
+    const a = h("span", "cm-av " + cls);
+    a.append(lbl(L.initialOf(author && author.name)));
     a.style.background = L.colorOf(author && author.name);
     return a;
   }
@@ -243,7 +254,7 @@ function start(host) {
     if (p.key === key) return;
     p.key = key;
     p.el.textContent = "";
-    if (open && t) p.el.append(document.createTextNode(String(live)));
+    if (open && t) p.el.append(lbl(String(live)));
     else p.el.append(avatar(author));
   }
 
@@ -356,9 +367,10 @@ function start(host) {
     .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); apply(j); })).catch((e) => tell(e.message));
   /** The clock and "Sends when you're back online" (or "Sending" while connected) that stands where the time would be. */
   function pendingState() {
-    const s = h("span", "cm-state");
+    // Inline, not a row: the meta row lines its baseline up with the name's, and the clock sits on the capitals' middle (cap units).
+    const s = h("span", "cm-state wait");
     s.innerHTML = ICON.clock;
-    s.append(document.createTextNode(st.sync && st.sync.connected ? "Sending" : "Sends when you're back online"));
+    s.append(lbl(st.sync && st.sync.connected ? "Sending" : "Sends when you're back online"));
     return s;
   }
   /** "Not sent: reason" with Retry and Discard. */
@@ -367,8 +379,7 @@ function start(host) {
     const s = h("span", "cm-state");
     s.innerHTML = ICON.alert;
     s.append(document.createTextNode(`Not sent: ${L.refusalReason(r, st.sync && st.sync.role)}`));
-    const retry = h("button", "cm-btn txt", "Retry"), drop = h("button", "cm-btn txt dim", "Discard");
-    retry.type = drop.type = "button";
+    const retry = txtBtn("cm-btn txt", "Retry"), drop = txtBtn("cm-btn txt dim", "Discard");
     retry.onclick = () => syncCall("retry", r.opId);
     drop.onclick = () => syncCall("discard", r.opId);
     row.append(s, retry, drop);
@@ -392,9 +403,9 @@ function start(host) {
       if (!pop.hidden && pop.contains(document.activeElement)) document.activeElement.blur();
       pop.hidden = true; popFor = null; popKey = ""; return;
     }
-    const lbl = layerLabel(t);
+    const where = layerLabel(t);
     const live = L.liveComments(t);
-    const key = JSON.stringify([t.id, t.resolvedAt || "", lbl, st.menu, live.map((c) => [c.id, c.body, c.editedAt || ""]), syncKey()]);
+    const key = JSON.stringify([t.id, t.resolvedAt || "", where, st.menu, live.map((c) => [c.id, c.body, c.editedAt || ""]), syncKey()]);
     pop.hidden = false;
     if (popFor === t.id && popKey === key) return;
     const keep = popFor === t.id ? pop.querySelector(".cm-field") : null;
@@ -406,20 +417,19 @@ function start(host) {
       const b = h("button", "cm-btn txt" + (t.resolvedAt ? " on" : ""));
       b.type = "button";
       b.innerHTML = ICON.check;
-      b.append(document.createTextNode(t.resolvedAt ? "Reopen" : "Resolve"));
+      b.append(lbl(t.resolvedAt ? "Reopen" : "Resolve"));
       b.setAttribute("aria-label", t.resolvedAt ? "Reopen thread" : "Resolve thread");
       b.onclick = () => sendOps([env({ kind: "thread.resolve", thread: t.id, resolved: !t.resolvedAt })]).then(() => { if (!showResolved && !t.resolvedAt) { st.open = null; render(); } }).catch((e) => tell(e.message));
       return b;
     };
     const more = btnEl("cm-btn", ICON.more, "More");
     more.onclick = () => { st.menu = !st.menu; popKey = ""; drawThread(); };
-    if (lbl.gone) {
+    if (where.gone) {
       const band = h("div", "cm-gone");
       const g = h("span", "cm-ghost"); g.innerHTML = ICON.ghost;
       const gt = h("div", "cm-gt");
       gt.append(h("b", "", "Layer deleted"), h("span", "cm-gl", L.previewLine(t.anchor && t.anchor.preview)));
-      const re = h("button", "cm-btn txt", "Pin to a layer");
-      re.type = "button";
+      const re = txtBtn("cm-btn txt", "Pin to a layer");
       re.onclick = () => { st.repin = t.id; st.open = null; setMode(true); render(); };
       const top = h("div", "cm-top"), acts = h("div", "cm-acts");
       top.append(g, gt);
@@ -428,7 +438,7 @@ function start(host) {
       pop.append(band);
     } else {
       const head = h("div", "cm-head");
-      head.append(chip(lbl.name, !t.anchor.nodeId), h("span", "cm-sp"), resolveBtn(), more);
+      head.append(chip(where.name, !t.anchor.nodeId), h("span", "cm-sp"), resolveBtn(), more);
       pop.append(head);
     }
     if (st.menu) {
@@ -436,7 +446,7 @@ function start(host) {
       const del = h("button", "", "Delete thread");
       del.type = "button";
       del.innerHTML = ICON.trash + "";
-      del.append(document.createTextNode("Delete thread"));
+      del.append(lbl("Delete thread"));
       del.setAttribute("aria-label", "Delete thread");
       del.onclick = () => { st.menu = false; st.open = null; sendOps([env({ kind: "thread.delete", thread: t.id })]).catch((e) => tell(e.message)); render(); };
       m.append(del);
@@ -579,7 +589,9 @@ function start(host) {
     hint.innerHTML = "";
     if (st.mode) {
       const m = h("span"); m.innerHTML = ICON.bubble;
-      hint.append(m, h("b", "", st.repin ? "Pin to a layer" : "Comment mode"), h("span", "cm-soft", st.repin ? "Click the layer this comment is about" : "Click a layer to pin a comment"), h("span", "cm-key", "esc"));
+      const key = h("span", "cm-key");
+      key.append(lbl("esc", "cm-t ex"));
+      hint.append(m, h("b", "", st.repin ? "Pin to a layer" : "Comment mode"), h("span", "cm-soft", st.repin ? "Click the layer this comment is about" : "Click a layer to pin a comment"), key);
     }
     const n = L.counts(st.threads);
     const show = !st.mode && n.open + n.resolved > 0;
@@ -590,8 +602,7 @@ function start(host) {
       const m = h("span"); m.innerHTML = ICON.bubble; m.style.display = "flex";
       bar.append(m, h("span", "", `${n.open} open`));
       if (n.resolved) {
-        const b = h("button", "cm-btn txt dim", showResolved ? `Hide ${n.resolved} resolved` : `Show ${n.resolved} resolved`);
-        b.type = "button";
+        const b = txtBtn("cm-btn txt dim", showResolved ? `Hide ${n.resolved} resolved` : `Show ${n.resolved} resolved`);
         b.setAttribute("aria-pressed", String(showResolved));
         b.onclick = () => { showResolved = !showResolved; try { localStorage.setItem(SHOW_KEY, showResolved ? "1" : "0"); } catch {} render(); };
         bar.append(b);
@@ -616,7 +627,7 @@ function start(host) {
     if (people.length) {
       const g = h("div", "cm-people");
       for (const a of people.slice(0, 4)) { const e = avatar(a); e.title = a.email || a.name; g.append(e); }
-      if (people.length > 4) { const m = h("span", "cm-av cm-more", "+" + (people.length - 4)); m.title = people.slice(4).map((a) => a.name).join(", "); g.append(m); }
+      if (people.length > 4) { const m = h("span", "cm-av cm-more"); m.append(lbl("+" + (people.length - 4))); m.title = people.slice(4).map((a) => a.name).join(", "); g.append(m); }
       shared.append(g);
     }
     const [tone, say] = STATUS[s.status] || STATUS.offline;

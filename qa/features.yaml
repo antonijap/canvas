@@ -199,7 +199,7 @@ features:
     name: C pins a comment thread to the layer under the pointer
     area: comments
     driven: [page, mcp]
-    cases: [pin, page-point, follows-layer, reply, resolve, show-resolved, layer-deleted, reopen, keyboard, light, dark, shared-bar, pending, rejected]
+    cases: [pin, page-point, follows-layer, reply, resolve, show-resolved, layer-deleted, reopen, keyboard, light, dark, shared-bar, pending, rejected, alignment]
   - id: scale-tool
     name: K scales a layer with its contents
     area: resize
@@ -660,7 +660,7 @@ features:
     name: First launch opens the Welcome file; the welcome card's MCP commands copy, and Connect registers them; Connected follows the agent; Settings > Agents shows the same; the browser page points at the app
     area: agent
     driven: [page, native, mcp]
-    cases: [welcome, copy-command, connect, connected, settings-agents, settings-connect, web-hint, engine-missing]
+    cases: [welcome, copy-command, connect, connected, settings-agents, settings-connect, web-hint, engine-missing, alignment]
 
   # ------------------------------------------------------------ MCP tools (cases are tool names)
   - id: mcp-read
@@ -759,7 +759,7 @@ features:
     name: Settings tabs (General, Canvas, Agents, Sounds, Performance, Privacy, Shortcuts)
     area: chrome
     driven: [native]
-    cases: [$themes, privacy, agents-model, updates, comment-name, cloud]
+    cases: [$themes, privacy, agents-model, updates, comment-name, cloud, alignment]
   - id: home
     name: Home, the pinned first tab (recents, files on this Mac, a team server, first launch)
     area: chrome

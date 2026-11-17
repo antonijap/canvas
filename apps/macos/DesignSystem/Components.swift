@@ -29,6 +29,30 @@ extension Image {
     }
 }
 
+// MARK: Optical centring
+
+extension View {
+    /// Centres a line of text (with the glyphs on its baseline) by its capitals: the parent's centre line goes through
+    /// the middle of the caps, not the middle of the line box, where SF's caps sit about half a point low.
+    /// `size` and `weight` are the text's (Typography); measured by qa/native/scenarios-alignment.ts.
+    func capCentered(_ size: CGFloat, weight: NSFont.Weight = .regular) -> some View {
+        alignmentGuide(VerticalAlignment.center) { d in d[.firstTextBaseline] - NSFont.systemFont(ofSize: size, weight: weight).capHeight / 2 }
+    }
+}
+
+/// A status dot beside a line of text, on the middle of its capitals (in an HStack aligned .firstTextBaseline).
+struct StatusDot: View {
+    let color: Color
+    var size: CGFloat = 8
+    /// The text's point size and weight beside it.
+    var textSize: CGFloat = 13
+    var textWeight: NSFont.Weight = .regular
+    var body: some View {
+        Circle().fill(color).frame(width: size, height: size)
+            .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + NSFont.systemFont(ofSize: textSize, weight: textWeight).capHeight / 2 }
+    }
+}
+
 // MARK: QA marks
 
 extension View {
@@ -715,7 +739,7 @@ struct NumberField: View {
             if !bare {
                 ScrubHandle(enabled: live && value != nil, begin: beginScrub, move: { dx, step in if let s = scrub { text = Self.format(s.move(dx, step: step)) } },
                             end: { scrub?.end(); scrub = nil }) {
-                    if let symbol { Image(systemName: symbol).glyph(11).foregroundStyle(Palette.mutedFg) }
+                    if let symbol { Image(systemName: symbol).glyph(11).foregroundStyle(Palette.mutedFg).qaID("field-glyph", label: symbol) }
                     else { Text(prefix).font(Typography.micro).foregroundStyle(Palette.mutedFg) }
                 }
                 .padding(.leading, -4).padding(.trailing, -2)
@@ -739,6 +763,7 @@ struct NumberField: View {
                 }
             }
         }
+        .qaID("number-field")
         // Option over the label or the input, then drag: a scrub with speed by height (NumericInput.swift).
         .overlay { OptionScrub(enabled: live && value != nil, begin: beginScrub,
                                move: { dx, step, speed in if let s = scrub { text = Self.format(s.move(dx, step: step, speed: speed)) } },
@@ -822,10 +847,12 @@ struct MenuField<Items: View>: View {
         Menu(content: items) {
             FieldBox {
                 if let symbol { Image(systemName: symbol).glyph(11).foregroundStyle(Palette.mutedFg) }
-                Text(title).font(font).foregroundStyle(Palette.fg).lineLimit(1)
+                Text(title).font(font).foregroundStyle(Palette.fg).lineLimit(1).qaID("menu-field-text", label: title)
+                    .capCentered(font == Typography.body ? 13 : 12)
                 Spacer(minLength: 0)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Palette.mutedFg)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Palette.mutedFg).qaID("menu-field-chevron")
             }
+            .qaID("menu-field", label: title)
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
     }
@@ -863,6 +890,8 @@ struct MiniButton: View {
     var inRow = false
     /// Sits inside a field's trailing edge: a small rounded square with its own inset.
     var inField = false
+    /// Optical nudge, in points down: a symbol whose drawing sits off its glyph box's middle (the hexagon draws half a point low).
+    var glyphNudge: CGFloat = 0
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -874,6 +903,7 @@ struct MiniButton: View {
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(hovering ? Palette.fg : Palette.mutedFg)
+                .offset(y: glyphNudge)
                 .frame(width: side, height: side)
                 .background(shape.fill(hovering || inField ? (inRow || inField ? Palette.active : Palette.hover) : .clear))
                 .contentShape(shape)
