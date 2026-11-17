@@ -168,8 +168,8 @@ sc("first-run", "a first launch opens the Welcome file; Connected follows an age
       fs.mkdirSync(`${process.cwd()}/qa/out/native`, { recursive: true });
       await f.shot(`${process.cwd()}/qa/out/native/settings-agents-connect.png`, "settings");
       await f.click(center(m), { window: "settings" });
-      for (let i = 0; i < 120 && (await f.marks({ id: "connect-claude", window: "settings" }))[0]?.label !== "Added"; i++) await sleep(250);
-      t.eq((await f.marks({ id: "connect-claude", window: "settings" }))[0]?.label, "Added", "Added after the click");
+      for (let i = 0; i < 120 && (await f.marks({ id: "connect-claude", window: "settings" }))[0]?.label !== "Connected"; i++) await sleep(250);
+      t.eq((await f.marks({ id: "connect-claude", window: "settings" }))[0]?.label, "Connected", "Connected after the click");
       t.eq((await f.marks({ id: "connect-hint", window: "settings" }))[0]?.label ?? null, "Added. Start a new Claude Code session.", "Settings says the next step");
       const cj = JSON.parse(fs.readFileSync(path.join(fresh.home, ".claude.json"), "utf8"));
       t.ok(cj.mcpServers?.canvas?.args?.includes(serverTs), `canvas in the fresh HOME's ~/.claude.json: ${JSON.stringify(cj.mcpServers)}`);
@@ -182,9 +182,9 @@ sc("first-run", "a first launch opens the Welcome file; Connected follows an age
     // main instance (e5rt errors in every later scenario). The Agents tab is the one shown; the screenshot shows its card.
     t.eq(execFileSync("defaults", ["read", fresh.bundleId, "canvas.settings.tab"], { encoding: "utf8" }).trim(), "agents", "the Agents tab shows");
     const sw = (await f.state()).windows.find((w: any) => w.settings);
-    // The pane opens on its Connect part (Connect, Models and Cursor show one at a time), with the card.
+    // The pane is one card: a row per agent, each with its menu.
     t.ok(sw, "the Settings window is open");
-    t.eq((await f.marks({ id: "agents-part", window: "settings" }))[0]?.label ?? null, "Connect", "Settings > Agents shows its Connect part");
+    for (const h of ["claude", "codex"]) t.eq((await f.marks({ id: `agent-menu-${h}`, window: "settings" })).length, 1, `Settings > Agents shows the ${h} row`);
     // The next launch is not a first one: welcomed is stored for this bundle id.
     t.eq(execFileSync("defaults", ["read", fresh.bundleId, "canvas.welcomed"], { encoding: "utf8" }).trim(), "1", "canvas.welcomed stored");
   } finally {

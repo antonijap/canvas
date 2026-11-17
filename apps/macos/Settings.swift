@@ -41,6 +41,11 @@ final class SettingsWindow {
 
     func close() { window?.orderOut(nil) }
 
+    /// A pane whose height changed while it shows (Settings > Cloud once an address is saved): the window follows.
+    func refit() {
+        DispatchQueue.main.async { [weak self] in (self?.window?.contentViewController as? SettingsTabs)?.fit(animated: true) }
+    }
+
     private func make(_ model: CanvasModel) -> NSWindow {
         // Read first: adding the first tab selects it, which saves it as the last tab.
         let saved = UserDefaults.standard.string(forKey: "canvas.settings.tab").flatMap(Tab.init) ?? .general
@@ -171,94 +176,166 @@ struct CanvasSettings: View {
     }
 }
 
+/// One card: a row per agent (Connect, or Connected, and a menu with its command, model and reasoning), the default
+/// agent, the agent's cursor and the run cap. Connect runs the agent's own `mcp add` (POST /api/mcp/connect,
+/// src/mcp-connect.ts); the commands are the Welcome card's (GET /api/mcp/setup, src/onboarding.ts).
 struct AgentSettings: View {
     @ObservedObject var model: CanvasModel
-    @State private var installed: Set<String>?
     /// Per installed agent: the models it offers (id, label, the reasoning levels each takes) and its levels.
     @State private var offers: [String: AgentOffer] = [:]
-    /// The pane shows one part at a time, so it stays short: connecting, the models asks use, the agent's cursor.
-    @State private var part: Part = .connect
-
-    enum Part: String, CaseIterable {
-        case connect, models, cursor
-        var title: String { rawValue.capitalized }
-    }
+    /// GET /api/mcp/setup: each agent's command, whether its CLI is installed and has Canvas added, and who talks now.
+    @State private var setup: [String: Any] = [:]
+    /// The agent whose command was just copied.
+    @State private var copied: String?
+    /// Agents whose Connect is running.
+    @State private var busy: Set<String> = []
+    /// A Connect's error, per agent, shown under its row until the next Connect.
+    @State private var errors: [String: String] = [:]
+    /// The next step after a Connect worked, per agent.
+    @State private var notes: [String: String] = [:]
+    @State private var hoveredMenu: String?
 
     var body: some View {
         SettingsStack {
-            SettingsSegments(items: Part.allCases.map { ($0.title, $0) }, selection: part) { part = $0 }
-                .frame(width: 300).frame(maxWidth: .infinity)
-                .qaID("agents-part", label: part.title)
-            switch part {
-            case .connect: ConnectAgentCard(model: model)
-            case .models: asks
-            case .cursor: cursor
-            }
-        }
-        .task { await loadInstalled() }
-    }
-
-    /// The default agent, each agent's model and reasoning (or Not installed), and the run cap.
-    private var asks: some View {
-        SettingsCard(title: "Ask about the selection") {
-            SettingsRow("Default agent") {
-                SettingsSegments(items: AgentHarness.allCases.map { ($0.title, $0) }, selection: model.prefs.harness) { model.prefs.harness = $0 }.frame(width: 220)
-            }
-            ForEach(AgentHarness.allCases) { h in
+            SettingsCard {
+                ForEach(AgentHarness.allCases) { h in
+                    agentRow(h)
+                    SettingsDivider()
+                }
+                SettingsRow("Default agent") {
+                    SettingsSegments(items: AgentHarness.allCases.map { ($0.title, $0) }, selection: model.prefs.harness) { model.prefs.harness = $0 }.frame(width: 200)
+                }
                 SettingsDivider()
-                SettingsRow(h.title, detail: detail(h)) {
-                    HStack(spacing: 6) {
-                        MenuField(title: modelTitle(h)) {
-                            Button("Default") { model.prefs.setModel(h, "") }
-                            ForEach(offers[h.rawValue]?.models ?? [], id: \.id) { m in
-                                Button(m.label) {
-                                    model.prefs.setModel(h, m.id)
-                                    if !efforts(h, model: m.id).contains(model.prefs.effort(h)) { model.prefs.setEffort(h, "") }
-                                }
-                            }
-                        }
-                        .frame(width: 150).qaID("model-\(h.rawValue)")
-                        MenuField(title: model.prefs.effort(h).isEmpty ? "Default" : AgentOffer.effortTitle(model.prefs.effort(h))) {
-                            Button("Default") { model.prefs.setEffort(h, "") }
-                            ForEach(efforts(h, model: model.prefs.model(h)), id: \.self) { e in
-                                Button(AgentOffer.effortTitle(e)) { model.prefs.setEffort(h, e) }
-                            }
-                        }
-                        .frame(width: 110).qaID("effort-\(h.rawValue)")
-                    }
-                    .disabled(offers[h.rawValue] == nil).opacity(offers[h.rawValue] == nil ? 0.5 : 1)
+                SettingsRow("Show the agent\u{2019}s cursor") { SettingsSwitch(isOn: $model.prefs.agentCursor) }
+                SettingsDivider()
+                SettingsRow("Cursor speed") {
+                    SettingsSegments(items: CursorSpeed.allCases.map { ($0.title, $0) }, selection: model.prefs.cursorSpeed) { model.prefs.cursorSpeed = $0 }
+                        .frame(width: 200).disabled(!model.prefs.agentCursor).opacity(model.prefs.agentCursor ? 1 : 0.5)
+                }
+                SettingsDivider()
+                SettingsRow("Stop a run after") {
+                    StepperField(value: model.prefs.runCapMin, range: SettingsLimits.runCap, step: 1, unit: "min", label: "Run time cap in minutes") { model.prefs.runCapMin = $0 }
                 }
             }
-            SettingsDivider()
-            SettingsRow("Stop a run after") {
-                StepperField(value: model.prefs.runCapMin, range: SettingsLimits.runCap, step: 1, unit: "min", label: "Run time cap in minutes") { model.prefs.runCapMin = $0 }
+            Button { NSWorkspace.shared.open(ConnectCopy.otherAppsURL) } label: {
+                Text(ConnectCopy.otherApps).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1)
+                    .qaID("connect-other-apps", label: ConnectCopy.otherApps)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 14)
+        }
+        .task { await loadOffers() }
+        // While the pane shows: each row follows its agent within a couple of seconds.
+        .task {
+            while !Task.isCancelled {
+                await loadSetup()
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
     }
 
-    private var cursor: some View {
-        SettingsCard(title: "Agent cursor") {
-            SettingsRow("Show the agent\u{2019}s cursor", detail: "Follows each edit an agent makes on the canvas") { SettingsSwitch(isOn: $model.prefs.agentCursor) }
-            SettingsDivider()
-            SettingsRow("Speed") {
-                SettingsSegments(items: CursorSpeed.allCases.map { ($0.title, $0) }, selection: model.prefs.cursorSpeed) { model.prefs.cursorSpeed = $0 }
-                    .frame(width: 220).disabled(!model.prefs.agentCursor).opacity(model.prefs.agentCursor ? 1 : 0.5)
+    /// The agent's name, where it stands, and its menu; a Connect's error or next step under it.
+    private func agentRow(_ h: AgentHarness) -> some View {
+        let key = h.rawValue
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text(h.title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1).qaText(h.title)
+                Spacer(minLength: 12)
+                agentState(h)
+                agentMenu(h)
+            }
+            .padding(.leading, 14).padding(.trailing, 8)
+            .frame(height: 48)
+            if let e = errors[key] {
+                Text(e).font(Typography.micro).foregroundStyle(Palette.danger)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.bottom, 12)
+                    .qaID("connect-error-\(key)", label: e)
+            } else if let n = notes[key] {
+                Text(n).font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.bottom, 12)
+                    .qaID("connect-hint", label: n)
             }
         }
     }
 
-    /// Under each agent's name: which runs first, or that it is missing.
-    private func detail(_ h: AgentHarness) -> String {
-        guard let installed else { return "Checking" }
-        if !installed.contains(h.rawValue) { return "Not installed" }
-        return h == model.prefs.harness ? "Runs first" : "Runs when the other is missing"
+    /// Connect (or Connecting...), a green dot and Connected once Canvas is added, Not installed, or Copied for a moment.
+    @ViewBuilder private func agentState(_ h: AgentHarness) -> some View {
+        let key = h.rawValue
+        let b = ConnectCopy.button(installed: flag("installed", key), registered: flag("registered", key), busy: busy.contains(key))
+        if copied == key {
+            stateText("Copied", dot: nil).qaID("agent-copied-\(key)", label: "Copied")
+        } else if b == "Added" {
+            stateText("Connected", dot: Palette.ok)
+                .help(talking(h) ? "\(h.title) is talking to Canvas now" : "Canvas is added to \(h.title)")
+                .qaID("connect-\(key)", label: "Connected")
+        } else if let b {
+            FieldButton(title: b, symbol: nil) { connect(key, h.title) }
+                .disabled(b != "Connect").opacity(b == "Connect" ? 1 : 0.6)
+                .qaID("connect-\(key)", label: b)
+        } else if !setup.isEmpty {
+            stateText("Not installed", dot: nil).qaID("connect-\(key)", label: "Not installed")
+        }
     }
 
-    private func modelTitle(_ h: AgentHarness) -> String {
-        let id = model.prefs.model(h)
-        if id.isEmpty { return "Default" }
-        return offers[h.rawValue]?.models.first(where: { $0.id == id })?.label ?? id
+    private func stateText(_ text: String, dot: Color?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if let dot { StatusDot(color: dot, size: 7).qaID("status-dot") }
+            Text(text).font(Typography.body).foregroundStyle(Palette.mutedFg).lineLimit(1).qaID("status-text", label: text)
+        }
+        .capCentered(13)
     }
+
+    /// The row's menu: the command to paste into Terminal, then the model and reasoning level this agent runs with.
+    private func agentMenu(_ h: AgentHarness) -> some View {
+        let key = h.rawValue
+        let offer = offers[key]
+        return Menu {
+            Button("Copy command") { copy(key) }.disabled(setup[key] == nil)
+            Divider()
+            Menu("Model") {
+                pick("Default", model.prefs.model(h).isEmpty) { model.prefs.setModel(h, "") }
+                ForEach(offer?.models ?? [], id: \.id) { m in
+                    pick(m.label, model.prefs.model(h) == m.id) {
+                        model.prefs.setModel(h, m.id)
+                        if !efforts(h, model: m.id).contains(model.prefs.effort(h)) { model.prefs.setEffort(h, "") }
+                    }
+                }
+            }
+            .disabled(offer == nil)
+            Menu("Reasoning") {
+                pick("Default", model.prefs.effort(h).isEmpty) { model.prefs.setEffort(h, "") }
+                ForEach(efforts(h, model: model.prefs.model(h)), id: \.self) { e in
+                    pick(AgentOffer.effortTitle(e), model.prefs.effort(h) == e) { model.prefs.setEffort(h, e) }
+                }
+            }
+            .disabled(offer == nil)
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 13, weight: .medium))
+                .foregroundStyle(hoveredMenu == key ? Palette.fg : Palette.mutedFg)
+                .frame(width: Metric.field, height: Metric.field)
+                .background(Circle().fill(hoveredMenu == key ? Palette.hover : .clear))
+                .contentShape(Circle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .onHover { on in withAnimation(Motion.fast) { hoveredMenu = on ? key : (hoveredMenu == key ? nil : hoveredMenu) } }
+        .help("\(h.title): command, model and reasoning")
+        .accessibilityLabel("\(h.title) options")
+        .qaID("agent-menu-\(key)", label: h.title)
+    }
+
+    /// A menu item with a checkmark on the current choice.
+    private func pick(_ title: String, _ on: Bool, _ action: @escaping () -> Void) -> some View {
+        Toggle(title, isOn: Binding(get: { on }, set: { _ in action() }))
+    }
+
+    private func talking(_ h: AgentHarness) -> Bool {
+        setup["connected"] as? Bool == true && ((setup["client"] as? String)?.lowercased().contains(h.rawValue) ?? false)
+    }
+
+    /// installed.claude, registered.codex and so on, from the setup answer.
+    private func flag(_ group: String, _ key: String) -> Bool { (setup[group] as? [String: Any])?[key] as? Bool == true }
 
     /// The reasoning levels for an agent's chosen model (Codex lists them per model), else the agent's own.
     private func efforts(_ h: AgentHarness, model id: String) -> [String] {
@@ -267,16 +344,59 @@ struct AgentSettings: View {
         return o.efforts
     }
 
-    private func loadInstalled() async {
+    private func loadOffers() async {
         var req = URLRequest(url: model.base.appendingPathComponent("api/agent/harnesses"))
         req.timeoutInterval = 5
         guard let (data, _) = try? await URLSession.shared.data(for: req),
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let list = j["harnesses"] as? [[String: Any]] else { installed = []; return }
-        installed = Set(list.compactMap { $0["id"] as? String })
+              let list = j["harnesses"] as? [[String: Any]] else { return }
         var o: [String: AgentOffer] = [:]
         for h in list { if let id = h["id"] as? String { o[id] = AgentOffer(h) } }
         offers = o
+    }
+
+    private func loadSetup() async {
+        var req = URLRequest(url: model.base.appendingPathComponent("api/mcp/setup"))
+        req.timeoutInterval = 4
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        setup = j
+    }
+
+    /// Runs the agent's own `mcp add` through the server, then shows the next step or the CLI's error.
+    private func connect(_ key: String, _ title: String) {
+        guard !busy.contains(key) else { return }
+        busy.insert(key)
+        errors[key] = nil
+        notes[key] = nil
+        Task {
+            var req = URLRequest(url: model.base.appendingPathComponent("api/mcp/connect"))
+            req.httpMethod = "POST"
+            req.timeoutInterval = 30
+            req.setValue("1", forHTTPHeaderField: "X-Canvas")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["agent": key])
+            var answer: [String: Any]?
+            if let (data, _) = try? await URLSession.shared.data(for: req) { answer = try? JSONSerialization.jsonObject(with: data) as? [String: Any] }
+            busy.remove(key)
+            if answer?["ok"] as? Bool == true {
+                notes[key] = answer?["message"] as? String ?? ConnectCopy.added(title)
+                var reg = setup["registered"] as? [String: Any] ?? [:]
+                reg[key] = true
+                setup["registered"] = reg
+            } else {
+                errors[key] = answer?["error"] as? String ?? "Canvas did not answer. Copy the command from the \u{2026} menu into Terminal instead."
+            }
+            await loadSetup()
+        }
+    }
+
+    private func copy(_ key: String) {
+        guard let text = setup[key] as? String else { return }
+        canvasPasteboard.clearContents()
+        canvasPasteboard.setString(text, forType: .string)
+        copied = key
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copied == key { copied = nil } }
     }
 }
 
@@ -298,135 +418,6 @@ struct AgentOffer {
         case "xhigh": "Extra high"
         default: e.prefix(1).uppercased() + e.dropFirst()
         }
-    }
-}
-
-/// The commands that register Canvas MCP (as "canvas") with Claude Code and Codex, each with Connect (the app runs the
-/// command: POST /api/mcp/connect, src/mcp-connect.ts) and Copy, and whether an agent is talking to Canvas now. The
-/// Welcome card shows the same, in the same words (GET /api/mcp/setup, src/onboarding.ts; ConnectCopy).
-struct ConnectAgentCard: View {
-    @ObservedObject var model: CanvasModel
-    @State private var setup: [String: Any] = [:]
-    @State private var copied: String?
-    /// Agents whose Connect is running.
-    @State private var busy: Set<String> = []
-    /// A Connect's error, per agent, shown under its command until the next Connect.
-    @State private var errors: [String: String] = [:]
-    /// The next step after a Connect worked.
-    @State private var note: String?
-
-    var body: some View {
-        SettingsCard(title: "Connect an agent") {
-            ForEach([("Claude Code", "claude"), ("Codex", "codex")], id: \.1) { title, key in
-                if key != "claude" { SettingsDivider() }
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Text(title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1)
-                        Spacer(minLength: 12)
-                        if let b = ConnectCopy.button(installed: flag("installed", key), registered: flag("registered", key), busy: busy.contains(key)) {
-                            FieldButton(title: b, symbol: b == "Added" ? "checkmark" : nil) { connect(key, title) }
-                                .disabled(b != "Connect").opacity(b == "Connect" ? 1 : 0.6)
-                                .qaID("connect-\(key)", label: b)
-                        }
-                        FieldButton(title: copied == key ? "Copied" : "Copy", symbol: copied == key ? "checkmark" : "doc.on.doc") { copy(key) }
-                            .disabled(setup[key] == nil)
-                    }
-                    Text(setup[key] as? String ?? "Asking Canvas\u{2026}")
-                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.fg)
-                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 10).padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field.opacity(0.6)))
-                    if let e = errors[key] {
-                        Text(e).font(Typography.micro).foregroundStyle(Palette.danger)
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                            .qaID("connect-error-\(key)", label: e)
-                    }
-                }
-                .padding(.horizontal, 14).padding(.vertical, 12)
-            }
-            SettingsDivider()
-            SettingsRow("Status") {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    StatusDot(color: connected ? Palette.ok : Palette.mutedFg.opacity(0.5)).qaID("status-dot")
-                    Text(connected ? "Connected\((setup["client"] as? String).map { ": \($0)" } ?? "")" : "Not connected")
-                        .font(Typography.body).foregroundStyle(connected ? Palette.fg : Palette.mutedFg).lineLimit(1)
-                        .qaID("status-text", label: connected ? "Connected" : "Not connected")
-                }
-                .capCentered(13)
-                .frame(height: Metric.field)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                if !connected || note != nil {
-                    Text(note ?? ConnectCopy.hint).font(Typography.micro).foregroundStyle(Palette.mutedFg)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .qaID("connect-hint", label: note ?? ConnectCopy.hint)
-                }
-                Button { NSWorkspace.shared.open(ConnectCopy.elsewhereURL) } label: {
-                    Text(ConnectCopy.elsewhere).font(Typography.micro).foregroundStyle(Palette.mutedFg)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .buttonStyle(.plain)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14).padding(.bottom, 12)
-        }
-        // While the pane shows: the status follows the agent within a couple of seconds.
-        .task {
-            while !Task.isCancelled {
-                await load()
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-            }
-        }
-    }
-
-    private var connected: Bool { setup["connected"] as? Bool == true }
-
-    /// installed.claude, registered.codex and so on, from the setup answer.
-    private func flag(_ group: String, _ key: String) -> Bool { (setup[group] as? [String: Any])?[key] as? Bool == true }
-
-    /// Runs the agent's own `mcp add` through the server, then shows the next step or the CLI's error.
-    private func connect(_ key: String, _ title: String) {
-        guard !busy.contains(key) else { return }
-        busy.insert(key)
-        errors[key] = nil
-        note = nil
-        Task {
-            var req = URLRequest(url: model.base.appendingPathComponent("api/mcp/connect"))
-            req.httpMethod = "POST"
-            req.timeoutInterval = 30
-            req.setValue("1", forHTTPHeaderField: "X-Canvas")
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try? JSONSerialization.data(withJSONObject: ["agent": key])
-            var answer: [String: Any]?
-            if let (data, _) = try? await URLSession.shared.data(for: req) { answer = try? JSONSerialization.jsonObject(with: data) as? [String: Any] }
-            busy.remove(key)
-            if answer?["ok"] as? Bool == true {
-                note = answer?["message"] as? String ?? ConnectCopy.added(title)
-                var reg = setup["registered"] as? [String: Any] ?? [:]
-                reg[key] = true
-                setup["registered"] = reg
-            } else {
-                errors[key] = answer?["error"] as? String ?? "Canvas did not answer. Copy the command into Terminal instead."
-            }
-            await load()
-        }
-    }
-
-    private func load() async {
-        var req = URLRequest(url: model.base.appendingPathComponent("api/mcp/setup"))
-        req.timeoutInterval = 4
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
-              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        setup = j
-    }
-
-    private func copy(_ key: String) {
-        guard let text = setup[key] as? String else { return }
-        canvasPasteboard.clearContents()
-        canvasPasteboard.setString(text, forType: .string)
-        copied = key
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copied == key { copied = nil } }
     }
 }
 
@@ -589,13 +580,13 @@ struct SettingsStack<Content: View>: View {
     }
 }
 
-/// A titled surface: no border, a layered shadow lifts it off the window.
+/// A surface, titled or not: no border, a layered shadow lifts it off the window.
 struct SettingsCard<Content: View>: View {
-    let title: String
+    var title: String? = nil
     @ViewBuilder var content: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg).lineLimit(1).padding(.leading, 14)
+            if let title { Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg).lineLimit(1).padding(.leading, 14) }
             VStack(spacing: 0, content: content)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.popover))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -803,30 +794,43 @@ struct AboutView: View {
     private let commit = Bundle.main.object(forInfoDictionaryKey: "CanvasCommit") as? String
     private let built = Bundle.main.object(forInfoDictionaryKey: "CanvasBuilt") as? String
 
+    /// "Version 0.1.2 alpha": the commit and the build date sit in its tooltip and its menu.
+    private var versionText: String { "Version \(version) alpha" }
+    private var builtText: String? { AboutInfo.builtLine(built) }
+    /// "Version 0.1.2 alpha (aede106), built Nov 17, 2026 at 2:46 PM": what Copy Version copies.
+    private var details: String {
+        var s = AboutInfo.versionLine(version: version, commit: commit).replacingOccurrences(of: "Version \(version)", with: versionText)
+        if let b = builtText { s += ", built \(b)" }
+        return s
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 96, height: 96)
+            Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 64, height: 64)
                 .accessibilityHidden(true).qaID("about-icon")
-            Text("Canvas").font(Typography.appName).foregroundStyle(Palette.fg).qaText("Canvas").padding(.top, 14)
-            // Optical padding: the A starts at its own edge, the a ends inside its advance.
-            Text("Alpha").font(Typography.section).foregroundStyle(Palette.mutedFg)
-                .padding(.leading, 7.5).padding(.trailing, 6.5).padding(.vertical, 2)
-                .background(Capsule().fill(Palette.active))
-                .qaID("about-alpha")
-                .padding(.top, 6)
-            Text(AboutInfo.versionLine(version: version, commit: commit))
-                .font(Typography.body).foregroundStyle(Palette.mutedFg).textSelection(.enabled).padding(.top, 14)
-                .qaID("about-version", label: AboutInfo.versionLine(version: version, commit: commit))
-            if let b = AboutInfo.builtLine(built) {
-                Text(b).font(Typography.body).foregroundStyle(Palette.mutedFg).padding(.top, 4).qaID("about-built", label: b)
+            Text("Canvas").font(.system(size: 22, weight: .semibold)).foregroundStyle(Palette.fg).lineLimit(1).qaText("Canvas").padding(.top, 22)
+            Text(versionText)
+                .font(Typography.body).foregroundStyle(Palette.mutedFg).lineLimit(1).padding(.top, 10)
+                .help(details)
+                .contextMenu {
+                    Button("Copy Version") {
+                        canvasPasteboard.clearContents()
+                        canvasPasteboard.setString(details, forType: .string)
+                    }
+                    Divider()
+                    if let commit, !commit.isEmpty { Text("Commit \(commit)") }
+                    if let b = builtText { Text("Built \(b)") }
+                }
+                .qaID("about-version", label: versionText)
+                // The commit and the build date: this line's tooltip (and its menu), read by qa:native as the line's details.
+                .qaID("about-details", label: details)
+            HStack(spacing: 8) {
+                FieldButton(title: "Website", symbol: nil) { NSWorkspace.shared.open(website) }.qaID("about-button", label: "Website")
+                FieldButton(title: "Report a Bug", symbol: nil, action: report).qaID("about-button", label: "Report a Bug")
             }
-            VStack(spacing: 10) {
-                FieldButton(title: "Website", symbol: nil, wide: true) { NSWorkspace.shared.open(website) }.qaID("about-button", label: "Website")
-                FieldButton(title: "Report a Bug", symbol: nil, wide: true, action: report).qaID("about-button", label: "Report a Bug")
-            }
-            .padding(.top, 24)
+            .padding(.top, 28)
         }
-        .padding(.horizontal, 48).padding(.top, 40).padding(.bottom, 36)
+        .padding(.horizontal, 40).padding(.top, 48).padding(.bottom, 32)
         .frame(width: 320)
     }
 }
