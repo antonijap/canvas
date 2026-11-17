@@ -734,6 +734,24 @@ sc("settings", "Settings > General > Updates: the version, Update automatically 
   await t.waitState((s) => s.toast === fromSource, "the same answer from the Canvas menu");
 });
 
+sc("settings", "Settings > General > Comments: Your name in comments starts as the Mac's full name and is stored when it is changed", { covers: ["settings:comment-name"] }, async (t: NT) => {
+  await t.key(",", ["cmd"]);
+  await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
+  await settingsTab(t, "General");
+  await t.waitText("Your name in comments", undefined, 4000, "settings");
+  const full = execFileSync("id", ["-F"], { encoding: "utf8" }).trim();
+  t.eq((await t.state()).prefs.commentName, full, "the name starts as the Mac's full user name");
+  const field = await t.mark({ id: "comment-name", window: "settings" }, 4000);
+  await t.click(center(field), { window: "settings" });
+  await t.key("a", ["cmd"], { window: "settings" });
+  await t.type("Ana QA", { window: "settings" });
+  await t.waitState((s) => s.prefs.commentName === "Ana QA", "the name to change");
+  const read = (key: string) => { try { return execFileSync("defaults", ["read", t.app.bundleId, key], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return ""; } };
+  for (let i = 0; i < 30 && read("canvas.settings.commentName") !== "Ana QA"; i++) await sleep(150);
+  t.eq(read("canvas.settings.commentName"), "Ana QA", "the name is stored");
+  await t.shot(`${process.cwd()}/qa/out/native/settings-general-comments.png`, "settings");
+});
+
 sc("settings", "Settings > Privacy: Share usage counts on, Help improve Canvas adds the monthly id, Show what's sent shows today's JSON", { covers: ["settings:privacy"] }, async (t: NT) => {
   await t.key(",", ["cmd"]);
   await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");

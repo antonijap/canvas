@@ -27,6 +27,7 @@ import { applyAutoTracking, prepareAutoTracking } from "./tracking.ts";
 import { cssVariables } from "./tokens.ts";
 import { version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
+import { handleCommentsRoute } from "./comments.ts";
 import { handlePagesRoute, resolvePages } from "./pages.ts";
 import { handleShaderRoute, settleShaderSources } from "./shaders.ts";
 import { handleImageRoute } from "./images.ts";
@@ -556,6 +557,11 @@ export function startServer(port = PORT()): Promise<http.Server> {
       if (await handleImageRoute(req, res, url)) return;
       if (await handleVideoRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
       if (await handleWidgetRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
+      if (await handleCommentsRoute(req, res, url, (f) => {
+        // Every page showing the file reads its comments again (an agent commented, or another page did).
+        const msg = sse("comments", { at: Date.now() });
+        for (const c of clients.get(resolveDocPath(f)) ?? []) c.write(msg);
+      })) return;
       if (await handleAgentRoute(req, res, url, agentCtx)) return;
       if (await handleOnboardingRoute(req, res, url, json)) return;
       if (await handleUsageCountsRoute(req, res, url)) return;
@@ -3709,5 +3715,6 @@ function historyStep(dir, plain) {
 <script type="module" src="/page/spark.js"></script>
 <script type="module" src="/page/variations.js"></script>
 <script type="module" src="/page/agent-cursor.js"></script>
+<script type="module" src="/page/comments.js"></script>
 </body>
 </html>`;

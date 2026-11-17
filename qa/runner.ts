@@ -37,7 +37,7 @@ export const REOPEN_MAX_PCT = 0.1, VISUAL_MAX_PCT = 0.1;
 /** Freezes what moves on its own, for pictures: CSS animations, transitions, the caret, shader cards (reduced motion). */
 const STILL_CSS = "*,*::before,*::after{animation-play-state:paused!important;animation-delay:-1ms!important;transition:none!important;caret-color:transparent!important}" +
   // The browser page's own panels float over the canvas; the picture is of the canvas only.
-  "#bar,#left,#props,#msg,#wtoast,#hov,#marquee,#guides{visibility:hidden!important}";
+  "#bar,#left,#props,#msg,#wtoast,#hov,#marquee,#guides,.cm-layer{visibility:hidden!important}";
 
 /** In a tab that runs as the native shell's page: the messages it posts, kept for the checks. */
 const NATIVE_STUB = `window.__posts = []; window.webkit = { messageHandlers: new Proxy({}, { get: (_, h) => ({ postMessage: (m) => { let v = m; try { v = typeof m === "string" ? JSON.parse(m) : m; } catch {} window.__posts.push({ h: String(h), m: v }); } }) }) };`;

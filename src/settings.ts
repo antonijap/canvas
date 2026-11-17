@@ -10,14 +10,14 @@ import type { Harness } from "./threads.ts";
  * . _ : - so nothing else reaches the command line.
  */
 export type ModelChoice = { model: string; effort: string };
-export type AgentSettings = { harness: Harness; runCapMin: number; claude: ModelChoice; codex: ModelChoice };
+export type AgentSettings = { harness: Harness; runCapMin: number; claude: ModelChoice; codex: ModelChoice; commentName: string };
 export const RUN_CAP_MIN = { min: 1, max: 60, default: 10 };
 export const EFFORTS: Record<Harness, string[]> = {
   claude: ["low", "medium", "high", "xhigh", "max"],
   codex: ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
 };
 const NO_CHOICE: ModelChoice = { model: "", effort: "" };
-export const DEFAULT_SETTINGS: AgentSettings = { harness: "claude", runCapMin: RUN_CAP_MIN.default, claude: NO_CHOICE, codex: NO_CHOICE };
+export const DEFAULT_SETTINGS: AgentSettings = { harness: "claude", runCapMin: RUN_CAP_MIN.default, claude: NO_CHOICE, codex: NO_CHOICE, commentName: "" };
 
 /** A model and reasoning level as the shell sent them, made safe: anything unexpected is the agent's default. */
 export function cleanChoice(raw: unknown, h: Harness): ModelChoice {
@@ -25,6 +25,11 @@ export function cleanChoice(raw: unknown, h: Harness): ModelChoice {
   const model = typeof o.model === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(o.model) ? o.model : "";
   const effort = typeof o.effort === "string" && EFFORTS[h].includes(o.effort) ? o.effort : "";
   return { model, effort };
+}
+
+/** "Your name in comments" (Settings > General): plain text, no control characters, at most 60 characters. */
+export function cleanName(raw: unknown): string {
+  return typeof raw === "string" ? raw.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) : "";
 }
 
 let current: AgentSettings = { ...DEFAULT_SETTINGS };
@@ -35,7 +40,7 @@ export function cleanSettings(raw: unknown): AgentSettings {
   const harness: Harness = o.harness === "codex" ? "codex" : "claude";
   const n = Number(o.runCapMin);
   const runCapMin = Number.isFinite(n) ? Math.min(RUN_CAP_MIN.max, Math.max(RUN_CAP_MIN.min, Math.round(n))) : RUN_CAP_MIN.default;
-  return { harness, runCapMin, claude: cleanChoice(o.claude, "claude"), codex: cleanChoice(o.codex, "codex") };
+  return { harness, runCapMin, claude: cleanChoice(o.claude, "claude"), codex: cleanChoice(o.codex, "codex"), commentName: cleanName(o.commentName) };
 }
 
 export function setAgentSettings(raw: unknown): void {
