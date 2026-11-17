@@ -28,6 +28,7 @@ import { cssVariables } from "./tokens.ts";
 import { version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
+import { handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
 import { handlePagesRoute, resolvePages } from "./pages.ts";
 import { handleShaderRoute, settleShaderSources } from "./shaders.ts";
 import { handleImageRoute } from "./images.ts";
@@ -159,6 +160,15 @@ async function prime(file: string): Promise<void> {
 widgetHooks.docOf = (docFile) => watched(docFile).doc;
 
 const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+/** Every page showing the file reads its comments again (an agent commented, another page did, the team server sent something). */
+function tellCommentPages(f: string | null): void {
+  if (!f) return;
+  let docFile: string;
+  try { docFile = resolveDocPath(f); } catch { return; }
+  const msg = sse("comments", { at: Date.now() });
+  for (const c of clients.get(docFile) ?? []) c.write(msg);
+}
+onCloudChanged((display) => tellCommentPages(display));
 // Undo history changes reach every page showing the document; the native page hands them to the Edit menu.
 // The last repeatable edit's name rides along (Edit > Repeat, src/repeat.ts).
 const historyMsg = (docFile: string) => sse("history", { ...historyState(docFile), repeat: repeatInfo(docFile) });
@@ -557,11 +567,8 @@ export function startServer(port = PORT()): Promise<http.Server> {
       if (await handleImageRoute(req, res, url)) return;
       if (await handleVideoRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
       if (await handleWidgetRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
-      if (await handleCommentsRoute(req, res, url, (f) => {
-        // Every page showing the file reads its comments again (an agent commented, or another page did).
-        const msg = sse("comments", { at: Date.now() });
-        for (const c of clients.get(resolveDocPath(f)) ?? []) c.write(msg);
-      })) return;
+      if (await handleCommentsRoute(req, res, url, tellCommentPages)) return;
+      if (await handleCloudRoute(req, res, url, tellCommentPages)) return;
       if (await handleAgentRoute(req, res, url, agentCtx)) return;
       if (await handleOnboardingRoute(req, res, url, json)) return;
       if (await handleUsageCountsRoute(req, res, url)) return;

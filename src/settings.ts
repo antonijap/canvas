@@ -2,6 +2,7 @@
 // talk-to-the-selection runs first and how long a run may take. The shell sends them with its state
 // (POST /api/state, src/bridge.ts); without the app (a browser) the defaults hold.
 
+import { setCloudConfig } from "./cloud-config.ts";
 import type { Harness } from "./threads.ts";
 
 /**
@@ -45,6 +46,7 @@ export function cleanSettings(raw: unknown): AgentSettings {
 
 export function setAgentSettings(raw: unknown): void {
   current = cleanSettings(raw);
+  setCloudConfig(raw);
 }
 export const agentSettings = (): AgentSettings => current;
 /** The run time cap in ms. */
