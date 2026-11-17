@@ -193,6 +193,14 @@ describe("commands", () => {
     const b = await cmd({ op: "tabs" });
     assert.equal(b.body.ok, true);
     assert.equal((await cmd({ op: "deselect", client: sh.id })).body.error.code, "invalid");
+    // The updater's ops (apps/macos/Updater.swift) go to the shell with no arguments; the app itself decides that
+    // check and restart run only under the local update test.
+    for (const op of ["update.state", "update.check", "update.restart"]) {
+      sh.cmds.length = 0;
+      const r = await cmd({ op, args: { file: "/etc/passwd" } });
+      assert.equal(r.body.ok, true, op);
+      assert.deepEqual(sh.cmds.map((c) => [c.op, c.args]), [[op, {}]], op);
+    }
     sh.close();
     await nap(50);
   });

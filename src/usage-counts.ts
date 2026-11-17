@@ -59,6 +59,9 @@ export const USAGE_EVENTS = [
   "copy_as.text",
   "update.toast_shown",
   "update.download_clicked",
+  "update.ready",
+  "update.installed",
+  "update.failed",
   "bug.report_opened",
 ] as const;
 export type UsageEvent = (typeof USAGE_EVENTS)[number];
