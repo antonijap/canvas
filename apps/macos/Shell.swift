@@ -127,8 +127,57 @@ struct RootView: View {
 
 // MARK: Top
 
+/// Each file tab's width, so a drag knows where the others sit.
+private struct TabWidthKey: PreferenceKey {
+    static var defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) { value.merge(nextValue()) { $1 } }
+}
+
 struct TopBar: View {
     @ObservedObject var model: CanvasModel
+    @State private var tabWidths: [String: CGFloat] = [:]
+    /// The file tab being dragged and how far it is from its place (clamped inside the strip).
+    @State private var dragging: String?
+    @State private var dragX: CGFloat = 0
+
+    private var widths: [CGFloat] { model.openFiles.map { tabWidths[$0] ?? 0 } }
+    private var dragTarget: Int? {
+        guard let d = dragging, let i = model.openFiles.firstIndex(of: d) else { return nil }
+        return TabOrder.target(from: i, offset: dragX, widths: widths, gap: 2)
+    }
+
+    /// One file tab. Press and drag sideways: it follows the pointer, the others slide aside, and the drop saves the
+    /// order. A click or a move under TabOrder.dragThreshold stays a click (the gesture only starts past it).
+    private func draggableTab(_ f: String, index i: Int) -> some View {
+        let isDragged = dragging == f
+        var off: CGFloat = 0
+        if isDragged { off = dragX }
+        else if let d = dragging, let di = model.openFiles.firstIndex(of: d), let t = dragTarget {
+            off = TabOrder.slide(i, dragged: di, target: t, width: tabWidths[d] ?? 0, gap: 2)
+        }
+        return TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, missing: model.isMissing(f),
+                       onClose: { model.close(f) }) { model.openTab(f) }
+            .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
+            .offset(x: off)
+            .animation(isDragged ? nil : Motion.island, value: off)
+            .zIndex(isDragged ? 1 : 0)
+            .highPriorityGesture(DragGesture(minimumDistance: TabOrder.dragThreshold, coordinateSpace: .global)
+                .onChanged { v in
+                    guard let at = model.openFiles.firstIndex(of: f) else { return }
+                    if dragging != f { dragging = f }
+                    dragX = TabOrder.clamp(v.translation.width, index: at, widths: widths, gap: 2)
+                }
+                .onEnded { _ in
+                    let to = dragTarget
+                    withAnimation(Motion.island) {
+                        if let to { model.moveTab(f, to: to) }
+                        dragging = nil
+                        dragX = 0
+                    }
+                })
+            .qaID("file-tab", label: model.name(of: f))
+            .id(f)
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: Metric.islandGap) {
@@ -142,11 +191,11 @@ struct TopBar: View {
                         .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
                         .animation(Motion.island, value: model.openFiles.isEmpty)
                     FadingScroller(scrollTo: model.currentFile) {
-                        ForEach(model.openFiles, id: \.self) { f in
-                            TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, missing: model.isMissing(f),
-                                    onClose: { model.close(f) }) { model.openTab(f) }.id(f)
+                        ForEach(Array(model.openFiles.enumerated()), id: \.element) { i, f in
+                            draggableTab(f, index: i)
                         }
                     }
+                    .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
                     Menu {
                         ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
                     } label: {

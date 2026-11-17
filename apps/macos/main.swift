@@ -672,6 +672,9 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   @objc func showWindow(_ s: Any?) { showMainWindow() }
   /// Window > Home (Shift+Cmd+0): the pinned first tab.
   @objc func showHome(_ s: Any?) { model.showHome() }
+  /// Window > Previous Tab / Next Tab (Shift+Cmd+[ and ]): the strip's order, Home first.
+  @objc func previousTab(_ s: Any?) { model.stepTab(forward: false) }
+  @objc func nextTab(_ s: Any?) { model.stepTab(forward: true) }
   /// Help > Report a Bug: the website's form in the browser, with this build's version, commit, macOS and
   /// architecture filled in (ReleaseLinks.report). Nothing is sent until the person presses Send there.
   @objc func reportBug(_ s: Any?) { NSWorkspace.shared.open(reportURL()); UsageCount.send("bug.report_opened", to: base) }
@@ -801,6 +804,8 @@ func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op:
   case "checkForUpdates": return (menuActions, #selector(MenuActions.checkForUpdates(_:)), nil)
   case "restartToUpdate": return (menuActions, #selector(MenuActions.restartToUpdate(_:)), nil)
   case "home": return (menuActions, #selector(MenuActions.showHome(_:)), nil)
+  case "previousTab": return (menuActions, #selector(MenuActions.previousTab(_:)), nil)
+  case "nextTab": return (menuActions, #selector(MenuActions.nextTab(_:)), nil)
   case "minimize": return (nil, #selector(NSWindow.performMiniaturize(_:)), nil)
   case "zoomWindow": return (nil, #selector(NSWindow.performZoom(_:)), nil)
   default: return nil

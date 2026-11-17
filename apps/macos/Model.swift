@@ -404,6 +404,21 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         if quietRecents.remove(file) == nil { MainActor.assumeIsolated { HomeStore.shared.touch(file) } }
     }
 
+    /// A tab dragged to a new place in the strip: the order is saved, and `list_tabs` reports it.
+    func moveTab(_ file: String, to index: Int) {
+        guard let i = openFiles.firstIndex(of: file) else { return }
+        let moved = TabOrder.move(openFiles, from: i, to: index)
+        guard moved != openFiles else { return }
+        openFiles = moved
+        UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
+    }
+
+    /// Shift+Cmd+[ and ]: the previous or next tab in the strip's order, Home first.
+    func stepTab(forward: Bool) {
+        guard let to = TabOrder.step(openFiles, current: currentFile, homeShown: homeShown, forward: forward) else { return }
+        if let f = to { openTab(f) } else { showHome() }
+    }
+
     func name(of file: String) -> String {
         allFiles.first { $0.file == file }?.name ?? URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
     }

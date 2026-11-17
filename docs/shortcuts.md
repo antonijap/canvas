@@ -137,6 +137,7 @@ The same keys work in Canvas.app and the browser version. Settings > Shortcuts s
 | Shift+Cmd+Return | Three variations |
 | Cmd+, | Settings |
 | Shift+Cmd+0 | Home: the pinned first tab (recent files, files on this Mac, your Cloud) |
+| Shift+Cmd+[ / ] | Previous / next tab, in the strip's order with Home first. Drag a file tab sideways to reorder the strip |
 | Cmd+M | Minimise |
 | Cmd+Q | Quit |
 
