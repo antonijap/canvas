@@ -1,8 +1,8 @@
-Evidence for roadmap and interaction-conventions work. A card or nicety is done only when its row here points at proof.
+Evidence for interaction-conventions and other product work. An item is done only when its row here points at proof.
 
 ## Rules for every item
 
-1. Read the item's row in [docs/interaction-conventions.md](../interaction-conventions.md) (the exact rule) or its roadmap card. Match that rule unless the product direction says otherwise (Canvas has no drawing tools; agents and paste/drop make layers).
+1. Read the item's row in [docs/interaction-conventions.md](../interaction-conventions.md) (the exact rule) or its issue. Match that rule unless the product direction says otherwise (Canvas has no drawing tools; agents and paste/drop make layers).
 2. Write a failing test first: a unit test in `test/`, and a scenario that drives the feature with real input: `qa/scenarios.ts` (headless Chrome, real mouse and keys) for page features, `qa/native/scenarios.ts` (real NSEvents in an isolated QA build) for anything in the SwiftUI shell (inspector, layers panel, menus, toasts, palette). Each scenario declares `covers` from `qa/features.yaml`; add the feature or case there if missing.
 3. Make it pass with the smallest change that does the job well. Keep the Canvas look: shadows not borders, no middots, no em dashes in UI text, blue only for canvas selection, grey for list selection, SF typography rules (no tracking on the system font in the app).
 4. Capture a screenshot that shows the result (the scenario's end state or a mid-interaction frame): PNG, at most 300 KB, in `docs/evidence/img/<area>-<slug>.png`. Look at it yourself before you commit it. A screenshot that does not show the feature is not evidence.
