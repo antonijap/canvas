@@ -70,7 +70,7 @@ export function setCloudConfig(raw: unknown): void {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const email = typeof o.cloudDevEmail === "string" ? o.cloudDevEmail.trim().toLowerCase() : "";
   const url = cleanServerUrl(o.cloudUrl) ?? "";
-  current = { url, devEmail: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && isLocalDev(url) ? email : "" };
+  current = { url, devEmail: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "" };
   if (url) joined = "";
 }
 
@@ -82,7 +82,8 @@ export function cloudConfig(): { url: string; devEmail: string } {
   const url = current.url || joined || cleanServerUrl(process.env.CANVAS_CLOUD_URL) || "";
   return {
     url,
-    devEmail: isLocalDev(url) ? current.devEmail || (process.env.CANVAS_CLOUD_DEV_EMAIL ?? "").trim().toLowerCase() : "",
+    // Used only for a development address (authHeaders); never for a hosted Cloud or an https one.
+    devEmail: current.devEmail || (process.env.CANVAS_CLOUD_DEV_EMAIL ?? "").trim().toLowerCase(),
   };
 }
 

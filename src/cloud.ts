@@ -41,7 +41,8 @@ const joinedCache = new Map<string, JoinedSecrets | null>();
 const forwards = new Map<string, { helper: Helper; origin: string } | Promise<{ helper: Helper; origin: string }>>();
 
 async function joinedSecrets(id: string): Promise<JoinedSecrets | null> {
-  if (!joinedCache.has(id)) joinedCache.set(id, await readJoined(id));
+  // Only a found item is kept: a Cloud joined later (or by the shell) is read again.
+  if (!joinedCache.get(id)) joinedCache.set(id, await readJoined(id));
   return joinedCache.get(id) ?? null;
 }
 
@@ -417,9 +418,10 @@ function stop(s: Session): void {
   sessions.delete(s.pkg);
 }
 
-/** Closes every room socket (a test, or the server shutting down). */
+/** Closes every room socket and joined Cloud tunnel (a test, or the server shutting down). */
 export function stopAll(): void {
   for (const s of [...sessions.values()]) stop(s);
+  for (const id of [...forwards.keys()]) closeTunnel(id);
   servers.clear();
 }
 

@@ -105,7 +105,7 @@ function run(bin: string, order: Record<string, unknown>): Helper {
 }
 
 /** Every helper Canvas is running now (QA checks there are none left after a stop). */
-export const runningHelpers = (): number[] => [...live].map((h) => h.child.pid!).filter(Boolean);
+export const runningHelpers = (): number[] => [...live].filter((h) => h.alive).map((h) => h.child.pid!).filter(Boolean);
 
 /** A new key: the private part (kept in the Keychain), its public key, and for a server its tunnel address. */
 export async function genkey(bin: string, kind: "server" | "client"): Promise<{ key: unknown; public: string; addr?: string }> {
@@ -153,3 +153,6 @@ export async function fingerprint(addr: string): Promise<string> {
 
 /** The fake helper tests and QA use (test/fixtures/fake-tunnel.ts): same orders, a local TCP relay in place of WireGuard. */
 export const FAKE_HELPER = path.join(import.meta.dirname, "..", "test", "fixtures", "fake-tunnel.sh");
+
+/** Stops every helper (Canvas quitting, or a test ending). */
+export function stopHelpers(): void { for (const h of [...live]) h.stop(); }
