@@ -48,6 +48,8 @@ struct AppSettings: Equatable {
     var openView = OpenView.restore
     var scrollZooms = false
     var boardLabels = true
+    /// The name on the comments made here (Settings > General). Starts as the Mac's full user name; empty: the server says "Me".
+    var commentName = ""
     // Agents
     var harness = AgentHarness.claude
     var agentCursor = true
@@ -77,6 +79,7 @@ struct AppSettings: Equatable {
         if let v = d.string(forKey: k("openView")).flatMap(OpenView.init) { s.openView = v }
         if has("scrollZooms") { s.scrollZooms = d.bool(forKey: k("scrollZooms")) }
         if has("boardLabels") { s.boardLabels = d.bool(forKey: k("boardLabels")) }
+        s.commentName = d.string(forKey: k("commentName")) ?? NSFullUserName()
         if let v = d.string(forKey: k("harness")).flatMap(AgentHarness.init) { s.harness = v }
         if has("agentCursor") { s.agentCursor = d.bool(forKey: k("agentCursor")) }
         if let v = d.string(forKey: k("cursorSpeed")).flatMap(CursorSpeed.init) { s.cursorSpeed = v }
@@ -99,6 +102,7 @@ struct AppSettings: Equatable {
         d.set(openView.rawValue, forKey: k("openView"))
         d.set(scrollZooms, forKey: k("scrollZooms"))
         d.set(boardLabels, forKey: k("boardLabels"))
+        d.set(commentName, forKey: k("commentName"))
         d.set(harness.rawValue, forKey: k("harness"))
         d.set(agentCursor, forKey: k("agentCursor"))
         d.set(cursorSpeed.rawValue, forKey: k("cursorSpeed"))
@@ -138,7 +142,7 @@ struct AppSettings: Equatable {
 
     /// What the server reads (src/settings.ts), sent with the shell's state.
     var serverSettings: [String: Any] {
-        ["harness": harness.rawValue, "runCapMin": runCapMin,
+        ["harness": harness.rawValue, "runCapMin": runCapMin, "commentName": commentName,
          "claude": ["model": claudeModel, "effort": claudeEffort], "codex": ["model": codexModel, "effort": codexEffort]]
     }
 
@@ -239,6 +243,7 @@ enum ShortcutCatalog {
         Row(title: "Next sibling", keys: ["⇥"]),
         Row(title: "Next board", keys: ["N"]),
         Row(title: "Scale tool", keys: ["K"]),
+        Row(title: "Comment on the canvas", keys: ["C"]),
         Row(title: "Opacity 10%", keys: ["1"]),
         Row(title: "Opacity 100%", keys: ["0"]),
         Row(title: "Delete", keys: ["⌫"]),

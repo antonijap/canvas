@@ -95,7 +95,7 @@ The engine renders each board into GPU tiles at a few fixed zoom levels and reus
 
 **The shell** (`apps/macos/`) is SwiftUI wrapped around a full-window web view. It adds the native parts: Liquid Glass toolbars, the inspector, the colour picker, menus and Keychain access.
 
-**Canvas MCP** (`mcp/`) is a stdio server that gives agents 78 tools, from reading the selection to writing shaders. It talks to the server over HTTP, so an agent and the person always see the same state.
+**Canvas MCP** (`mcp/`) is a stdio server that gives agents 82 tools, from reading the selection to writing shaders. It talks to the server over HTTP, so an agent and the person always see the same state.
 
 Documents are plain JSON. A `.canvas` package holds the design, its pages, widgets and copied assets in one folder.
 

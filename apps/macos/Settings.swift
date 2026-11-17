@@ -129,6 +129,16 @@ struct GeneralSettings: View {
                     SettingsSwitch(isOn: $model.prefs.scrollZooms)
                 }
             }
+            SettingsCard(title: "Comments") {
+                SettingsRow("Your name in comments", detail: "Shown on the comments you write") {
+                    FieldBox {
+                        TextField("Name", text: Binding(get: { model.prefs.commentName }, set: { model.prefs.commentName = String($0.prefix(60)) }))
+                            .textFieldStyle(.plain).font(Typography.body)
+                            .accessibilityLabel("Your name in comments").qaID("comment-name")
+                    }
+                    .frame(width: 200)
+                }
+            }
             UpdateSettings()
         }
     }
