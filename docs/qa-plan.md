@@ -114,7 +114,7 @@ Left for the maintainer:
 
 `qa/features.yaml` lists every feature with the cases it must survive: node type (frame, group, text, image, instance, card kinds), state (empty, one, many, rotated, inside an instance, inside auto layout, hidden, on another page), theme (light, dark), file size (tiny; large, an 18 MB real-world file; 5,000 boards) and input (mouse, keyboard, agent tool).
 
-`pnpm qa:coverage` prints which feature × case pairs have a passing test and which don't. A roadmap card moves to Done only when its catalog entry has coverage.
+`pnpm qa:coverage` prints which feature × case pairs have a passing test and which don't. A feature counts as done only when its catalog entry has coverage.
 
 ## 2. Checks every scenario runs
 
