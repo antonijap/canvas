@@ -3,7 +3,7 @@ import { applyOp, checkEnvelope } from "../../protocol";
 import type { Thread } from "../../protocol";
 import { envelope } from "./helpers";
 
-it("records the shared creation helper's comment-id reuse gap", () => {
+it("rejects reused initial comment ids in the shared creation helper", () => {
   const doc = crypto.randomUUID();
   const first = envelope(doc);
   const second = envelope(doc);
@@ -12,13 +12,18 @@ it("records the shared creation helper's comment-id reuse gap", () => {
   const threads: Thread[] = [];
   const by = { email: "owner@example.com", name: "owner" };
   expect(applyOp(threads, doc, first.op, by, first.at)).toBeNull();
-  expect(applyOp(threads, doc, second.op, by, second.at)).toBeNull();
-  expect(threads[0].comments[0].id).toBe(threads[1].comments[0].id);
+  expect(applyOp(threads, doc, second.op, by, second.at)).toBe("comment exists");
+  expect(threads).toHaveLength(1);
 });
-it("records the shared envelope helper's partial timestamp and anchor validation", () => {
+it("accepts ISO times and plain anchors under the shared limits", () => {
   const op = envelope(crypto.randomUUID());
-  op.at = "not a timestamp";
+  op.at = "2026-11-17T12:00:00.000Z";
   if (op.op.kind !== "thread.create") throw new Error("Expected create");
-  Object.assign(op.op.anchor, { nodeId: 42, revision: "not-a-uuid" });
+  Object.assign(op.op.anchor, { nodeId: "layer", revision: crypto.randomUUID() });
   expect(checkEnvelope(op)).toBeNull();
+  op.at = "x".repeat(41);
+  expect(checkEnvelope(op)).not.toBeNull();
+  op.at = new Date().toISOString();
+  Object.assign(op.op.anchor, { unknown: true });
+  expect(checkEnvelope(op)).not.toBeNull();
 });

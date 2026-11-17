@@ -60,6 +60,49 @@ describe("Access identity", () => {
     expect(await createAuthenticator(fetcher)(request(await token()), settings)).toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+  it("throttles varying unknown kids per domain for 60 seconds, including fetch failures", async () => {
+    const fetcher = vi.fn(async () => Response.json({ keys: [jwk] }));
+    const authenticate = createAuthenticator(fetcher);
+    await authenticate(request(await token()), settings);
+    for (let i = 0; i < 5; i++) expect(await authenticate(request(await token({}, { kid: `unknown-${i}` })), settings)).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_001);
+    try { await authenticate(request(await token({}, { kid: "rotated" })), settings); }
+    finally { clock.mockRestore(); }
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    fetcher.mockRejectedValue(new Error("offline"));
+    const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_002);
+    try {
+      for (let i = 0; i < 3; i++) await authenticate(request(await token({}, { kid: `missing-${i}` })), settings);
+    } finally { later.mockRestore(); }
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+  it("verifies the signature before parsing claims", async () => {
+    const authenticate = createAuthenticator(async () => Response.json({ keys: [jwk] }));
+    const jwt = await token();
+    const [head, , signature] = jwt.split(".");
+    const parse = vi.spyOn(JSON, "parse");
+    const verify = vi.spyOn(crypto.subtle, "verify");
+    try {
+      expect(await authenticate(request(`${head}.${btoa("unparseable claims")}.${signature}`), settings)).toBeNull();
+      expect(verify).toHaveBeenCalledTimes(1);
+      expect(parse.mock.calls.some(([value]) => value === "unparseable claims")).toBe(false);
+    } finally { parse.mockRestore(); verify.mockRestore(); }
+  });
+  it("caps signed and dev emails at 254 characters", async () => {
+    const authenticate = createAuthenticator(async () => Response.json({ keys: [jwk] }));
+    const long = `${"a".repeat(243)}@example.com`;
+    expect(long).toHaveLength(255);
+    expect(await authenticate(request(await token({ email: long })), settings)).toBeNull();
+    expect(await authenticate(new Request("http://localhost/v1/me", { headers: { "x-canvas-dev-email": long } }), { ...settings, DEV: "1" })).toBeNull();
+    expect(await authenticate(request(await token({ email: long.slice(1) })), settings)).not.toBeNull();
+  });
+  it("backs off when the first JWKS load fails", async () => {
+    const fetcher = vi.fn(async () => { throw new Error("offline"); });
+    const authenticate = createAuthenticator(fetcher);
+    for (let i = 0; i < 3; i++) expect(await authenticate(request(await token({}, { kid: `unknown-${i}` })), settings)).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it("accepts the clock skew window", async () => {
     const authenticate = createAuthenticator(async () => Response.json({ keys: [jwk] }));
     const now = Math.floor(Date.now() / 1000);

@@ -7,15 +7,21 @@ export { Team } from "./team";
 export { Room } from "./room";
 
 async function route(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  const method = request.method;
+  if (method !== "GET") {
+    const origin = request.headers.get("Origin");
+    const type = request.headers.get("Content-Type")?.split(";", 1)[0].trim().toLowerCase();
+    if ((origin !== null && origin !== url.origin) || type !== "application/json") return failure(403, "forbidden", "Same-origin JSON required");
+  }
   const me = await authenticate(request, env);
   if (!me) return failure(401, "unauthenticated", "Valid Access identity required");
-  const url = new URL(request.url);
   const { pathname: path } = url;
-  const method = request.method;
+  const team = env.TEAM.getByName("team");
+  if (!await team.allowMessage(me.email)) return failure(429, "quota", "Too many requests in one minute");
   if (path === "/v1/info" && method === "GET") {
     return Response.json({ protocol: PROTOCOL_VERSION, server: env.SERVER_VERSION, capabilities: ["comments"] } satisfies ServerInfo);
   }
-  const team = env.TEAM.getByName("team");
   const role = await team.role(me.email);
   if (!role) return failure(403, "forbidden", "No access to this team");
   if (path === "/v1/me" && method === "GET") return Response.json({ ...me, role });
@@ -29,8 +35,12 @@ async function route(request: Request, env: Env): Promise<Response> {
     }
     if (path === "/v1/export" && method === "GET") {
       const rules = await team.rules();
-      const docs = await Promise.all((await team.documents()).map(async doc => ({ ...doc, ...await env.ROOM.getByName(doc.doc).snapshot() })));
-      return Response.json({ rules, docs });
+      const cursor = url.searchParams.get("cursor") ?? "";
+      if (cursor && !uuid(cursor)) return failure(400, "invalid", "cursor must be a document uuid");
+      const page = await team.documents(cursor, 51);
+      const docs = [];
+      for (const doc of page.slice(0, 50)) docs.push({ ...doc, ...await env.ROOM.getByName(doc.doc).snapshot() });
+      return Response.json({ rules, docs, cursor: page.length > 50 ? docs.at(-1)!.doc : null });
     }
   }
   if (path === "/v1/docs" && method === "POST") {
@@ -38,7 +48,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     const body = await readJson(request);
     const doc = body && typeof body === "object" && "doc" in body ? body.doc : null;
     if (!uuid(doc)) return failure(400, "invalid", "doc must be a uuid");
-    await team.register(doc, me.email);
+    if (!await team.register(doc, me.email)) return failure(409, "quota", "Team has too many documents");
     return Response.json({ doc });
   }
   const match = /^\/v1\/docs\/([^/]+)\/(threads|ops|socket)$/.exec(path);
@@ -59,14 +69,17 @@ async function route(request: Request, env: Env): Promise<Response> {
     return env.ROOM.getByName(doc).fetch(new Request(request, { headers }));
   }
   if (action === "threads" && method === "GET") {
-    sinceValue(url.searchParams.get("since") ?? "0");
-    return Response.json(await env.ROOM.getByName(doc).snapshot());
+    const since = sinceValue(url.searchParams.get("since") ?? "0");
+    return Response.json(await env.ROOM.getByName(doc).read(since));
   }
   if (action === "ops" && method === "POST") {
     const body = await readJson(request);
     const ops = body && typeof body === "object" && "ops" in body ? body.ops : null;
     if (!Array.isArray(ops)) return failure(400, "invalid", "ops must be a list");
-    if (ops.length > LIMITS.opsPerMessage) return failure(429, "quota", "Too many ops in one message");
+    if (ops.length > LIMITS.opsPerMessage) {
+      await team.takeOps(me.email, ops.length);
+      return failure(429, "quota", "Too many ops in one message");
+    }
     return Response.json(await env.ROOM.getByName(doc).submit(doc, ops, me, role));
   }
   return failure(404, "not_found", "No such route");
