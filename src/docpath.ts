@@ -12,6 +12,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
+import { loadDoc, serialize } from "./doc/docfile.ts";
+import { logPathOf } from "./doc/doclog.ts";
 
 export const PACKAGE_EXT = ".canvas";
 export const DESIGN_FILE = "document.json";
@@ -286,11 +288,11 @@ export function copyableMedia(file: string, docDir: string): boolean {
  * their references in the package's document.json are rewritten, so the package stays self-contained.
  * Files are cloned when the filesystem can.
  */
-function copyReferencedFiles(docFilePath: string, pkgTmp: string, warnings: string[]): void {
+function copyReferencedFiles(docFilePath: string, pkgTmp: string, warnings: string[], design = docFilePath): void {
   let raw: string;
   let doc: unknown;
   try {
-    raw = fs.readFileSync(docFilePath, "utf8");
+    raw = fs.readFileSync(design, "utf8");
     doc = JSON.parse(raw);
   } catch {
     return;
@@ -345,8 +347,13 @@ export function saveAsCanvas(file: unknown, target: unknown, warnings: string[] 
   }
   if (!fs.existsSync(src.docFilePath)) throw new DocError(404, `No such file: ${src.docFilePath}`);
   return createPackage(to, (tmp) => {
-    fs.copyFileSync(src.docFilePath, path.join(tmp, DESIGN_FILE));
-    copyReferencedFiles(src.docFilePath, tmp, warnings);
+    // The design as Canvas reads it: document.json with its save log on top (doc/doclog.ts). Another Canvas may own a
+    // log with edits not folded yet, or one left by a crash, and this server may never have opened the file: the copy
+    // holds every edit either way, written whole. The log itself never comes along (it belongs to the original).
+    const l = fs.existsSync(logPathOf(src.docFilePath)) ? loadDoc(src.docFilePath) : undefined;
+    if (l?.log?.records) fs.writeFileSync(path.join(tmp, DESIGN_FILE), serialize(l, l.doc));
+    else fs.copyFileSync(src.docFilePath, path.join(tmp, DESIGN_FILE));
+    copyReferencedFiles(src.docFilePath, tmp, warnings, path.join(tmp, DESIGN_FILE));
     if (fs.existsSync(src.widgetsPath)) fs.copyFileSync(src.widgetsPath, path.join(tmp, WIDGETS_FILE));
     else fs.writeFileSync(path.join(tmp, WIDGETS_FILE), JSON.stringify(EMPTY_WIDGETS, null, 2) + "\n");
     copyCardFiles(src, tmp, warnings);
