@@ -171,26 +171,29 @@
 .vd-time{flex:none;opacity:.9;white-space:nowrap}
 .vd-scrub{flex:1;min-width:24px;height:16px;accent-color:#fff;cursor:pointer}
 
-/* welcome (the Welcome file's card, src/onboarding.ts). Type: title 17/24 semibold like the to-do, lines 14/20, the
-   commands 11/16 mono in a muted well, the status 13/20. Connect and Copy are grey, never the accent. */
-.wc{display:flex;flex-direction:column;height:100%;padding:16px;box-sizing:border-box;font-size:14px;line-height:20px;overflow:hidden}
-.wc .wd-head{margin-bottom:8px}
-.wc-lines p{margin:0}
-.wc-cmds{display:flex;flex-direction:column;gap:12px;margin-top:16px}
-.wc-cmd-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:24px;margin-bottom:6px}
-.wc-cmd-name{font-weight:600;line-height:100%;text-box:trim-both cap alphabetic}
-.wc-btns{display:flex;gap:6px}
-.wc-btn{height:24px;padding:0 10px;border:0;border-radius:999px;background:color-mix(in srgb,var(--c-fg) 8%,transparent);color:var(--c-fg);font:600 12px/24px var(--c-font-sans);cursor:pointer}
-.wc-btn:hover{background:color-mix(in srgb,var(--c-fg) 14%,transparent)}
-.wc-connect{background:color-mix(in srgb,var(--c-fg) 14%,transparent)}
-.wc-connect:hover{background:color-mix(in srgb,var(--c-fg) 20%,transparent)}
-.wc-connect:disabled{cursor:default;background:color-mix(in srgb,var(--c-fg) 8%,transparent);color:var(--c-muted-fg)}
-.wc-connect.done{background:transparent;color:var(--c-muted-fg)}
-.wc-code{display:block;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--c-fg) 6%,transparent);font:11px/16px var(--c-font-mono);word-break:break-all;white-space:pre-wrap;user-select:text;-webkit-user-select:text;cursor:text}
-.wc-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;margin-top:auto;padding-top:16px;font-size:13px;line-height:20px}
-.wc-dot{flex:none;width:8px;height:8px;border-radius:50%;background:color-mix(in srgb,var(--c-muted-fg) 55%,transparent)}
-.wc.on .wc-dot{background:var(--c-ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--c-ok) 25%,transparent)}
-.wc-said{font-weight:600}
-.wc-hint{flex-basis:100%;color:var(--c-muted-fg)}
-.wc-hint.err{color:var(--c-danger);word-break:break-word}
-.wc-else{flex-basis:100%;color:var(--c-muted-fg);user-select:text;-webkit-user-select:text;cursor:text}
+/* welcome (the Welcome file's card, src/onboarding.ts; design/master/master.canvas, wc-new). Type: title 15 semibold,
+   agent names 13 medium, buttons and the footer 12. Rows are 48px; the lines between them run edge to edge. Connect
+   is grey, never the accent. One-line labels sit at line-height 100%; an error or the temporary-worktree note in the
+   footer takes two lines of 14px in the same 40px, so the card never needs to grow. */
+.wc{position:relative;display:flex;flex-direction:column;height:100%;box-sizing:border-box;overflow:hidden}
+.wc-title{flex:none;padding:16px 16px 8px;font-size:15px;line-height:100%;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-row{flex:none;display:flex;align-items:center;gap:6px;height:48px;padding:0 6px 0 16px}
+.wc-name{font-weight:500;line-height:100%;white-space:nowrap}
+.wc-sp{flex:1;min-width:0}
+.wc-line{flex:none;height:1px;background:var(--c-stroke)}
+.wc-btn{flex:none;display:inline-flex;align-items:center;height:28px;padding:0 12px;border:0;border-radius:8px;background:color-mix(in srgb,var(--c-fg) 7%,transparent);color:var(--c-fg);font:500 12px/100% var(--c-font-sans);white-space:nowrap;cursor:pointer}
+.wc-btn:hover{background:color-mix(in srgb,var(--c-fg) 12%,transparent)}
+.wc-btn:disabled{cursor:default;background:color-mix(in srgb,var(--c-fg) 5%,transparent);color:var(--c-muted-fg)}
+.wc-on{flex:none;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 6px;font-size:12px;line-height:100%;font-weight:500;color:var(--c-fg);white-space:nowrap}
+.wc-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--c-ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--c-ok) 22%,transparent)}
+.wc-more{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:2.5px;width:28px;height:28px;padding:0;border:0;border-radius:14px;background:transparent;color:var(--c-muted-fg);cursor:pointer}
+.wc-more:hover,.wc-more[aria-expanded=true]{background:color-mix(in srgb,var(--c-fg) 7%,transparent);color:var(--c-fg)}
+.wc-more i{width:2.5px;height:2.5px;border-radius:50%;background:currentColor}
+.wc-hint{flex:none;padding:12px 16px 16px;font-size:12px;line-height:100%;color:var(--c-muted-fg)}
+.wc-hint.err,.wc-hint.long{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;padding:6px 16px;line-height:14px;word-break:break-word;user-select:text;-webkit-user-select:text;cursor:text}
+.wc-hint.err{color:var(--c-danger)}
+.wc-menu{position:absolute;z-index:1;min-width:150px;padding:4px;border-radius:10px;background:var(--c-popover);box-shadow:0 0 0 .5px #0000001f,0 1px 3px #00000014,0 8px 24px -6px #0000002e}
+@media (prefers-color-scheme: dark){.wc-menu{box-shadow:0 0 0 .5px #00000099,0 1px 3px #00000066,0 8px 24px -6px #000000a6}}
+.wc-menu button{display:flex;align-items:center;width:100%;height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--c-fg);font:500 12px/100% var(--c-font-sans);text-align:left;white-space:nowrap;cursor:pointer}
+.wc-menu button:hover{background:var(--c-hover)}
+.wc-menu button:disabled{color:var(--c-muted-fg);cursor:default;background:transparent}

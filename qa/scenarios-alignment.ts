@@ -176,28 +176,30 @@ sc("comments", "alignment: every comment control is optically centred, light and
   t.ok(!bad.length, `${bad.length} alignment problems:\n  ${bad.join("\n  ")}`);
 });
 
-sc("first-run", "alignment: the welcome card's Connect and Copy buttons, its command names and its dot, light and dark", { covers: ["first-run:alignment"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone" } }, async (t: T) => {
-  const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -600, y: 0, w: 460, h: 500 })).widget;
+sc("first-run", "alignment: the welcome card's Connect button, agent names, menu button and Connected dot, light and dark", { covers: ["first-run:alignment"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone", reopen: "the live page's setup answer is stubbed (Codex registered); the reopened tab reads the scratch agent config, where nothing is registered" } }, async (t: T) => {
+  const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -600, y: 0, w: 400, h: 180 })).widget;
   t.subject = ["widget:" + w.id];
-  // Both agents installed, neither registered: Connect shows beside both commands.
-  await t.ev(`(() => { const real = window.fetch.bind(window); window.fetch = async (u, o) => { const r = await real(u, o); if (!String(u).includes("/api/mcp/setup")) return r; const j = await r.json(); return new Response(JSON.stringify({ ...j, connected: false, installed: { claude: true, codex: true }, registered: { claude: false, codex: false } })); }; })()`);
+  // Both agents installed, Codex registered: Claude Code's row shows Connect, Codex's the dot and Connected.
+  await t.ev(`(() => { const real = window.fetch.bind(window); window.fetch = async (u, o) => { const r = await real(u, o); if (!String(u).includes("/api/mcp/setup")) return r; const j = await r.json(); return new Response(JSON.stringify({ ...j, connected: false, temporary: false, installed: { claude: true, codex: true }, registered: { claude: false, codex: true } })); }; })()`);
   await t.look(-620, -20);
-  await t.waitFor(`(() => { const b = document.querySelectorAll('.wc .wc-connect'); return b.length === 2 && [...b].every((x) => !x.hidden); })()`, "Connect beside both commands");
+  await t.waitFor(`(() => { const b = document.querySelector('.wc .wc-row[data-agent=claude] .wc-btn'); return b && !b.hidden && !b.disabled && document.querySelector('.wc .wc-row[data-agent=codex] .wc-on').hidden === false; })()`, "Connect for Claude Code, Connected for Codex");
   const bad: string[] = [];
   for (const th of ["light", "dark"]) {
     await theme(t, th);
     await sleep(400);
     const img = await grab(t);
     const m = resolve(img, await measure(t, {
-      connect: "b:.wc .wc-connect", connectT: "t:.wc .wc-connect", copy: "b:.wc .wc-copy", copyT: "t:.wc .wc-copy", name: "t:.wc .wc-cmd-name",
-      dot: "b:.wc .wc-dot", said: "t:.wc .wc-said",
+      connect: "b:.wc .wc-row[data-agent=claude] .wc-btn", connectT: "t:.wc .wc-row[data-agent=claude] .wc-btn", name: "t:.wc .wc-row[data-agent=claude] .wc-name",
+      more: "b:.wc .wc-row[data-agent=claude] .wc-more", row: "b:.wc .wc-row[data-agent=claude]",
+      dot: "b:.wc .wc-row[data-agent=codex] .wc-dot", on: "t:.wc .wc-row[data-agent=codex] .wc-on-t", name2: "t:.wc .wc-row[data-agent=codex] .wc-name",
     }));
     const k = new AlignChecker("page", th, img, K);
     k.label("welcome-connect", m.connect, m.connectT);
-    k.label("welcome-copy", m.copy, m.copyT);
-    k.near("welcome: Connect and Copy share a centre line", cy(m.connect), cy(m.copy));
-    k.near("welcome: the agent's name, cap middle on the buttons' centre line", m.name?.cap, cy(m.connect));
-    k.near("welcome: the dot's middle on Not connected yet's cap middle", cy(m.dot), m.said?.cap);
+    k.near("welcome: Connect on the row's centre line", cy(m.connect), cy(m.row));
+    k.near("welcome: the menu button on Connect's centre line", cy(m.more), cy(m.connect));
+    k.near("welcome: the agent's name, cap middle on Connect's centre line", m.name?.cap, cy(m.connect));
+    k.near("welcome: the dot's middle on Connected's cap middle", cy(m.dot), m.on?.cap);
+    k.near("welcome: Connected's cap middle on the agent name's", m.on?.cap, m.name2?.cap);
     bad.push(...k.bad);
   }
   await t.page.send("Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });

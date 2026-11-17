@@ -116,25 +116,32 @@ sc("first-run", "a first launch opens the Welcome file; Connected follows an age
     await sleep(1500);
     await shot(f, "welcome-first");
     // The card is drawn by the page: read it there, and check it is inside the window, not off to the side.
-    await f.waitJs("(() => { const c = document.querySelectorAll('.wc .wc-code'); return c.length === 2 && c[0].textContent.startsWith('claude mcp add canvas') && c[1].textContent.startsWith('codex mcp add canvas'); })()", "the commands on the card", 10_000);
-    t.eq(await f.js("return document.querySelector('.wc .wd-title').textContent;"), "Welcome to Canvas", "the card's title");
-    t.eq(await f.js("return document.querySelector('.wc .wc-said').textContent;"), "Not connected yet", "before any agent");
+    await f.waitJs("(() => { const b = document.querySelectorAll('.wc .wc-btn'); return b.length === 2 && [...b].every((x) => !x.disabled); })()", "the agent rows on the card", 10_000);
+    t.eq(await f.js("return document.querySelector('.wc .wc-title').textContent;"), "Connect an agent", "the card's title");
+    t.eq(await f.js("return [...document.querySelectorAll('.wc .wc-name')].map((e) => e.textContent);"), ["Claude Code", "Codex"], "a row per agent");
+    t.eq(await f.js("return document.querySelector('.wc .wc-row[data-agent=claude] .wc-on').hidden;"), true, "not Connected before any agent");
+    // The commands are no longer on the card: each row's menu copies them (Copy command).
+    const setup = (await (await fetch(`${fresh.base}/api/mcp/setup`)).json()) as any;
+    t.ok(String(setup.claude).startsWith("claude mcp add canvas") && String(setup.codex).startsWith("codex mcp add canvas"), "the commands the rows' Copy command copies");
+    await f.js("document.querySelector('.wc .wc-row[data-agent=codex] .wc-more').click();");
+    t.eq(await f.js("return document.querySelector('.wc .wc-menu button')?.textContent ?? null;"), "Copy command", "the row's menu offers Copy command");
+    await f.js("document.querySelector('.wc .wc-row[data-agent=codex] .wc-more').click();");
     const box = await f.js<{ l: number; t: number; r: number; b: number }>("const r = document.querySelector('.wc').getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom };");
     const win = (await f.state()).window;
     t.ok(box.l >= 0 && box.t >= 0 && box.r <= win.width && box.b <= win.height, `the welcome card is in view: ${JSON.stringify(box)}`);
     await shot(f, "welcome");
     // An agent connects (canvas-mcp's hello, as mcp/client.ts sends it): the dot turns on within a poll.
     await fetch(`${fresh.base}/api/mcp/hello`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": "mcp-qa-first", "x-canvas-agent": "claude-code" }, body: "{}" });
-    await f.waitJs("document.querySelector('.wc .wc-said').textContent === 'Connected: Claude'", "Connected on the card", 8000);
+    await f.waitJs("document.querySelector('.wc .wc-row[data-agent=claude] .wc-on').hidden === false", "Connected on the card", 8000);
     await shot(f, "welcome-connected");
     // Connect, for real: this instance's server runs with the fresh HOME, so the agents' own CLIs write their config
     // there (~/.codex/config.toml, ~/.claude.json under it), never the person's.
     const installed = ((await (await fetch(`${fresh.base}/api/mcp/setup`)).json()) as any).installed ?? {};
     const serverTs = path.join(path.resolve(import.meta.dirname, "../.."), "mcp", "server.ts");
     if (installed.codex) {
-      await f.waitJs("(() => { const b = document.querySelectorAll('.wc .wc-connect')[1]; return b && !b.hidden && b.textContent === 'Connect'; })()", "Connect for Codex on the card", 8000);
-      await f.js("document.querySelectorAll('.wc .wc-connect')[1].click();");
-      await f.waitJs("document.querySelectorAll('.wc .wc-connect')[1].textContent === 'Added'", "Added on the card", 30_000);
+      await f.waitJs("(() => { const b = document.querySelector('.wc .wc-row[data-agent=codex] .wc-btn'); return b && !b.hidden && b.textContent === 'Connect'; })()", "Connect for Codex on the card", 8000);
+      await f.js("document.querySelector('.wc .wc-row[data-agent=codex] .wc-btn').click();");
+      await f.waitJs("document.querySelector('.wc .wc-row[data-agent=codex] .wc-on').hidden === false", "Connected for Codex on the card", 30_000);
       t.eq(await f.js("return document.querySelector('.wc .wc-hint').textContent;"), "Added. Start a new Codex session.", "the card says the next step");
       const toml = fs.readFileSync(path.join(fresh.home, ".codex", "config.toml"), "utf8");
       t.ok(/^\[mcp_servers\.canvas\]$/m.test(toml) && toml.includes(JSON.stringify(serverTs)), `canvas in the fresh HOME's Codex config: ${toml}`);
@@ -167,7 +174,7 @@ sc("first-run", "a first launch opens the Welcome file; Connected follows an age
       const cj = JSON.parse(fs.readFileSync(path.join(fresh.home, ".claude.json"), "utf8"));
       t.ok(cj.mcpServers?.canvas?.args?.includes(serverTs), `canvas in the fresh HOME's ~/.claude.json: ${JSON.stringify(cj.mcpServers)}`);
       // The card in the main window follows: its setup poll reads the same config.
-      await f.waitJs("document.querySelectorAll('.wc .wc-connect')[0].textContent === 'Added'", "Added for Claude Code on the card too", 8000);
+      await f.waitJs("document.querySelector('.wc .wc-row[data-agent=claude] .wc-on').hidden === false", "Connected for Claude Code on the card too", 8000);
       await sleep(400);
       await f.shot(`${process.cwd()}/qa/out/native/settings-agents-added.png`, "settings");
     } else t.notes.push("Claude Code is not installed on this Mac: Settings' Connect was not clicked");

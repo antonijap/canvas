@@ -18,6 +18,7 @@ const noEngine = path.join(dir, "no-engine");
 fs.mkdirSync(noEngine);
 
 const O = await import("../src/onboarding.ts");
+const { temporaryServer } = await import("../src/mcp-connect.ts");
 const { startServer } = await import("../src/server.ts");
 const { kinds } = await import("../src/widgets.ts");
 const server = await startServer(0);
@@ -68,6 +69,9 @@ test("setup commands register the server as canvas with absolute paths", async (
   assert.match(s.codex, /^codex mcp add canvas -- \S+node \S+\/mcp\/server\.ts$/);
   assert.ok(path.isAbsolute(s.node) && path.isAbsolute(s.server));
   assert.ok(fs.existsSync(s.server), "the MCP script it names exists");
+  // Whether Connect may run here (a server in a temporary worktree: no; the card offers Copy command instead).
+  assert.equal(typeof s.temporary, "boolean", "setup says whether the server is in a temporary worktree");
+  assert.equal(s.temporary, temporaryServer(s.server));
   // A mise patch version is registered as its major folder, so a Node update does not break it.
   assert.equal(O.stableNode("/u/.local/share/mise/installs/node/24.11.1/bin/node", () => true), "/u/.local/share/mise/installs/node/24/bin/node");
   assert.equal(O.stableNode("/opt/homebrew/bin/node", () => true), "/opt/homebrew/bin/node");
