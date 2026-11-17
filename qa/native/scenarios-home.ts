@@ -1,6 +1,6 @@
 // Home, the pinned first tab (apps/macos/Home.swift, HomeLogic.swift): the tab is first and cannot be closed, the
 // shortcut and Window > Home show it, a card opens its file, a missing file offers Remove from recents, the comment
-// count and the team server on a card, the server view, the first-launch cards, thumbnails in the state folder,
+// count and the cloud on a shared card, the server view, the first-launch header and line, thumbnails in the state folder,
 // and the alignment of the controls. Screenshots of the three states, light and dark, go to qa/out/native.
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -94,7 +94,7 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   await t.waitState((s) => s.file === t.file && !s.homeShown, "the file to open again");
 });
 
-sc("home", "Home: recents newest first, comment count and server on a card, a missing file, filter and search, thumbnails, alignment", { covers: ["home:recents", "home:remove", "home:thumbnail", "home:alignment", "home:server", "home:light", "home:dark"] }, async (t: NT) => {
+sc("home", "Home: recents newest first, comment count and a cloud on a shared card, a missing file, On this Mac and search, thumbnails, alignment", { covers: ["home:recents", "home:remove", "home:thumbnail", "home:alignment", "home:server", "home:light", "home:dark"] }, async (t: NT) => {
   const team = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(req.url === "/v1/info" ? JSON.stringify({ protocol: 1, server: "0.1.0", capabilities: ["comments"] }) : JSON.stringify({ email: "anna@studio.test", name: "anna", role: "owner" }));
@@ -136,22 +136,32 @@ sc("home", "Home: recents newest first, comment count and server on a card, a mi
     // Comments and place.
     const badges = await t.marks({ id: "home-comments" });
     t.eq(badges.map((m) => m.label).sort(), ["2", "3"], "open comments only: resolved ones do not count");
-    t.ok((await t.findText("This Mac")).length >= 1, "a file that is not shared says This Mac");
-    t.ok((await t.findText(host)).length >= 1, "a shared file names its server");
+    // A card's meta row is its time; a shared file gets a cloud before it (the server's name is in its tooltip).
+    const grid = await t.marks({ id: "home-card" });
+    const cardsArea = { x: Math.min(...grid.map((m) => m.x)) - 4, y: grid[0].y - 4, w: 10_000, h: 10_000 };
+    t.eq((await t.findText("This Mac", cardsArea)).length, 0, "a file that is not shared names no place");
+    const clouds = await t.marks({ id: "home-card-where-glyph" });
+    t.eq(clouds.map((m) => m.label), [host], "one cloud, on the shared file's card, naming its server");
+    const bCard = await t.mark({ id: "home-card", label: "home-b" });
+    t.ok(clouds[0].x >= bCard.x - 0.6 && clouds[0].x + clouds[0].w <= bCard.x + bCard.w + 0.6 && clouds[0].y > bCard.y + bCard.h, "the cloud sits under the shared file's picture");
+    // The cloud's own mark carries the name (its tooltip), so read the drawn text: no text mark, and none on screen.
+    t.eq((await t.marks({ id: "text", label: host, region: cardsArea })).length, 0, "the server's name is not a text on the card");
+    t.eq((await t.ocr(host, cardsArea)).length, 0, "the server's name is not written on the card");
     await shot(t, "home-recents-light");
     await t.cmd("qa.theme", { theme: "dark" });
     await sleep(500);
     await shot(t, "home-recents-dark");
     await t.cmd("qa.theme", { theme: "light" });
     await sleep(400);
-    // Alignment: the header buttons share a height, the filter and the search field match the same field height,
+    // Alignment: the header buttons share a height, the search field matches the same field height,
     // sidebar rows share one height, and a card's picture and name share its left edge.
     const open1 = await t.mark({ id: "home-open" }), nw = await t.mark({ id: "home-new" });
     sameHeight(t, "Open and New file", [open1, nw]);
     t.near(midY(open1), midY(nw), 0.6, "Open and New file sit on one line");
     t.near(open1.h, 28, 0.6, "the field height");
-    const filter = await t.mark({ id: "home-filter" }), search = await t.mark({ id: "home-search" });
-    sameHeight(t, "filter, search and buttons", [filter, search, open1]);
+    const search = await t.mark({ id: "home-search" });
+    sameHeight(t, "search and buttons", [search, open1]);
+    t.eq((await t.marks({ id: "home-filter" })).length + (await t.marks({ id: "home-segment" })).length, 0, "no filter segments over the cards: the sidebar picks");
     const rows = await t.marks({ id: "home-row" });
     sameHeight(t, "sidebar rows", rows);
     t.ok(rows.every((r) => Math.abs(r.x - rows[0].x) < 0.6 && Math.abs(r.w - rows[0].w) < 0.6), "sidebar rows share one left edge and width");
@@ -160,19 +170,28 @@ sc("home", "Home: recents newest first, comment count and server on a card, a mi
     const card = (await t.marks({ id: "home-card" }))[0];
     t.ok(card.w >= 220, `a card keeps its minimum width (${card.w})`);
     t.near(card.w / card.h, 1.6, 0.05, "the picture keeps its shape");
-    // Filter.
-    const seg = async (label: string) => { const r = (await t.findText(label, filter))[0]; t.ok(r, `the ${label} segment`); await t.click(center(r)); await sleep(350); };
-    await seg("Cloud");
-    t.eq(await cards(t), ["home-b"], "Cloud: the shared file only");
-    await seg("On this Mac");
+    // The sidebar picks what the main view lists: On this Mac, then Recents with every file again.
+    const pick = async (label: string, section: string) => {
+      await t.click(center(await t.mark({ id: "home-row", label })));
+      await t.waitState((s) => s.homeSection === section, label);
+      await sleep(350);
+    };
+    await pick("On this Mac", "mac");
     const mac = await cards(t);
     t.ok(!mac.includes("home-b") && mac.includes("home-c") && mac.includes("home-gone"), `On this Mac: the files that are not shared (${mac})`);
-    await seg("All");
+    await pick("Recents", "recents");
+    const every = await cards(t);
+    t.ok(every.includes("home-b") && every.includes("home-c") && every.includes("home-gone"), `Recents: every file, shared or not (${every})`);
     // Search, in the sidebar.
     await t.click(center(search));
     await t.type("home-c");
     await sleep(350);
     t.eq(await cards(t), ["home-c"], "search filters by name");
+    await t.type("zzz");
+    await sleep(350);
+    t.eq((await cards(t)).length, 0, "a search that matches nothing lists no cards");
+    const noMatch = await t.mark({ id: "home-empty", label: "No files match \u201Chome-czzz\u201D" });
+    t.ok(noMatch.h > 200, `the line is centred in the space under the header, with no box (${noMatch.h})`);
     await t.key("a", ["cmd"]);
     await t.key("Delete");
     await sleep(350);
@@ -224,7 +243,7 @@ sc("home", "Home: recents newest first, comment count and server on a card, a mi
   }
 });
 
-sc("home", "Home on a first launch: three cards and the empty recents", { covers: ["home:first-launch", "home:light", "home:dark", "home:alignment"] }, async (t: NT) => {
+sc("home", "Home on a first launch: the Recents header and one line where the files will be", { covers: ["home:first-launch", "home:light", "home:dark", "home:alignment"] }, async (t: NT) => {
   const fresh = new QaApp(path.dirname(t.app.dir), 80 + t.app.shard);
   const was = process.env.CANVAS_QA_FIRST_RUN;
   process.env.CANVAS_QA_FIRST_RUN = "1";
@@ -237,13 +256,16 @@ sc("home", "Home on a first launch: three cards and the empty recents", { covers
     await f.click(center(await f.mark({ id: "home-tab" })));
     await f.waitState((s) => s.homeShown, "Home");
     await sleep(600);
-    for (const label of ["Welcome to Canvas", "Files you open show up here", "Start the course"]) await f.mark({ label }, 8000);
-    const starts = await f.marks({ id: "home-start" });
-    t.eq(starts.map((m) => m.label), ["Start the course", "New file", "Add Cloud"], "the three cards' buttons");
-    sameHeight(t, "the start buttons", starts);
-    t.ok(starts.every((s) => Math.abs(s.y - starts[0].y) < 0.6), "on one line");
-    const marks = await f.marks({ id: "home-start-mark" });
-    sameHeight(t, "the card marks", marks);
+    await f.mark({ id: "text", label: "Recents" }, 8000);
+    t.eq((await f.state()).recents, [], "with Home up, the course the app opened is still not a recent");
+    const line = await f.mark({ id: "home-empty", label: "Files you open show up here" }, 8000);
+    const open1 = await f.mark({ id: "home-open" }), nw = await f.mark({ id: "home-new" });
+    sameHeight(t, "Open and New file", [open1, nw]);
+    t.near(midY(open1), midY(nw), 0.6, "Open and New file sit on one line");
+    t.near(open1.h, 28, 0.6, "the field height");
+    t.ok(line.y > nw.y + nw.h, "the line sits under the header");
+    for (const gone of ["Welcome to Canvas", "Start the course"]) t.eq((await f.marks({ label: gone })).length, 0, `no ${gone}`);
+    for (const id of ["home-start", "home-start-mark", "home-empty-glyph", "home-search"]) t.eq((await f.marks({ id })).length, 0, `no ${id}`);
     t.eq((await f.marks({ id: "home-card" })).length, 0, "no recent cards yet");
     await f.cmd("qa.theme", { theme: "light" });
     await sleep(400);

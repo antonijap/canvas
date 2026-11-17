@@ -1,6 +1,6 @@
 // Optical alignment of the shell's newer UI, measured from the window's own 2x capture (qa/ink.ts): Settings (General's
 // Updates and comment name, Cloud with and without a server, Agents' Connect, status and agent menus), About Canvas, the letter spacing field with
-// its Auto chip and token button, and Home (the pinned tab, header, filter, sidebar rows, server, first launch).
+// its Auto chip and token button, and Home (the pinned tab, header, sidebar rows, card lines, server, first launch).
 // Light and dark. An icon sits in the middle of its control by its visible shape; a label by the middle of its
 // capitals (SF Pro's cap height above the baseline the pixels show); a dot or a glyph beside text sits on the text's
 // cap middle; paddings match. Every measurement goes to qa/out/alignment/native.jsonl, each crop beside it.
@@ -242,18 +242,18 @@ sc("inspector", "alignment: letter spacing's glyph, number, Auto chip and token 
   report(t, bad);
 });
 
-sc("home", "alignment: Home's tab, header buttons, filter, sidebar rows and server view are optically centred, light and dark", { covers: ["home:alignment", "home:light", "home:dark"] }, async (t: NT) => {
+sc("home", "alignment: Home's tab, header buttons, sidebar rows, card lines and server view are optically centred, light and dark", { covers: ["home:alignment", "home:light", "home:dark"] }, async (t: NT) => {
   fresh("native-home");
-  // Two open comments, so this file's card shows the bubble and its count.
-  const doc = crypto.randomUUID();
-  const thread = () => ({ id: crypto.randomUUID(), doc, anchor: { nodeId: "x", x: 0, y: 0, board: "b" }, createdAt: new Date().toISOString(), createdBy: { name: "Ana" }, comments: [{ id: crypto.randomUUID(), body: "c" }] });
-  fs.writeFileSync(path.join(t.file, "comments.json"), JSON.stringify({ format: 1, doc, seq: 0, threads: [thread(), thread()], outbox: [] }));
   const team = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(req.url === "/v1/info" ? JSON.stringify({ protocol: 1, server: "0.1.0", capabilities: ["comments"] }) : JSON.stringify({ email: "anna@studio.test", name: "anna", role: "owner" }));
   });
   await new Promise<void>((r) => team.listen(0, "127.0.0.1", r));
   const url = `http://127.0.0.1:${(team.address() as { port: number }).port}`;
+  // Two open comments, so this file's card shows the bubble and its count, shared to the server, so it shows the cloud.
+  const doc = crypto.randomUUID();
+  const thread = () => ({ id: crypto.randomUUID(), doc, anchor: { nodeId: "x", x: 0, y: 0, board: "b" }, createdAt: new Date().toISOString(), createdBy: { name: "Ana" }, comments: [{ id: crypto.randomUUID(), body: "c" }] });
+  fs.writeFileSync(path.join(t.file, "comments.json"), JSON.stringify({ format: 1, doc, seq: 0, server: { url }, threads: [thread(), thread()], outbox: [] }));
   const bad: string[] = [];
   try {
     // Cloud with no server: the address field and Sign in share one line.
@@ -288,11 +288,9 @@ sc("home", "alignment: Home's tab, header buttons, filter, sidebar rows and serv
       s = await grab(t);
       k = new AlignChecker("native-home", theme, s.img, s.k);
       for (const [label, name] of [["Open", "home-open"], ["New file", "home-new"]]) await fieldButton(t, k, s, label, name);
-      for (const seg of await marks(t, "main", "home-segment")) {
-        const txt = inside((await t.marks({ id: "text", label: seg.label ?? "" })) as Mark[], seg);
-        // "All": its A starts on its own edge with thin diagonals, so its ink box reads 0.8 pt left of where it looks; judged fine.
-        k.label(`home-filter-${seg.label}`, box(seg, 6), line(s, txt, 12, seg.label ?? ""), { inset: 1, tolX: seg.label === "All" ? 0.85 : undefined });
-      }
+      // The header level with the sidebar's search field: the buttons' middle on the field's.
+      const search = await one(t, "main", "home-search"), newBtn = await one(t, "main", "home-new");
+      k.near("header: New file's middle on the search field's middle", cy(box(newBtn)), cy(box(search)));
       for (const row of await marks(t, "main", "home-row")) {
         const g = inside(await marks(t, "main", "home-row-glyph"), row), txt = inside((await t.marks({ id: "text", label: row.label ?? "" })) as Mark[], row);
         const gi = k.ink(`home-row-glyph-${row.label}`, bare(box(g)), { inset: 0 });
@@ -301,12 +299,12 @@ sc("home", "alignment: Home's tab, header buttons, filter, sidebar rows and serv
       }
       const srvRow = (await marks(t, "main", "home-row")).find((r) => r.label && /127\.0\.0\.1/.test(r.label)) ?? null;
       await dotOnText(t, k, s, "home-server-dot", inside((await t.marks({ id: "text", label: srvRow?.label ?? "" })) as Mark[], srvRow), 13, "home-server-row");
-      // A card's line under its name: the place glyph on its words, the bubble on the count.
-      const card = (await marks(t, "main", "home-card"))[0] ?? null;
+      // A card's line under its name: the cloud of a shared file on its time, the bubble on the count.
+      const card = (await marks(t, "main", "home-card", path.basename(t.file).replace(/\.canvas$/, "")))[0] ?? null;
       const below = card ? { x: card.x, y: card.y + card.h, w: card.w, h: 60 } : null;
       const whereG = inside(await marks(t, "main", "home-card-where-glyph"), below);
       const whereT = whereG ? ((await t.marks({ id: "text" })) as Mark[]).find((m) => m.x > whereG.x && m.x < whereG.x + whereG.w + 10 && Math.abs(m.y + m.h / 2 - (whereG.y + whereG.h / 2)) < 6) ?? null : null;
-      k.near("card: the place glyph's middle on its words' cap middle", midY(k.ink("home-card-where-glyph", bare(box(whereG)), { inset: 0 })), line(s, whereT, 12)?.cap);
+      k.near("card: the cloud's middle on its time's cap middle", midY(k.ink("home-card-where-glyph", bare(box(whereG)), { inset: 0 })), line(s, whereT, 12)?.cap);
       const count = (await marks(t, "main", "home-card-count"))[0] ?? null;
       const bubble = count ? (await marks(t, "main", "home-card-comments-glyph")).find((g) => Math.abs(g.y + g.h / 2 - (count.y + count.h / 2)) < 6 && g.x < count.x) ?? null : null;
       k.near("card: the bubble's middle on the count's cap middle", midY(k.ink("home-card-bubble", bare(box(bubble)), { inset: 0 })), line(s, count, 12)?.cap);
@@ -334,7 +332,7 @@ sc("home", "alignment: Home's tab, header buttons, filter, sidebar rows and serv
   report(t, bad);
 });
 
-sc("home", "alignment: Home's first-launch cards centre their glyphs and buttons, light and dark", { covers: ["home:alignment", "home:first-launch"] }, async (t: NT) => {
+sc("home", "alignment: Home's first launch, its header level with Recents' row and its one line centred, light and dark", { covers: ["home:alignment", "home:first-launch"] }, async (t: NT) => {
   fresh("native-home-first");
   const app = new QaApp(path.dirname(t.app.dir), 90 + t.app.shard);
   const was = process.env.CANVAS_QA_FIRST_RUN;
@@ -347,17 +345,27 @@ sc("home", "alignment: Home's first-launch cards centre their glyphs and buttons
     await f.settle(30_000);
     await f.click(center(await f.mark({ id: "home-tab" })));
     await f.waitState((s) => s.homeShown, "Home");
-    await f.mark({ id: "home-start" }, 8000);
+    t.eq((await f.state()).recents, [], "the course the app opened is not a recent");
+    await f.mark({ id: "home-empty" }, 8000);
     for (const theme of ["light", "dark"]) {
       await f.cmd("qa.theme", { theme });
       const s = await grab(f);
       const k = new AlignChecker("native-home-first", theme, s.img, s.k);
-      for (const m of await marks(f, "main", "home-start-mark")) k.icon(`home-start-mark-${m.label}`, box(m, 10), { inset: 2 });
-      for (const b of await marks(f, "main", "home-start")) await fieldButton(f, k, s, b.label ?? "", `home-start-${b.label}`);
-      // The empty recents: the clock and the words on the box's middle.
-      const empty = await one(f, "main", "home-empty"), eg = await one(f, "main", "home-empty-glyph"), et = await one(f, "main", "text", "Files you open show up here");
-      k.near("empty recents: the clock centred across the box", midX(k.ink("home-empty-glyph", bare(box(eg)), { inset: 0 })), cx(box(empty)));
-      k.near("empty recents: the words' label ink centred across the box", midX(k.ink("home-empty-text", bare(box(et)), { inset: 0 })), cx(box(empty)));
+      for (const [label, name] of [["Open", "home-open"], ["New file", "home-new"]]) await fieldButton(f, k, s, label, name);
+      // The header on the sidebar's first row (Recents: no search before the first file): the title's capitals
+      // and the buttons on the row's centre line, where the row's own name sits.
+      const row = (await marks(f, "main", "home-row"))[0] ?? null;
+      if (row?.label !== "Recents") k.bad.push(`home-first-row (${theme}): the sidebar's first row is ${row?.label ?? "missing"}, not Recents`);
+      const named = (await f.marks({ id: "text", label: "Recents" })) as Mark[];
+      const rowText = inside(named, row), title = named.find((m) => row && m.x > row.x + row.w) ?? null;
+      const newBtn = await one(f, "main", "home-new");
+      k.near("first launch: the title's cap middle on Recents' row centre line", line(s, title, 22, "Recents")?.cap, cy(box(row)));
+      k.near("first launch: the title's cap middle on the row name's cap middle", line(s, title, 22, "Recents")?.cap, line(s, rowText, 13, "Recents")?.cap);
+      k.near("first launch: New file's middle on Recents' row centre line", cy(box(newBtn)), cy(box(row)));
+      // The one line: its ink centred across the main view and down the space under the header.
+      const empty = await one(f, "main", "home-empty"), et = await one(f, "main", "text", "Files you open show up here");
+      k.near("empty recents: the words' label ink centred across the space under the header", midX(k.ink("home-empty-text", bare(box(et)), { inset: 0 })), cx(box(empty)));
+      k.near("empty recents: the words' cap middle centred down the space under the header", line(s, et, 13, "Files you open show up here")?.cap, cy(box(empty)));
       bad.push(...k.bad);
     }
   } finally {

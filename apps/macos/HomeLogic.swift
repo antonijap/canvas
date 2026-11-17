@@ -101,15 +101,9 @@ enum ServerName {
     static func same(_ a: String, _ b: String) -> Bool { host(a).lowercased() == host(b).lowercased() && !host(a).isEmpty }
 }
 
+/// Which of the cards a view lists (the sidebar picks: Recents is all of them, On this Mac the files not shared).
 enum HomeFilter: String, CaseIterable {
     case all, mac, servers
-    var title: String {
-        switch self {
-        case .all: "All"
-        case .mac: "On this Mac"
-        case .servers: "Cloud"
-        }
-    }
 }
 
 /// A file's card, everything the grid draws.
@@ -148,6 +142,17 @@ enum HomeLogic {
         if words.isEmpty { return cards }
         return cards.filter { c in words.allSatisfy { c.name.localizedCaseInsensitiveContains($0) } }
     }
+
+    /// The one muted line where a view has no files to show: a search that matched nothing, a server with nothing
+    /// shared yet, no files at all (a first launch), or a view whose files are all elsewhere.
+    static func emptyLine(query: String, onServer: Bool, files: Int) -> String {
+        if !query.isEmpty { return "No files match \u{201C}\(query)\u{201D}" }
+        if onServer { return "No files shared to this server yet" }
+        return files == 0 ? "Files you open show up here" : "Nothing here yet"
+    }
+
+    /// The sidebar's search field: hidden while there is nothing to search, unless words are still typed in it.
+    static func showsSearch(files: Int, query: String) -> Bool { files > 0 || !query.isEmpty }
 
     /// The cards of one server (by host).
     static func onServer(_ cards: [HomeCard], _ url: String) -> [HomeCard] {

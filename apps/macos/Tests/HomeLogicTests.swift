@@ -1,4 +1,4 @@
-// Tests for HomeLogic.swift: the recents list, comment summaries, card order, filter, search, labels, thumbnail keys.
+// Tests for HomeLogic.swift: the recents list, comment summaries, card order, filter, search, empty lines, labels, thumbnail keys.
 // Run from apps/macos:
 //   swiftc -parse-as-library HomeLogic.swift Tests/HomeLogicTests.swift -o /tmp/home-tests && /tmp/home-tests
 
@@ -15,7 +15,7 @@ struct HomeLogicTests {
     }
 
     static func main() {
-        recents(); comments(); servers(); cards(); labels(); thumbnails()
+        recents(); comments(); servers(); cards(); empty(); labels(); thumbnails()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -99,6 +99,18 @@ struct HomeLogicTests {
         check(HomeLogic.search(all, "zzz").isEmpty, "no match")
         check(HomeLogic.onServer(all, "https://STUDIO.workers.dev/").count == 2 && HomeLogic.onServer(all, "https://other.example.com").isEmpty, "a server's files")
         check(gone.shared == false && a.shared, "shared follows the server")
+    }
+
+    static func empty() {
+        check(HomeLogic.emptyLine(query: "", onServer: false, files: 0) == "Files you open show up here", "no files at all: a first launch")
+        check(HomeLogic.emptyLine(query: "", onServer: false, files: 3) == "Nothing here yet", "a view whose files are all elsewhere")
+        check(HomeLogic.emptyLine(query: "", onServer: true, files: 3) == "No files shared to this server yet", "a server with nothing shared")
+        check(HomeLogic.emptyLine(query: "", onServer: true, files: 0) == "No files shared to this server yet", "a server, even before the first file")
+        check(HomeLogic.emptyLine(query: "brand", onServer: true, files: 3) == "No files match \u{201C}brand\u{201D}", "a search that matched nothing wins")
+        check(HomeLogic.emptyLine(query: "q", onServer: false, files: 0) == "No files match \u{201C}q\u{201D}", "a search with no files says so too")
+        check(!HomeLogic.showsSearch(files: 0, query: ""), "no search field before the first file")
+        check(HomeLogic.showsSearch(files: 1, query: ""), "search once there is a file")
+        check(HomeLogic.showsSearch(files: 0, query: "old"), "words still typed keep the field, so they can be cleared")
     }
 
     static func labels() {
