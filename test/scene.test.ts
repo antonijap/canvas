@@ -83,6 +83,8 @@ const { decodeWoff, decodeWoff2, pickFace, svgShapesOk } = await (async () => {
   return { ...ff, svgShapesOk: sc.svgShapes };
 })();
 const server = await startServer(0); // a free port of its own: fixed ones clash with other suites
+// Synchronous font compression can outlast an idle socket. Use a fresh connection for each request.
+server.maxRequestsPerSocket = 1;
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 const q = (s: string) => `?file=${encodeURIComponent(real)}${s}`;
 

@@ -249,12 +249,21 @@ describe("saving through the log", () => {
   test("edits pause: the log is folded into document.json (an older build sees them)", async () => {
     const file = make("compact");
     await open(file);
+    // Establish the log before enabling compaction: under load it can fold before a flush response arrives.
+    await update(file, "R9_4", { name: "in the log" });
+    await flush(file);
+    assert.ok(fs.existsSync(L.logPathOf(file)));
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).children[9].children[4].name, undefined);
     pw.writeConfig.compactAfterMs = 60;
     try {
       await update(file, "R9_4", { name: "soon on disk" });
       await flush(file);
-      assert.ok(fs.existsSync(L.logPathOf(file)));
-      for (let i = 0; i < 100 && fs.existsSync(L.logPathOf(file)); i++) await sleep(20);
+      // Wait for the folded state, even if it was reached before flush answered. The deadline only bounds a hang.
+      const deadline = performance.now() + 10_000;
+      while (fs.existsSync(L.logPathOf(file)) || JSON.parse(fs.readFileSync(file, "utf8")).children[9].children[4].name !== "soon on disk") {
+        assert.ok(performance.now() < deadline, `the log did not fold: ${JSON.stringify(pw.writerStats(file))}`);
+        await sleep(20);
+      }
       assert.equal(fs.existsSync(L.logPathOf(file)), false);
       assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).children[9].children[4].name, "soon on disk");
     } finally {
