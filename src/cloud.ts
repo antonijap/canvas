@@ -197,7 +197,8 @@ export async function checkServer(origin: string, force = false, fresh = false):
       return known;
     }
   }
-  const set = (s: Omit<ServerState, "at" | "devEmail">) => { const v = { ...s, at: Date.now(), devEmail }; servers.set(origin, v); return v; };
+  // Once a hosted Cloud said this Mac was removed, its tunnel stops letting it in, which looks like "down": it stays "removed".
+  const set = (s: Omit<ServerState, "at" | "devEmail">) => { const v = { ...s, status: s.status === "down" && known?.status === "removed" ? "removed" as Status : s.status, at: Date.now(), devEmail }; servers.set(origin, v); return v; };
   const info = await request(origin, "/v1/info");
   if (info.fail) return set({ status: info.fail });
   const protocol = Number(info.json?.protocol);
@@ -240,6 +241,7 @@ export function onChanged(fn: (display: string | null, pkg: string) => void): vo
 const notify = (s: Session) => notifier(s.display, s.pkg);
 
 function setStatus(s: Session, status: Status): void {
+  if (s.status === "removed" && status === "down") return; // see checkServer: a removed Mac is kept out by the tunnel too
   if (s.status === status) return;
   s.status = status;
   notify(s);

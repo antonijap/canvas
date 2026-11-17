@@ -162,6 +162,10 @@ test("removal: devices, pending codes and sockets go at once; a new person with 
   assert.notEqual(again.body.me.id, benId);
   const r = await (await post(base, `/v1/docs/${doc}/ops`, { ops: [{ opId: crypto.randomUUID(), doc, at: new Date().toISOString(), op: { kind: "comment.edit", comment, body: "Taken over" } }] }, bearer(again.token))).json() as any;
   assert.equal(r.rejected[0]?.code, "forbidden");
+  // Moving the pin follows the same rule: the thread's author by person id, or the owner.
+  const move = (token: string) => post(base, `/v1/docs/${doc}/ops`, { ops: [{ opId: crypto.randomUUID(), doc, at: new Date().toISOString(), op: { kind: "thread.move", thread, anchor: { x: 5, y: 5 } } }] }, bearer(token)).then((x) => x.json() as any);
+  assert.equal((await move(again.token)).rejected[0]?.code, "forbidden", "a label match is not authorship");
+  assert.equal((await move(owner)).acks.length, 1, "the owner may move it");
   const read = await (await fetch(`${base}/v1/docs/${doc}/threads`, { headers: bearer(owner) })).json() as any;
   assert.equal(read.threads[0].comments[0].body, "From Ben");
   assert.equal(read.threads[0].comments[0].author.id, benId);

@@ -51,7 +51,14 @@ struct HostState: Equatable {
         tunnel = j["tunnel"] as? String ?? "off"
         people = (j["people"] as? [[String: Any]] ?? []).compactMap { p in
             guard let id = p["id"] as? String, let label = p["label"] as? String else { return nil }
-            let devices = (p["devices"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String }
+            // "Ben's MacBook on 18 Nov": which Mac joined, and when.
+            let devices = (p["devices"] as? [[String: Any]] ?? []).compactMap { d -> String? in
+                guard let name = d["name"] as? String else { return nil }
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                guard let at = (d["joinedAt"] as? String).flatMap({ iso.date(from: $0) }) else { return name }
+                return "\(name) on \(at.formatted(.dateTime.day().month(.abbreviated)))"
+            }
             return Person(id: id, label: label, role: p["role"] as? String ?? "", devices: devices, invited: p["invite"] is [String: Any])
         }
     }
