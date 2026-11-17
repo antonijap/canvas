@@ -22,6 +22,7 @@ import { register as structure } from "./tools/structure.ts";
 import { register as layout } from "./tools/layout.ts";
 import { register as variations } from "./tools/variations.ts";
 import { register as links } from "./tools/links.ts";
+import { register as comments } from "./tools/comments.ts";
 
 process.on("unhandledRejection", (e) => process.stderr.write(`[canvas-mcp] ${e}\n`));
 
@@ -34,6 +35,7 @@ export const INSTRUCTIONS = [
   "Pages group boards (list_pages); only the active page's boards show. select_nodes and fit_view switch to a node's page.",
   "Animated cards: create_shader / update_shader take WGSL (fn shade) and answer with compile errors or a rendered frame and its GPU cost; fix errors in the same turn.",
   "Video cards: add_video plays a local video file on the canvas (nearNodeId puts it exactly over an image placeholder and links it to the node); video_frame shows a frame at time t.",
+  "Comments: list_comments shows the threads the person pinned to layers; add_comment pins a note or question of yours, reply_comment answers a thread, resolve_comment closes it. Comments are saved beside the design (comments.json) and are not in undo.",
   "When you finish a set of changes the person is watching, call finish_work once: it shows what changed with a gloss, a toast and a sound.",
   "Disk-only tools (get_document_summary, lookup_nodes, inspect_node, get_fonts, render_node, widgets) work with Canvas closed. Live tools return no_page or no_shell when nothing is open: call canvas_status, then launch_canvas or open_file.",
   "Errors read \"code: message\" with a hint. stale_revision means the file changed: read again and redo.",
@@ -53,7 +55,7 @@ const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS });
 // "Connected" on the Welcome card and in Settings > Agents.
 server.server.oninitialized = () => { setAgentName(server.server.getClientVersion()?.name); sayHello(); };
 
-for (const r of [app, document, selection, camera, visuals, edits, structure, layout, widgets, shaders, videos, pages, ux, variations, links]) r(server);
+for (const r of [app, document, selection, camera, visuals, edits, structure, layout, widgets, shaders, videos, pages, ux, variations, links, comments]) r(server);
 
 server.registerResource("state", "canvas://state", { title: "Canvas state", description: "Server, app, open pages and the current selection", mimeType: "application/json" }, async (uri) => {
   const h = await health();

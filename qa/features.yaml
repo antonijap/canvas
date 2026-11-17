@@ -195,6 +195,11 @@ features:
     area: resize
     driven: [page, mcp]
     cases: [$layers, rotated, nested, mouse, agent, in-autolayout, in-frame, keyboard, origin]
+  - id: comments
+    name: C pins a comment thread to the layer under the pointer
+    area: comments
+    driven: [page, mcp]
+    cases: [pin, page-point, follows-layer, reply, resolve, show-resolved, layer-deleted, reopen, keyboard, light, dark]
   - id: scale-tool
     name: K scales a layer with its contents
     area: resize
@@ -754,7 +759,7 @@ features:
     name: Settings tabs (General, Canvas, Agents, Sounds, Performance, Privacy, Shortcuts)
     area: chrome
     driven: [native]
-    cases: [$themes, privacy, agents-model, updates]
+    cases: [$themes, privacy, agents-model, updates, comment-name]
   - id: theme
     name: App theme light and dark
     area: chrome

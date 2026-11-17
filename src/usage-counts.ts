@@ -63,6 +63,9 @@ export const USAGE_EVENTS = [
   "update.installed",
   "update.failed",
   "bug.report_opened",
+  "comment.thread_created",
+  "comment.replied",
+  "comment.resolved",
 ] as const;
 export type UsageEvent = (typeof USAGE_EVENTS)[number];
 const ALLOWED = new Set<string>(USAGE_EVENTS);

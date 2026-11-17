@@ -14,6 +14,7 @@ import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { loadDoc, serialize } from "./doc/docfile.ts";
 import { logPathOf } from "./doc/doclog.ts";
+import { forkComments } from "./comments-file.ts";
 
 export const PACKAGE_EXT = ".canvas";
 export const DESIGN_FILE = "document.json";
@@ -357,6 +358,14 @@ export function saveAsCanvas(file: unknown, target: unknown, warnings: string[] 
     if (fs.existsSync(src.widgetsPath)) fs.copyFileSync(src.widgetsPath, path.join(tmp, WIDGETS_FILE));
     else fs.writeFileSync(path.join(tmp, WIDGETS_FILE), JSON.stringify(EMPTY_WIDGETS, null, 2) + "\n");
     copyCardFiles(src, tmp, warnings);
+    // Comments come along as a fork: the copy is another document, so it gets its own comment identity.
+    if (src.kind === "canvas") {
+      try {
+        forkComments(src.displayPath, tmp);
+      } catch (e) {
+        warnings.push(`The comments were not copied: ${(e as Error).message}`);
+      }
+    }
   });
 }
 
