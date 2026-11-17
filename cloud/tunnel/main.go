@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/tailscale/tailcat"
-	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )
 
@@ -181,4 +180,3 @@ func forward(ctx context.Context, o order) {
 	}
 }
 
-var _ = tailcfg.DERPRegionID(0)
