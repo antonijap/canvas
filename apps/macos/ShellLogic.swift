@@ -1035,6 +1035,9 @@ enum MenuSpec {
         Item(title: "Tidy Up", command: "tidy", key: "t", mods: [.control, .option], pageKey: true),
     ]
     static let window: [Entry] = [
+        // Home (Home.swift): the pinned first tab. Shift+Cmd+0 is free: the page's Shift+0 (zoom to 100%) has no Cmd.
+        Item(title: "Home", command: "home", key: "0", mods: [.command, .shift]),
+        nil,
         Item(title: "Minimize", command: "minimize", key: "m"),
         Item(title: "Zoom", command: "zoomWindow", mods: []),
         nil,

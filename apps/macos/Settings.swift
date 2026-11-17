@@ -692,6 +692,8 @@ struct StepperField: View {
 struct FieldButton: View {
     let title: String
     let symbol: String?
+    /// The one main action of a screen: the primary colours.
+    var prominent = false
     let action: () -> Void
     @State private var hovering = false
     var body: some View {
@@ -700,9 +702,10 @@ struct FieldButton: View {
                 if let symbol { Image(systemName: symbol).glyph(GlyphSize.field) }
                 Text(title).font(Typography.label).lineLimit(1)
             }
-            .foregroundStyle(Palette.fg)
+            .foregroundStyle(prominent ? Palette.primaryFg : Palette.fg)
             .padding(.horizontal, 12).frame(height: Metric.field)
-            .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(hovering ? Palette.active : Palette.field.opacity(0.6)))
+            .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous)
+                .fill(prominent ? Palette.primary.opacity(hovering ? 0.88 : 1) : (hovering ? Palette.active : Palette.field.opacity(0.6))))
             .contentShape(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous))
         }
         .buttonStyle(.plain)

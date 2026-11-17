@@ -248,6 +248,7 @@ App menus (Canvas.app; the browser handles the same keys on the page). Menus: Ca
 | Shift+Cmd+G | Ungroup |
 | Cmd+] / Cmd+[ | Bring forward / send backward |
 | Opt+Cmd+] / Opt+Cmd+[ | Bring to front / send to back |
+| Shift+Cmd+0 | Home: the pinned first tab (Window > Home) |
 | Cmd+M | Minimize |
 | Cmd+Q | Quit |
 
@@ -371,6 +372,17 @@ A file's comments can sync live through the team's own Canvas server (`cloud/clo
 - **Authors**: the server's verified author wins for synced comments. An agent's MCP comment sets `Author.agent` (locally and in what the page shows). The server knows only people, so it is sent by the person whose app relayed it and shows as theirs for everyone else; on the relaying machine `relayed` keeps showing it as the agent's.
 - **Page**: the shared bar (top right, under the toolbar island; design board 5) shows the avatars of people who commented (agents excluded), the server's host and a dot (green connected, grey offline, amber sign in again or other trouble). A pending comment shows a clock and "Sends when you're back online" ("Sending" while connected). A refused one shows "Not sent: <reason>" with Retry and Discard (`POST /api/comments/retry|discard?file=`). `GET /api/comments` answers `sync: {url, host, status, connected, me, pending[], rejected[]}` for a shared file.
 - **Tests**: `test/cloud-sync.test.ts` (outbox and confirmed rebuild, ack, refusal, reconnect with since, snapshot, share, token never on disk, dev header only for localhost, the 401 rules), `node qa/cloud-e2e.ts` (the real server run locally with `DEV=1` and two Canvas servers: share, a comment reaching the other file in under a second, offline then reconnect, a person removed from the rules; needs `pnpm install --frozen-lockfile` in `cloud/cloudflare`), `pnpm qa comments` (the shared bar, pending and refused states), `pnpm qa:native settings` (the Cloud tab and a sign-in against a local development server), `Tests/SettingsTests.swift` (address rules).
+
+## Home
+
+Home is the pinned first tab (`apps/macos/Home.swift`; the logic, without views, is `HomeLogic.swift`, tested by `Tests/HomeLogicTests.swift`). It cannot be closed: with no file open it shows a house and "Home", with files open only the house. A click, Shift+Cmd+0 or Window > Home (`MenuSpec.window`, so it is also in Settings > Shortcuts) shows it. `CanvasModel.homeShown` swaps the screen: Home draws over the canvas web view, which is hidden (not removed), so every file tab's page stays alive and nothing else runs under it; Cmd+W with Home showing closes nothing. Opening a file by any route (`CanvasModel.open`) leaves Home. Closing the last file tab, or a launch with nothing to open, lands on Home.
+
+- **Recents**: the app's own list in UserDefaults (`canvas.recents`: path and last opened time, newest first, at most 50, one entry per path). An install from before Home starts from its open tabs. The file the app opens by itself on a first launch (the course) is not a recent until the person opens it from Home or its tab.
+- **Cards**: thumbnail, name, where it lives ("This Mac" with a laptop, or the team server with a cloud, when the file's `comments.json` has a `server`), "Opened" or "Edited" with a relative time (an edit later than the last open wins), and the open comment count (threads not resolved or deleted, plus new threads waiting in the outbox). Home reads each `comments.json` itself (up to 8 MB) off the main thread, so there is no server route. A file that is gone shows greyed with "Moved or deleted" and Remove from recents; right-click has Open, Show in Finder and Remove from recents. The grid reflows from a 220 pt card width.
+- **Thumbnails**: when a file's page goes out of sight (another tab, Home, the tab closing) and when the app quits, `takeSnapshot` of the web view is saved as a 480 px wide PNG at `<state folder>/thumbnails/<first 16 bytes of SHA-256 of the path, in hex>.png` (state folder: `CANVAS_STATE_DIR`, else `~/Library/Application Support/Canvas`). Never inside the `.canvas` package. No picture yet: a neutral tile with the file's initial.
+- **Sidebar**: search (filters the cards by name), Recents, On this Mac (files not shared to a server), Learn Canvas (the course copy, `POST /api/welcome`), then Team servers: the server from Settings > Cloud with its status dot (green connected, grey offline, amber sign in again; polled every 8 s while Home shows) and Add a team server (Settings > Cloud). The server row opens the server view: who you are connected as and the host, then the files on this Mac whose comments are shared to it, with open comments. Files that exist only on the server are not listed: the server stores comments, not files.
+- **First launch** (no recents): the three cards (Learn Canvas, New file, Work with your team) and the empty recents area.
+- **QA**: `pnpm qa:native home` (`qa/native/scenarios-home.ts`): the pinned tab and its shortcut, recents order, comment counts, filter, search, Remove from recents, thumbnails on disk, alignment of the marked controls, the server view and the first-launch page, with screenshots in `qa/out/native/home-*-light.png` and `-dark.png`. QA instances get their own `CANVAS_STATE_DIR`.
 
 ## Copy and paste
 
@@ -544,6 +556,7 @@ swiftc -parse-as-library ShellLogic.swift Tests/ShellLogicTests.swift -o /tmp/sh
 swiftc -parse-as-library LayersLogic.swift Tests/LayersLogicTests.swift -o /tmp/layers-tests && /tmp/layers-tests
 swiftc -parse-as-library ShellLogic.swift PaletteLogic.swift Tests/PaletteLogicTests.swift -o /tmp/palette-tests && /tmp/palette-tests
 swiftc -parse-as-library ShellLogic.swift SettingsLogic.swift Tests/SettingsTests.swift -o /tmp/settings-tests && /tmp/settings-tests
+swiftc -parse-as-library HomeLogic.swift Tests/HomeLogicTests.swift -o /tmp/home-tests && /tmp/home-tests
 ```
 
 Tests never touch real documents: they use temp folders (`CANVAS_ROOTS`), a stubbed Keychain and a fake PostHog. `test/widgets-secrets.test.ts` contains obviously fake `sk_live_...` strings to check secrets never leak; they are not real keys. `test/fixtures/json-kind.ts` is a test-only widget kind (a number from any JSON URL, once the "App value" card) that the source, secret and HTTP tests register; Canvas itself no longer offers it, and a document that still holds one shows it as an unsupported card that can be moved and deleted.
