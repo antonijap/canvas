@@ -275,6 +275,11 @@ enum QA {
             // {theme: "light" | "dark" | "system"}: the app theme, as Settings > General sets it.
             if let t = (a["theme"] as? String).flatMap(AppTheme.init(rawValue:)) { model.theme = t }
             return ["theme": model.theme.rawValue]
+        case "qa.agents":
+            // {added: ["claude"]}: Settings > Agents shows these agents installed with Canvas added (Connected), as the
+            // pane reads them from GET /api/mcp/setup; [] goes back to what this Mac has. No config file is touched.
+            AgentsQA.added = Set((a["added"] as? [String] ?? []).filter { $0 == "claude" || $0 == "codex" })
+            return ["added": AgentsQA.added.sorted()]
         case "qa.cloud":
             // {url, devEmail, name}: the team server address, development email and name, as Settings > Cloud types them.
             if let u = a["url"] as? String { model.prefs.cloudUrl = u }
@@ -296,6 +301,7 @@ enum QA {
             // Between scenarios: nothing left open or held from the last one.
             VirtualDrag.current = nil
             PaintHooks.answerDelay = 0
+            AgentsQA.added = []
             UserDefaults.standard.set(false, forKey: BindQA.key)
             panels = []
             hides = []
@@ -1311,5 +1317,11 @@ extension NSView {
         }
         return MainActor.assumeIsolated { v.session }
     }
+}
+
+/// qa.agents: the agents Settings > Agents shows as added, over what GET /api/mcp/setup says (Settings.swift loadSetup).
+@MainActor
+enum AgentsQA {
+    static var added: Set<String> = []
 }
 #endif

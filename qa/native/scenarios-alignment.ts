@@ -129,16 +129,18 @@ sc("settings", "alignment: General, Cloud (with and without a server) and Agents
       k.near("server address: the text's cap middle on the field's centre line", line(s, urlField, 13, "http://127.0.0.1:1")?.cap, cy(box(urlField)));
       bad.push(...k.bad);
       // Agents: each row's Connect and status dot (Copy and the model menus moved into the row's … menu), and that menu.
+      await t.cmd("qa.agents", { added: ["claude"] });
       await openSettings(t, "Agents");
       for (const h of ["claude", "codex"]) await t.mark({ id: `agent-menu-${h}`, window: "settings" }, 4000);
-      await sleep(2600); // the rows follow /api/mcp/setup, asked every 2 s
+      await t.waitFor(async () => (await marks(t, "settings", "connect-claude"))[0]?.label === "Connected", "Claude Code to show Connected", 6000);
+      await sleep(600);
       s = await grab(t, "settings");
       k = new AlignChecker("native-settings", theme, s.img, s.k);
       if (await one(t, "settings", "field-button", "Connect")) await fieldButton(t, k, s, "Connect", "agents-connect");
-      // A dot shows only beside Connected (an agent with Canvas added); Not installed has none.
-      const dotted = (await marks(t, "settings", "status-text")).filter((m) => m.label === "Connected");
-      for (const st of dotted) await dotOnText(t, k, s, "status-dot", st, 13, "agents-status");
-      if (!dotted.length) t.notes.push(`no agent shows Connected (${theme}): the status dot was not measured`);
+      // The dot sits beside Connected: Claude Code is shown added (qa.agents above), so it is always measured.
+      const connected = (await marks(t, "settings", "status-text")).find((m) => m.label === "Connected") ?? null;
+      if (!connected) k.bad.push(`agents (${theme}): no row shows Connected`);
+      await dotOnText(t, k, s, "status-dot", connected, 13, "agents-status");
       for (const [h, title] of [["claude", "Claude Code"], ["codex", "Codex"]] as const) {
         const menu = await one(t, "settings", `agent-menu-${h}`);
         const dots = k.ink(`agents-menu-${h}`, bare(box(menu)), { inset: 0 });
@@ -152,6 +154,7 @@ sc("settings", "alignment: General, Cloud (with and without a server) and Agents
       bad.push(...k.bad);
     }
   } finally {
+    await t.cmd("qa.agents", { added: [] }).catch(() => {});
     await t.cmd("qa.cloud", { url: "", devEmail: "" }).catch(() => {});
     await t.cmd("qa.theme", { theme: "light" }).catch(() => {});
     team.closeAllConnections();
@@ -322,6 +325,7 @@ sc("home", "alignment: Home's tab, header buttons, filter, sidebar rows and serv
       await t.waitState((st) => st.homeSection === "recents", "Recents");
     }
   } finally {
+    await t.cmd("qa.agents", { added: [] }).catch(() => {});
     await t.cmd("qa.cloud", { url: "", devEmail: "" }).catch(() => {});
     await t.cmd("qa.theme", { theme: "light" }).catch(() => {});
     team.closeAllConnections();
