@@ -1577,11 +1577,8 @@ function kick(st: FileState): void {
   clearTimeout(st.writeTimer);
   st.writeTimer = undefined;
   if (st.writing || !host) return;
-  const saved = st.saved;
   st.writing = run(st).finally(() => {
     st.writing = undefined;
-    // Usage counts: one file.save per write that put a changed document on disk.
-    if (st.saved > saved) countUsage("file.save");
     land(st);
     // A retry already has its timer; after the last retry the next edit or flush tries again.
     if (st.dirty && !st.writeTimer && st.retries < writeConfig.maxRetries) scheduleWrite(st);
@@ -1698,6 +1695,8 @@ function settle(st: FileState, key: string, hash: string, v: number, keepJournal
   st.diskKey = `${key}:?`;
   st.diskHash = hash;
   st.diskVersion = v;
+  // Usage counts: one file.save per write that put a changed document on disk.
+  if (v > st.saved) countUsage("file.save");
   st.saved = Math.max(st.saved, v);
   st.bytes = Number(key.split(":")[1]);
   st.pending = st.pending.filter((p) => p.version > v);
@@ -1957,6 +1956,7 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
     st.logSeen = `${ino}:${info.size}`;
     st.logFold = true;
     st.diskVersion = v;
+    if (v > st.saved) countUsage("file.save"); // usage counts: the edits are on disk, in the save log
     st.saved = Math.max(st.saved, v);
     const savedEdits = st.pending.filter((p) => p.version <= v);
     st.pending = st.pending.filter((p) => p.version > v);
