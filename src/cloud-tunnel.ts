@@ -37,6 +37,8 @@ export class Helper {
   private buf = "";
   private readonly waiters: ((e: HelperEvent) => void)[] = [];
   private exited = false;
+  /** The latest event of each kind (a forward says now and then whether its path is direct: "path"). */
+  readonly last = new Map<string, HelperEvent>();
   onExit: (code: number | null) => void = () => {};
 
   constructor(bin: string, order: Record<string, unknown>) {
@@ -55,7 +57,9 @@ export class Helper {
         this.buf = this.buf.slice(i + 1);
         let e: HelperEvent;
         try { e = JSON.parse(line); } catch { continue; }
-        if (e && typeof e.event === "string") for (const w of this.waiters.splice(0)) w(e);
+        if (!e || typeof e.event !== "string") continue;
+        this.last.set(e.event, e);
+        for (const w of this.waiters.splice(0)) w(e);
       }
     });
     this.child.stdin!.on("error", () => {});

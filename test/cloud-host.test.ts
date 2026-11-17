@@ -155,6 +155,7 @@ test("removal: devices, pending codes and sockets go at once; a new person with 
   const pending = h.invite("ben@studio.test", "commenter"); // a second device on its way
   assert.ok(h.remove(benId));
   await until(() => closed);
+  assert.ok(got.some((m) => m.type === "error" && m.code === "unauthenticated"), "told it was removed before the close (its tunnel goes too)");
   assert.equal((await fetch(`${base}/v1/me`, { headers: bearer(ben.token) })).status, 401);
   assert.equal((await join(base, pending.code)).status, 401, "the pending code was cancelled");
   // A new person who happens to get the same label cannot edit Ben's comment: ids decide, not labels.

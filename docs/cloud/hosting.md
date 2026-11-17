@@ -45,4 +45,13 @@ Settings > Cloud > **Leave** forgets the invite on this Mac and stops its tunnel
 
 ### Checking the real tunnel
 
-The tests use a stand-in for the tunnel. To check the real one by hand: build Canvas with Go installed, turn on hosting on one Mac, invite yourself from a second Mac on another network (a phone hotspot works), share a file and comment from both sides. Close the first Mac's lid: the second one reads "Cloud down" within about half a minute, and catches up when the lid opens.
+The tests use a stand-in for the tunnel. The same end to end runs through the real one on a single Mac (it needs the network for the relays, and 127.0.0.1:5190 free):
+
+```sh
+cd cloud/tunnel && go build -mod=readonly -trimpath -o /tmp/canvas-tunnel . && cd ../..
+CANVAS_E2E_TUNNEL=/tmp/canvas-tunnel node qa/cloud-hosted-e2e.ts
+```
+
+It hosts, invites, joins, syncs comments both ways, moves a pin, pauses the Cloud (the joining side reads "Cloud down", then catches up), removes the person (their socket closes and their tunnel key no longer gets in), and checks nothing is left running. It prints whether the traffic went directly or through a relay. Two Macs on different networks (a phone hotspot works) are the last check: comment from both sides, close the host's lid, and the other Mac reads "Cloud down" within about half a minute and catches up when the lid opens.
+
+`apps/macos/build.sh` finds Go on the PATH or through mise (`mise exec go@1.27`).
