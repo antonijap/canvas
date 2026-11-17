@@ -24,7 +24,11 @@ test("build.sh compiles the app for Info.plist's minimum", () => {
   assert.match(sh, /MINOS="\$\(\/usr\/libexec\/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info\.plist\)"/, "the target comes from Info.plist");
 });
 
-test("the Swift sources compile for that minimum without newer APIs", { skip: process.platform !== "darwin" }, () => {
+// Needs an SDK at least as new as the minimum (CI's older Xcode lacks the macOS 26 APIs the shell uses).
+const sdkMajor = () => { try { return Number(execFileSync("xcrun", ["--sdk", "macosx", "--show-sdk-version"], { encoding: "utf8" }).split(".")[0]); } catch { return 0; } };
+const noSdk = process.platform !== "darwin" ? "macOS only" : sdkMajor() < Number(plistMin()!.split(".")[0]) ? "the macOS SDK here is older than the minimum" : false;
+
+test("the Swift sources compile for that minimum without newer APIs", { skip: noSdk }, () => {
   const sh = fs.readFileSync(path.join(MAC, "build.sh"), "utf8");
   const files = sh.split("\n").find((l) => l.startsWith("swiftc "))!.split(/\s+/).filter((w) => w.endsWith(".swift") && !w.includes("*"));
   const ds = fs.readdirSync(path.join(MAC, "DesignSystem")).filter((f) => f.endsWith(".swift")).map((f) => "DesignSystem/" + f);
