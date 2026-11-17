@@ -38,7 +38,7 @@ Evidence for interaction-conventions and other product work. An item is done onl
 | [moving.md](moving.md) | Space keeps the parent, the move modifiers, smart selection, tidy up, align to parent, rotation origin |
 | [leftovers.md](leftovers.md) | Layout guides, paragraph spacing and indent, lists |
 | [gaps.md](gaps.md) | Shader card to fill, nested instance swap, Components panel drag, reset by right-click, replace image fill, copy one paint, letter case, hanging punctuation, list details, undo atomicity |
-| [speed.md](speed.md) | 5,000-board open, save log (two reviews' findings fixed; off by default, `CANVAS_SAVE_LOG=1` turns it on) |
+| [speed.md](speed.md) | 5,000-board open, save log (two reviews' findings and the last four cases fixed; on by default, `CANVAS_SAVE_LOG=0` turns it off) |
 | [keys.md](keys.md) | Real-key tests for K, Opt+Cmd+Shift+R, Opt+Cmd+C/V, `.`, Cmd+] / [, Opt+Cmd+K/B, Cmd+Return, Shift+Cmd+Return |
 | [qa-infra.md](qa-infra.md) | Native QA without OCR, Shift+Cmd chord check, page lists on add and delete |
 | [privacy.md](privacy.md) | Usage counts to the website's contract and Settings > Privacy (Share usage counts, Help improve Canvas, Show what's sent) |

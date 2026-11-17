@@ -37,7 +37,7 @@ import { promisify } from "node:util";
 import zlib from "node:zlib";
 import { boardCache, forgetBoard } from "./boardcache.ts";
 import { boardLacks } from "./doc/boardindex.ts";
-import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logPathOf, logSig, logSigSync, parseLog, readLogSync, removeLogSync, tryLockLog, type LogInfo } from "./doc/doclog.ts";
+import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logLockable, logPathOf, logSig, logSigSync, markFold, parseLog, readLogSync, removeLogSync, tieCtimeOf, tryLockLog, type LogInfo } from "./doc/doclog.ts";
 import { boardDigestStale, snapshotOfDoc, type Snapshot } from "./boards.ts";
 import { backupDirFor, findNode, loadDoc, loadDocAsync, revisionOf, sha, StaleFileError, writeDoc, type LoadedDoc, type CanvasDoc, type DocNode } from "./engine.ts";
 import type { NodeOp, Op } from "./history.ts";
@@ -101,9 +101,10 @@ export const writeConfig = {
   maxRetries: 6,
   /**
    * Documents at least this big save by appending the boards that changed to the save log (doc/doclog.ts) instead of
-   * rewriting the whole file. Infinity: never (CANVAS_SAVE_LOG=0 turns it off; docs/evidence/speed.md, save log review).
+   * rewriting the whole file: 1 MB. Infinity: never (CANVAS_SAVE_LOG=0 turns it off; docs/evidence/speed.md, "Save log,
+   * last cases"). A volume without flock never uses it (doc/doclog.ts logLockable).
    */
-  logMinBytes: process.env.CANVAS_SAVE_LOG === "1" ? 1024 * 1024 : Infinity,
+  logMinBytes: process.env.CANVAS_SAVE_LOG === "0" ? Infinity : 1024 * 1024,
   /** The log is folded into a whole write once it passes this share of the document (or logMaxBytes, if larger)... */
   logMaxShare: 0.25,
   logMaxBytes: 4 * 1024 * 1024,
@@ -216,7 +217,7 @@ type FileState = {
    * The save log on top of document.json that this state holds (doc/doclog.ts): what it holds, its open file once
    * this run appended, and when its first record was written (ours).
    */
-  log?: { info: LogInfo; fh?: fs.promises.FileHandle; checked?: boolean; since?: number };
+  log?: { info: LogInfo; fh?: fs.promises.FileHandle; checked?: boolean; since?: number; /** This state appended every record in it (it made the log): `logged` holds all their edits. */ mine?: boolean };
   /** The log file as this state last saw it: inode:bytes, or "none". Any other is someone else's change. */
   logSeen: string;
   /** Edits saved in our log, not in document.json yet: they go on top of a save that does not know the log. */
@@ -225,6 +226,11 @@ type FileState = {
   logFold?: boolean;
   /** A log of a version this build does not read is there: never removed, saves are whole. */
   logUnknown?: boolean;
+  /**
+   * Document ctimes this server caused itself while a log was in play (a hard link to the document made and removed
+   * by a whole write that then did not land): not a restore in place (restoreSuspected).
+   */
+  ownCtimes?: Set<string>;
   /** The release of the log lock this write holds (run takes it, and lets go when it ends). */
   unlock?: () => void;
   /** Waiting for the log lock another Canvas holds, to load again under it (settleLater). */
@@ -1012,13 +1018,16 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
   const prevOurs = !!prevLog && prevLog.info.owner === OWNER;
   // (No log held, but pending edits carry a seq: the log this state was creating when the disk moved under it.)
   const creating = !prevLog && st.logSeen === "none" && st.pending.some((p) => p.seq !== undefined) && (l.log?.owner ?? l.logHead?.owner) === OWNER;
-  const sameFile = creating || (prevOurs && inoOf(st.logSeen) !== undefined && inoOf(st.logSeen) === inoOf(l.logSeen));
+  const sameIno = prevOurs && inoOf(st.logSeen) !== undefined && inoOf(st.logSeen) === inoOf(l.logSeen);
+  // Covered only when this state wrote every record of that file: a log of ours it loaded (written by this server at
+  // another path, before a move) has records whose edits are in no Pending here, so it is never taken as covered.
+  const sameFile = creating || (sameIno && !!prevLog!.mine);
   const heldSeq = sameFile ? Math.max(prevLog?.info.seq ?? 0, ...st.pending.map((p) => p.seq ?? 0)) : -1;
   // A stale log that is ours, a copy, or one whose owner is gone is settled under the lock: no other Canvas is
   // folding it into a whole write at this moment (it would remove it right after), so whether it is still there says
   // whose it is. Without the lock it is never recovered or removed: the load waits for it (not on the main thread).
   const owner = l.logHead?.owner;
-  const needLock = !!(l.logStale && l.logHead && (l.logCopy || owner === OWNER || !ownerAlive(owner)));
+  const needLock = !!(l.logStale && l.logHead && (l.logFolded || l.logCopy || owner === OWNER || !ownerAlive(owner)));
   let unlock: (() => void) | undefined;
   let deferred = false;
   if (st.loadLock) {
@@ -1067,17 +1076,24 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
     // Our log is gone (or another file stands in its place) while document.json is still the very bytes it applied
     // to: no whole write folded it (that writes new bytes); something deleted it (a version control clean or stash,
     // a sync or cleanup tool). Its edits are on disk nowhere: back as pending, and written whole.
-    if (prevOurs && prevLogged.length && !sameFile && l.hash === prevLog!.info.base) {
+    if (prevOurs && prevLogged.length && !sameIno && l.hash === prevLog!.info.base) {
       merge = prevLogged;
       compact = true;
     }
+    // The same for a log of ours this state loaded rather than wrote (folding it was due): its records are in what
+    // Canvas showed, nowhere else. That version is kept as a recovery copy.
+    if (prevOurs && !prevLog!.mine && prevLog!.info.records && !sameIno && !l.log && l.hash === prevLog!.info.base && before) {
+      const out = recover(st, before.doc, before.format, "save log gone");
+      report(docFile, `${path.basename(docFile)}: its save log was removed from outside before Canvas folded it${out ? `; Canvas's version with its ${prevLog!.info.records} save${prevLog!.info.records === 1 ? "" : "s"} is saved as ${out}` : ""}`);
+    }
     if (l.log) {
-      st.log = { info: { ...l.log }, since: l.log.owner === OWNER ? (since ?? Date.now()) : Date.now() };
+      st.log = { info: { ...l.log }, since: l.log.owner === OWNER ? (since ?? Date.now()) : Date.now(), mine: false };
       st.logFold = true; // the state holds it: a whole write of this state retires it
       if (l.log.copy) compact = true; // copied with its package: into the copy's document.json at once
       else if (l.log.owner === OWNER) {
         if (sameFile && l.log.seq <= heldSeq) {
           const seq = l.log.seq;
+          st.log.mine = true;
           st.logged = prevLogged.filter((p) => p.seq !== undefined && p.seq <= seq);
           merge = prevLogged.filter((p) => !(p.seq !== undefined && p.seq <= seq));
         } else compact = true; // ours by name, but not this state's: its edits into document.json at once
@@ -1085,10 +1101,25 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
       // Another live server's log: edits of ours that were in a log of ours are in it (the whole write that retired
       // ours held them).
     } else if (l.logStale && l.logHead && !deferred && locked) {
-      if (l.logCopy) {
+      if (l.logFolded) {
+        // A Canvas folded it into these very bytes and stopped before removing it (its fold line names them): they
+        // hold every edit in it. Nothing is put on top again (it would land twice) and nothing is recovered.
+        if (stillThere()) {
+          retire = true;
+          if (sameFile) {
+            const seq = logSeqNow(docFile);
+            st.pending = st.pending.filter((p) => !(p.seq !== undefined && p.seq <= seq));
+          }
+        }
+      } else if (l.logCopy) {
         // A copy of another package's log, for bytes that are not the ones it was written for: its edits over these
         // bytes as a recovery copy.
         if (stillThere()) retire = recoverStaleLog(st, l, format);
+      } else if (l.logRestored) {
+        // The file was put back in place to the very bytes the log started from (cp -p, a backup tool): the person
+        // rolled it back. The logged edits are not put on top again (whoever owns the log), and not lost either:
+        // a recovery copy, and the person is told.
+        if (stillThere()) retire = recoverStaleLog(st, l, format, "restored");
       } else if (l.logHead.owner === OWNER) {
         // Someone saved document.json whole without our log's edits (an older build, another app, a sync client): they go on
         // top of their save. Gone meanwhile: a Canvas folded it into the bytes it wrote, which hold them. A log of
@@ -1181,7 +1212,7 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
  * applied to the new bytes are saved as a recovery copy and reported. True when the log may go (its edits are in
  * that copy, or it held none); otherwise it is moved next to the document instead (and true as well).
  */
-function recoverStaleLog(st: FileState, l: LoadedDoc, format: Format): boolean {
+function recoverStaleLog(st: FileState, l: LoadedDoc, format: Format, why?: "restored"): boolean {
   let raw: Buffer | undefined;
   try {
     raw = readLogSync(st.docFile)?.raw;
@@ -1201,9 +1232,12 @@ function recoverStaleLog(st: FileState, l: LoadedDoc, format: Format): boolean {
       return false;
     }
   }
+  const saves = `${p.records.length} save${p.records.length === 1 ? "" : "s"}`;
   report(
     st.docFile,
-    `${path.basename(st.docFile)} was saved by another app after Canvas stopped, without ${p.records.length} save${p.records.length === 1 ? "" : "s"} Canvas had made` +
+    (why === "restored"
+      ? `${path.basename(st.docFile)} was put back to an earlier version by another app (a restore), without the last ${saves} Canvas had made`
+      : `${path.basename(st.docFile)} was saved by another app after Canvas stopped, without ${saves} Canvas had made`) +
       `${out ? `; Canvas's version with ${n === p.records.length ? "them" : `${n} of them`} is saved as ${out}` : ""}${kept ? `; Canvas's save log is kept as ${kept}` : ""}`,
   );
   return true;
@@ -1673,11 +1707,37 @@ async function hashFile(file: string): Promise<string> {
 }
 
 /**
+ * Only the ctime of the document moved (signature `sig`, same inode, size and mtime), while a log with records applies
+ * to it whose tie names another ctime: the file may have been put back in place to the log's base bytes (cp -p, a
+ * backup tool). Then it is loaded again rather than taken as unchanged, and the load decides (a restore: the logged
+ * edits go to a recovery copy, not on top). The snapshot cache asks the same (server.ts).
+ */
+export function restoreSuspected(docFile: string, sig: string): boolean {
+  const st = states.get(docFile);
+  const tie = st?.log?.info.records ? st.log.info.tie : undefined;
+  const c = tieCtimeOf(tie);
+  if (!st || c === undefined) return false;
+  const [ino, , mtime, ctime] = sig.split(":");
+  if (`${ino}:${mtime}` !== tie!.split(":").slice(0, 2).join(":")) return false;
+  return ctime !== c && !st.ownCtimes?.has(ctime);
+}
+
+/** A whole write of ours linked the document and took the link away without replacing it: its ctime is ours. */
+function ownCtime(st: FileState, base: string | undefined): void {
+  if (!st.log || !base) return;
+  try {
+    const now = keyOf(fs.statSync(st.docFile));
+    if (key3(now) === key3(base)) (st.ownCtimes ??= new Set()).add(now.split(":")[3]);
+  } catch {}
+}
+
+/**
  * The disk shows `key` instead of what we noted (only the ctime moved: a tag, a chmod, or a write of ours whose
  * signature is not verified yet): are its bytes the ones we last wrote? The signature must hold still around the read.
  */
 async function sameBytes(st: FileState, key: string): Promise<boolean> {
   if (!st.diskHash || !st.diskKey || key3(key) !== key3(st.diskKey)) return false;
+  if (restoreSuspected(st.docFile, key)) return false;
   try {
     const h = await hashFile(st.docFile);
     return h === st.diskHash && (await statKey(st.docFile)) === key;
@@ -1767,6 +1827,7 @@ function retireLog(st: FileState): void {
 function logEligible(st: FileState): boolean {
   if (!(st.bytes >= writeConfig.logMinBytes) || !Number.isFinite(st.bytes)) return false;
   if (!st.logDoc || st.compactDue || st.undurable || !st.diskHash || st.logUnknown) return false;
+  if (!logLockable(st.docFile)) return false; // no flock on this volume: no log (doc/doclog.ts, the lock)
   if (st.log) {
     // Only our own log, for the bytes on disk, and not older than compactMaxMs (the window an older build or another app
     // reads document.json without it stays short even while edits never pause).
@@ -1909,9 +1970,10 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
       // ruled out above. Created exclusively: never over a log someone else just made.
       if (st.logSeen !== "none") await fs.promises.rm(file, { force: true });
       fresh = await fs.promises.open(file, "wx", format.mode || 0o644);
-      // The tie: the document's inode:mtime, and the log file's own inode (a copy of the package has another).
+      // The tie: the document's inode:mtime, the log file's own inode (a copy of the package has another), and the
+      // document's ctime (a restore in place can set the mtime back, never the ctime).
       const k = base!.split(":");
-      const tie = `${k[0]}:${k[2]}:${(await fresh.stat()).ino}`;
+      const tie = `${k[0]}:${k[2]}:${(await fresh.stat()).ino}:${k[3]}`;
       const head = headerOf(docHash, tie, OWNER);
       for (const p of saving) p.seq = seq;
       await writeAt(fresh, Buffer.concat([head, rec.bytes]), 0);
@@ -1950,7 +2012,7 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
       return "retry";
     }
     const ino = fresh ? (await fresh.stat()).ino : Number(st.logSeen.split(":")[0]);
-    if (fresh) lg = st.log = { info, fh: fresh, checked: true, since: Date.now() };
+    if (fresh) lg = st.log = { info, fh: fresh, checked: true, since: Date.now(), mine: true };
     else lg!.info = info;
     fresh = undefined;
     st.logSeen = `${ino}:${info.size}`;
@@ -2366,9 +2428,10 @@ async function runWrites(st: FileState): Promise<void> {
       // The checks after the write before this one finish first: what they find (someone's save crossed it, the
       // bytes on disk are not what it wrote) changes what this write may replace.
       if (st.checking) await st.checking;
-      // A save log in play: the swap and the log's retirement happen under the lock, so no Canvas appends to it or
-      // folds it in between.
-      if (!st.unlock && (st.log || st.logSeen !== "none" || (await logSig(docFile)) !== "none")) await takeLock(st);
+      // The swap and the log's retirement happen under the lock, so no Canvas appends to the log or folds it in between.
+      // Always, not only when this state saw a log: another Canvas may have made one since and be folding it right now
+      // (between its last look at the disk and its rename); a rename of ours in there would be lost under its.
+      if (!st.unlock) await takeLock(st);
       // Last look before the swap: the disk must still be the bytes this write was based on, and nobody (an outside
       // reload) invalidated it meanwhile.
       const now = await statKey(docFile);
@@ -2390,29 +2453,50 @@ async function runWrites(st: FileState): Promise<void> {
       // possible). Without that, the write does not happen.
       const baseHash = st.diskHash;
       const prev = prevName(tmp, baseHash);
+      // From here to the rename no load runs (st.renaming holds them back): one in between would make this write stale
+      // after the document was linked, and a link made and taken away again moves the document's ctime, which a save
+      // log's tie reads as a restore in place (doc/doclog.ts).
+      st.renaming = true;
       let kind: "link" | "copy";
       try {
         kind = await preserve(docFile, prev, baseHash);
       } catch (e) {
+        st.renaming = false;
         await fs.promises.rm(tmp, { force: true });
         throw e;
       }
       if (st.epoch !== epoch || (kind === "link" && key3(keyOf(await fs.promises.stat(prev))) !== key3(base!))) {
+        st.renaming = false;
         await fs.promises.rm(prev, { force: true });
         await fs.promises.rm(tmp, { force: true });
+        if (kind === "link") ownCtime(st, base);
         st.dirty = true;
         if (++looks > 5) throw new Error(`${docFile} keeps changing on disk`);
         continue;
       }
       host.markOwn(docFile, key, hash);
-      st.renaming = true;
+      // This write folds the log it holds: the fold line first, so a crash between the rename and the log's removal
+      // leaves a log that names these bytes (doc/doclog.ts) instead of one whose edits would be put on top again.
+      let unmark: (() => void) | null = null;
       try {
-        await fs.promises.rename(tmp, docFile);
+        if (st.logFold && st.logSeen !== "none") unmark = await markFold(docFile, hash);
       } catch (e) {
         st.renaming = false;
         host.markOwn(docFile, null);
         await fs.promises.rm(tmp, { force: true });
         await fs.promises.rm(prev, { force: true });
+        if (kind === "link") ownCtime(st, base);
+        throw e;
+      }
+      try {
+        await fs.promises.rename(tmp, docFile);
+      } catch (e) {
+        unmark?.();
+        st.renaming = false;
+        host.markOwn(docFile, null);
+        await fs.promises.rm(tmp, { force: true });
+        await fs.promises.rm(prev, { force: true });
+        if (kind === "link") ownCtime(st, base);
         throw e;
       }
       // The written file's full signature (the ctime the rename gave it), read at once.
@@ -2523,8 +2607,26 @@ async function runWrites(st: FileState): Promise<void> {
 
 /** A small document: written now, the way store.ts saveDoc does, all synchronous. False when the async path must take it. */
 function writeSmall(st: FileState, format: Format, buf: Buffer, hash: string): boolean {
-  const docFile = st.docFile;
   if (st.log || st.logged.length || st.logSeen !== "none") return false; // a save log in play: the background path, under its lock
+  // The lock, as every whole write takes it (runWrites): another Canvas may have made a log since this state looked and
+  // be folding it. One try; when someone holds it, or a log is there now, the background path takes the write.
+  let unlock: (() => void) | null;
+  try {
+    unlock = tryLockLog(st.docFile);
+  } catch {
+    return false;
+  }
+  if (!unlock) return false;
+  try {
+    if (logSigSync(st.docFile) !== "none") return false;
+    return writeSmallLocked(st, format, buf, hash);
+  } finally {
+    unlock();
+  }
+}
+
+function writeSmallLocked(st: FileState, format: Format, buf: Buffer, hash: string): boolean {
+  const docFile = st.docFile;
   let base: string | null;
   try {
     base = keyOf(fs.statSync(docFile));

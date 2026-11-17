@@ -555,3 +555,275 @@ describe("second review: the package renamed while open", () => {
     }
   });
 });
+
+// ------------------------------------------------------------------------------------------------------------------
+// The last four cases (docs/evidence/speed.md, "Save log, last cases"): a plain whole save whose load saw no log, the
+// lock on a volume without flock, Save As by a server that never opened the source, a restore in place of the base.
+
+const { saveDoc } = await import("../src/doc/docfile.ts");
+const { execFileSync } = await import("node:child_process");
+const { pathToFileURL } = await import("node:url");
+
+/**
+ * Another Canvas in the middle of folding the log into a whole write: it holds the lock from its last look at the
+ * disk until its rename (`ms` later), then puts `bytes` in place and retires the log, as runWrites does.
+ */
+async function foldBy(p: { root: string; docPath: string; logPath: string }, bytes: string, ms: number) {
+  const { spawn: spawnProc } = await import("node:child_process");
+  const src = path.join(p.root, `fold-${n++}.json`);
+  fs.writeFileSync(src, bytes);
+  const code = `const fs=require("fs");const [lock,doc,log,src,ms]=process.argv.slice(1);const fd=fs.openSync(lock,fs.constants.O_RDWR|fs.constants.O_CREAT|0x20|fs.constants.O_NONBLOCK,0o600);console.log("HELD");setTimeout(()=>{fs.copyFileSync(src,doc+".fold.tmp");fs.renameSync(doc+".fold.tmp",doc);fs.rmSync(log,{force:true});fs.closeSync(fd);console.log("DONE")},Number(ms))`;
+  const h = spawnProc(process.execPath, ["-e", code, L.lockPathOf(p.docPath), p.docPath, p.logPath, src, String(ms)], { stdio: ["ignore", "pipe", "inherit"] });
+  await new Promise<void>((r) => h.stdout!.on("data", (d) => String(d).includes("HELD") && r()));
+  return { done: new Promise<void>((r) => (h.exitCode !== null ? r() : h.once("exit", () => r()))) };
+}
+/** A server started with extra environment (read when it starts). */
+async function spawnEnv(root: string, env: Record<string, string>): Promise<Scratch> {
+  const keep = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  try {
+    return await spawn(root);
+  } finally {
+    for (const [k, v] of Object.entries(keep)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+/** A preload that makes every volume look like one without flock (a network share whose server has no lock support). */
+function noFlockPreload(): string {
+  fs.mkdirSync(dir, { recursive: true });
+  const f = path.join(dir, "no-flock.mjs");
+  fs.writeFileSync(
+    f,
+    `import fs from "node:fs";
+const open = fs.openSync;
+fs.openSync = function (p, flags, ...rest) {
+  if (typeof flags === "number" && flags & 0x20 && String(p).endsWith(".canvas-lock")) throw Object.assign(new Error("ENOTSUP: operation not supported (simulated: no flock on this volume)"), { code: "ENOTSUP" });
+  return open.call(this, p, flags, ...rest);
+};
+`,
+  );
+  return f;
+}
+/** A layer's name as a running server shows it. */
+async function shown(b: string, file: string, id: string): Promise<string | undefined> {
+  const r = await fetch(`${b}/api/node?file=${encodeURIComponent(file)}&id=${encodeURIComponent(id)}&depth=0`, { headers: { "x-canvas": "1" } });
+  const j: any = await r.json();
+  return j?.name ?? j?.node?.name;
+}
+
+describe("last cases", () => {
+  test("a plain whole save (store.ts saveDoc) whose load saw no log takes the lock: it never lands inside another Canvas's fold", async () => {
+    const p = pkg("plainlock");
+    const l = loadDoc(p.docPath); // before any log existed
+    assert.equal(l.logSeen, undefined);
+    // Another Canvas makes a log, answers an edit from it, and crashes; a third Canvas folds that log into a whole
+    // write (it holds the lock from its last look at the disk until its rename).
+    const B = await spawn(p.root);
+    const b = client(B.base, p.pkg);
+    await b.open();
+    assert.equal((await b.update("B0N1", { name: "E1" })).status, 200);
+    assert.equal((await b.flush()).status, 200);
+    await kill9(B);
+    assert.ok(fs.existsSync(p.logPath), "E1 is in the log");
+    const fold = await foldBy(p, JSON.stringify(withLog(p.docPath), null, 2), 1500);
+    const keep = L.lockConfig.syncWaitMs;
+    L.lockConfig.syncWaitMs = 5000; // a standalone process (a script, the MCP server) waits for the lock
+    let answered = false, refused = "";
+    try {
+      nodeIn(l.doc, "B9N9").name = "PLAIN";
+      saveDoc(l, l.doc);
+      answered = true;
+    } catch (e) {
+      refused = (e as Error).message;
+    } finally {
+      L.lockConfig.syncWaitMs = keep;
+    }
+    await fold.done;
+    const d = alone(p.docPath);
+    assert.equal(nodeIn(d, "B0N1").name, "E1", "the other Canvas's acknowledged edit is in document.json");
+    if (answered) assert.equal(nodeIn(d, "B9N9").name, "PLAIN", "the plain save answered: its edit is in document.json");
+    else assert.match(refused, /changed on disk/, "the plain save was refused, and says why");
+    // Redone on what is there now: both.
+    writeDoc(p.docPath, {}, (x) => void (nodeIn(x, "B9N9").name = "PLAIN"));
+    const e = alone(p.docPath);
+    assert.equal(nodeIn(e, "B0N1").name, "E1");
+    assert.equal(nodeIn(e, "B9N9").name, "PLAIN");
+  });
+
+  test("on a volume without flock the log stays off: saves are whole, no stand-in lock file, and a log that came along is still folded", async () => {
+    const pre = noFlockPreload();
+    const env = { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(pre).href}`.trim() };
+    const p = pkg("noflock");
+    const s = await spawnEnv(p.root, env);
+    try {
+      const c = client(s.base, p.pkg);
+      await c.open();
+      assert.equal((await c.update("B0N1", { name: "E1" })).status, 200);
+      assert.equal((await c.flush()).status, 200);
+      assert.equal(fs.existsSync(p.logPath), false, "the log stays off on a volume without flock");
+      assert.equal(nodeIn(alone(p.docPath), "B0N1").name, "E1", "the edit is in document.json, saved whole");
+      assert.equal(fs.existsSync(L.lockPathOf(p.docPath) + ".held"), false, "no stand-in lock file");
+    } finally {
+      await stop(s);
+    }
+    // A package with a log in it (made where flock works, its server gone) copied onto such a volume: still applied
+    // and folded into document.json.
+    const q = pkg("noflock-copy");
+    const B = await spawn(q.root);
+    await client(B.base, q.pkg).open();
+    assert.equal((await client(B.base, q.pkg).update("B2N2", { name: "LOGGED" })).status, 200);
+    assert.equal((await client(B.base, q.pkg).flush()).status, 200);
+    await kill9(B);
+    assert.ok(fs.existsSync(q.logPath));
+    const t = await spawnEnv(q.root, env);
+    try {
+      assert.equal((await client(t.base, q.pkg).open()).status, 200);
+      assert.ok(await until(() => !fs.existsSync(q.logPath), 8000), "the log is folded");
+      assert.equal(nodeIn(alone(q.docPath), "B2N2").name, "LOGGED");
+      assert.equal(fs.existsSync(L.lockPathOf(q.docPath) + ".held"), false, "no stand-in lock file");
+    } finally {
+      await stop(t);
+    }
+  });
+
+  test("Save As by a server that never opened the source: the copy holds every acknowledged edit, and no log", async () => {
+    for (const owner of ["alive", "crashed"]) {
+      const p = pkg("saveas");
+      const B = await spawn(p.root);
+      let A: Scratch | undefined;
+      try {
+        const b = client(B.base, p.pkg);
+        await b.open();
+        assert.equal((await b.update("B0N1", { name: "E1" })).status, 200);
+        assert.equal((await b.flush()).status, 200);
+        assert.ok(fs.existsSync(p.logPath), `${owner}: E1 is in the log`);
+        if (owner === "crashed") await kill9(B);
+        A = await spawn(p.root);
+        const target = path.join(p.root, `Copy ${owner}.canvas`);
+        const r = await fetch(`${A.base}/api/canvas/save-as`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ file: p.pkg, target }) });
+        assert.equal(r.status, 200, `${owner}: ${await r.clone().text()}`);
+        const cp = path.join(fs.realpathSync(target), "document.json");
+        assert.equal(nodeIn(alone(cp), "B0N1").name, "E1", `${owner}: the copy's document.json holds the edit`);
+        assert.equal(fs.existsSync(L.logPathOf(cp)), false, `${owner}: no log carried over`);
+        assert.equal(nodeIn(withLog(p.docPath), "B0N1").name, "E1", `${owner}: the original still holds it`);
+      } finally {
+        if (A) await stop(A);
+        if (owner === "alive") await stop(B);
+      }
+    }
+  });
+
+  test("document.json put back in place to the log's base bytes with the old mtime (cp -p, a backup tool): the logged edit is not applied again, and is kept as a recovery copy", async () => {
+    for (const when of ["after a crash", "while Canvas runs"]) {
+      const p = pkg("restore");
+      const backup = path.join(p.root, "backup-document.json");
+      execFileSync("cp", ["-p", p.docPath, backup]); // the backup: these bytes, this mtime
+      let s = await spawn(p.root);
+      try {
+        const c = client(s.base, p.pkg);
+        await c.open();
+        assert.equal((await c.update("B0N1", { name: "E1" })).status, 200);
+        assert.equal((await c.flush()).status, 200);
+        assert.ok(fs.existsSync(p.logPath), `${when}: E1 is in the log`);
+        if (when === "after a crash") await kill9(s);
+        const st0 = fs.statSync(p.docPath);
+        await sleep(30);
+        execFileSync("cp", ["-p", backup, p.docPath]); // the person rolls the file back to the backup, in place
+        const st1 = fs.statSync(p.docPath);
+        assert.equal(st1.ino, st0.ino, "the same file");
+        assert.equal(st1.mtimeMs, st0.mtimeMs, "the same mtime");
+        assert.notEqual(st1.ctimeMs, st0.ctimeMs, "only the ctime moved");
+        if (when === "after a crash") {
+          s = await spawn(p.root);
+          assert.equal((await client(s.base, p.pkg).open()).status, 200);
+        } else await sleep(1500);
+        await client(s.base, p.pkg).flush();
+        assert.ok(await until(() => !fs.existsSync(p.logPath), 8000), `${when}: the log is settled`);
+        assert.equal(nodeIn(alone(p.docPath), "B0N1").name, "Layer 0.1", `${when}: the restore stands (the logged edit is not applied again)`);
+        assert.equal(await shown(s.base, p.pkg, "B0N1"), "Layer 0.1", `${when}: Canvas shows the restored file`);
+        const rec = fs.readdirSync(p.pkg).filter((f) => f.startsWith("document.json.recovered-"));
+        assert.equal(rec.length, 1, `${when}: a recovery copy`);
+        assert.equal(nodeIn(JSON.parse(fs.readFileSync(path.join(p.pkg, rec[0]), "utf8")), "B0N1").name, "E1", `${when}: the recovery copy holds the logged edit`);
+        assert.ok(s.log.join("").includes(rec[0]), `${when}: and the person is told where it is`);
+      } finally {
+        await stop(s);
+      }
+    }
+  });
+
+  // Found by the two-server fuzz (docs/evidence/speed.md, "Save log, last cases").
+  test("a log of ours loaded at a new path (the package moved) and made stale before it was folded: its edits are kept", async () => {
+    const p = pkg("movedstale");
+    const s = await spawn(p.root);
+    let h: Awaited<ReturnType<typeof holdLock>> | undefined;
+    try {
+      const a = client(s.base, p.pkg);
+      await a.open();
+      assert.equal((await a.update("B0N1", { name: "E1" })).status, 200);
+      assert.equal((await a.flush()).status, 200);
+      const m = moved(p, "Moved.canvas");
+      // Another Canvas holds the lock, so the fold of the log this server now loads at the new path waits...
+      h = await holdLock(L.lockPathOf(m.docPath), 1500);
+      assert.equal((await client(s.base, m.pkg).open()).status, 200);
+      assert.equal(await shown(s.base, m.pkg, "B0N1"), "E1", "the log applies at the new path");
+      // ...while a sync client writes the same bytes again (another file: the log is stale for it).
+      fs.writeFileSync(m.docPath + ".sync", fs.readFileSync(m.docPath));
+      fs.renameSync(m.docPath + ".sync", m.docPath);
+      await h.released;
+      await sleep(500);
+      await client(s.base, m.pkg).flush();
+      assert.ok(await until(() => !fs.existsSync(m.logPath), 8000), "the log is settled");
+      assert.ok(keptAnywhere(m, "B0N1", "E1"), "E1 is in document.json or a recovery copy");
+    } finally {
+      h?.kill();
+      await stop(s);
+    }
+  });
+
+  // Found by the two-server fuzz: a nudge on disk twice.
+  test("another Canvas folds the log into a whole write and dies before retiring it: the owner applies nothing twice", async () => {
+    // That other Canvas is killed right after its rename of document.json lands (before it removes the log).
+    fs.mkdirSync(dir, { recursive: true });
+    const pre = path.join(dir, "die-after-rename.mjs");
+    fs.writeFileSync(
+      pre,
+      `import fs from "node:fs";
+const rename = fs.promises.rename;
+fs.promises.rename = async function (a, b, ...rest) {
+  await rename.call(this, a, b, ...rest);
+  if (String(b).endsWith("/document.json") && String(a).endsWith(".tmp")) process.kill(process.pid, "SIGKILL");
+};
+`,
+    );
+    const p = pkg("foldcrash");
+    const S = await spawn(p.root);
+    try {
+      const s = client(S.base, p.pkg);
+      await s.open();
+      const x0 = nodeIn(alone(p.docPath), "B3N4").x;
+      assert.equal((await s.move("B3N4", 1)).status, 200);
+      assert.equal((await s.flush()).status, 200);
+      assert.ok(fs.existsSync(p.logPath), "the nudge is in S's log");
+      const N = await spawnEnv(p.root, { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(pre).href}`.trim() });
+      spawned.delete(N);
+      const n = client(N.base, p.pkg);
+      await n.open();
+      assert.equal((await n.update("B9N9", { name: "N-EDIT" })).status, 200);
+      void n.flush().catch(() => {});
+      await new Promise<void>((r) => (N.proc.exitCode !== null || N.proc.signalCode ? r() : N.proc.once("exit", () => r())));
+      assert.equal(nodeIn(alone(p.docPath), "B9N9").name, "N-EDIT", "N's whole write landed");
+      assert.equal(nodeIn(alone(p.docPath), "B3N4").x, x0 + 1, "with S's nudge in it");
+      // N died before removing S's log; S may have settled it already (it reads the fold line), so no look at it here.
+      await sleep(800);
+      await s.flush();
+      assert.ok(await until(() => !fs.existsSync(p.logPath), 8000), "the log is settled");
+      assert.equal(nodeIn(withLog(p.docPath), "B3N4").x, x0 + 1, "the nudge is on disk once");
+      assert.equal(nodeIn(withLog(p.docPath), "B9N9").name, "N-EDIT");
+      assert.equal((await fetch(`${S.base}/api/node?file=${encodeURIComponent(p.pkg)}&id=B3N4&depth=0`).then((r) => r.json()) as any).node.x, x0 + 1, "and in S once");
+    } finally {
+      await stop(S);
+    }
+  });
+});
