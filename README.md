@@ -12,7 +12,7 @@ It also stretches what a canvas is. Boards and layers sit next to notes, to-do l
 
 1. Download Canvas from [getcanvas.cc/download](https://getcanvas.cc/download). It runs on macOS 26 or later, on Apple silicon.
 2. Unzip it, move `Canvas.app` to Applications and open it. The first launch opens a Welcome file with a short course.
-3. Connect your agent: run the line for the one you use in Terminal, then start a new agent session.
+3. Connect your agent: press **Connect** beside Claude Code or Codex on the Welcome card (or in Settings > Agents), then start a new agent session. Connect runs the agent's own `mcp add` for you. To do it by hand, run the line for the one you use in Terminal:
 
    ```sh
    claude mcp add canvas --scope user -- /Applications/Canvas.app/Contents/Resources/node/bin/node /Applications/Canvas.app/Contents/Resources/server/mcp/server.ts
@@ -24,11 +24,11 @@ It also stretches what a canvas is. Boards and layers sit next to notes, to-do l
 
 4. Check it: `/mcp` in Claude Code (or `codex mcp list`) lists `canvas`, and the dot on the Welcome card turns green. Ask your agent "what do I have selected in Canvas?".
 
-Canvas brings its own Node and MCP server inside the app, so there is nothing else to install. If you keep `Canvas.app` somewhere other than Applications, change the two paths. The Welcome card and Settings > Agents show both commands with this Mac's paths and a Copy button.
+Canvas brings its own Node and MCP server inside the app, so there is nothing else to install. If you keep `Canvas.app` somewhere other than Applications, press Connect again (it fills in where the app is now) or change the two paths. The Welcome card and Settings > Agents show both commands with this Mac's paths, with Connect and Copy.
 
 ## Design with an agent
 
-How it works: you open Canvas, connect Claude Code or Codex to it once through Canvas MCP, then ask your agent for changes in its own chat (or press Cmd+Return on a selection in Canvas). The agent edits the open file while you watch. The first launch opens a Welcome file whose card has the exact commands with Copy buttons, and a dot that turns green once your agent connects. Settings > Agents shows the same.
+How it works: you open Canvas, connect Claude Code or Codex to it once through Canvas MCP, then ask your agent for changes in its own chat (or press Cmd+Return on a selection in Canvas). The agent edits the open file while you watch. The first launch opens a Welcome file whose card has a Connect button for each agent you have installed, the exact commands with Copy buttons, and a dot that turns green once your agent connects. Settings > Agents shows the same.
 
 The server always registers under the name `canvas`, so `/mcp` in Claude Code lists it as `canvas`. With the downloaded app, use the commands in [Install](#install). From a source checkout ([Run it](#run-it)), point at this folder instead:
 
@@ -235,7 +235,7 @@ Canvas is a Mac app. From a fresh clone, one command builds everything and opens
 pnpm app
 ```
 
-It installs the dependencies, builds the Rust drawing engine (a few minutes the first time), builds `build/Canvas.app` for this checkout, and opens it. The first launch opens a Welcome file in `~/Documents/Canvas`: a ten-lesson course with something to try on every board, and a card that connects your agent.
+It installs the dependencies, builds the Rust drawing engine (a few minutes the first time), builds `build/Canvas.app` for this checkout, and opens it. The first launch opens a Welcome file in `~/Documents/Canvas`: an eleven-lesson course with something to try on every board, and a card that connects your agent.
 
 You need macOS 26 or later, Xcode 26 or its Command Line Tools (`xcode-select --install`), Node 22.18 or later, pnpm and [Rust](https://rustup.rs). `pnpm app` adds Rust's `wasm32-unknown-unknown` target and the pinned `wasm-bindgen-cli` itself if they are missing. Run `pnpm app --engine` after changing anything in `engine/`.
 
