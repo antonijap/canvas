@@ -141,6 +141,14 @@ test("the helper gets nothing secret on its command line, and a small environmen
   f.helper.stop();
 });
 
+test("log lines lose every Cloud secret shape", () => {
+  const token = `ccd_0123456789abcdef.${"c".repeat(43)}`;
+  const line = `failed ${link({ v: "1", host: HOST, tc: TC, code: CODE })} with Bearer ${token} via ${TC} code ${CODE}`;
+  const out = Sec.scrubSecrets(line);
+  for (const s of [token, TC, CODE, "c".repeat(43)]) assert.ok(!out.includes(s), s.slice(0, 8));
+  assert.match(out, /^failed canvas:\/\/cloud\/join\?•••/);
+});
+
 test("secrets: written through stdin, never argv; a fake security binary sees the command on stdin", async () => {
   const dir = fs.mkdtempSync(path.join(tmp, "sec-"));
   const log = path.join(dir, "log");

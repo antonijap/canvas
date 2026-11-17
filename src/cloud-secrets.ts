@@ -71,3 +71,15 @@ export async function readJoined(hostId: string): Promise<JoinedSecrets | null> 
 }
 export const writeJoined = (hostId: string, s: JoinedSecrets) => writeSecret(`hosted:${hostId}`, JSON.stringify(s));
 export const deleteJoined = (hostId: string) => deleteSecret(`hosted:${hostId}`);
+
+/**
+ * Text with every Cloud secret shape blanked: invite links, join codes, device tokens, tunnel addresses, bearer values.
+ * The server runs every line it writes to its log or stderr through this (src/server.ts).
+ */
+export function scrubSecrets(text: string): string {
+  return String(text)
+    .replace(/canvas:\/\/cloud\/join\?\S*/gi, "canvas://cloud/join?•••")
+    .replace(/\bcc[dj]_[0-9a-f]{16}\.[A-Za-z0-9_-]{43}/g, "•••")
+    .replace(/(?<![A-Za-z0-9_-])tc[A-Za-z0-9_-]{20,}/g, "tc•••")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{6,}/gi, "Bearer •••");
+}

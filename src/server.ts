@@ -29,6 +29,7 @@ import { codeRootId, version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
 import { handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
+import { scrubSecrets } from "./cloud-secrets.ts";
 import { handlePagesRoute, resolvePages } from "./pages.ts";
 import { handleShaderRoute, settleShaderSources } from "./shaders.ts";
 import { handleImageRoute } from "./images.ts";
@@ -62,7 +63,7 @@ const IDLE_EXIT_MS = 30 * 60_000;
 export { version };
 
 // A rejected background scan must not take the server down (node exits on unhandled rejections).
-process.on("unhandledRejection", (e) => console.error(`[canvas] ${e}`));
+process.on("unhandledRejection", (e) => console.error(scrubSecrets(`[canvas] ${e}`)));
 
 /** /asset responses: an SVG opened as a page gets an opaque origin and no script. */
 export const ASSET_CSP = "sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:";
@@ -114,7 +115,7 @@ function logLine(line: string): void {
   try {
     const logs = logDir();
     fs.mkdirSync(logs, { recursive: true });
-    fs.appendFileSync(path.join(logs, "server.log"), `${new Date().toISOString()} ${line}\n`);
+    fs.appendFileSync(path.join(logs, "server.log"), `${new Date().toISOString()} ${scrubSecrets(line)}\n`);
   } catch {}
 }
 /**
@@ -483,7 +484,7 @@ export function gateOnJournal(res: http.ServerResponse): void {
         if (fn() !== false && isWrite && !ending) res.emit("drain");
       })
       .catch((e) => {
-        console.error(`[canvas] response: ${(e as Error).message}`);
+        console.error(scrubSecrets(`[canvas] response: ${(e as Error).message}`));
         res.destroy(e as Error);
       });
     chain = p;
@@ -995,7 +996,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const file = process.argv[2];
   // A crash says why before the process goes: stderr and ~/Library/Logs/Canvas/server.log.
   process.on("uncaughtException", (e) => {
-    const line = `${new Date().toISOString()} [canvas] uncaught: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`;
+    const line = scrubSecrets(`${new Date().toISOString()} [canvas] uncaught: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`);
     process.stderr.write(line);
     try {
       const logs = logDir();
