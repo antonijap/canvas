@@ -4,6 +4,7 @@ How comments work locally and on a team's own Canvas server. The types and the s
 
 - Every document, thread, comment and op has a UUID that never changes and is never reused.
 - A document's comment identity is `doc` in its `comments.json`. Save As mints a new one (a fork). A copy made by a sync folder keeps it (the same document).
+- In the app only, an envelope whose `doc` is the nil uuid means "this file's own document" (before its first comment gives it one). The local server replaces it with the real `doc` before anything is stored or sent; a team server never sees it.
 - Deletes are tombstones: a deleted comment keeps its id and loses its body; a deleted thread marks all its comments deleted. A replay or an old copy can never bring one back.
 
 ## Ops
