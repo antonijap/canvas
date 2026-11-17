@@ -1,5 +1,5 @@
 // Optical alignment of the shell's newer UI, measured from the window's own 2x capture (qa/ink.ts): Settings (General's
-// Updates and comment name, Cloud, Agents' Connect, Copy and model menus), About Canvas, the letter spacing field with
+// Updates and comment name, Cloud with and without a server, Agents' Connect, status and agent menus), About Canvas, the letter spacing field with
 // its Auto chip and token button, and Home (the pinned tab, header, filter, sidebar rows, server, first launch).
 // Light and dark. An icon sits in the middle of its control by its visible shape; a label by the middle of its
 // capitals (SF Pro's cap height above the baseline the pixels show); a dot or a glyph beside text sits on the text's
@@ -54,16 +54,6 @@ async function dotOnText(t: NT, k: AlignChecker, s: Shot, dotId: string, text: M
   k.near(`${name}: the dot's middle on the text's cap middle`, midY(ink), line(s, text, size)?.cap);
 }
 
-/** Settings > Agents shows one part at a time: Connect, Models or Cursor. */
-async function agentsPart(t: NT, part: string) {
-  // The segment's own word, not the whole control: the control's mark carries the selected part's name too.
-  await t.waitText(part, undefined, 4000, "settings");
-  const word = (await t.marks({ label: part, window: "settings" })).filter((m) => m.id !== "agents-part").sort((a, b) => a.w - b.w)[0];
-  t.ok(word, `no ${part} segment in Settings > Agents`);
-  await t.click(center(word), { window: "settings" });
-  await t.waitFor(async () => (await t.marks({ id: "agents-part", window: "settings" }))[0]?.label === part, `the ${part} part of Settings > Agents`, 4000);
-}
-
 async function openSettings(t: NT, tab: string) {
   if (!(await t.state()).windows.some((w: any) => w.settings)) {
     await t.key(",", ["cmd"]);
@@ -83,7 +73,7 @@ async function openSettings(t: NT, tab: string) {
 const report = (t: NT, bad: string[]) => t.ok(!bad.length, `${bad.length} alignment problems:\n  ${bad.join("\n  ")}`);
 const fresh = (run: string) => { fs.mkdirSync(ALIGN_OUT, { recursive: true }); fs.rmSync(path.join(ALIGN_OUT, `${run}.jsonl`), { force: true }); };
 
-sc("settings", "alignment: General, Cloud and Agents controls are optically centred, light and dark", { covers: ["settings:alignment", "settings:light", "settings:dark"] }, async (t: NT) => {
+sc("settings", "alignment: General, Cloud (with and without a server) and Agents controls are optically centred, light and dark", { covers: ["settings:alignment", "settings:light", "settings:dark"] }, async (t: NT) => {
   fresh("native-settings");
   const team = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
@@ -93,6 +83,20 @@ sc("settings", "alignment: General, Cloud and Agents controls are optically cent
   const url = `http://127.0.0.1:${(team.address() as { port: number }).port}`;
   const bad: string[] = [];
   try {
+    // Cloud with no server: the address field and Sign in share one line.
+    await t.cmd("qa.cloud", { url: "", devEmail: "", name: "" });
+    for (const theme of ["light", "dark"]) {
+      await t.cmd("qa.theme", { theme });
+      await openSettings(t, "Cloud");
+      await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000);
+      const s = await grab(t, "settings");
+      const k = new AlignChecker("native-settings", theme, s.img, s.k);
+      await fieldButton(t, k, s, "Sign in", "cloud-setup-sign-in");
+      const field = await one(t, "settings", "cloud-url"), signIn = await one(t, "settings", "field-button", "Sign in");
+      k.near("cloud setup: the placeholder's cap middle on the field's centre line", line(s, field, 13, "https://your-team.workers.dev")?.cap, cy(box(field)));
+      k.near("cloud setup: Sign in on the field's centre line", cy(box(signIn)), cy(box(field)));
+      bad.push(...k.bad);
+    }
     await t.cmd("qa.cloud", { url, devEmail: "anna@studio.test" });
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
@@ -124,28 +128,27 @@ sc("settings", "alignment: General, Cloud and Agents controls are optically cent
       const urlField = await one(t, "settings", "cloud-url");
       k.near("server address: the text's cap middle on the field's centre line", line(s, urlField, 13, "http://127.0.0.1:1")?.cap, cy(box(urlField)));
       bad.push(...k.bad);
-      // Agents: Connect and Copy, the status dot, Installed, the model and reasoning menus.
+      // Agents: each row's Connect and status dot (Copy and the model menus moved into the row's … menu), and that menu.
       await openSettings(t, "Agents");
-      await agentsPart(t, "Connect");
-      await t.mark({ id: "status-text", window: "settings" }, 4000);
-      await sleep(600);
+      for (const h of ["claude", "codex"]) await t.mark({ id: `agent-menu-${h}`, window: "settings" }, 4000);
+      await sleep(2600); // the rows follow /api/mcp/setup, asked every 2 s
       s = await grab(t, "settings");
       k = new AlignChecker("native-settings", theme, s.img, s.k);
       if (await one(t, "settings", "field-button", "Connect")) await fieldButton(t, k, s, "Connect", "agents-connect");
-      await fieldButton(t, k, s, "Copy", "agents-copy");
-      await dotOnText(t, k, s, "status-dot", await one(t, "settings", "status-text"), 13, "agents-status");
-      bad.push(...k.bad);
-      await agentsPart(t, "Models");
-      await t.mark({ id: "menu-field", window: "settings" }, 4000);
-      await sleep(600);
-      s = await grab(t, "settings");
-      k = new AlignChecker("native-settings", theme, s.img, s.k);
-      const menu = (await marks(t, "settings", "menu-field"))[0] ?? null;
-      const mText = inside(await marks(t, "settings", "menu-field-text"), menu), chev = inside(await marks(t, "settings", "menu-field-chevron"), menu);
-      const tInk = k.ink("agents-menu-text", bare(box(mText)), { inset: 0 }), cInk = k.ink("agents-menu-chevron", bare(box(chev)), { inset: 0 });
-      if (menu && tInk && cInk) k.near("model menu: room left of the text and right of the chevron", tInk.x0 - menu.x, menu.x + menu.w - cInk.x1);
-      k.near("model menu: the text's cap middle on the field's centre line", line(s, mText, 13)?.cap, cy(box(menu)));
-      k.near("model menu: the chevron's middle on the text's cap middle", midY(cInk), line(s, mText, 13)?.cap);
+      // A dot shows only beside Connected (an agent with Canvas added); Not installed has none.
+      const dotted = (await marks(t, "settings", "status-text")).filter((m) => m.label === "Connected");
+      for (const st of dotted) await dotOnText(t, k, s, "status-dot", st, 13, "agents-status");
+      if (!dotted.length) t.notes.push(`no agent shows Connected (${theme}): the status dot was not measured`);
+      for (const [h, title] of [["claude", "Claude Code"], ["codex", "Codex"]] as const) {
+        const menu = await one(t, "settings", `agent-menu-${h}`);
+        const dots = k.ink(`agents-menu-${h}`, bare(box(menu)), { inset: 0 });
+        k.near(`${h} menu: the ellipsis centred across its button`, midX(dots), cx(box(menu)));
+        k.near(`${h} menu: the ellipsis's middle on the button's centre line`, midY(dots), cy(box(menu)));
+        const name = (await marks(t, "settings", "text", title)).find((m) => menu && Math.abs(m.y + m.h / 2 - (menu.y + menu.h / 2)) < 14) ?? null;
+        k.near(`${h} row: the name's cap middle on the menu's centre line`, line(s, name, 13, title)?.cap, cy(box(menu)));
+        const state = (await marks(t, "settings", `connect-${h}`))[0] ?? null;
+        if (state) k.near(`${h} row: its Connect or status on the menu's centre line`, cy(box(state)), cy(box(menu)));
+      }
       bad.push(...k.bad);
     }
   } finally {
@@ -167,16 +170,23 @@ sc("about", "alignment: About Canvas is centred on one line, its chip and button
     const s = await grab(t, "about");
     const k = new AlignChecker("native-about", theme, s.img, s.k);
     const W = s.img.width / s.k;
-    const icon = await one(t, "about", "about-icon"), title = await one(t, "about", "text", "Canvas"), alpha = await one(t, "about", "about-alpha");
-    const version = await one(t, "about", "about-version"), built = await one(t, "about", "about-built");
-    for (const [n, m] of [["icon", icon], ["title", title], ["version", version], ["built", built]] as const) {
+    // The Alpha chip and the build line are gone: "alpha" ends the version line, the build sits in its tooltip.
+    const icon = await one(t, "about", "about-icon"), title = await one(t, "about", "text", "Canvas");
+    const version = await one(t, "about", "about-version");
+    for (const [n, m] of [["icon", icon], ["title", title], ["version", version]] as const) {
       const ink = k.ink(`about-${n}`, bare(box(m)), { inset: 0 });
       k.near(`About: the ${n}'s ${n === "icon" ? "ink" : "label ink"} centred in the window`, midX(ink), W / 2);
     }
-    k.label("about-alpha", box(alpha, (alpha?.h ?? 0) / 2), line(s, alpha, 11, "Alpha"), { inset: 1 });
-    k.near("About: the Alpha chip centred in the window", cx(box(alpha)), W / 2);
-    for (const b of await marks(t, "about", "about-button")) {
+    const buttons = await marks(t, "about", "about-button");
+    if (buttons.length !== 2) k.bad.push(`About (${theme}): ${buttons.length} buttons, not Website and Report a Bug`);
+    for (const b of buttons) {
       k.label(`about-button-${b.label}`, box(b, 8), textLine(s.img, s.k, { x: b.x + 8, y: b.y + 3, w: b.w - 16, h: b.h - 6 }, b.label ?? "", 12 * SF.cap, 12 * SF.ex), { inset: 2 });
+    }
+    // Side by side: one centre line, the pair centred in the window.
+    if (buttons.length === 2) {
+      const [l, r] = [...buttons].sort((a, b) => a.x - b.x);
+      k.near("About: Website and Report a Bug on one centre line", cy(box(l)), cy(box(r)));
+      k.near("About: the two buttons centred in the window", (l.x + r.x + r.w) / 2, W / 2);
     }
     bad.push(...k.bad);
   }
@@ -243,6 +253,20 @@ sc("home", "alignment: Home's tab, header buttons, filter, sidebar rows and serv
   const url = `http://127.0.0.1:${(team.address() as { port: number }).port}`;
   const bad: string[] = [];
   try {
+    // Cloud with no server: the address field and Sign in share one line.
+    await t.cmd("qa.cloud", { url: "", devEmail: "", name: "" });
+    for (const theme of ["light", "dark"]) {
+      await t.cmd("qa.theme", { theme });
+      await openSettings(t, "Cloud");
+      await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000);
+      const s = await grab(t, "settings");
+      const k = new AlignChecker("native-settings", theme, s.img, s.k);
+      await fieldButton(t, k, s, "Sign in", "cloud-setup-sign-in");
+      const field = await one(t, "settings", "cloud-url"), signIn = await one(t, "settings", "field-button", "Sign in");
+      k.near("cloud setup: the placeholder's cap middle on the field's centre line", line(s, field, 13, "https://your-team.workers.dev")?.cap, cy(box(field)));
+      k.near("cloud setup: Sign in on the field's centre line", cy(box(signIn)), cy(box(field)));
+      bad.push(...k.bad);
+    }
     await t.cmd("qa.cloud", { url, devEmail: "anna@studio.test" });
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });

@@ -217,12 +217,74 @@ struct CloudSettings: View {
         }
     }
 
+    /// The address typed while none is saved; Sign in saves it.
+    @State private var draft = ""
+
     var body: some View {
+        Group {
+            if CloudSetup.compact(model.prefs.cloudUrl) { setup } else { full }
+        }
+        // While this pane shows (rarely, and briefly): the server is asked every few seconds, so a fix or an outage shows
+        // at once. Home asks far less often.
+        .task(id: model.prefs.cloudUrl + "|" + model.prefs.cloudDevEmail) {
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            while !Task.isCancelled {
+                await account.refresh(model, fresh: true)
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+            }
+        }
+        // The window takes the pane's height: the short card grows into the full one once an address is saved.
+        .onChange(of: CloudSetup.compact(model.prefs.cloudUrl)) { SettingsWindow.shared.refit() }
+    }
+
+    /// No address saved: one field and Sign in. Account, status and sharing come once there is a server to talk to.
+    private var setup: some View {
+        let hint = CloudSetup.hint(draft)
+        return SettingsStack {
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        FieldBox {
+                            TextField(CloudSetup.placeholder, text: Binding(get: { draft }, set: { draft = String($0.prefix(200)) }))
+                                .textFieldStyle(.plain).font(Typography.body)
+                                .onSubmit { saveAndSignIn() }
+                                .accessibilityLabel("Server address").qaID("cloud-url")
+                        }
+                        .frame(maxWidth: .infinity)
+                        FieldButton(title: "Sign in", symbol: nil, prominent: true) { saveAndSignIn() }
+                            // Off, the system dims it by half: no extra opacity, or the label fades into the fill.
+                            .disabled(CloudSetup.next(draft, devEmail: model.prefs.cloudDevEmail) == nil)
+                            .qaID("cloud-sign-in", label: "Sign in")
+                    }
+                    if let hint {
+                        Text(hint).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1).qaText(hint)
+                    }
+                }
+                .padding(14)
+            }
+        }
+    }
+
+    /// Saves the typed address. A local server in DEV mode asks for the development email first (the full layout shows
+    /// its field); any other server signs in at once, once the local server has the address (the shell's state goes
+    /// out 100 ms after a change, Bridge.swift stateChanged).
+    private func saveAndSignIn() {
+        guard let next = CloudSetup.next(draft, devEmail: model.prefs.cloudDevEmail) else { return }
+        model.prefs.cloudUrl = draft.trimmingCharacters(in: .whitespaces)
+        draft = ""
+        guard next == .signIn else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            account.signIn(model)
+        }
+    }
+
+    private var full: some View {
         SettingsStack {
             SettingsCard(title: "Cloud") {
-                SettingsRow("Server address", detail: urlText.isEmpty || valid ? "Your team\u{2019}s own Canvas server" : "Use an https address, like https://studio.workers.dev") {
+                SettingsRow("Server address", detail: CloudSetup.hint(urlText) ?? "Your team\u{2019}s own Canvas server") {
                     FieldBox {
-                        TextField("https://your-team.workers.dev", text: Binding(get: { model.prefs.cloudUrl }, set: { model.prefs.cloudUrl = String($0.prefix(200)) }))
+                        TextField(CloudSetup.placeholder, text: Binding(get: { model.prefs.cloudUrl }, set: { model.prefs.cloudUrl = String($0.prefix(200)) }))
                             .textFieldStyle(.plain).font(Typography.body)
                             .accessibilityLabel("Server address").qaID("cloud-url")
                     }
@@ -241,7 +303,7 @@ struct CloudSettings: View {
                     SettingsDivider()
                     SettingsRow("Development email", detail: "For a local server in DEV mode") {
                         FieldBox {
-                            TextField("anna@studio.test", text: Binding(get: { model.prefs.cloudDevEmail }, set: { model.prefs.cloudDevEmail = String($0.prefix(120)) }))
+                            TextField(String("anna@studio.test"), text: Binding(get: { model.prefs.cloudDevEmail }, set: { model.prefs.cloudDevEmail = String($0.prefix(120)) }))
                                 .textFieldStyle(.plain).font(Typography.body)
                                 .accessibilityLabel("Development email").qaID("cloud-dev-email")
                         }
@@ -275,15 +337,6 @@ struct CloudSettings: View {
                         .disabled(model.currentFile == nil || account.state.status != "connected").opacity(model.currentFile == nil || account.state.status != "connected" ? 0.5 : 1)
                         .qaID("cloud-share", label: "Share Comments")
                 }
-            }
-        }
-        // While this pane shows (rarely, and briefly): the server is asked every few seconds, so a fix or an outage shows
-        // at once. Home asks far less often.
-        .task(id: model.prefs.cloudUrl + "|" + model.prefs.cloudDevEmail) {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            while !Task.isCancelled {
-                await account.refresh(model, fresh: true)
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
         }
     }

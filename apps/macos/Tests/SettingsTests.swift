@@ -149,6 +149,13 @@ struct SettingsTests {
         check(CloudURL.clean("studio") == nil && CloudURL.clean("") == nil && CloudURL.clean("file:///etc/passwd") == nil, "not an address")
         check(CloudURL.isLocal("http://localhost:8787") && !CloudURL.isLocal("https://studio.workers.dev"), "local means http on this Mac")
         check(CloudURL.host("https://studio.workers.dev/x") == "studio.workers.dev" && CloudURL.host("http://localhost:8787") == "localhost:8787", "the host is the Keychain account")
+        check(CloudSetup.compact("") && CloudSetup.compact("  ") && !CloudSetup.compact("https://studio.workers.dev"), "the short Cloud pane shows only while no address is saved")
+        check(CloudSetup.hint("") == nil && CloudSetup.hint("https://studio.workers.dev") == nil, "no hint while the field is empty or valid")
+        check(CloudSetup.hint("studio") == "Use an https address, like https://studio.workers.dev", "an invalid address says what to type")
+        check(CloudSetup.next("studio", devEmail: "") == nil, "Sign in is off until the address is valid")
+        check(CloudSetup.next("https://studio.workers.dev", devEmail: "") == .signIn, "a team server signs in at once")
+        check(CloudSetup.next("http://localhost:8787", devEmail: "") == .askEmail, "a local server asks for the development email first")
+        check(CloudSetup.next("http://localhost:8787", devEmail: "anna@studio.test") == .signIn, "a local server with an email signs in")
         var s = AppSettings()
         s.cloudUrl = "https://studio.workers.dev/x"; s.cloudDevEmail = "anna@studio.test"
         check(s.serverSettings["cloudUrl"] as? String == "https://studio.workers.dev", "the server gets the cleaned address")
@@ -177,9 +184,8 @@ struct SettingsTests {
         check(ConnectCopy.button(installed: true, registered: false, busy: true) == "Connecting\u{2026}", "while the CLI runs")
         check(ConnectCopy.button(installed: true, registered: true, busy: false) == "Added", "registered for this app: Added")
         check(ConnectCopy.button(installed: false, registered: false, busy: false) == nil, "not installed: no button, Copy only")
-        check(ConnectCopy.hint == "Press Connect, or copy a command into Terminal. Then start a new agent session.", "the welcome card's words")
-        check(ConnectCopy.elsewhere == "Other apps, or Canvas not in Applications: getcanvas.cc/download#connect", "the welcome card's line for other apps")
-        check(ConnectCopy.elsewhereURL.absoluteString == "https://getcanvas.cc/download#connect", "the download page's connect section")
+        check(ConnectCopy.otherApps == "Other apps: getcanvas.cc/download#connect", "the line under the Agents card")
+        check(ConnectCopy.otherAppsURL.absoluteString == "https://getcanvas.cc/download#connect", "the download page's connect section")
         check(ConnectCopy.added("Codex") == "Added. Start a new Codex session.", "the next step")
     }
 }

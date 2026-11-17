@@ -695,19 +695,30 @@ sc("settings", "Cmd+, opens Settings and a change persists", { covers: ["setting
   await t.shot(`${process.cwd()}/qa/out/native/settings-window.png`, "settings");
 });
 
-sc("settings", "Settings > Agents: Connect, Models and Cursor parts; a model and reasoning menu for each agent under Models, Default until one is picked", { covers: ["settings:agents-model"] }, async (t: NT) => {
+sc("settings", "Settings > Agents: one card, each agent's menu holds Copy command and its Model and Reasoning choices, Default until one is picked; then Default agent and Stop a run after", { covers: ["settings:agents-model"] }, async (t: NT) => {
   await t.key(",", ["cmd"]);
   await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
   await settingsTab(t, "Agents");
-  // The pane opens on Connect; Models holds the default agent, each agent's menus and the run cap.
-  await t.mark({ id: "connect-claude", window: "settings" }, 4000).catch(() => null);
-  t.eq((await t.marks({ id: "agents-part", window: "settings" }))[0]?.label, "Connect", "Settings > Agents opens on Connect");
-  await t.click(await t.waitText("Models", undefined, 4000, "settings"), { window: "settings" });
-  await t.waitText("Ask about the selection", undefined, 4000, "settings");
+  await t.waitText("Default agent", undefined, 4000, "settings");
+  await t.waitText("Stop a run after", undefined, 4000, "settings");
   for (const h of ["claude", "codex"]) {
-    const m = await t.mark({ id: `model-${h}`, window: "settings" }, 4000);
-    t.ok(m, `the ${h} model menu`);
-    await t.mark({ id: `effort-${h}`, window: "settings" }, 4000);
+    const m = await t.mark({ id: `agent-menu-${h}`, window: "settings" }, 4000);
+    t.ok(m, `the ${h} menu`);
+    // The model and reasoning menus moved into the row's menu: they are there, each on Default until one is picked.
+    await t.click(center(m), { window: "settings" });
+    await t.waitState((s) => s.menu, `the ${h} menu to open`);
+    try {
+      const items = (await t.cmd("qa.menu", {})).items as { title: string }[];
+      t.eq(items.map((i) => i.title), ["Copy command", "Model", "Reasoning"], `the ${h} menu's items`);
+      for (const sub of ["Model", "Reasoning"]) {
+        const subItems = (await t.cmd("qa.menu", { sub })).items as { title: string; on: boolean }[];
+        t.eq(subItems[0]?.title, "Default", `${h} ${sub} starts with Default`);
+        t.eq(subItems.filter((i) => i.on).map((i) => i.title), ["Default"], `${h} ${sub}: Default until one is picked`);
+      }
+    } finally {
+      await t.cmd("qa.menu", { cancel: true }).catch(() => {});
+    }
+    await t.waitState((s) => !s.menu, `the ${h} menu to close`);
   }
   await t.shot(`${process.cwd()}/qa/out/native/settings-agents-model.png`, "settings");
 });

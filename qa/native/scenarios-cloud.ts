@@ -23,7 +23,7 @@ async function settingsCloud(t: NT) {
   await tab(t, "Cloud", 3);
 }
 
-sc("settings", "Settings > Cloud: the server address, Sign in against a local development server opens Home on the server with a connected toast, shows Signed in as, and Sign out", { covers: ["settings:cloud"] }, async (t: NT) => {
+sc("settings", "Settings > Cloud: one field and Sign in until a server is saved; a local one asks for the email, then Home opens with a toast; Signed in as, Sign out", { covers: ["settings:cloud"] }, async (t: NT) => {
   const asked: { url: string; email: string | undefined; token: string | undefined }[] = [];
   const team = http.createServer((req, res) => {
     asked.push({ url: req.url ?? "", email: req.headers["x-canvas-dev-email"] as string | undefined, token: req.headers["cf-access-token"] as string | undefined });
@@ -33,17 +33,31 @@ sc("settings", "Settings > Cloud: the server address, Sign in against a local de
   await new Promise<void>((r) => team.listen(0, "127.0.0.1", r));
   const port = (team.address() as { port: number }).port;
   try {
+    await t.cmd("qa.cloud", { url: "", devEmail: "", name: "" });
     await settingsCloud(t);
+    // No server yet: one card, the address field and Sign in. No account, status, name or sharing until there is one.
+    const url = await t.mark({ id: "cloud-url", window: "settings" }, 4000);
+    await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000);
+    for (const id of ["cloud-status", "cloud-name", "cloud-share", "cloud-dev-email", "cloud-sign-out"]) t.eq((await t.marks({ id, window: "settings" })).length, 0, `no ${id} before a server is saved`);
+    for (const word of ["Server address", "Name", "Account", "Status", "Share the open file"]) t.eq((await t.marks({ label: word, window: "settings" })).filter((m) => m.id === "text").length, 0, `no "${word}" before a server is saved`);
+    await t.shot(`${process.cwd()}/qa/out/native/settings-cloud-setup.png`, "settings");
+    // Sign in is off until the address is valid, and an invalid one gets a hint under the field.
+    await t.click(center(url), { window: "settings" });
+    await t.type("studio", { window: "settings" });
+    await t.waitText("Use an https address, like https://studio.workers.dev", undefined, 4000, "settings");
+    await t.click(center(await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000)), { window: "settings" });
+    await sleep(500);
+    t.eq((await t.state()).prefs.cloudUrl ?? "", "", "a click on Sign in with an invalid address saves nothing");
+    await t.key("Delete", [], { window: "settings", repeat: 10 });
+    await t.type(`http://127.0.0.1:${port}`, { window: "settings" });
+    for (let i = 0; i < 20 && (await t.marks({ label: "Use an https address, like https://studio.workers.dev", window: "settings" })).length; i++) await sleep(100);
+    t.eq((await t.marks({ label: "Use an https address, like https://studio.workers.dev", window: "settings" })).length, 0, "no hint once the address is valid");
+    // Sign in saves the address; a local server asks for the development email first, so the full pane shows.
+    await t.click(center(await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000)), { window: "settings" });
+    await t.waitText("Development email", undefined, 4000, "settings");
     await t.waitText("Server address", undefined, 4000, "settings");
     await t.waitText("Not signed in", undefined, 4000, "settings");
-    const status = await t.mark({ id: "cloud-status", window: "settings" }, 4000);
-    t.ok(status, "the status line is there");
-    await t.waitText("No server", undefined, 4000, "settings");
-    const url = await t.mark({ id: "cloud-url", window: "settings" }, 4000);
-    await t.click(center(url), { window: "settings" });
-    await t.type(`http://127.0.0.1:${port}`, { window: "settings" });
-    // A local address shows the development email, and Sign in needs it.
-    await t.waitText("Development email", undefined, 4000, "settings");
+    t.ok(await t.mark({ id: "cloud-status", window: "settings" }, 4000), "the status line is there");
     const email = await t.mark({ id: "cloud-dev-email", window: "settings" }, 4000);
     await t.click(center(email), { window: "settings" });
     await t.type("anna@studio.test", { window: "settings" });
@@ -88,6 +102,7 @@ sc("settings", "Settings > Cloud: the server address, Sign in against a local de
     team.closeAllConnections();
     await t.waitText("Offline", undefined, 12000, "settings");
   } finally {
+    await t.cmd("qa.cloud", { url: "", devEmail: "", name: "" }).catch(() => {});
     team.closeAllConnections();
     if (team.listening) await new Promise<void>((r) => team.close(() => r()));
   }

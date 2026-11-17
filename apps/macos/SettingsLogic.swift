@@ -187,11 +187,12 @@ enum UsageLinks {
 /// Connect in Settings > Agents (POST /api/mcp/connect, src/mcp-connect.ts): the same words as the welcome card
 /// (src/page/widget-kinds.js) and the course's Connect your agent board (demos/build-learn.ts).
 enum ConnectCopy {
-    static let hint = "Press Connect, or copy a command into Terminal. Then start a new agent session."
-    static let elsewhere = "Other apps, or Canvas not in Applications: getcanvas.cc/download#connect"
-    static let elsewhereURL = URL(string: "https://getcanvas.cc/download#connect")!
+    /// The line under the Agents card: where to read about connecting any other app.
+    static let otherApps = "Other apps: getcanvas.cc/download#connect"
+    static let otherAppsURL = URL(string: "https://getcanvas.cc/download#connect")!
     static func added(_ agent: String) -> String { "Added. Start a new \(agent) session." }
-    /// The button's title; nil hides it (the agent's CLI is not installed: Copy is all there is).
+    /// The button's title; "Added" reads as Connected in Settings; nil hides it (the agent's CLI is not installed:
+    /// Copy command in the row's menu is all there is).
     static func button(installed: Bool, registered: Bool, busy: Bool) -> String? {
         if busy { return "Connecting\u{2026}" }
         if !installed { return nil }
@@ -296,6 +297,25 @@ enum CloudURL {
     static func host(_ raw: String) -> String {
         guard let c = clean(raw), let u = URL(string: c), let h = u.host else { return "" }
         return u.port.map { "\(h):\($0)" } ?? h
+    }
+}
+
+/// Settings > Cloud before an address is saved: one field and Sign in (CloudSettings.swift).
+enum CloudSetup {
+    enum Next: Equatable { case signIn, askEmail }
+    /// A String, not a string literal: SwiftUI reads a literal title as Markdown and draws an address as a blue link.
+    static let placeholder = "https://your-team.workers.dev"
+    /// The short layout shows while no address is saved.
+    static func compact(_ saved: String) -> Bool { saved.trimmingCharacters(in: .whitespaces).isEmpty }
+    /// The line under the field: only while the typed text is not an address Canvas can use.
+    static func hint(_ typed: String) -> String? {
+        typed.trimmingCharacters(in: .whitespaces).isEmpty || CloudURL.clean(typed) != nil ? nil : "Use an https address, like https://studio.workers.dev"
+    }
+    /// What Sign in does with the typed address: nil (not an address, the button is off), sign in at once, or first ask
+    /// for the development email a local server in DEV mode takes.
+    static func next(_ typed: String, devEmail: String) -> Next? {
+        guard CloudURL.clean(typed) != nil else { return nil }
+        return CloudURL.isLocal(typed) && devEmail.trimmingCharacters(in: .whitespaces).isEmpty ? .askEmail : .signIn
     }
 }
 
