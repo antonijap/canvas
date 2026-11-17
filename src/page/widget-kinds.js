@@ -587,13 +587,17 @@ function videoCard(ctx) {
 
 // ---------- welcome ----------
 // The card on the Welcome file a first launch opens (src/onboarding.ts): what Canvas is for in three lines, the
-// commands that register Canvas MCP with Claude Code and Codex, each with Copy, and a Connected dot that follows
-// GET /api/mcp/setup every 2 s while the card is on the page.
+// commands that register Canvas MCP with Claude Code and Codex, each with Connect (POST /api/mcp/connect runs it for
+// the person, src/mcp-connect.ts) and Copy, and a Connected dot that follows GET /api/mcp/setup every 2 s while the
+// card is on the page. Settings > Agents says the same words (apps/macos/Settings.swift, ConnectAgentCard).
 const WELCOME_LINES = [
   "Canvas is a design canvas you share with an AI agent.",
   "Connect Claude Code or Codex once, select a board or layer, and ask for a change.",
   "The agent edits this file while you watch, and ⌘Z undoes its work.",
 ];
+export const CONNECT_HINT = "Press Connect, or copy a command into Terminal. Then start a new agent session.";
+export const CONNECT_ELSEWHERE = "Other apps, or Canvas not in Applications: getcanvas.cc/download#connect";
+const AGENT_LABEL = { claude: "Claude Code", codex: "Codex" };
 function welcomeCard(ctx) {
   const root = h("div", "wc");
   const head = h("div", "wd-head");
@@ -602,37 +606,83 @@ function welcomeCard(ctx) {
   for (const t of WELCOME_LINES) lines.append(h("p", "", t));
   const cmds = h("div", "wc-cmds");
   const rows = {};
-  for (const [key, label] of [["claude", "Claude Code"], ["codex", "Codex"]]) {
-    const row = h("div", "wc-cmd");
-    const top = h("div", "wc-cmd-head");
-    const btn = nodrag(h("button", "wc-copy", "Copy"));
-    btn.type = "button";
-    btn.setAttribute("aria-label", "Copy the " + label + " command");
-    const code = nodrag(h("code", "wc-code", "…"));
-    top.append(h("span", "wc-cmd-name", label), btn);
-    row.append(top, code);
-    btn.onclick = () => { if (rows[key].text) ctx.copy(rows[key].text); };
-    rows[key] = { code, text: "" };
-    cmds.append(row);
-  }
   const status = h("div", "wc-status");
   const dot = h("span", "wc-dot");
   const said = h("span", "wc-said", "Not connected yet");
-  const hint = h("span", "wc-hint", "Run a command in Terminal, then start a new agent session.");
-  status.append(dot, said, hint);
+  const hint = h("span", "wc-hint", CONNECT_HINT);
+  const elsewhere = h("span", "wc-else", CONNECT_ELSEWHERE);
+  status.append(dot, said, hint, elsewhere);
+  let last = {};
+  /** What the hint says after a Connect: the next step, or the error. Null: the default. */
+  let note = null;
+  for (const [key, label] of Object.entries(AGENT_LABEL)) {
+    const row = h("div", "wc-cmd");
+    const top = h("div", "wc-cmd-head");
+    const btns = h("div", "wc-btns");
+    const connect = nodrag(h("button", "wc-btn wc-connect", "Connect"));
+    connect.type = "button";
+    connect.hidden = true;
+    connect.setAttribute("aria-label", "Connect " + label + " to Canvas");
+    const btn = nodrag(h("button", "wc-btn wc-copy", "Copy"));
+    btn.type = "button";
+    btn.setAttribute("aria-label", "Copy the " + label + " command");
+    const code = nodrag(h("code", "wc-code", "…"));
+    btns.append(connect, btn);
+    top.append(h("span", "wc-cmd-name", label), btns);
+    row.append(top, code);
+    btn.onclick = () => { if (rows[key].text) ctx.copy(rows[key].text); };
+    connect.onclick = () => connectAgent(key);
+    rows[key] = { code, connect, text: "", busy: false };
+    cmds.append(row);
+  }
   root.append(head, lines, cmds, status);
+
+  async function connectAgent(key) {
+    const r = rows[key];
+    if (r.busy || (last.registered && last.registered[key])) return;
+    r.busy = true;
+    note = null;
+    show(last);
+    let j;
+    try {
+      const res = await fetch("/api/mcp/connect", { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ agent: key }) });
+      j = await res.json();
+    } catch (e) {
+      j = { ok: false, error: "Canvas did not answer: " + ((e && e.message) || e) };
+    }
+    r.busy = false;
+    if (j && j.ok) {
+      note = { text: j.message || "Added. Start a new " + AGENT_LABEL[key] + " session.", err: false };
+      last = { ...last, registered: { ...(last.registered || {}), [key]: true } };
+    } else {
+      const e = String((j && j.error) || "Something went wrong.");
+      note = { text: e.startsWith(AGENT_LABEL[key]) ? e : AGENT_LABEL[key] + ": " + e, err: true };
+    }
+    show(last);
+  }
 
   let timer = 0;
   function show(j) {
-    for (const key of ["claude", "codex"]) {
-      const t = typeof j[key] === "string" ? j[key] : "";
-      rows[key].text = t;
-      setText(rows[key].code, t || "…");
+    last = j || {};
+    for (const key of Object.keys(AGENT_LABEL)) {
+      const r = rows[key];
+      const t = typeof last[key] === "string" ? last[key] : "";
+      r.text = t;
+      setText(r.code, t || "…");
+      const installed = !!(last.installed && last.installed[key]);
+      const added = !!(last.registered && last.registered[key]);
+      r.connect.hidden = !installed && !r.busy;
+      r.connect.disabled = r.busy || added;
+      r.connect.classList.toggle("done", added && !r.busy);
+      setText(r.connect, r.busy ? "Connecting…" : added ? "Added" : "Connect");
     }
-    const on = j.connected === true;
+    const on = last.connected === true;
     root.classList.toggle("on", on);
-    setText(said, on ? "Connected" + (j.client ? ": " + j.client : "") : "Not connected yet");
-    hint.hidden = on;
+    setText(said, on ? "Connected" + (last.client ? ": " + last.client : "") : "Not connected yet");
+    hint.hidden = on && !(note && note.err);
+    hint.classList.toggle("err", !!(note && note.err));
+    setText(hint, note ? note.text : CONNECT_HINT);
+    elsewhere.hidden = on;
   }
   async function poll() {
     timer = 0;
