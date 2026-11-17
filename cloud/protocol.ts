@@ -143,6 +143,10 @@ export interface CommentsFile {
   threads: Thread[];
   /** Ops made here and not yet acknowledged by the server, oldest first. Empty for a file never shared. */
   outbox: OpEnvelope[];
+  /** Who this app is on the server (from /v1/me), so the page can tell its own comments. Shared files only. */
+  me?: Author;
+  /** Comments an agent wrote here through MCP and this app sent as its person: comment id to the agent, shown as the agent on this Mac only. */
+  relayed?: Record<Uuid, Author>;
   /** Ops the server refused, kept so nothing typed is lost; shown to the person. */
   rejected?: { envelope: OpEnvelope; code: ErrorCode; message: string }[];
 }
