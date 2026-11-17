@@ -32,12 +32,12 @@ import (
 const cloudPort = 5190
 
 type order struct {
-	Op    string             `json:"op"`
-	Kind  string             `json:"kind"`
+	Op    string              `json:"op"`
+	Kind  string              `json:"kind"`
 	Key   *tailcat.PrivateKey `json:"key"`
-	Addr  string             `json:"addr"`
-	Port  int                `json:"port"`
-	Allow *[]string          `json:"allow"`
+	Addr  string              `json:"addr"`
+	Port  int                 `json:"port"`
+	Allow *[]string           `json:"allow"`
 }
 
 var out = json.NewEncoder(os.Stdout)
@@ -179,4 +179,3 @@ func forward(ctx context.Context, o order) {
 		}()
 	}
 }
-
