@@ -273,14 +273,14 @@ private struct HomeSidebar: View {
             HomeRow(symbol: "laptopcomputer", title: "On this Mac", selected: store.section == .mac) { store.section = .mac }
             HomeRow(symbol: "graduationcap", title: "Learn Canvas", selected: false) { model.openCourse() }
 
-            Text("Team servers").font(Typography.section).foregroundStyle(Palette.mutedFg).lineLimit(1)
+            Text("Cloud").font(Typography.section).foregroundStyle(Palette.mutedFg).lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 12).padding(.top, 14).padding(.bottom, 6)
-                .qaText("Team servers")
+                .qaText("Cloud")
             if configured {
                 HomeRow(symbol: "cloud", title: ServerName.label(serverUrl, name: model.prefs.cloudName), selected: store.section == .server, dot: dot) { store.section = .server }
             }
-            HomeRow(symbol: "plus", title: "Add a team server", selected: false, muted: true) {
+            HomeRow(symbol: "plus", title: "Add Cloud", selected: false, muted: true) {
                 SettingsWindow.shared.show(model, tab: .cloud)
             }
         }
@@ -416,7 +416,7 @@ private struct HomeEmpty: View {
 }
 
 /// Home's filter: text segments at field height, each as wide as its words plus room (the inspector's TextSegments
-/// squeeze to equal widths, which is too tight for "On team servers").
+/// squeeze to equal widths, which is too tight for "On this Mac").
 private struct HomeSegments<Tag: Hashable>: View {
     let items: [(title: String, tag: Tag)]
     let selection: Tag
@@ -544,7 +544,7 @@ private struct HomeFirstLaunch: View {
             HomeStart(symbol: "doc.badge.plus", nudge: CGSize(width: 2, height: 0.5), tint: HomeTint.file, title: "New file",
                       text: "A blank canvas on this Mac. Ask your agent for a first board, or drop in a screenshot.", button: "New file", prominent: false) { model.newCanvas() }
             HomeStart(symbol: "cloud", nudge: CGSize(width: 0, height: -0.5), tint: HomeTint.team, title: "Work with your team",
-                      text: "Connect a server your team runs on its own Cloudflare account. Comments sync live.", button: "Add a team server", prominent: false) {
+                      text: "Connect a server your team runs on its own Cloudflare account. Comments sync live.", button: "Add Cloud", buttonTrailing: 11, prominent: false) {
                 SettingsWindow.shared.show(model, tab: .cloud)
             }
         }
@@ -560,6 +560,8 @@ private struct HomeStart: View {
     let title: String
     let text: String
     let button: String
+    /// The button's right padding, when its last letter needs its own (FieldButton.trailing).
+    var buttonTrailing: CGFloat? = nil
     let prominent: Bool
     let action: () -> Void
 
@@ -575,7 +577,7 @@ private struct HomeStart: View {
                 Text(text).font(Typography.body).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, minHeight: 54, alignment: .topLeading)
             }
-            FieldButton(title: button, symbol: nil, prominent: prominent, action: action).qaID("home-start", label: button)
+            FieldButton(title: button, symbol: nil, prominent: prominent, trailing: buttonTrailing, action: action).qaID("home-start", label: button)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .topLeading)

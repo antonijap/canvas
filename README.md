@@ -26,7 +26,7 @@ It also stretches what a canvas is. Boards and layers sit next to notes, to-do l
 
 Canvas brings its own Node and MCP server inside the app, so there is nothing else to install. If you keep `Canvas.app` somewhere other than Applications, press Connect again (it fills in where the app is now) or change the two paths. The Welcome card and Settings > Agents show both commands with this Mac's paths, with Connect and Copy.
 
-Home is the first tab and never closes: your recent files with a picture, where each lives (this Mac or your team server) and its open comments, and a first-launch page with the course, a new file and a team server. Shift+Cmd+0 goes there.
+Home is the first tab and never closes: your recent files with a picture, where each lives (this Mac or your Cloud) and its open comments, and a first-launch page with the course, a new file and Add Cloud. Shift+Cmd+0 goes there.
 
 Canvas updates itself: a new version downloads in the background, is checked against its checksum and signature, and installs when you choose Restart to Update or quit (Settings > General > Update automatically turns it off).
 

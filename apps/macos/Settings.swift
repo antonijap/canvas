@@ -708,6 +708,8 @@ struct FieldButton: View {
     var prominent = false
     /// As wide as its column and a control tall (About Canvas).
     var wide = false
+    /// The right padding when the title's last letter needs its own (a closing d ends a point inside its advance).
+    var trailing: CGFloat? = nil
     let action: () -> Void
     @State private var hovering = false
     var body: some View {
@@ -720,7 +722,7 @@ struct FieldButton: View {
             .foregroundStyle(prominent ? Palette.primaryFg : Palette.fg)
             // Optical padding: a glyph's own side bearing adds about a point on its side, and a closing ellipsis
             // ends inside its advance, so those sides take a little less (measured: qa/native/scenarios-alignment.ts).
-            .padding(.leading, symbol == nil ? 12 : 11.5).padding(.trailing, title.hasSuffix("\u{2026}") ? 11 : 12)
+            .padding(.leading, symbol == nil ? 12 : 11.5).padding(.trailing, trailing ?? (title.hasSuffix("\u{2026}") ? 11 : 12))
             .frame(maxWidth: wide ? .infinity : nil).frame(height: wide ? Metric.control : Metric.field)
             .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous)
                 .fill(prominent ? Palette.primary.opacity(hovering ? 0.88 : 1) : (hovering ? Palette.active : Palette.field.opacity(0.6))))

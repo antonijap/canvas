@@ -107,7 +107,7 @@ enum HomeFilter: String, CaseIterable {
         switch self {
         case .all: "All"
         case .mac: "On this Mac"
-        case .servers: "On team servers"
+        case .servers: "Cloud"
         }
     }
 }

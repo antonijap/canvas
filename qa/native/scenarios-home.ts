@@ -161,8 +161,8 @@ sc("home", "Home: recents newest first, comment count and server on a card, a mi
     t.near(card.w / card.h, 1.6, 0.05, "the picture keeps its shape");
     // Filter.
     const seg = async (label: string) => { const r = (await t.findText(label, filter))[0]; t.ok(r, `the ${label} segment`); await t.click(center(r)); await sleep(350); };
-    await seg("On team servers");
-    t.eq(await cards(t), ["home-b"], "On team servers: the shared file only");
+    await seg("Cloud");
+    t.eq(await cards(t), ["home-b"], "Cloud: the shared file only");
     await seg("On this Mac");
     const mac = await cards(t);
     t.ok(!mac.includes("home-b") && mac.includes("home-c") && mac.includes("home-gone"), `On this Mac: the files that are not shared (${mac})`);
@@ -238,7 +238,7 @@ sc("home", "Home on a first launch: three cards and the empty recents", { covers
     await sleep(600);
     for (const label of ["Welcome to Canvas", "Files you open show up here", "Start the course"]) await f.mark({ label }, 8000);
     const starts = await f.marks({ id: "home-start" });
-    t.eq(starts.map((m) => m.label), ["Start the course", "New file", "Add a team server"], "the three cards' buttons");
+    t.eq(starts.map((m) => m.label), ["Start the course", "New file", "Add Cloud"], "the three cards' buttons");
     sameHeight(t, "the start buttons", starts);
     t.ok(starts.every((s) => Math.abs(s.y - starts[0].y) < 0.6), "on one line");
     const marks = await f.marks({ id: "home-start-mark" });
