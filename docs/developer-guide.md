@@ -369,9 +369,22 @@ Canvas > Settings (Cmd+,) is a toolbar-tab window (`apps/macos/Settings.swift`; 
 | Agents | Connect an agent: the Claude Code and Codex commands with Copy, and Connected (live); default agent (shows which are installed); run time cap (1 to 60 min); agent cursor on/off and speed | server, page |
 | Sounds | finish_work sound on/off, volume, preview | shell |
 | Performance | Tabs kept open (`TabPool`, 1 to 8); board snapshot cache size and Clear | shell, page |
+| Privacy | Share usage counts (on), Help improve Canvas (off), What Canvas collects, Show what's sent (see [Usage counts](#usage-counts)) | server |
 | Shortcuts | Read-only list from the menus (`MenuSpec`) and the canvas keys, as keycaps | |
 
 The page gets `{cmd: "prefs"}` (every live tab when a setting changes, and on each `snapHello`) and keeps a copy in localStorage for its next load. The server gets the default harness and run cap with the shell's bridge state (`src/settings.ts`).
+
+### Usage counts
+
+Canvas counts how many times a day each feature is used and, in a release build, sends those counts once a day to `https://getcanvas.cc/api/usage`. Counts only: never file names, paths, document contents, prompts, layer names, user names, emails or hardware ids. The website's privacy page says the same: https://getcanvas.cc/privacy#usage.
+
+- **What**: one JSON body per completed UTC day, `{v, build, os, arch, day, events: {name: count}, install?}`. `v` is the app version, `build` the commit, `os` the macOS version, `arch` `arm64` or `x86_64`. The names are the list `USAGE_EVENTS` in `src/usage-counts.ts` (anything else is ignored); at most 60 names, counts capped at 100000, at most 8 KB.
+- **Where counted**: the server counts at the point each thing happens (`countUsage(name)`): `file.new` (`/api/canvas/new`), `file.save` (a write that put a changed document on disk, `src/docwriter.ts`), `agent.connected.claude|codex|other` (a new MCP session, `src/onboarding.ts`), `agent.prompt` and `agent.run_done` (`src/agent-run.ts`), `agent.run_undone` (an undo of a step a Canvas agent run made, `src/history.ts`), `variations.make|keep|discard`, `widget.add.<kind>`, `export.<format>`, `copy_as.<format>`. The page posts `link.copy` (Cmd+L). The shell posts `app.open`, `crash` (the last run never quit: `RunMarker` in `SettingsLogic.swift`), `file.open` and `course.opened` (a tab opened, the Welcome file), `update.toast_shown`, `update.download_clicked` and `bug.report_opened` to `POST /api/usage/count {name}` (`x-canvas: 1`).
+- **Where kept**: `usage.json` in the state folder (`CANVAS_STATE_DIR`, else `~/Library/Application Support/Canvas`): `{days: {"YYYY-MM-DD": {name: n}}, lastTry, install: {month, id}}`, written two seconds after a count and on exit, at most 30 unsent days. A development build writes `usage-dev.json` instead, so its counts never reach a release's sender.
+- **When sent**: at server start, when the app first says sharing is on, and every hour: each completed day with counts, oldest first, one POST each (5 s timeout). On `{"ok":true}` the day is deleted. On anything else (an error status, a timeout, no network) the day stays, `lastTry` is set to today and nothing more is tried until the next UTC day. Never a retry loop.
+- **Who sends**: only a release build: the server runs from inside an app bundle (`.app/Contents/Resources/server`, `scripts/release-app.sh`), the app said Share usage counts is on, and it is not a QA build (the QA app says `qa: true`, and `CANVAS_QA=1` servers never send). `pnpm app`, `pnpm start`, `pnpm qa` and the tests never send. Without the app (a browser, tests) the server counts nothing to disk at all: counts wait in memory until the app says what the switches are.
+- **The switches** (Settings > Privacy, sent with the shell's bridge state as `usage: {share, improve, version, commit, os, qa}`): Share usage counts (default on; off deletes what was waiting, and nothing is counted or sent). Help improve Canvas (default off, needs sharing): adds `install`, 32 random hex characters made on the Mac and replaced every calendar month (UTC); turning it off deletes it. Show what's sent opens the exact JSON for today (`GET /api/usage/preview`, built by the same code as the sender).
+- **Testing**: `test/usage-counts.test.ts` posts to a local server through `CANVAS_USAGE_URL`; `pnpm qa:native privacy` opens Settings > Privacy and reads the JSON.
 
 ## File format and save safety
 
@@ -550,6 +563,7 @@ pnpm qa:release --only scrub,docs # some checks: scrub licence security agent fu
 | `CANVAS_LOG_DIR` | `~/Library/Logs/Canvas` | Where the app and server write `server.log` |
 | `CANVAS_QA` | unset | `1`: the server forwards `qa.*` ops to a QA build of the app (`pnpm qa:native`) |
 | `CANVAS_WELCOME_DIR` | `~/Documents/Canvas` | Where the first launch writes `Welcome.canvas` (a copy of the course, `demos/learn.canvas`) |
+| `CANVAS_USAGE_URL` | `https://getcanvas.cc/api/usage` | Where a release build sends its daily usage counts; tests point it at a local server ([Usage counts](#usage-counts)) |
 | `CANVAS_SAVE_LOG` | unset | `1`: documents of 1 MB or more save through the save log (`src/doc/doclog.ts`). Off by default until a second independent review of the 2026-11-17 fixes |
 
 ## Troubleshooting

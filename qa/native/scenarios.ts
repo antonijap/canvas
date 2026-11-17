@@ -634,12 +634,27 @@ sc("inspector", "Option over a field and drag scrubs; up is faster, down slower"
 
 // ---------------------------------------------------------------- Settings and Styles
 
+/** The Settings toolbar's tabs, left to right (SettingsWindow.Tab in apps/macos/Settings.swift). */
+export const SETTINGS_TABS = ["General", "Canvas", "Agents", "Sounds", "Performance", "Privacy", "Shortcuts"];
+
+/** Clicks a Settings tab: its toolbar button by label, else by position once every tab is there. */
+async function settingsTab(t: NT, label: string) {
+  let b: any;
+  for (let i = 0; i < 30 && !b; i++) {
+    const bs = (await t.views("settings")).filter((v) => v.class === "NSToolbarButton").sort((x, y) => x.x - y.x);
+    b = bs.find((v) => v.label === label) ?? (bs.length === SETTINGS_TABS.length ? bs[SETTINGS_TABS.indexOf(label)] : undefined);
+    if (!b) await sleep(100);
+  }
+  t.ok(b, `no ${label} tab in the Settings toolbar`);
+  await t.click(center(b), { window: "settings" });
+}
+
 sc("settings", "Cmd+, opens Settings and a change persists", { covers: ["settings:light", "settings:dark", "theme:light", "theme:dark"] }, async (t: NT) => {
   await t.key(",", ["cmd"]);
   await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
   const tabButton = async (label: string) => {
     // The toolbar's tab buttons, left to right in SettingsWindow.Tab order.
-    const order = ["General", "Canvas", "Agents", "Sounds", "Performance", "Shortcuts"];
+    const order = SETTINGS_TABS;
     let b: any;
     for (let i = 0; i < 30 && !b; i++) {
       const bs = (await t.views("settings")).filter((v) => v.class === "NSToolbarButton").sort((x, y) => x.x - y.x);
@@ -674,6 +689,67 @@ sc("settings", "Cmd+, opens Settings and a change persists", { covers: ["setting
   t.eq(after.prefs.boardLabels, before === "true" ? "false" : "true", "boardLabels");
   await stored("canvas.settings.boardLabels", before === "true" ? "0" : "1");
   await t.shot(`${process.cwd()}/qa/out/native/settings-window.png`, "settings");
+});
+
+sc("settings", "Settings > Privacy: Share usage counts on, Help improve Canvas adds the monthly id, Show what's sent shows today's JSON", { covers: ["settings:privacy"] }, async (t: NT) => {
+  await t.key(",", ["cmd"]);
+  await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
+  await settingsTab(t, "Privacy");
+  await t.waitText("Share usage counts", undefined, 4000, "settings");
+  const st = await t.state();
+  t.eq(st.prefs.shareUsage, "true", "Share usage counts is on by default");
+  const read = (key: string) => { try { return execFileSync("defaults", ["read", t.app.bundleId, key], { encoding: "utf8" }).trim(); } catch { return ""; } };
+  const improve = async (want: "true" | "false") => {
+    if ((await t.state()).prefs.improveCanvas === want) return;
+    const row = await t.waitText("Help improve Canvas", undefined, 4000, "settings");
+    const sw = (await t.views("settings")).filter((v) => v.kind === "switch" || v.kind === "button").find((v) => Math.abs(v.y + v.h / 2 - row.y) < 14 && v.x > row.x);
+    t.ok(sw, "no switch beside Help improve Canvas");
+    await t.click(center(sw), { window: "settings" });
+    await t.waitState((s) => s.prefs.improveCanvas === want, `Help improve Canvas ${want === "true" ? "on" : "off"}`);
+  };
+  await improve("true");
+  for (let i = 0; i < 30 && read("canvas.settings.improveCanvas") !== "1"; i++) await sleep(150);
+  t.eq(read("canvas.settings.improveCanvas"), "1", "Help improve Canvas stored");
+  // The server heard it with the shell's state (POST /api/state), and counted this instance's launch and file opens.
+  const p = await (async () => {
+    for (let i = 0; i < 40; i++) {
+      const j = (await (await fetch(`${t.app.base}/api/usage/preview`)).json()) as any;
+      if (j.improve && j.body?.install) return j;
+      await sleep(250);
+    }
+    throw new Error("the server never heard Help improve Canvas");
+  })();
+  t.eq(p.sends, false, "a QA build never sends");
+  t.ok(/^[0-9a-f]{32}$/.test(p.body.install), `an install id: ${p.body.install}`);
+  t.ok(p.body.events["file.open"] >= 1, `file.open counted: ${JSON.stringify(p.body.events)}`);
+  t.ok(/^\d{4}-\d{2}-\d{2}$/.test(p.body.day), "a UTC day");
+  await t.shot(`${process.cwd()}/qa/out/native/settings-privacy.png`, "settings");
+  // Show what's sent: a popover with the exact JSON the server would send for today.
+  await t.click(center(await t.mark({ id: "usage-show", window: "settings" })), { window: "settings" });
+  await t.waitState((s) => s.popoverShown, "the Show what's sent popover");
+  const m = await t.mark({ id: "usage-json", window: "popover" }, 8000);
+  let shown: any;
+  for (let i = 0; i < 40; i++) {
+    const label = (await t.marks({ id: "usage-json", window: "popover" }))[0]?.label ?? "";
+    try { shown = JSON.parse(label); break; } catch { await sleep(150); }
+  }
+  t.ok(shown, `the popover shows JSON: ${m.label}`);
+  t.eq(Object.keys(shown).filter((k) => !["v", "build", "os", "arch", "day", "events", "install"].includes(k)).join(","), "", "only the contract's fields");
+  t.eq(shown.install, p.body.install, "the same install id the server would send");
+  t.eq(shown.day, p.body.day, "today");
+  t.ok(shown.events["file.open"] >= 1, "today's counts");
+  await sleep(700); // the popover's fade-in
+  await t.shot(`${process.cwd()}/qa/out/native/settings-privacy-json.png`, "popover");
+  await t.key("Escape", [], { window: "popover" });
+  // Back to the default for the scenarios after this one.
+  await improve("false");
+  let off: any;
+  for (let i = 0; i < 40; i++) {
+    off = await (await fetch(`${t.app.base}/api/usage/preview`)).json();
+    if (!off.improve) break;
+    await sleep(250);
+  }
+  t.eq(off.body.install, undefined, "Help improve Canvas off: no install id");
 });
 
 sc("styles", "the Styles switch shows Text, Variables and Fonts", { covers: [] }, async (t: NT) => {

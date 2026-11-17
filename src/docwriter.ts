@@ -41,6 +41,7 @@ import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSIO
 import { boardDigestStale, snapshotOfDoc, type Snapshot } from "./boards.ts";
 import { backupDirFor, findNode, loadDoc, loadDocAsync, revisionOf, sha, StaleFileError, writeDoc, type LoadedDoc, type CanvasDoc, type DocNode } from "./engine.ts";
 import type { NodeOp, Op } from "./history.ts";
+import { countUsage } from "./usage-counts.ts";
 
 /** What the writer needs from the snapshot cache (server.ts wires it). Without a host, edits go straight to writeDoc. */
 export type DocHost = {
@@ -1576,8 +1577,11 @@ function kick(st: FileState): void {
   clearTimeout(st.writeTimer);
   st.writeTimer = undefined;
   if (st.writing || !host) return;
+  const saved = st.saved;
   st.writing = run(st).finally(() => {
     st.writing = undefined;
+    // Usage counts: one file.save per write that put a changed document on disk.
+    if (st.saved > saved) countUsage("file.save");
     land(st);
     // A retry already has its timer; after the last retry the next edit or flush tries again.
     if (st.dirty && !st.writeTimer && st.retries < writeConfig.maxRetries) scheduleWrite(st);

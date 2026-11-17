@@ -13,6 +13,7 @@ import { fontStatuses, systemFonts } from "./fonts.ts";
 import { finishAgent } from "./history.ts";
 import { listPages } from "./pages.ts";
 import { setAgentSettings } from "./settings.ts";
+import { usage } from "./usage-counts.ts";
 import { boardIndex, boardOf, fontsUsed, summaryOf } from "./summary.ts";
 import { version } from "./version.ts";
 
@@ -565,6 +566,8 @@ function receiveState(b: Json, ctx: BridgeCtx) {
   const next = c.role === "page" ? cleanPageState(b) : cleanShellState(b);
   // Settings > Agents rides on the shell's state (src/settings.ts).
   if (c.role === "shell" && b.settings && typeof b.settings === "object") setAgentSettings(b.settings);
+  // Settings > Privacy and the facts only the app knows (version, commit, macOS) for usage counts (src/usage-counts.ts).
+  if (c.role === "shell" && b.usage && typeof b.usage === "object") usage.setFacts(b.usage);
   c.state = next;
   c.stateAt = Date.now();
   if (c.role === "page") {

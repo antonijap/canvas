@@ -23,7 +23,7 @@ struct SettingsTests {
     }
 
     static func main() {
-        defaults(); roundTrip(); limits(); payloads(); shortcuts()
+        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -83,6 +83,34 @@ struct SettingsTests {
         check(json.hasPrefix("{") && json.contains("\"agentCursor\":true"), "page JSON: \(json)")
         check(s.serverSettings["harness"] as? String == "codex" && s.serverSettings["runCapMin"] as? Int == 4, "server gets harness and cap")
         check(CursorSpeed.fast.multiplier > CursorSpeed.normal.multiplier && CursorSpeed.normal.multiplier > CursorSpeed.slow.multiplier, "speeds order")
+    }
+
+    static func privacy() {
+        let s0 = AppSettings.load(fresh())
+        check(s0.shareUsage, "Share usage counts is on by default")
+        check(!s0.improveCanvas, "Help improve Canvas is off by default")
+        let f = s0.usageFacts(version: "0.1.0", commit: "ed205ff", os: "15.2", qa: false)
+        check(f["share"] as? Bool == true && f["improve"] as? Bool == false, "default facts: share, no install id")
+        check(f["version"] as? String == "0.1.0" && f["commit"] as? String == "ed205ff" && f["os"] as? String == "15.2" && f["qa"] as? Bool == false, "facts: \(f)")
+        check(s0.usageFacts(version: "0", commit: nil, os: "15.2", qa: true)["commit"] == nil, "no commit, no key")
+        check(s0.usageFacts(version: "0", commit: nil, os: "15.2", qa: true)["qa"] as? Bool == true, "a QA build says so")
+        // Off stays off, and improve without share never reaches the server.
+        let d = fresh()
+        var s = AppSettings(); s.shareUsage = false; s.improveCanvas = true
+        s.save(d)
+        let back = AppSettings.load(d)
+        check(!back.shareUsage && back.improveCanvas, "both stored")
+        check(!back.improveEffective, "improve needs share")
+        check(back.usageFacts(version: "0", commit: nil, os: "15.2", qa: false)["improve"] as? Bool == false, "the server is told improve off while sharing is off")
+        var on = back; on.shareUsage = true
+        check(on.usageFacts(version: "0", commit: nil, os: "15.2", qa: false)["improve"] as? Bool == true, "both on: install id")
+        check(UsageLinks.privacy.absoluteString == "https://getcanvas.cc/privacy#usage", "the privacy page")
+        // The crash marker: set at launch, cleared on quit; still set at the next launch means the last run did not quit.
+        let m = fresh()
+        check(!RunMarker.launch(m), "first launch: no crash")
+        RunMarker.quit(m)
+        check(!RunMarker.launch(m), "after a normal quit: no crash")
+        check(RunMarker.launch(m), "launched again without quitting: one crash")
     }
 
     static func shortcuts() {
