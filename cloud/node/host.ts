@@ -61,6 +61,15 @@ export function cleanLabel(raw: unknown): string | null {
 /** A device name the joining Mac sent: one line, at most 60 characters. */
 const deviceName = (raw: unknown) => (cleanLabel(raw) ?? "A Mac").slice(0, 60);
 
+/**
+ * Closes a socket whose device lost access. A removed device is told so first ("unauthenticated"): its tunnel key
+ * leaves the member tunnel at the same moment, so a later question could not reach the Cloud to learn why.
+ */
+function drop(ws: ServerSocket, removed: boolean): void {
+  if (removed) ws.send(JSON.stringify({ type: "error", code: "unauthenticated", message: "Removed from this Cloud" } satisfies ServerMessage));
+  ws.close(1008, "Permission changed");
+}
+
 export class HostError extends Error {
   readonly status: number;
   readonly code: string;
@@ -284,7 +293,7 @@ export class CloudHost {
     for (const room of this.rooms.values()) {
       for (const [socket, s] of room.sockets) {
         const now = this.current(s.me);
-        if (!now || ranks[now.role] < ranks[s.me.role]) { room.sockets.delete(socket); socket.close(1008, "Permission changed"); }
+        if (!now || ranks[now.role] < ranks[s.me.role]) { room.sockets.delete(socket); drop(socket, !now); }
         else s.me = now;
       }
     }
@@ -326,7 +335,7 @@ export class CloudHost {
       const text = JSON.stringify({ type: "applied", entries: result.entries } satisfies ServerMessage);
       for (const [socket, s] of r.sockets) {
         if (!s.ready) continue;
-        if (!this.current(s.me)) { r.sockets.delete(socket); socket.close(1008, "Permission changed"); continue; }
+        if (!this.current(s.me)) { r.sockets.delete(socket); drop(socket, true); continue; }
         socket.send(text);
       }
     }
@@ -476,7 +485,7 @@ export class CloudHost {
       }
       // Who this is now: a removed device or a lower role closes the socket before anything is read.
       const current = this.current(s.me);
-      if (!current || ranks[current.role] < ranks[s.me.role]) { room.sockets.delete(ws); ws.close(1008, "Permission changed"); return; }
+      if (!current || ranks[current.role] < ranks[s.me.role]) { room.sockets.delete(ws); drop(ws, !current); return; }
       s.me = current;
       let message: any;
       try { message = JSON.parse(text); } catch { throw new HostError(400, "invalid", "Invalid JSON"); }

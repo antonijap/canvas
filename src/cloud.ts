@@ -85,6 +85,14 @@ export async function target(url: string): Promise<{ base: string; headers: Reco
 }
 
 /** Stops a joined Cloud's tunnel helper (leaving, or a test). */
+/** How a joined Cloud's traffic goes now: "direct" between the two Macs, "relay", or null (unknown, or not a tunnel). */
+export function tunnelPath(url: string): "direct" | "relay" | null {
+  const id = hostedId(url);
+  const f = id ? forwards.get(id) : undefined;
+  const e = f && !(f instanceof Promise) && f.helper.alive ? f.helper.last.get("path") : undefined;
+  return e ? (e.direct ? "direct" : "relay") : null;
+}
+
 export function closeTunnel(id: string): void {
   const f = forwards.get(id);
   forwards.delete(id);
@@ -380,7 +388,12 @@ function onMessage(s: Session, m: ServerMessage): void {
     }
     case "error": {
       if (m.code === "version") setStatus(s, "tooOld");
-      else if (m.code === "unauthenticated") setStatus(s, "signInAgain");
+      else if (m.code === "unauthenticated" && hostedId(s.origin)) {
+        // A hosted Cloud says this Mac was removed, just before its tunnel shuts the Mac out: kept, so it never reads "down".
+        const known = servers.get(s.origin);
+        servers.set(s.origin, { ...(known ?? { devEmail: cloudConfig().devEmail }), status: "removed", at: Date.now() });
+        setStatus(s, "removed");
+      } else if (m.code === "unauthenticated") setStatus(s, "signInAgain");
       else if (m.code === "forbidden") setStatus(s, "forbidden");
       return;
     }
@@ -528,7 +541,7 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
       const cfg = cloudConfig();
       if (!cfg.url) return out(200, { configured: false, url: "", host: "", status: "signedOut", dev: false });
       const st = await checkServer(cfg.url, false, url.searchParams.get("fresh") === "1");
-      return out(200, { configured: true, url: cfg.url, host: hostOf(cfg.url), dev: isLocalDev(cfg.url), hosted: !!hostedId(cfg.url), status: st.status, email: st.email ?? null, name: st.name ?? null, role: st.role ?? null, server: st.server ?? null });
+      return out(200, { configured: true, url: cfg.url, host: hostOf(cfg.url), dev: isLocalDev(cfg.url), hosted: !!hostedId(cfg.url), via: tunnelPath(cfg.url), status: st.status, email: st.email ?? null, name: st.name ?? null, role: st.role ?? null, server: st.server ?? null });
     }
     if (p === "/api/cloud/host" && req.method === "GET") return out(200, await hostStatus());
     if (req.method !== "POST") return out(405, { error: "method not allowed" });

@@ -162,6 +162,20 @@ func forward(ctx context.Context, o order) {
 		fail("could not listen")
 	}
 	say(map[string]any{"event": "ready", "port": ln.Addr().(*net.TCPAddr).Port})
+	// Which way the traffic goes, now and then: straight between the two Macs, or through a relay. Only that bit
+	// is said, never an address.
+	go func() {
+		time.Sleep(3 * time.Second)
+		for {
+			c, cancel := context.WithTimeout(ctx, 10*time.Second)
+			res, err := cl.DiscoPing(c)
+			cancel()
+			if err == nil && res != nil {
+				say(map[string]any{"event": "path", "direct": res.Endpoint != ""})
+			}
+			time.Sleep(30 * time.Second)
+		}
+	}()
 	for {
 		c, err := ln.Accept()
 		if err != nil {

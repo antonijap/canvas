@@ -1,6 +1,7 @@
 // End to end for a Cloud hosted on a Mac (docs/cloud/hosting.md): two Canvas servers, Anna's hosting and Ben's
-// joining, with the fake tunnel helper (test/fixtures/fake-tunnel.ts) standing in for the real one, so it runs
-// anywhere with no network. The real tunnel is checked by hand (docs/cloud/hosting.md, "Checking the real tunnel").
+// joining. By default the fake tunnel helper (test/fixtures/fake-tunnel.ts) stands in for the real one, so it runs
+// anywhere with no network. CANVAS_E2E_TUNNEL=<path to a built canvas-tunnel> runs it through the real tunnel instead
+// (WireGuard through the relays; the Cloud takes this Mac's 127.0.0.1:5190, which must be free).
 //   Anna turns on hosting; her own Canvas is connected as owner on loopback.
 //   She invites Ben; Ben joins with the link; the same link is dead after that.
 //   Anna shares a file; Ben's comment reaches her comments.json in under a second.
@@ -8,7 +9,8 @@
 //   outbox, and arrives when the Cloud is back.
 //   Anna removes Ben: his socket closes and he reads "removed".
 //   The editor port is 127.0.0.1 only; the Cloud port serves no editor route; nothing is left running at the end.
-// Run: node qa/cloud-hosted-e2e.ts
+//   Comments go both ways; a thread.move by its author arrives, one by someone else is refused.
+// Run: node qa/cloud-hosted-e2e.ts       CANVAS_E2E_TUNNEL=/path/canvas-tunnel node qa/cloud-hosted-e2e.ts
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
@@ -17,6 +19,7 @@ import path from "node:path";
 import { ROOT, sleep, startServer, type Scratch } from "./lib.ts";
 import { shareLocal } from "../src/cloud-sync.ts";
 
+const REAL = process.env.CANVAS_E2E_TUNNEL ?? "";
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "canvas-cloud-hosted-")));
 const fakeDir = path.join(tmp, "tunnels");
 fs.mkdirSync(fakeDir);
@@ -36,11 +39,13 @@ const anchor = { nodeId: "Ttl01", x: 0.25, y: 0.5, board: "Scr01" };
 const NIL = "00000000-0000-4000-8000-000000000000";
 const op = (o: unknown) => ({ opId: crypto.randomUUID(), doc: NIL, at: new Date().toISOString(), op: o });
 const env = (who: string): Record<string, string> => ({
-  CANVAS_TUNNEL_BIN: path.join(ROOT, "test", "fixtures", "fake-tunnel.sh"),
-  CANVAS_FAKE_TUNNEL_DIR: fakeDir,
-  CANVAS_FAKE_TUNNEL_NODE: process.execPath,
-  CANVAS_FAKE_TUNNEL_ANY_PORT: "1",
-  CANVAS_CLOUD_HOST_PORT: "0",
+  ...(REAL ? { CANVAS_TUNNEL_BIN: REAL } : {
+    CANVAS_TUNNEL_BIN: path.join(ROOT, "test", "fixtures", "fake-tunnel.sh"),
+    CANVAS_FAKE_TUNNEL_DIR: fakeDir,
+    CANVAS_FAKE_TUNNEL_NODE: process.execPath,
+    CANVAS_FAKE_TUNNEL_ANY_PORT: "1",
+    CANVAS_CLOUD_HOST_PORT: "0",
+  }),
   CANVAS_CLOUD_SECRETS_FILE: path.join(tmp, `${who}-secrets.json`),
   CANVAS_CLOUD_WATCH_MS: "1000",
   CANVAS_COMMENT_NAME: who,
@@ -65,6 +70,7 @@ async function main() {
   const comments = async (s: Scratch, file: string) => (await (await fetch(`${s.base}/api/comments?file=${encodeURIComponent(file)}`)).json()) as any;
   const postOps = (s: Scratch, file: string, ops: unknown[]) => call(s, `/api/comments/ops?file=${encodeURIComponent(file)}`, { ops });
 
+  console.log(REAL ? "through the real tunnel helper" : "through the stand-in tunnel helper");
   // 1. Anna hosts.
   const started = await call(sa, "/api/cloud/host/start", { name: "Studio Cloud", label: "Anna" });
   line(started.status === 200 && started.j.hosting && started.j.tunnel === "up", `hosting is on, tunnel ${started.j.tunnel}`);
@@ -93,7 +99,7 @@ async function main() {
   line(again.status !== 200 && /already used|expired/.test(again.j.error), "the same link does not work twice");
   const people = (await (await fetch(`${sa.base}/api/cloud/host`)).json() as any).people;
   line(people.some((p: any) => p.label === "ben@studio.test" && p.devices.length === 1 && p.devices[0].name === "Ben's MacBook"), "Anna sees Ben joined from Ben's MacBook");
-  await until("Ben connected", async () => (await status(sb)).status === "connected");
+  await until("Ben connected", async () => (await status(sb)).status === "connected", REAL ? 60_000 : 8000);
   line(true, `Ben is connected as ${(await status(sb)).role}`);
   const secrets = fs.readFileSync(path.join(tmp, "Ben-secrets.json"), "utf8");
   line(secrets.length > 0, "and it is there");
@@ -111,20 +117,38 @@ async function main() {
   fs.writeFileSync(path.join(pkgB, "comments.json"), JSON.stringify(shareLocal({ ...before, server: undefined }, shared.j.url, { name: "Ben" }, [])));
   const diskB = () => JSON.parse(fs.readFileSync(path.join(pkgB, "comments.json"), "utf8"));
   await comments(sb, pkgB);
-  await until("Ben's copy connected", async () => (await comments(sb, pkgB)).sync?.status === "connected");
-  await until("Ben has Anna's thread", () => diskB().threads.some((t: any) => t.id === t1));
+  await until("Ben's copy connected", async () => (await comments(sb, pkgB)).sync?.status === "connected", REAL ? 60_000 : 8000);
+  await until("Ben has Anna's thread", () => diskB().threads.some((t: any) => t.id === t1), REAL ? 30_000 : 8000);
   const bt = crypto.randomUUID();
   const t0 = Date.now();
   await postOps(sb, pkgB, [op({ kind: "thread.create", thread: bt, anchor, comment: crypto.randomUUID(), body: "From Ben" })]);
-  await until("Ben's comment at Anna's", () => diskA().threads.some((t: any) => t.id === bt), 2000);
+  await until("Ben's comment at Anna's", () => diskA().threads.some((t: any) => t.id === bt), REAL ? 10_000 : 2000);
   const ms = Date.now() - t0;
   const author = diskA().threads.find((t: any) => t.id === bt).comments[0].author;
-  line(ms < 1000 && author.email === "ben@studio.test" && typeof author.id === "string", `Ben's comment reached Anna in ${ms} ms, by person ${author.id ? "id" : "?"}`);
+  line(ms < (REAL ? 5000 : 1000) && author.email === "ben@studio.test" && typeof author.id === "string", `Ben's comment reached Anna in ${ms} ms, by person ${author.id ? "id" : "?"}`);
+  // And the other way: Anna replies, Ben has it.
+  const reply = crypto.randomUUID();
+  const t2 = Date.now();
+  await postOps(sa, pkgA, [op({ kind: "comment.add", thread: bt, comment: reply, body: "Reply from Anna" })]);
+  await until("Anna's reply at Ben's", () => diskB().threads.some((t: any) => t.comments.some((c: any) => c.id === reply)), REAL ? 10_000 : 2000);
+  line(true, `Anna's reply reached Ben in ${Date.now() - t2} ms`);
+  // thread.move: Ben moves his own pin (it arrives at Anna's); moving Anna's thread is refused.
+  await postOps(sb, pkgB, [op({ kind: "thread.move", thread: bt, anchor: { ...anchor, x: 0.75 } })]);
+  await until("Ben's move at Anna's", () => diskA().threads.find((t: any) => t.id === bt)?.anchor.x === 0.75, REAL ? 10_000 : 2000);
+  line(true, "Ben moved his own pin and it moved at Anna's");
+  await postOps(sb, pkgB, [op({ kind: "thread.move", thread: t1, anchor: { ...anchor, x: 0.9 } })]);
+  await until("the move of Anna's thread refused", () => (diskB().rejected ?? []).some((r: any) => r.envelope.op.kind === "thread.move" && r.code === "forbidden"), REAL ? 10_000 : 3000);
+  line(diskA().threads.find((t: any) => t.id === t1)?.anchor.x === 0.25, "moving Anna's thread is refused, it stays put at hers");
+  if (REAL) {
+    const via = await until("the tunnel's path", async () => (await status(sb)).via !== null, 60_000).then(async () => (await status(sb)).via).catch(() => "unknown");
+    console.log(`INFO Ben's traffic goes ${via === "direct" ? "directly between the two" : via === "relay" ? "through a relay" : "by an unknown path"}`);
+  }
 
   // 5. The Cloud stops answering (its process paused, like a Mac asleep with the lid closed).
-  paused = pgrep(path.join("cloud", "node", "main.ts"));
+  paused = (() => { try { return execFileSync("pgrep", ["-P", String(sa.proc.pid), "-f", path.join("cloud", "node", "main.ts")], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } })();
+  line(paused.length === 1, "Anna's Cloud runs as its own process");
   for (const pid of paused) process.kill(Number(pid), "SIGSTOP");
-  const downAfter = await until("Ben reads down", async () => (await comments(sb, pkgB)).sync?.status === "down", 30_000);
+  const downAfter = await until("Ben reads down", async () => (await comments(sb, pkgB)).sync?.status === "down", 60_000);
   line(true, `Ben's status reads "down" ${downAfter} ms after the Cloud stopped answering`);
   const st = await status(sb);
   line(st.status === "down", `and Settings reads ${st.status}`);
@@ -142,8 +166,16 @@ async function main() {
   await call(sa, "/api/cloud/host/remove", { personId: ben.id });
   await until("Ben removed", async () => (await comments(sb, pkgB)).sync?.status === "removed", 15_000);
   line(true, "Ben's socket closed and he reads \"removed\"");
-  const keys = JSON.parse(fs.readFileSync(path.join(fakeDir, fs.readdirSync(fakeDir).find((f) => f.endsWith(".json") && JSON.parse(fs.readFileSync(path.join(fakeDir, f), "utf8")).allow)!), "utf8")).allow;
-  line(Array.isArray(keys) && keys.length === 0, "the member tunnel no longer lets his Mac's key in");
+  // His Mac's tunnel key is out of the member tunnel: a fresh connection with it does not get through at all.
+  const benSecret = JSON.parse(JSON.parse(fs.readFileSync(path.join(tmp, "Ben-secrets.json"), "utf8"))[`hosted:${started.j.hostId}`]);
+  await sleep(REAL ? 8000 : 1000); // the member tunnel restarts with the new list
+  const bin = REAL || path.join(ROOT, "test", "fixtures", "fake-tunnel.sh");
+  const { forward } = await import("../src/cloud-tunnel.ts");
+  if (!REAL) Object.assign(process.env, { CANVAS_FAKE_TUNNEL_DIR: fakeDir, CANVAS_FAKE_TUNNEL_NODE: process.execPath, CANVAS_FAKE_TUNNEL_ANY_PORT: "1" });
+  const f = await forward(bin, benSecret.key, benSecret.addr);
+  const through = await fetch(`${f.origin}/v1/info`, { headers: { authorization: `Bearer ${benSecret.token}` }, signal: AbortSignal.timeout(REAL ? 20_000 : 3000) }).then((r) => r.status).catch(() => 0);
+  f.helper.stop();
+  line(through === 0, `the member tunnel no longer lets his Mac's key in (${through === 0 ? "no connection" : `answered ${through}`})`);
   await sleep(4000);
   line((await comments(sb, pkgB)).sync?.status === "removed", "and he still reads \"removed\", not \"down\", once the tunnel shuts him out");
 
@@ -157,9 +189,7 @@ async function main() {
   for (const s of scratch) await s.stop();
   scratch.length = 0;
   await sleep(1500);
-  const left = [...pgrep(path.join("cloud", "node", "main.ts")), ...pgrep("fake-tunnel.ts")].filter((pid) => {
-    try { return execFileSync("ps", ["-o", "command=", "-p", pid], { encoding: "utf8" }).includes(ROOT); } catch { return false; }
-  });
+  const left = [...pgrep(path.join(ROOT, "cloud", "node", "main.ts")), ...pgrep(path.join(ROOT, "test", "fixtures", "fake-tunnel")), ...(REAL ? pgrep(REAL) : [])];
   line(left.length === 0, `no Cloud process or tunnel helper left running (${left.length})`);
 }
 
