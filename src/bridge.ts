@@ -153,7 +153,7 @@ const shellSummary = (c: Client | undefined) =>
 
 // ---------- commands ----------
 
-const SHELL_OPS = new Set(["tabs", "open", "close", "theme.get", "theme.set", "snapshot", "fonts", "toast", "activate", "ping", "sound"]);
+const SHELL_OPS = new Set(["tabs", "open", "close", "theme.get", "theme.set", "snapshot", "fonts", "toast", "activate", "ping", "sound", "update.state", "update.check", "update.restart"]);
 /**
  * Native QA input (pnpm qa:native): a QA build of the app answers qa.* ops (post mouse and key events into its own
  * window, read its state, screenshot it). Only a server started with CANVAS_QA=1 forwards them; any other server
@@ -205,6 +205,7 @@ const COLOR = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$/;
 function cleanArgs(op: string, a: Json): Json {
   switch (op) {
     case "tabs": case "theme.get": case "fonts": case "activate": case "ping": case "deselect": case "clear_highlights": case "freeze": case "thaw": return {};
+    case "update.state": case "update.check": case "update.restart": return {};
     case "open": return { file: existingDoc(a.file), focus: a.focus === true };
     case "close": return a.file === undefined ? {} : { file: safeResolve(str(a.file, "file", 2000)) };
     case "theme.set": return { mode: oneOf(a.mode, "mode", ["light", "dark", "system"] as const) };

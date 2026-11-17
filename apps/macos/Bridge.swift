@@ -190,6 +190,20 @@ final class BridgeClient {
       toastId = ms <= 0 ? id : nil
       model.flash(String(message.prefix(200)), durationMs: ms, level: args["level"] as? String)
       return ["shown": true]
+    case "update.state":
+      // The updater (Updater.swift): this version, a verified update waiting, and the toast on screen.
+      let u = Updater.shared
+      return ["version": u.version, "ready": u.ready?.version as Any? ?? NSNull(), "busy": u.busy, "automatic": u.automatic,
+              "localTest": u.localTest, "toast": model.toast as Any? ?? NSNull(), "actions": model.toastActions.map(\.label)]
+    case "update.check", "update.restart":
+      // Only the local end-to-end test drives these (scripts/update-e2e.sh); people use the Canvas menu and the toast.
+      guard Updater.shared.localTest else { throw BridgeError(code: "forbidden", message: "\(op) is for the local update test only") }
+      if op == "update.check" { Updater.shared.check(userInitiated: true); return ["checking": true] }
+      guard Updater.shared.ready != nil else { throw BridgeError(code: "not_ready", message: "no update is ready") }
+      // The answer goes out first; then the same path as Canvas > Restart to Update. A run loop timer, not a main queue
+      // block: quitting waits in a nested run loop for main queue callbacks, which never run inside a main queue block.
+      Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { _ in MainActor.assumeIsolated { Updater.shared.restartToUpdate() } }
+      return ["restarting": true]
     case "activate":
       activate()
       return ["activated": true]

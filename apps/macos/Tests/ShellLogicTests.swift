@@ -20,6 +20,7 @@ struct ShellLogicTests {
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -655,4 +656,168 @@ struct ShellLogicTests {
         check(items(.typography, ["fontFamily", "lineHeight", "textAlign"]) == "Reset font=fontFamily, Reset line height=lineHeight, Reset text align=textAlign", items(.typography, ["fontFamily", "lineHeight", "textAlign"]))
     }
 
+    // Updates (AppUpdate): the manifest, where the zip may come from, which release this Mac takes.
+    static func updateManifest() {
+        let good = #"{"latest":{"version":"0.1.2","file":"Canvas-0.1.2-2c4b1469.zip","size":53617915,"sha256":"2c4b1469e6f8098037c6445984c117099f2f9907103a3c4abc99161367825ca7","minimumSystemVersion":"26.0","arch":["arm64"]}}"#
+        let r = AppUpdate.parse(Data(good.utf8))
+        check(r == AppUpdate.Release(version: "0.1.2", file: "Canvas-0.1.2-2c4b1469.zip", size: 53617915, sha256: "2c4b1469e6f8098037c6445984c117099f2f9907103a3c4abc99161367825ca7", minimumSystemVersion: "26.0", arch: ["arm64"]), "the manifest's latest release: \(String(describing: r))")
+        func with(_ key: String, _ value: String) -> AppUpdate.Release? {
+            var j = try! JSONSerialization.jsonObject(with: Data(good.utf8)) as! [String: Any]
+            var l = j["latest"] as! [String: Any]
+            l[key] = value == "<none>" ? nil : (try? JSONSerialization.jsonObject(with: Data(value.utf8), options: .fragmentsAllowed))
+            j["latest"] = l
+            return AppUpdate.parse(try! JSONSerialization.data(withJSONObject: j))
+        }
+        for f in [#""../Canvas-0.1.2.zip""#, #""Canvas-0.1.2.zip/../x.zip""#, #""dl/Canvas-0.1.2.zip""#, #""Canvas-0.1.2.dmg""#, #""Other-0.1.2.zip""#, #""Canvas-0.1.2%2F.zip""#, #""Canvas-0.1.2 .zip""#, #""Canvas-..zip""#, "7", "<none>"] {
+            check(with("file", f) == nil, "a file name outside the pattern is refused: \(f)")
+        }
+        check(with("sha256", #""2C4B""#) == nil && with("sha256", #""zz4b1469e6f8098037c6445984c117099f2f9907103a3c4abc99161367825ca7""#) == nil && with("sha256", "<none>") == nil, "a SHA-256 is 64 hex digits")
+        check(with("size", "0") == nil && with("size", "-5") == nil && with("size", #""53617915""#) == nil && with("size", "3000000000") == nil, "a size is a positive number under 2 GB")
+        check(with("version", #""0.1.2; rm -rf""#) == nil && with("minimumSystemVersion", #""twenty-six""#) == nil, "version and minimum macOS in their shapes")
+        check(with("arch", "<none>")?.arch == [], "no arch list: any Mac")
+        check(AppUpdate.parse(Data("{}".utf8)) == nil && AppUpdate.parse(Data("nope".utf8)) == nil, "no release, or garbage")
+
+        // Where it comes from: the website over https, or a local test server only when the override says so.
+        let site = AppUpdate.manifestSource(env: [:])
+        check(site.url.absoluteString == "https://getcanvas.cc/releases.json" && !site.localTest, "the website by default")
+        let local = AppUpdate.manifestSource(env: ["CANVAS_UPDATE_MANIFEST": "http://127.0.0.1:8765/releases.json"])
+        check(local.url.absoluteString == "http://127.0.0.1:8765/releases.json" && local.localTest, "a local test manifest")
+        for bad in ["https://evil.example/releases.json", "http://localhost:8765/releases.json", "http://127.0.0.1.evil.example/r.json", "https://127.0.0.1:8765/r.json",
+                    "file:///tmp/r.json", "http://user@127.0.0.1:8765/r.json", "http://10.0.0.1/r.json", "http://127.0.0.1:8765@evil.example/r.json"] {
+            let s = AppUpdate.manifestSource(env: ["CANVAS_UPDATE_MANIFEST": bad])
+            check(s.url.absoluteString == "https://getcanvas.cc/releases.json" && !s.localTest, "an override that is not http://127.0.0.1 is ignored: \(bad)")
+        }
+        check(AppUpdate.downloadURL(manifest: site.url, file: "Canvas-0.1.2-2c4b1469.zip")?.absoluteString == "https://getcanvas.cc/download/Canvas-0.1.2-2c4b1469.zip", "the zip on the website")
+        check(AppUpdate.downloadURL(manifest: local.url, file: "Canvas-0.1.2.zip")?.absoluteString == "http://127.0.0.1:8765/download/Canvas-0.1.2.zip", "the zip on the local test server")
+        check(AppUpdate.downloadURL(manifest: URL(string: "http://getcanvas.cc/releases.json")!, file: "Canvas-0.1.2.zip") == nil, "never over http from the website")
+        check(AppUpdate.downloadURL(manifest: URL(string: "https://getcanvas.cc.evil.example/releases.json")!, file: "Canvas-0.1.2.zip") == nil, "never another host")
+        check(AppUpdate.downloadURL(manifest: URL(string: "http://localhost:8765/releases.json")!, file: "Canvas-0.1.2.zip") == nil, "never another local name")
+        check(AppUpdate.downloadURL(manifest: site.url, file: "../Canvas-0.1.2.zip") == nil, "never a path out of /download")
+
+        // Which release this Mac takes: newer, a macOS it meets, its architecture.
+        let os26 = OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)
+        let os27 = OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 1)
+        check(AppUpdate.meetsMinimum("26.0", os: os26) && AppUpdate.meetsMinimum("26", os: os27) && AppUpdate.meetsMinimum("27.0.1", os: os27), "the minimum met")
+        check(!AppUpdate.meetsMinimum("26.1", os: os26) && !AppUpdate.meetsMinimum("27.0.2", os: os27) && !AppUpdate.meetsMinimum("28.0", os: os27), "the minimum not met")
+        let rel = r!
+        check(AppUpdate.offers(rel, current: "0.1.1", os: os26, arch: "arm64"), "0.1.2 over 0.1.1 on macOS 26, Apple silicon")
+        check(!AppUpdate.offers(rel, current: "0.1.2", os: os26, arch: "arm64") && !AppUpdate.offers(rel, current: "0.2.0", os: os26, arch: "arm64"), "not the same or an older version")
+        check(!AppUpdate.offers(rel, current: "0.1.1", os: os26, arch: "x86_64"), "not another architecture")
+        let later = AppUpdate.Release(version: "0.1.2", file: rel.file, size: rel.size, sha256: rel.sha256, minimumSystemVersion: "28.0", arch: [])
+        check(!AppUpdate.offers(later, current: "0.1.1", os: os27, arch: "arm64"), "not a release that needs a newer macOS")
+        check(AppUpdate.offers(AppUpdate.Release(version: "0.1.2", file: rel.file, size: rel.size, sha256: rel.sha256, minimumSystemVersion: "26.0", arch: []), current: "0.1.1", os: os26, arch: "x86_64"), "no arch list: any Mac")
+
+        // The Canvas menu: Check for Updates always, Restart to Update (shown while one is ready).
+        let app = MenuSpec.app.compactMap { $0 }
+        check(app.contains { $0.title == "Check for Updates\u{2026}" && $0.command == "checkForUpdates" } && app.contains { $0.title == "Restart to Update" && $0.command == "restartToUpdate" }, "Canvas menu items")
+    }
+
+    // The checks before anything is replaced: each failure refuses with its own reason, the first one that failed.
+    static func updateVerdict() {
+        let rel = AppUpdate.Release(version: "0.1.2", file: "Canvas-0.1.2.zip", size: 100, sha256: String(repeating: "a", count: 64), minimumSystemVersion: "26.0", arch: ["arm64"])
+        let own = AppUpdate.Own(version: "0.1.1", bundleID: "cc.getcanvas.canvas", teamID: "TEAM123456")
+        let ok = AppUpdate.Facts(size: 100, sha256: String(repeating: "a", count: 64), unzipped: true, apps: ["Canvas.app"], bundleID: "cc.getcanvas.canvas",
+                                 version: "0.1.2", signatureValid: true, teamID: "TEAM123456", gatekeeper: true)
+        func v(_ change: (inout AppUpdate.Facts) -> Void, own o: AppUpdate.Own = own, local: Bool = false) -> AppUpdate.Verdict {
+            var f = ok; change(&f); return AppUpdate.verdict(f, release: rel, own: o, localTest: local)
+        }
+        func refused(_ verdict: AppUpdate.Verdict, _ words: String) -> Bool {
+            if case .refuse(let why) = verdict { return why.contains(words) }
+            return false
+        }
+        check(v { _ in } == .install, "every check passed: install")
+        check(refused(v({ _ in }, own: AppUpdate.Own(version: "0.1.1", bundleID: "cc.getcanvas.canvas", teamID: nil)), "Developer ID"), "an ad-hoc or unsigned running app never updates itself")
+        check(refused(v { $0.size = 99 }, "size"), "size differs")
+        check(refused(v { $0.size = nil }, "size"), "nothing downloaded")
+        check(refused(v { $0.sha256 = String(repeating: "b", count: 64) }, "SHA-256"), "checksum differs")
+        check(v { $0.sha256 = String(repeating: "A", count: 64) } == .install, "the checksum compares without case")
+        check(refused(v { $0.unzipped = false }, "unzip"), "would not unzip")
+        check(refused(v { $0.apps = [] }, "one Canvas.app"), "no app in the zip")
+        check(refused(v { $0.apps = ["Canvas.app", "Other.app"] }, "one Canvas.app"), "two apps in the zip")
+        check(refused(v { $0.apps = ["Evil.app"] }, "one Canvas.app"), "another app's name")
+        check(refused(v { $0.bundleID = "com.example.other" }, "not Canvas"), "another bundle id")
+        check(refused(v { $0.bundleID = nil }, "not Canvas"), "no bundle id")
+        check(refused(v { $0.version = "0.1.3" }, "0.1.3"), "a version other than the manifest's")
+        check(refused(v({ _ in }, own: AppUpdate.Own(version: "0.1.2", bundleID: own.bundleID, teamID: own.teamID)), "not newer"), "not newer than this app")
+        check(refused(v { $0.signatureValid = false }, "signature"), "a signature that does not verify")
+        check(refused(v { $0.signatureValid = nil }, "signature"), "a signature not checked")
+        check(refused(v { $0.teamID = "OTHER12345" }, "different developer"), "another team")
+        check(refused(v { $0.teamID = nil }, "different developer"), "no team (ad-hoc)")
+        check(refused(v { $0.gatekeeper = false }, "Gatekeeper"), "Gatekeeper rejects it")
+        check(refused(v { $0.gatekeeper = nil }, "Gatekeeper"), "Gatekeeper not asked")
+        check(v({ $0.gatekeeper = false }, local: true) == .install, "the local test skips only Gatekeeper")
+        check(refused(v({ $0.teamID = "OTHER12345" }, local: true), "different developer") && refused(v({ $0.sha256 = String(repeating: "b", count: 64) }, local: true), "SHA-256"), "the local test still checks everything else")
+        check(refused(v { $0.size = 99; $0.teamID = nil }, "size"), "the first failure is the reason")
+    }
+
+    // Where the app can replace itself, and where it opens the download page instead.
+    static func updateInstall() {
+        check(AppUpdate.installMode(bundlePath: "/Applications/Canvas.app", folderWritable: true, bundleWritable: true) == .swap, "Applications, writable: swap")
+        if case .manual(let why) = AppUpdate.installMode(bundlePath: "/Applications/Canvas.app", folderWritable: false, bundleWritable: true) {
+            check(why.contains("Applications"), "names the folder: \(why)")
+        } else { check(false, "a folder this account cannot change: the download page") }
+        check(AppUpdate.installMode(bundlePath: "/Applications/Canvas.app", folderWritable: true, bundleWritable: false) != .swap, "an app this account cannot change: the download page")
+        if case .manual(let why) = AppUpdate.installMode(bundlePath: "/private/var/folders/x/T/AppTranslocation/ABC/d/Canvas.app", folderWritable: true, bundleWritable: true) {
+            check(why.contains("Applications"), "translocated: move it to Applications: \(why)")
+        } else { check(false, "a translocated app cannot replace itself") }
+    }
+
+    // The helper that swaps the app after it quits: quoted paths, the rollback, the relaunch.
+    static func updateHelper() {
+        check(AppUpdate.shQuote("/a b/it's") == #"'/a b/it'\''s'"#, "single quotes, an apostrophe closed and reopened")
+        let s = AppUpdate.helperScript(pid: 4242, app: "/Users/x/My Apps/Canvas.app", staged: "/Users/x/Library/Caches/c/Updates/0.1.2/u 1/Canvas.app",
+                                       stagingRoot: "/Users/x/Library/Caches/c/Updates", log: "/Users/x/Library/Logs/Canvas/update.log",
+                                       relaunch: true, env: [("CANVAS_PORT", "5300"), ("CANVAS_STATE_DIR", "/tmp/s t")])
+        check(s.hasPrefix("#!/bin/sh\n"), "a /bin/sh script")
+        check(s.contains("PID=4242\n"), "waits for this pid")
+        check(s.contains(#"APP='/Users/x/My Apps/Canvas.app'"#) && s.contains(#"NEW='/Users/x/Library/Caches/c/Updates/0.1.2/u 1/Canvas.app'"#), "paths with spaces quoted")
+        check(s.contains(#"TMP='/Users/x/My Apps/.Canvas.app.update-4242'"#) && s.contains(#"BAK='/Users/x/My Apps/.Canvas.app.previous-4242'"#), "the new app is copied next to the old one first, the old one moves aside there")
+        check(s.contains(#"while kill -0 "$PID""#), "waits for the old app to exit")
+        check(s.contains(#"/usr/bin/ditto "$NEW" "$TMP""#), "copies with ditto (keeps the signature)")
+        check(s.contains(#"/bin/mv "$APP" "$BAK""#) && s.contains(#"/bin/mv "$TMP" "$APP""#), "old aside, new in")
+        check(s.contains(#"/bin/mv "$BAK" "$APP""#), "a failed move puts the old app back")
+        check(s.contains(#"/usr/bin/xattr -dr com.apple.quarantine "$APP""#), "clears quarantine")
+        check(s.contains(#"/usr/bin/open --env 'CANVAS_PORT=5300' --env 'CANVAS_STATE_DIR=/tmp/s t' "$APP""#), "relaunches with the app's own overrides: \(s)")
+        let noRelaunch = AppUpdate.helperScript(pid: 1, app: "/Applications/Canvas.app", staged: "/c/Canvas.app", stagingRoot: "/c", log: "/l", relaunch: false, env: [])
+        check(noRelaunch.contains("RELAUNCH=0") && s.contains("RELAUNCH=1"), "install on quit does not relaunch")
+        // The script itself: run it against folders with spaces, a pid that has exited, and a copy that fails.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("canvas-helper-test \(getpid())")
+        try? fm.removeItem(at: root)
+        let apps = root.appendingPathComponent("My Apps"), staging = root.appendingPathComponent("Caches dir/Updates")
+        func makeApp(_ dir: URL, _ marker: String) {
+            try? fm.createDirectory(at: dir.appendingPathComponent("Canvas.app/Contents"), withIntermediateDirectories: true)
+            try? marker.write(to: dir.appendingPathComponent("Canvas.app/Contents/marker"), atomically: true, encoding: .utf8)
+        }
+        makeApp(apps, "old"); makeApp(staging.appendingPathComponent("0.1.2/u 1"), "new")
+        let log = root.appendingPathComponent("update.log")
+        func run(_ script: String) -> Int32 {
+            let f = root.appendingPathComponent("helper.sh")
+            try? script.write(to: f, atomically: true, encoding: .utf8)
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = [f.path]
+            p.standardError = FileHandle.nullDevice
+            try? p.run(); p.waitUntilExit(); return p.terminationStatus
+        }
+        func marker() -> String? { try? String(contentsOf: apps.appendingPathComponent("Canvas.app/Contents/marker"), encoding: .utf8) }
+        func beside() -> [String] { ((try? fm.contentsOfDirectory(atPath: apps.path)) ?? []).sorted() }
+        let app = apps.appendingPathComponent("Canvas.app").path
+        // A staged app that is not there: the copy fails, the old app stays where it was.
+        let broken = AppUpdate.helperScript(pid: 999_999, app: app, staged: staging.appendingPathComponent("missing/Canvas.app").path, stagingRoot: staging.path, log: log.path, relaunch: false, env: [])
+        check(run(broken) != 0 && marker() == "old", "a failed copy keeps the old app")
+        check(beside() == ["Canvas.app"], "and leaves nothing beside it: \(beside())")
+        // The new app cannot move in (a file is in the way of the copy's name): the old one goes back.
+        let blocker = apps.appendingPathComponent(".Canvas.app.update-999999")
+        let staged = staging.appendingPathComponent("0.1.2/u 1/Canvas.app").path
+        try? fm.createDirectory(at: blocker, withIntermediateDirectories: true)
+        try? "x".write(to: blocker.appendingPathComponent("locked"), atomically: true, encoding: .utf8)
+        _ = chmod(blocker.path, 0o500)
+        check(run(AppUpdate.helperScript(pid: 999_999, app: app, staged: staged, stagingRoot: staging.path, log: log.path, relaunch: false, env: [])) != 0 && marker() == "old", "a copy that cannot be made keeps the old app")
+        _ = chmod(blocker.path, 0o700); try? fm.removeItem(at: blocker)
+        let good = AppUpdate.helperScript(pid: 999_999, app: app, staged: staged, stagingRoot: staging.path, log: log.path, relaunch: false, env: [])
+        check(run(good) == 0 && marker() == "new", "the new app in the old one's place")
+        check(beside() == ["Canvas.app"], "no copy or backup left beside it: \(beside())")
+        check(!fm.fileExists(atPath: staging.path), "the staged download is gone")
+        check(((try? String(contentsOf: log, encoding: .utf8)) ?? "").contains("installed"), "the log says so")
+        try? fm.removeItem(at: root)
+    }
 }

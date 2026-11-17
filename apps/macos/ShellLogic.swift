@@ -905,6 +905,9 @@ enum MenuSpec {
 
     static let app: [Entry] = [
         Item(title: "About Canvas", command: "about", mods: []),
+        // Updates (Updater.swift): Restart to Update shows only while a verified update is waiting.
+        Item(title: "Check for Updates\u{2026}", command: "checkForUpdates", mods: []),
+        Item(title: "Restart to Update", command: "restartToUpdate", mods: []),
         nil,
         Item(title: "Settings\u{2026}", command: "settings", key: ","),
         nil,
@@ -1398,9 +1401,9 @@ enum OpenTypeFeatures {
 }
 
 /// The website's pages for this build (getcanvas.cc): reporting a bug, the download page, and the release manifest the
-/// app reads once a day. The report link carries only the app's version and commit, the macOS version and the
-/// architecture, each in the shape the page accepts (it ignores anything else): nothing is sent until the person
-/// presses Send there. The manifest is a plain GET with no identifiers.
+/// app reads at launch and every 6 hours (AppUpdate, Updater.swift). The report link carries only the app's version
+/// and commit, the macOS version and the architecture, each in the shape the page accepts (it ignores anything else):
+/// nothing is sent until the person presses Send there. The manifest is a plain GET with no identifiers.
 /// Canvas > About Canvas: "Version 0.1.0 (aede106)" and when this build was made (build.sh writes CanvasBuilt, UTC).
 enum AboutInfo {
     static func versionLine(version: String, commit: String?) -> String {
@@ -1466,5 +1469,182 @@ enum ReleaseLinks {
         case (_, nil): return false
         case let (p?, q?): return p.compare(q, options: .numeric) == .orderedDescending
         }
+    }
+}
+
+// MARK: Updates
+
+/// A downloaded copy of Canvas updates itself (Updater.swift does the network, the files and the processes; this is
+/// the part the tests run). The manifest's latest release is downloaded from getcanvas.cc over https, checked
+/// (`verdict`), and swapped in by a small /bin/sh helper after the app quits (`helperScript`).
+enum AppUpdate {
+    /// The manifest's `latest` entry (docs/developer-guide.md "Updates" lists the fields).
+    struct Release: Equatable {
+        let version: String
+        let file: String
+        let size: Int
+        let sha256: String
+        let minimumSystemVersion: String
+        let arch: [String]
+    }
+
+    static let versionShape = #"^[0-9A-Za-z.+-]{1,32}$"#
+    private static func matches(_ s: String, _ re: String) -> Bool { s.range(of: re, options: .regularExpression) != nil }
+
+    /// Canvas-<anything plain>.zip: letters, digits and . _ + -, no folders, nothing that walks out of /download.
+    static func isFileName(_ s: String) -> Bool {
+        matches(s, #"^Canvas-[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}\.zip$"#) && !s.contains("..")
+    }
+
+    static func parse(_ data: Data) -> Release? {
+        guard let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let l = j["latest"] as? [String: Any],
+              let version = l["version"] as? String, matches(version, versionShape),
+              let file = l["file"] as? String, isFileName(file),
+              let n = l["size"] as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue == n.doubleValue.rounded(),
+              n.doubleValue > 0, n.doubleValue < 2_000_000_000,
+              let sha = l["sha256"] as? String, matches(sha, #"^[0-9A-Fa-f]{64}$"#),
+              let minOS = l["minimumSystemVersion"] as? String, matches(minOS, #"^[0-9]{1,3}(\.[0-9]{1,3}){0,2}$"#) else { return nil }
+        let arch = (l["arch"] as? [Any] ?? []).compactMap { $0 as? String }
+        return Release(version: version, file: file, size: n.intValue, sha256: sha.lowercased(), minimumSystemVersion: minOS, arch: arch)
+    }
+
+    /// The website's manifest, or CANVAS_UPDATE_MANIFEST for the local end-to-end test (scripts/update-e2e.sh), only
+    /// when it is plain http on 127.0.0.1: nothing else can point the app at another server.
+    static func manifestSource(env: [String: String]) -> (url: URL, localTest: Bool) {
+        if let s = env["CANVAS_UPDATE_MANIFEST"], let u = URL(string: s), isLocalTest(u) { return (u, true) }
+        return (ReleaseLinks.manifest, false)
+    }
+
+    static func isLocalTest(_ u: URL) -> Bool {
+        u.scheme == "http" && u.host == "127.0.0.1" && u.user == nil && u.password == nil
+    }
+
+    /// <site>/download/<file>: https://getcanvas.cc only, or the local test server the manifest came from.
+    static func downloadURL(manifest: URL, file: String) -> URL? {
+        guard isFileName(file), manifest.user == nil, manifest.password == nil else { return nil }
+        if manifest.scheme == "https" && manifest.host == "getcanvas.cc" && manifest.port == nil {
+            return URL(string: ReleaseLinks.site + "/download/" + file)
+        }
+        if isLocalTest(manifest) { return URL(string: "http://127.0.0.1" + (manifest.port.map { ":\($0)" } ?? "") + "/download/" + file) }
+        return nil
+    }
+
+    /// The Mac's macOS is at least `minimum` ("26", "26.1", "27.0.1").
+    static func meetsMinimum(_ minimum: String, os: OperatingSystemVersion) -> Bool {
+        var m = minimum.split(separator: ".").map { Int($0) ?? 0 }
+        while m.count < 3 { m.append(0) }
+        let have = [os.majorVersion, os.minorVersion, os.patchVersion]
+        for i in 0..<3 where have[i] != m[i] { return have[i] > m[i] }
+        return true
+    }
+
+    /// A release this Mac takes: newer than the running version, a macOS it meets, its architecture (no list: any).
+    static func offers(_ r: Release, current: String, os: OperatingSystemVersion, arch: String) -> Bool {
+        ReleaseLinks.isNewer(r.version, than: current) && meetsMinimum(r.minimumSystemVersion, os: os) && (r.arch.isEmpty || r.arch.contains(arch))
+    }
+
+    /// The running app: its version, bundle id and the team identifier of its Developer ID signature (nil: ad-hoc or
+    /// unsigned, which never updates itself).
+    struct Own: Equatable {
+        let version: String
+        let bundleID: String
+        let teamID: String?
+    }
+
+    /// What the checks found, in the order they run (nil: not run, which refuses like a failure).
+    struct Facts: Equatable {
+        var size: Int? = nil
+        var sha256: String? = nil
+        var unzipped = false
+        var apps: [String] = []
+        var bundleID: String? = nil
+        var version: String? = nil
+        var signatureValid: Bool? = nil
+        var teamID: String? = nil
+        var gatekeeper: Bool? = nil
+    }
+
+    enum Verdict: Equatable { case install, refuse(String) }
+
+    /// Install only when every check passed; otherwise the first one that failed, in words. The local test
+    /// (CANVAS_UPDATE_MANIFEST) skips Gatekeeper only: builds that are not notarized never pass it.
+    static func verdict(_ f: Facts, release r: Release, own: Own, localTest: Bool) -> Verdict {
+        guard let team = own.teamID, !team.isEmpty else { return .refuse("this copy of Canvas is not signed with a Developer ID, so it does not update itself") }
+        guard f.size == r.size else { return .refuse("the download\u{2019}s size (\(f.size ?? 0) bytes) is not the release\u{2019}s (\(r.size) bytes)") }
+        guard f.sha256?.lowercased() == r.sha256.lowercased() else { return .refuse("the download\u{2019}s SHA-256 is not the release\u{2019}s") }
+        guard f.unzipped else { return .refuse("the download would not unzip") }
+        guard f.apps == ["Canvas.app"] else { return .refuse("the download does not hold exactly one Canvas.app") }
+        guard f.bundleID == own.bundleID else { return .refuse("the app in the download is not Canvas (\(f.bundleID ?? "no bundle id"))") }
+        guard f.version == r.version else { return .refuse("the app in the download is version \(f.version ?? "unknown"), not \(r.version)") }
+        guard ReleaseLinks.isNewer(r.version, than: own.version) else { return .refuse("the app in the download is not newer than this one (\(own.version))") }
+        guard f.signatureValid == true else { return .refuse("the app\u{2019}s signature does not verify") }
+        guard f.teamID == team else { return .refuse("the app is signed by a different developer") }
+        guard localTest || f.gatekeeper == true else { return .refuse("macOS Gatekeeper does not accept the app as notarized") }
+        return .install
+    }
+
+    enum Install: Equatable { case swap, manual(String) }
+
+    /// Whether the app can replace itself where it is. Not when macOS runs it from a temporary copy (a quarantined
+    /// app opened where it was downloaded) or when this account cannot change its folder: then the website.
+    static func installMode(bundlePath: String, folderWritable: Bool, bundleWritable: Bool) -> Install {
+        if bundlePath.contains("/AppTranslocation/") {
+            return .manual("Move Canvas to the Applications folder to update it in place, or download it from the website.")
+        }
+        guard folderWritable && bundleWritable else {
+            let folder = URL(fileURLWithPath: bundlePath).deletingLastPathComponent().lastPathComponent
+            return .manual("This account doesn\u{2019}t have permission to change the \(folder) folder, so download it from the website.")
+        }
+        return .swap
+    }
+
+    /// One shell word: single quotes, an apostrophe closed, escaped and reopened.
+    static func shQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: #"'\''"#) + "'" }
+
+    /// The helper Canvas writes to its caches folder and runs, detached, as it quits: waits for `pid` to exit, copies
+    /// the verified app next to the old one, moves the old one aside and the new one into its place (on failure the
+    /// old one goes back), clears quarantine, deletes the download and the old copy, and opens the app again when
+    /// `relaunch` (Restart to Update; a plain quit installs without opening). `env`: the CANVAS_* overrides the app
+    /// was started with, so a relaunched test instance keeps its port and folders.
+    static func helperScript(pid: Int32, app: String, staged: String, stagingRoot: String, log: String, relaunch: Bool, env: [(String, String)]) -> String {
+        let dir = URL(fileURLWithPath: app).deletingLastPathComponent().path
+        let name = URL(fileURLWithPath: app).lastPathComponent
+        let open = (["/usr/bin/open"] + env.flatMap { ["--env", shQuote("\($0.0)=\($0.1)")] } + [#""$APP""#]).joined(separator: " ")
+        return """
+        #!/bin/sh
+        # Canvas update helper, written by Canvas as it quit: waits for it to exit, puts the new version in its place
+        # and opens it. On any failure the old app stays (or goes back) where it was.
+        PID=\(pid)
+        APP=\(shQuote(app))
+        NEW=\(shQuote(staged))
+        TMP=\(shQuote(dir + "/." + name + ".update-\(pid)"))
+        BAK=\(shQuote(dir + "/." + name + ".previous-\(pid)"))
+        STAGING=\(shQuote(stagingRoot))
+        LOG=\(shQuote(log))
+        RELAUNCH=\(relaunch ? 1 : 0)
+        log() { printf '%s %s\\n' "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG" 2>/dev/null; }
+        reopen() { if [ "$RELAUNCH" = 1 ]; then \(open); fi; }
+        fail() { log "not installed: $*"; /bin/rm -rf "$TMP" 2>/dev/null; reopen; exit 1; }
+        n=0
+        while kill -0 "$PID" 2>/dev/null; do
+          n=$((n + 1))
+          if [ "$n" -gt 600 ]; then log "not installed: Canvas (pid $PID) was still running after a minute"; exit 1; fi
+          /bin/sleep 0.1
+        done
+        /bin/rm -rf "$TMP" "$BAK" 2>/dev/null || fail "could not clear $TMP"
+        /usr/bin/ditto "$NEW" "$TMP" || fail "could not copy the new version next to $APP"
+        /bin/mv "$APP" "$BAK" || fail "could not move $APP aside"
+        if ! /bin/mv "$TMP" "$APP"; then
+          /bin/mv "$BAK" "$APP"
+          fail "could not move the new version into $APP; the old one is back"
+        fi
+        /usr/bin/xattr -dr com.apple.quarantine "$APP" 2>/dev/null
+        /bin/rm -rf "$BAK"
+        case "$STAGING" in */Updates) /bin/rm -rf "$STAGING" ;; esac
+        log "installed $APP"
+        reopen
+        exit 0
+
+        """
     }
 }

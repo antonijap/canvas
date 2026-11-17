@@ -43,6 +43,10 @@ test("the list of names: every one fits the contract, fewer than 60, unknown nam
   assert.ok(USAGE_EVENTS.length <= MAX_NAMES);
   for (const n of USAGE_EVENTS) assert.match(n, RE.name, n);
   assert.equal(new Set(USAGE_EVENTS).size, USAGE_EVENTS.length, "no name twice");
+  // The shell's updater (apps/macos/Updater.swift) posts these.
+  for (const n of ["update.toast_shown", "update.download_clicked", "update.ready", "update.installed", "update.failed"]) {
+    assert.ok((USAGE_EVENTS as readonly string[]).includes(n), n);
+  }
   const { u } = counter();
   u.setFacts(FACTS);
   u.count("app.open");

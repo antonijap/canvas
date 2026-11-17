@@ -364,7 +364,7 @@ Canvas > Settings (Cmd+,) is a toolbar-tab window (`apps/macos/Settings.swift`; 
 
 | Tab | Settings | Read by |
 |---|---|---|
-| General | Theme; open files where you left them or fitted; scroll to zoom | shell, page |
+| General | Theme; open files where you left them or fitted; scroll to zoom; Update automatically and the version, with Check for Updates (see [Updates](#updates)) | shell, page |
 | Canvas | Snap to objects, pixel grid, smart guides; big nudge; board names | page |
 | Agents | Connect an agent: the Claude Code and Codex commands with Copy, and Connected (live); default agent (shows which are installed); run time cap (1 to 60 min); agent cursor on/off and speed | server, page |
 | Sounds | finish_work sound on/off, volume, preview | shell |
@@ -379,12 +379,63 @@ The page gets `{cmd: "prefs"}` (every live tab when a setting changes, and on ea
 Canvas counts how many times a day each feature is used and, in a release build, sends those counts once a day to `https://getcanvas.cc/api/usage`. Counts only: never file names, paths, document contents, prompts, layer names, user names, emails or hardware ids. The website's privacy page says the same: https://getcanvas.cc/privacy#usage.
 
 - **What**: one JSON body per completed UTC day, `{v, build, os, arch, day, events: {name: count}, install?}`. `v` is the app version, `build` the commit, `os` the macOS version, `arch` `arm64` or `x86_64`. The names are the list `USAGE_EVENTS` in `src/usage-counts.ts` (anything else is ignored); at most 60 names, counts capped at 100000, at most 8 KB.
-- **Where counted**: the server counts at the point each thing happens (`countUsage(name)`): `file.new` (`/api/canvas/new`), `file.save` (a write that put a changed document on disk, `src/docwriter.ts`), `agent.connected.claude|codex|other` (a new MCP session, `src/onboarding.ts`), `agent.prompt` and `agent.run_done` (`src/agent-run.ts`), `agent.run_undone` (an undo of a step a Canvas agent run made, `src/history.ts`), `variations.make|keep|discard`, `widget.add.<kind>`, `export.<format>`, `copy_as.<format>`. The page posts `link.copy` (Cmd+L). The shell posts `app.open`, `crash` (the last run never quit: `RunMarker` in `SettingsLogic.swift`), `file.open` and `course.opened` (a tab opened, the Welcome file), `update.toast_shown`, `update.download_clicked` and `bug.report_opened` to `POST /api/usage/count {name}` (`x-canvas: 1`).
+- **Where counted**: the server counts at the point each thing happens (`countUsage(name)`): `file.new` (`/api/canvas/new`), `file.save` (a write that put a changed document on disk, `src/docwriter.ts`), `agent.connected.claude|codex|other` (a new MCP session, `src/onboarding.ts`), `agent.prompt` and `agent.run_done` (`src/agent-run.ts`), `agent.run_undone` (an undo of a step a Canvas agent run made, `src/history.ts`), `variations.make|keep|discard`, `widget.add.<kind>`, `export.<format>`, `copy_as.<format>`. The page posts `link.copy` (Cmd+L). The shell posts `app.open`, `crash` (the last run never quit: `RunMarker` in `SettingsLogic.swift`), `file.open` and `course.opened` (a tab opened, the Welcome file), `update.toast_shown`, `update.download_clicked`, `update.ready` (a verified update is waiting), `update.installed` (the first launch of the version a quit installed), `update.failed` (a download refused by its checks, or an install that did not take) and `bug.report_opened` to `POST /api/usage/count {name}` (`x-canvas: 1`).
 - **Where kept**: `usage.json` in the state folder (`CANVAS_STATE_DIR`, else `~/Library/Application Support/Canvas`): `{days: {"YYYY-MM-DD": {name: n}}, lastTry, install: {month, id}}`, written two seconds after a count and on exit, at most 30 unsent days. A development build writes `usage-dev.json` instead, so its counts never reach a release's sender.
 - **When sent**: at server start, when the app first says sharing is on, and every hour: each completed day with counts, oldest first, one POST each (5 s timeout). On `{"ok":true}` the day is deleted. On anything else (an error status, a timeout, no network) the day stays, `lastTry` is set to today and nothing more is tried until the next UTC day. Never a retry loop.
 - **Who sends**: only a release build: the server runs from inside an app bundle (`.app/Contents/Resources/server`, `scripts/release-app.sh`), the app said Share usage counts is on, and it is not a QA build (the QA app says `qa: true`, and `CANVAS_QA=1` servers never send). `pnpm app`, `pnpm start`, `pnpm qa` and the tests never send. Without the app (a browser, tests) the server counts nothing to disk at all: counts wait in memory until the app says what the switches are.
 - **The switches** (Settings > Privacy, sent with the shell's bridge state as `usage: {share, improve, version, commit, os, qa}`): Share usage counts (default on; off deletes what was waiting, and nothing is counted or sent). Help improve Canvas (default off, needs sharing): adds `install`, 32 random hex characters made on the Mac and replaced every calendar month (UTC); turning it off deletes it. Show what's sent opens the exact JSON for today (`GET /api/usage/preview`, built by the same code as the sender).
 - **Testing**: `test/usage-counts.test.ts` posts to a local server through `CANVAS_USAGE_URL`; `pnpm qa:native privacy` opens Settings > Privacy and reads the JSON.
+
+## Updates
+
+A downloaded copy of Canvas updates itself (`apps/macos/Updater.swift`; the pure parts, tested by `Tests/ShellLogicTests.swift`, are `AppUpdate` in `ShellLogic.swift`). Only a release build does: the server runs from inside the app (`Contents/Resources/server`), it is not a QA build and `CANVAS_SERVER` does not point at a checkout. `pnpm app` builds and QA builds never check; Check for Updates there says the build is from source.
+
+What the person sees:
+
+1. At launch (10 s in) and every 6 hours the app reads `https://getcanvas.cc/releases.json` (a plain GET, no identifiers). Nothing newer: nothing happens. Canvas > Check for Updates… does the same on demand and answers "Canvas is up to date".
+2. A newer release whose `minimumSystemVersion` this Mac meets and whose `arch` list has this Mac's: with Settings > General > Update automatically on (the default), the zip downloads in the background to `~/Library/Caches/<bundle id>/Updates/<version>/` and is checked (below).
+3. Checked: the toast "Canvas 0.1.2 is ready" with Restart to Update, and Canvas > Restart to Update (the item shows only while an update is waiting; Settings > General shows it too).
+4. Restart to Update quits the way Cmd+Q does (the text being typed and the inspector's queued writes are saved first; a write that fails keeps the app open), stops the server (`POST /quit`, which finishes its writes, then waits up to 10 s for it to stop answering, so the new app never talks to the old server), starts the helper and exits. The helper swaps the app and opens it again; the next launch says "Canvas is updated to 0.1.2". Quitting instead of restarting installs the same way without reopening.
+5. Update automatically off, or a running app that is not Developer ID signed: the old behaviour, a toast "Canvas 0.1.2 is out" with Download (the website's download page), once per version. Where the app cannot replace itself (its folder is not writable by this account, or macOS runs it from a translocated copy because it was opened where it was downloaded) the toast says why and offers Download; Check for Updates opens the download page.
+
+What is checked before anything is replaced, in this order; the first failure refuses the update, deletes the download, logs the reason to `~/Library/Logs/Canvas/update.log` and says it in a toast with Download (`AppUpdate.verdict`):
+
+- the running app has a Developer ID team identifier (an ad-hoc or unsigned app never updates itself);
+- the zip's size and SHA-256 match the manifest's;
+- `ditto -x -k` unzips it into a fresh folder holding exactly one `Canvas.app` (not a link);
+- its bundle id is the running app's, its version is the manifest's and newer than the running one;
+- `codesign --verify --deep --strict` passes;
+- its team identifier equals the running app's, both read with the Security framework (`SecStaticCodeCreateWithPath`, `SecCodeCopySelf`, `SecCodeCopySigningInformation`, `kSecCodeInfoTeamIdentifier`): no team id or name is written anywhere in the code;
+- Gatekeeper accepts it (`spctl --assess --type execute`) and it is notarized (the `notarized` code requirement through `SecStaticCodeCheckValidity`). Both, because `spctl` accepts a Developer ID app that is not notarized when it has no quarantine flag, and a file `URLSession` downloads has none.
+
+The manifest's `file` must look like `Canvas-<letters, digits, . _ + ->.zip` and is fetched only from `https://getcanvas.cc/download/<file>` (`AppUpdate.downloadURL`).
+
+The helper (`AppUpdate.helperScript`) is a `/bin/sh` script written to `~/Library/Caches/<bundle id>/update-helper.sh` and run detached with the app's pid. It waits for that pid to exit (a minute at most, else it gives up and changes nothing), copies the new app with `ditto` next to the old one (`.Canvas.app.update-<pid>`), moves the old one aside (`.Canvas.app.previous-<pid>`) and the new one into its place, puts the old one back if that move fails, clears the quarantine flag, deletes the old copy and the download, logs the result and opens the app (Restart to Update only). The paths are single-quoted, so folders with spaces or apostrophes work. Settings and documents are not touched: they live outside the app.
+
+### Publishing a release for it
+
+`pnpm release:app` with notarization makes the zip; upload it to `getcanvas.cc/download/<file>` and then update `releases.json`, whose `latest` needs every field the app reads:
+
+| Field | Example | Use |
+|---|---|---|
+| `version` | `0.1.2` | Compared with the running version (0.1.10 is newer than 0.1.9; `-alpha.2` is older than the same version without it); the app inside the zip must have exactly this `CFBundleShortVersionString` |
+| `file` | `Canvas-0.1.2-2c4b1469.zip` | The name under `/download/` |
+| `size` | `53617915` | Bytes, from `RELEASE-NOTES.md` |
+| `sha256` | `2c4b…5ca7` | 64 hex digits, from `RELEASE-NOTES.md` |
+| `minimumSystemVersion` | `26.0` | Macs below it are not offered the release |
+| `arch` | `["arm64"]` | Architectures the build runs on; missing means any |
+
+Upload the zip before the manifest: a manifest that names a file not there yet fails the download, and the app tries again at its next check. The app must be notarized (Gatekeeper refuses it otherwise) and signed by the same Developer ID team as the version people have.
+
+### The local end-to-end test
+
+`node scripts/update-e2e.ts` (about 10 minutes, needs the Developer ID identity in the keychain and `engine/pkg`) builds 0.1.1 and 0.1.2 with `scripts/release-app.sh` (`CANVAS_NOTARY_PROFILE=none`) under the test bundle id `cc.getcanvas.canvas.updatetest`, with no document types and no `canvas://` scheme; the version edits to `apps/macos/Info.plist` and `package.json` are put back however it ends, so nothing to commit. A local server plays the website, and `CANVAS_UPDATE_MANIFEST=http://127.0.0.1:<port>/releases.json` points the app at it: the app honours it only for plain http on 127.0.0.1, and under it, and only under it, it skips the Gatekeeper check (un-notarized builds never pass it; the log says it was skipped) and the bridge's `update.check` and `update.restart` ops work (`update.state` always answers). The 0.1.1 app runs from `qa/out/update-e2e/Test Apps/` on its own port and folders (never `/Applications`, never the app on 5189) and must:
+
+- answer "Canvas is up to date" for the same version;
+- refuse a zip with one byte changed (SHA-256), an app with one byte changed inside whose manifest matches the zip (signature), the app re-signed ad-hoc (team) and a manifest that names another version;
+- download, verify and offer the real 0.1.2, take an edit to the open document, restart into 0.1.2 at the same path with nothing left beside it, the download gone, no quarantine flag, the document open again with the edit, and the usage counts written.
+
+It deletes the builds, the scratch folder and the test bundle id's preferences, caches and WebKit data at the end (`UPDATE_E2E_KEEP=1` keeps the folder, and a later run with `UPDATE_E2E_REUSE=1` reuses its two builds). The helper's rollback runs in `Tests/ShellLogicTests.swift` against temporary folders.
 
 ## File format and save safety
 
@@ -564,6 +615,8 @@ pnpm qa:release --only scrub,docs # some checks: scrub licence security agent fu
 | `CANVAS_QA` | unset | `1`: the server forwards `qa.*` ops to a QA build of the app (`pnpm qa:native`) |
 | `CANVAS_WELCOME_DIR` | `~/Documents/Canvas` | Where the first launch writes `Welcome.canvas` (a copy of the course, `demos/learn.canvas`) |
 | `CANVAS_USAGE_URL` | `https://getcanvas.cc/api/usage` | Where a release build sends its daily usage counts; tests point it at a local server ([Usage counts](#usage-counts)) |
+| `CANVAS_UPDATE_MANIFEST` | `https://getcanvas.cc/releases.json` | The local update test only: a manifest on `http://127.0.0.1:<port>`; anything else is ignored ([Updates](#updates)) |
+| `CANVAS_NO_UPDATE_CHECK` | unset | Set: a release build does not check for updates on its own |
 | `CANVAS_SAVE_LOG` | unset | `0`: every save writes the whole file. Unset (the default): documents of 1 MB or more save through the save log (`src/doc/doclog.ts`), except on a volume without flock (`docs/evidence/speed.md`, "Save log, last cases") |
 
 ## Troubleshooting

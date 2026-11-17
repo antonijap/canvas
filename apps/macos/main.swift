@@ -80,6 +80,7 @@ func startServer() {
 
 /// Starts the server when it is down, and counts the starts that did not take.
 func keepServerUp() {
+  if stoppingServer { return } // a quit is stopping it to install an update
   if serverUp() { serverFailures = 0; return }
   startServer()
   serverFailures += 1
@@ -126,39 +127,14 @@ func reportURL() -> URL {
   return ReleaseLinks.report(version: appVersion, build: appCommit, os: ProcessInfo.processInfo.operatingSystemVersion, arch: arch)
 }
 
-/// Once a day at most: the website's release manifest (a plain GET, no identifiers). A newer version shows a quiet
-/// toast with a Download button, once per version. Nothing installs on its own.
-func checkForUpdate() {
-  let d = UserDefaults.standard
-  let last = d.double(forKey: "canvas.updates.lastCheck")
-  guard Date().timeIntervalSince1970 - last > 24 * 3600 else { return }
-  d.set(Date().timeIntervalSince1970, forKey: "canvas.updates.lastCheck")
-  var req = URLRequest(url: ReleaseLinks.manifest, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
-  URLSession(configuration: .ephemeral).dataTask(with: req) { data, response, _ in
-    guard (response as? HTTPURLResponse)?.statusCode == 200, let data, let v = ReleaseLinks.newer(manifest: data, than: appVersion),
-          d.string(forKey: "canvas.updates.told") != v else { return }
-    d.set(v, forKey: "canvas.updates.told")
-    DispatchQueue.main.async {
-      MainActor.assumeIsolated {
-        model.flash("Canvas \(v) is out", durationMs: 12000, actions: [ToastAction(id: "download", label: "Download", symbol: nil) {
-          model.clearToast(); NSWorkspace.shared.open(ReleaseLinks.download)
-          UsageCount.send("update.download_clicked", to: base)
-        }])
-        UsageCount.send("update.toast_shown", to: base)
-      }
-    }
-  }.resume()
-}
 // QA builds and runs with CANVAS_NO_UPDATE_CHECK never ask.
 #if CANVAS_QA
 let isQABuild = true
 #else
 let isQABuild = false
 #endif
-if ProcessInfo.processInfo.environment["CANVAS_NO_UPDATE_CHECK"] == nil && !isQABuild {
-  DispatchQueue.main.asyncAfter(deadline: .now() + 20) { checkForUpdate() }
-  Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in checkForUpdate() }
-}
+/// A release build updates itself (Updater.swift): the server inside the app, not a QA build, not pointed at a checkout.
+let isReleaseBuild = bundledServer != nil && serverScript == bundledServer && !isQABuild
 
 // Keep the server up for as long as the window exists; it idles out after 30 quiet minutes.
 Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
@@ -169,6 +145,11 @@ let config = WKWebViewConfiguration()
 config.websiteDataStore = .default() // the camera position per file lives in localStorage
 
 let model = CanvasModel(configuration: config, base: base)
+// Updates: the release manifest at launch and every 6 hours, release builds only (Updater.swift).
+MainActor.assumeIsolated {
+  Updater.shared.setup(model: model, base: base, release: isReleaseBuild)
+  Updater.shared.start()
+}
 
 let window = NSWindow(
   contentRect: NSRect(x: 0, y: 0, width: 1560, height: 980),
@@ -212,12 +193,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
   // Quit waits for the text being typed on the canvas (the page writes it first) and the inspector's queued
   // writes: an edit that exists only in the page's editor or the shell's queue would be lost. A write that fails
-  // (or a server that does not answer) keeps the app open, with the edit still on screen.
+  // (or a server that does not answer) keeps the app open, with the edit still on screen. With every edit saved and
+  // an update ready, the updater stops the server and starts its helper before the app goes (Updater.beforeQuit).
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     model.flushTextEdit { textOK in
       let finish = { (ok: Bool) in
         if !ok { model.flash("Canvas could not save the last change, so it stayed open. Try again, or quit once more to discard it.") }
-        NSApp.reply(toApplicationShouldTerminate: ok || quitAnyway)
+        if ok {
+          MainActor.assumeIsolated { Updater.shared.beforeQuit { go in NSApp.reply(toApplicationShouldTerminate: go) } }
+        } else {
+          if !quitAnyway { MainActor.assumeIsolated { Updater.shared.quitCancelled() } }
+          NSApp.reply(toApplicationShouldTerminate: quitAnyway)
+        }
         quitAnyway = !ok
       }
       if model.writesIdle { finish(textOK); return }
@@ -674,6 +661,10 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   @objc func reportBug(_ s: Any?) { NSWorkspace.shared.open(reportURL()); UsageCount.send("bug.report_opened", to: base) }
   /// Help > Download Latest Version: the website's download page.
   @objc func downloadLatest(_ s: Any?) { NSWorkspace.shared.open(ReleaseLinks.download); UsageCount.send("update.download_clicked", to: base) }
+  /// Canvas > Check for Updates: "Canvas is up to date", or the download starts (Updater.swift).
+  @objc func checkForUpdates(_ s: Any?) { MainActor.assumeIsolated { Updater.shared.check(userInitiated: true) } }
+  /// Canvas > Restart to Update: shown while a verified update is ready.
+  @objc func restartToUpdate(_ s: Any?) { MainActor.assumeIsolated { Updater.shared.restartToUpdate() } }
   private var nativeText: Bool { keyWindowNow.firstResponder is NSText }
   func validateMenuItem(_ item: NSMenuItem) -> Bool {
     let key = NSApp.currentEvent?.type == .keyDown
@@ -706,6 +697,10 @@ final class MenuActions: NSObject, NSMenuItemValidation {
     case #selector(collapseLayers(_:)):
       // Option+L typed anywhere is the page's key (a text field types it); a menu click runs it here.
       return !(key && (webHasFocus || nativeText))
+    case #selector(checkForUpdates(_:)):
+      return MainActor.assumeIsolated { !Updater.shared.busy }
+    case #selector(restartToUpdate(_:)):
+      return MainActor.assumeIsolated { Updater.shared.ready != nil }
     default: return true
     }
   }
@@ -786,6 +781,8 @@ func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op:
   case "palette": return (paletteMenuTarget, #selector(PaletteMenuTarget.toggle(_:)), nil)
   case "reportBug": return (menuActions, #selector(MenuActions.reportBug(_:)), nil)
   case "downloadLatest": return (menuActions, #selector(MenuActions.downloadLatest(_:)), nil)
+  case "checkForUpdates": return (menuActions, #selector(MenuActions.checkForUpdates(_:)), nil)
+  case "restartToUpdate": return (menuActions, #selector(MenuActions.restartToUpdate(_:)), nil)
   case "minimize": return (nil, #selector(NSWindow.performMiniaturize(_:)), nil)
   case "zoomWindow": return (nil, #selector(NSWindow.performZoom(_:)), nil)
   default: return nil
@@ -838,6 +835,11 @@ for t in AppTheme.allCases {
   viewMenu.addItem(item)
 }
 NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { _ in themePicker.sync(viewMenu) }
+// Canvas > Restart to Update: in the menu only while a verified update is ready.
+let restartItem = menubar.item(withTitle: "Canvas")?.submenu?.items.first { $0.action == #selector(MenuActions.restartToUpdate(_:)) }
+let restartItemSync = MainActor.assumeIsolated {
+  Updater.shared.$ready.receive(on: DispatchQueue.main).sink { r in restartItem?.isHidden = r == nil }
+}
 
 // Window: one entry for the window, named after the file it shows, and the way back after its close button
 // (AppKit's own entry is off: it would list the window a second time and drop it once the window is closed).
@@ -1018,6 +1020,8 @@ DispatchQueue.global(qos: .userInitiated).async {
   UsageCount.send("app.open", to: base)
   DispatchQueue.main.async {
     serverReady = true
+    // Whether the update the last quit installed took (a toast and a usage count).
+    MainActor.assumeIsolated { Updater.shared.launched() }
     // A Finder open that arrived before the server was up goes first; otherwise the remembered file.
     model.refreshAgentReady()
     let defaults = UserDefaults.standard, env = ProcessInfo.processInfo.environment
