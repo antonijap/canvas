@@ -50,9 +50,8 @@ function start(host) {
 @media (prefers-color-scheme: dark){.cm-layer{--cm-card:0 0 0 .5px #00000099,0 1px 3px #00000066,0 12px 32px -6px #000000a6;--cm-pin:0 0 0 .5px #00000099,0 1px 2px #00000066,0 4px 10px -2px #00000080}}
 .cm-pin{position:absolute;left:0;top:0;width:${PIN}px;height:${PIN}px;border:0;padding:0;border-radius:14px 14px 14px 3px;background:var(--c-popover);color:var(--c-fg);font:600 12px/100% var(--c-font-sans);display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;box-shadow:var(--cm-pin);will-change:transform}
 .cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1.06}
-.cm-pin.open{background:#18181b;color:#fff;box-shadow:0 0 0 1.5px #fff,var(--cm-pin)}
+.cm-pin.open{color:var(--c-fg)}
 .cm-pin.resolved:not(.open){opacity:.6}
-.cm-pin.gone{border-radius:14px}
 .cm-av{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:11px;color:#fff;font:600 11px/100% var(--c-font-sans);flex:none;transition:scale .12s ease-out}
 .cm-agent{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;background:var(--cm-chip);color:var(--c-fg);flex:none;transition:scale .12s ease-out}
 .cm-ui{pointer-events:auto}
