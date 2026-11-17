@@ -21,7 +21,7 @@ export function interTrackingEm(size: number): number {
   return -0.0223 + 0.185 * Math.exp(-0.1745 * size);
 }
 
-/** Apple HIG tracking tables, in points by point size (copied from ~/.claude/skills/sf-typography, 5 Nov 2026). */
+/** Apple HIG tracking tables, in points by point size (Human Interface Guidelines, Typography, Tracking values; 5 Nov 2026). */
 export const SF_PRO: Record<number, number> = {
   6: 0.24, 7: 0.23, 8: 0.21, 9: 0.17, 10: 0.12, 11: 0.06, 12: 0, 13: -0.08, 14: -0.15, 15: -0.23, 16: -0.31, 17: -0.43, 18: -0.44,
   19: -0.45, 20: -0.45, 21: -0.36, 22: -0.26, 23: -0.1, 24: 0.07, 25: 0.15, 26: 0.22, 27: 0.29, 28: 0.38, 29: 0.4, 30: 0.4, 31: 0.39,

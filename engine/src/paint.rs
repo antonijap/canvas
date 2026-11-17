@@ -394,7 +394,8 @@ impl BoxShape {
     }
 }
 
-/// A rectangle with smoothed corners (the "squircle" from phamfoo's MIT-licensed npm package): each corner's arc is shorter
+/// A rectangle with smoothed corners (the squircle curve adapted from Tien Pham's MIT-licensed implementation; licence in
+/// THIRD_PARTY_NOTICES.md): each corner's arc is shorter
 /// by `smooth` and two cubic curves ease into it from up to (1 + smooth) x radius along each side, within half the
 /// shorter side. `smooth` 0 is the plain circular corner.
 pub fn smooth_path(rect: Rect, radii: [f64; 4], smooth: f64) -> BezPath {
