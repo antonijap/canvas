@@ -359,3 +359,30 @@ test("an MCP client counts once per session, by name: claude, codex or other", a
   usage.setFacts({ share: false });
   usage.stop();
 });
+
+test("the server counts a saved edit as file.save, and the shell's counts through POST /api/usage/count", async () => {
+  const dir = tmpDir("usage-server");
+  process.env.CANVAS_ROOTS = dir;
+  process.env.CANVAS_STATE_DIR = path.join(dir, ".state");
+  const file = path.join(dir, "Counted.canvas.json");
+  fs.writeFileSync(file, JSON.stringify({ version: "2.11", children: [{ type: "frame", id: "B1", name: "Board", x: 0, y: 0, width: 100, height: 100, children: [] }] }));
+  const { usage } = await import("../src/usage-counts.ts");
+  const { startServer } = await import("../src/server.ts");
+  usage.setFacts(FACTS);
+  const server = await startServer(0);
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  try {
+    const post = (p: string, body: unknown) => fetch(`${base}${p}`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal((await post("/api/update", { file, id: "B1", props: { opacity: 0.5 } })).status, 200);
+    assert.equal((await post("/api/flush", { file })).status, 200);
+    assert.deepEqual(await (await post("/api/usage/count", { name: "app.open" })).json(), { ok: true, counted: true });
+    const p = (await (await fetch(`${base}/api/usage/preview`)).json()) as { body: { events: Record<string, number> }; sends: boolean };
+    assert.ok(p.body.events["file.save"] >= 1, `file.save: ${JSON.stringify(p.body.events)}`);
+    assert.equal(p.body.events["app.open"], 1);
+    assert.equal(p.sends, false, "a checkout never sends");
+  } finally {
+    server.close();
+    usage.setFacts({ share: false });
+    usage.stop();
+  }
+});

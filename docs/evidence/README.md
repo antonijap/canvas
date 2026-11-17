@@ -41,4 +41,5 @@ Evidence for roadmap and interaction-conventions work. A card or nicety is done 
 | [speed.md](speed.md) | 5,000-board open, save log (two reviews' findings fixed; off by default, `CANVAS_SAVE_LOG=1` turns it on) |
 | [keys.md](keys.md) | Real-key tests for K, Opt+Cmd+Shift+R, Opt+Cmd+C/V, `.`, Cmd+] / [, Opt+Cmd+K/B, Cmd+Return, Shift+Cmd+Return |
 | [qa-infra.md](qa-infra.md) | Native QA without OCR, Shift+Cmd chord check, page lists on add and delete |
+| [privacy.md](privacy.md) | Usage counts to the website's contract and Settings > Privacy (Share usage counts, Help improve Canvas, Show what's sent) |
 | [review-fixes.md](review-fixes.md), [review-fixes-2.md](review-fixes-2.md) | Bugs found by the Codex and Claude reviews, each failing before its fix |
