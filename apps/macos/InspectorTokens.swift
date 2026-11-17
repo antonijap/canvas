@@ -141,7 +141,7 @@ struct TokenBindButton: View {
         // In a field (every numeric field shows it on hover) it is always offered: with no tokens of the
         // kind the picker says so. Beside a field it only shows when there is something to pick.
         if inField || !model.tokenItems(kind).isEmpty {
-            MiniButton(symbol: "hexagon", help: "Use a \(kind.noun) token", enabled: enabled, inRow: !inField, inField: inField) { isOpen.wrappedValue = true }
+            MiniButton(symbol: "hexagon", help: "Use a \(kind.noun) token", enabled: enabled, inRow: !inField, inField: inField, glyphNudge: -0.5) { isOpen.wrappedValue = true }
                 .qaID("token-bind")
                 .popover(isPresented: isOpen, arrowEdge: .leading) {
                     TokenPicker(model: model, kind: kind, current: nil, pick: { onPick($0); isOpen.wrappedValue = false }, detach: nil, close: { isOpen.wrappedValue = false })
@@ -484,7 +484,7 @@ struct TrackingField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // Auto sits beside its caption, out of the field: the field keeps its room for the number.
-            HStack(spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("Letter spacing").font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1).frame(height: 16).qaText("Letter spacing")
                 Spacer(minLength: 0)
                 Button {
@@ -494,13 +494,14 @@ struct TrackingField: View {
                     case .none: break
                     }
                 } label: {
-                    Text("Auto").font(.system(size: 10, weight: .semibold))
+                    // The caption's size, so the two share a baseline; off is a grey fill, not an outline.
+                    Text("Auto").font(Typography.section)
                         .foregroundStyle(auto ? Palette.sel : Palette.mutedFg)
                         .padding(.horizontal, 5).frame(height: 16)
-                        .background(Capsule().fill(auto ? Palette.sel.opacity(0.14) : .clear))
-                        .overlay(Capsule().stroke(auto ? .clear : Palette.stroke, lineWidth: 1))
+                        .background(Capsule().fill(auto ? Palette.sel.opacity(0.14) : Palette.hover))
                         .contentShape(Capsule())
                         .fixedSize()
+                        .qaID("tracking-auto")
                 }
                 .buttonStyle(.plain)
                 .disabled(!enabled || (!auto && !canTurnOn))
@@ -512,7 +513,8 @@ struct TrackingField: View {
                 ScrubHandle(enabled: enabled, begin: { scrub = ScrubSession(start: NumericInput.evaluate(text, current: value) ?? value ?? 0, min: nil, max: nil, write: onManual) },
                             move: { dx, step in if let s = scrub { text = NumberField.format(s.move(dx, step: step / 10)) } },
                             end: { scrub?.end(); scrub = nil }) {
-                    Image(systemName: "textformat.characters.arrow.left.and.right").glyph(11).foregroundStyle(Palette.mutedFg)
+                    // Small: at the other fields' glyph size this one is wider than its 18 pt handle and crowds the number.
+                    Image(systemName: "textformat.characters.arrow.left.and.right").glyph(11).imageScale(.small).foregroundStyle(Palette.mutedFg).qaID("tracking-glyph")
                 }
                 .padding(.leading, -4).padding(.trailing, -2)
                 TextField("0", text: $text)
@@ -540,6 +542,7 @@ struct TrackingField: View {
                 }
             }
             .help(helpText)
+            .qaID("tracking-field")
             .modifier(OptionalBind(model: model, enabled: enabled, hovering: $hovering, picking: $picking, onBind: onBind, inline: true))
         }
         .onAppear(perform: sync)

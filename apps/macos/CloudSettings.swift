@@ -229,12 +229,13 @@ struct CloudSettings: View {
                 }
                 SettingsDivider()
                 SettingsRow("Status") {
-                    HStack(spacing: 6) {
-                        Circle().fill(tone).frame(width: 8, height: 8)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        StatusDot(color: tone).qaID("status-dot")
                         Text(CloudStatusText.line(account.state.status, configured: account.state.configured))
                             .font(Typography.body).foregroundStyle(account.state.status == "connected" ? Palette.fg : Palette.mutedFg).lineLimit(1)
                             .qaID("cloud-status", label: CloudStatusText.line(account.state.status, configured: account.state.configured))
                     }
+                    .capCentered(13)
                 }
             }
             SettingsCard(title: "Comments") {

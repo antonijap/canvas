@@ -32,6 +32,8 @@ enum Typography {
     static let display = Font.system(size: 22, weight: .semibold)
     /// A card's title on Home's first-launch cards.
     static let cardTitle = Font.system(size: 15, weight: .semibold)
+    /// The app's name in About Canvas.
+    static let appName = Font.system(size: 26, weight: .semibold)
 }
 
 /// The app-wide theme. `system` follows macOS; light and dark override it for the whole app,
