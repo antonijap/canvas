@@ -17,6 +17,8 @@ export interface Author {
   /** Verified by the server (Cloudflare Access); absent on a comment made in a local file that never synced. */
   email?: string;
   name: string;
+  /** An agent (Claude Code, Codex) wrote it through MCP, not a person. Set by whoever records the comment. */
+  agent?: boolean;
 }
 
 /**
