@@ -368,61 +368,65 @@ export const stateHashOf = (l: { hash: string; log?: LogInfo }) => (l.log && l.l
 
 // ---------------------------------------------------------------- the lock
 
-// Appending to the log, and writing the document whole while a log is there, happen under an exclusive lock on
-// `.<document>.canvas-lock`, so two Canvas servers on one file never interleave them: an append never lands in a
-// log another server is folding into a whole write, and a whole write never misses a record appended meanwhile.
-// On macOS it is flock (open with O_EXLOCK): the kernel lets go of it when its process dies. Elsewhere, or on a
-// volume without flock, a lock file of its own (`.held`, created exclusively, holding the pid) stands in.
+// Appending to the log, and writing the document whole, happen under an exclusive lock on `.<document>.canvas-lock`,
+// so two Canvas servers on one file never interleave them: an append never lands in a log another server is folding
+// into a whole write, and a whole write never misses a record appended meanwhile. It is flock (open with O_EXLOCK,
+// macOS): the kernel lets go of it when its process dies, and a network volume's server keeps it for every client.
+//
+// There is no stand-in where flock is missing (another platform, or a volume that answers ENOTSUP or ENOLCK, such as a
+// network share without lock support). A lock file of our own (it was `.held`, holding the pid) is taken from a holder
+// on another Mac (its pid means nothing here), stays held for good when its process dies between making it and
+// writing the pid, and two processes that both find a dead holder's file can both remove it and both take it. So there
+// the log stays off (logLockable is false: saves are whole, as before the log) and the lock is a no-op: whole writes go
+// as they did before the log, and a log that came along (a package copied there) is still read and folded.
 const O_EXLOCK = 0x20; // <sys/fcntl.h>, macOS
 const BUSY = new Set(["EAGAIN", "EWOULDBLOCK"]);
-const NO_FLOCK = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL"]);
+const NO_FLOCK = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL", "ENOLCK"]);
 const heldHere = new Set<string>();
+/** Folders whose volume has no flock (found when a lock was tried there). */
 const noFlock = new Set<string>();
+/** Folders whose volume has it. */
+const hasFlock = new Set<string>();
+const NO_LOCK = () => {};
 
-const pidAlive = (pid: number) => {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
-
-/** One try. A release function, or null when someone holds it. */
+/** One try. A release function (a no-op where flock is missing), or null when someone holds it. */
 function tryLock(file: string): (() => void) | null {
-  if (process.platform === "darwin" && !noFlock.has(path.dirname(file))) {
-    try {
-      const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT | O_EXLOCK | fs.constants.O_NONBLOCK, 0o600);
-      return () => {
-        try {
-          fs.closeSync(fd);
-        } catch {}
-      };
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code ?? "";
-      if (BUSY.has(code)) return null;
-      if (!NO_FLOCK.has(code)) throw e;
-      noFlock.add(path.dirname(file));
-    }
-  }
-  const held = `${file}.held`;
+  const dir = path.dirname(file);
+  if (process.platform !== "darwin" || noFlock.has(dir)) return NO_LOCK;
   try {
-    const fd = fs.openSync(held, "wx", 0o600);
-    try {
-      fs.writeSync(fd, String(process.pid));
-    } finally {
-      fs.closeSync(fd);
-    }
-    return () => fs.rmSync(held, { force: true });
+    const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT | O_EXLOCK | fs.constants.O_NONBLOCK, 0o600);
+    hasFlock.add(dir);
+    return () => {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    };
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    let pid = 0;
-    try {
-      pid = Number(fs.readFileSync(held, "utf8"));
-    } catch {}
-    if (pid && pid !== process.pid && !pidAlive(pid)) fs.rmSync(held, { force: true }); // its process is gone: the next try takes it
-    return null;
+    const code = (e as NodeJS.ErrnoException).code ?? "";
+    if (BUSY.has(code)) return null;
+    if (!NO_FLOCK.has(code)) throw e;
+    noFlock.add(dir);
+    return NO_LOCK;
+  }
+}
+
+/**
+ * Whether the save log may be used for `docFile`: its folder's volume has flock (tried once per folder, by taking and
+ * letting go of the lock). False on another platform, on a volume without it, and where the lock file cannot be made.
+ */
+export function logLockable(docFile: string): boolean {
+  const file = lockPathOf(docFile);
+  const dir = path.dirname(file);
+  if (process.platform !== "darwin" || noFlock.has(dir)) return false;
+  if (hasFlock.has(dir) || heldHere.has(file)) return true;
+  try {
+    const r = tryLock(file);
+    if (r === NO_LOCK) return false;
+    r?.(); // null: someone holds it, so the volume has flock
+    hasFlock.add(dir);
+    return true;
+  } catch {
+    return false; // the lock file cannot be made (a read-only folder): no log either
   }
 }
 
