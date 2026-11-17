@@ -168,7 +168,7 @@ sc("comments", "reply, resolve and Show resolved", { covers: ["comments:reply", 
   // Show resolved brings it back, faded; Reopen puts it back.
   await t.waitFor(`document.querySelector(".cm-bar.on")?.innerText.includes("0 open")`, "the bar says 0 open");
   await t.ev(`[...document.querySelectorAll(".cm-bar button")].find((b) => b.textContent.startsWith("Show 1 resolved")).click()`);
-  await t.waitFor(`document.querySelector('.cm-pin[data-thread="${id}"]')?.classList.contains("resolved")`, "the resolved pin shown");
+  await t.waitFor(`(() => { const p = document.querySelector('.cm-pin[data-thread="${id}"]'); return p?.classList.contains("resolved") && p.style.display !== "none"; })()`, "the resolved pin shown");
   await openThread(t, id);
   t.ok(/Resolved by/.test(await t.ev<string>(`document.querySelector(".cm-pop").innerText`)), "the thread says who resolved it");
   await t.ev(`document.querySelector('.cm-pop [aria-label="Reopen thread"]').click()`);

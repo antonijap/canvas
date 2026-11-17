@@ -366,7 +366,7 @@ function start(host) {
     const row = h("div", "cm-fail");
     const s = h("span", "cm-state");
     s.innerHTML = ICON.alert;
-    s.append(document.createTextNode(`Not sent: ${r.message || "the server refused it"}`));
+    s.append(document.createTextNode(`Not sent: ${L.refusalReason(r, st.sync && st.sync.role)}`));
     const retry = h("button", "cm-btn txt", "Retry"), drop = h("button", "cm-btn txt dim", "Discard");
     retry.type = drop.type = "button";
     retry.onclick = () => syncCall("retry", r.opId);
@@ -374,7 +374,7 @@ function start(host) {
     row.append(s, retry, drop);
     return row;
   }
-  const syncKey = () => (st.sync ? JSON.stringify([st.sync.connected, st.sync.pending.map((o) => o.opId), st.sync.rejected.map((o) => [o.opId, o.message])]) : "");
+  const syncKey = () => (st.sync ? JSON.stringify([st.sync.connected, st.sync.role, st.sync.pending.map((o) => o.opId), st.sync.rejected.map((o) => [o.opId, o.kind, o.code, o.message])]) : "");
 
   // ---------- the thread card ----------
   const chip = (name, page) => { const c = h("span", "cm-chip"); c.innerHTML = ICON.layer; c.append(h("span", "", name)); c.title = page ? "On the canvas" : name; return c; };

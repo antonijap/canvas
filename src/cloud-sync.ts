@@ -9,7 +9,7 @@
 // What the page shows is viewOf(file): the confirmed threads with the outbox (and the refused creates) applied on top,
 // so a comment appears the moment it is typed and is never lost offline. Nothing else is stored twice.
 //
-// Two keys beyond the contract (cloud/protocol.ts CommentsFile keeps unknown keys):
+// The contract also keeps local display metadata:
 //   me       = who the server said this app is (email and name), to show pending comments as theirs
 //   relayed  = agent authors, by comment id. The server knows people only, so a comment an agent wrote through this
 //              app is sent as this person's. On this machine it keeps showing as the agent's (Author.agent).
@@ -185,21 +185,25 @@ export function discard(f: SyncFile, opId: string): boolean {
 
 /**
  * The ops that make a local file's threads exist on a server, sent from the sharer: thread.create with the same ids
- * and anchors, comment.add for the replies, thread.resolve for the resolved ones. Deleted comments and threads
- * (tombstones) stay local only: nothing is sent for them.
+ * and anchors, comment.add for the replies, thread.resolve for the resolved ones. Tombstones are created with a
+ * placeholder body, then deleted, so the server remembers every id without receiving the deleted text.
  */
 export function opsForShare(f: CommentsFile, now: Date = new Date(), id: () => string = () => crypto.randomUUID()): OpEnvelope[] {
   const at = now.toISOString();
   const out: OpEnvelope[] = [];
   const env = (op: Op): OpEnvelope => ({ opId: id(), doc: f.doc, at, op });
   for (const t of f.threads) {
-    if (t.deletedAt) continue;
-    const live = t.comments.filter((c) => !c.deletedAt);
-    if (!live.length) continue;
-    const [first, ...rest] = live;
-    out.push(env({ kind: "thread.create", thread: t.id, anchor: t.anchor, comment: first.id, body: first.body }));
-    for (const c of rest) out.push(env({ kind: "comment.add", thread: t.id, comment: c.id, body: c.body }));
-    if (t.resolvedAt) out.push(env({ kind: "thread.resolve", thread: t.id, resolved: true }));
+    const [first, ...rest] = t.comments;
+    if (!first) continue;
+    const body = (c: Thread["comments"][number]) => t.deletedAt || c.deletedAt ? "Deleted" : c.body;
+    out.push(env({ kind: "thread.create", thread: t.id, anchor: t.anchor, comment: first.id, body: body(first) }));
+    if (first.deletedAt && !t.deletedAt) out.push(env({ kind: "comment.delete", comment: first.id }));
+    for (const c of rest) {
+      out.push(env({ kind: "comment.add", thread: t.id, comment: c.id, body: body(c) }));
+      if (c.deletedAt && !t.deletedAt) out.push(env({ kind: "comment.delete", comment: c.id }));
+    }
+    if (t.deletedAt) out.push(env({ kind: "thread.delete", thread: t.id }));
+    else if (t.resolvedAt) out.push(env({ kind: "thread.resolve", thread: t.id, resolved: true }));
   }
   return out;
 }

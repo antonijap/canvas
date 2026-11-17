@@ -22,6 +22,19 @@ export const visibleThreads = (threads, showResolved) => threads.filter((t) => !
 /** The comments of a thread that were not deleted. */
 export const liveComments = (t) => t.comments.filter((c) => !c.deletedAt);
 
+/** A server refusal in words the person commenting can act on. Raw server details stay out of the page. */
+export function refusalReason(refusal, role) {
+  const { code, message, kind } = refusal;
+  if (code === "forbidden") {
+    if (role === "viewer") return "You can view this file but not comment on it";
+    if (["comment.edit", "comment.delete", "thread.delete"].includes(kind)) return "Only the person who wrote it can change it";
+  }
+  if (code === "conflict" && /\b(thread|comment)\b.*\bdeleted\b/i.test(message || "")) return "This thread was deleted";
+  if (code === "quota") return "Too many comments at once. Canvas will try again";
+  if (code === "invalid") return "Canvas could not send this comment";
+  return "The server did not accept this comment";
+}
+
 /** The page a thread shows on: its board's page, else the page it was made on, else the first page. */
 export function pageOf(t, pageOfBoard, firstPage) {
   const a = t.anchor || {};
