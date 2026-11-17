@@ -17,7 +17,8 @@
     "src",
     "test",
     "mcp",
-    "qa"
+    "qa",
+    "cloud"
   ],
-  "exclude": ["qa/out"]
+  "exclude": ["qa/out", "cloud/cloudflare"]
 }
