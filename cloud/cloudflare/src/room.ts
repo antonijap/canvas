@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { LIMITS, PROTOCOL_VERSION } from "../../protocol";
 import type { PeopleRule, Role, ServerMessage } from "../../protocol";
 import type { Identity } from "./auth";
+import type { SqlStore } from "../../core/sql.ts";
 import type { Env } from "./env";
 import { failure, HttpError, sinceValue, uuid } from "./http";
 import { Operations } from "./operations";
@@ -22,7 +23,7 @@ export class Room extends DurableObject<Env> {
   private refreshing?: Promise<void>;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.operations = new Operations(ctx.storage);
+    this.operations = new Operations(ctx.storage as unknown as SqlStore);
   }
   private matches(doc: string): boolean {
     return uuid(doc) && this.env.ROOM.idFromName(doc).equals(this.ctx.id);
