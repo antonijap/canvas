@@ -129,6 +129,7 @@ struct GeneralSettings: View {
                     SettingsSwitch(isOn: $model.prefs.scrollZooms)
                 }
             }
+            UpdateSettings()
         }
     }
 }
@@ -744,5 +745,29 @@ private struct AboutButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+    }
+}
+
+// MARK: Updates
+
+/// Settings > General > Updates: Update automatically (Updater.swift; off, a newer version only offers its download)
+/// and the version this is, with Check for Updates (or Restart to Update while one is ready).
+struct UpdateSettings: View {
+    @ObservedObject private var updater = Updater.shared
+    var body: some View {
+        SettingsCard(title: "Updates") {
+            SettingsRow("Update automatically", detail: "Downloads new versions and installs them when Canvas restarts") {
+                SettingsSwitch(isOn: $updater.automatic)
+            }
+            SettingsDivider()
+            SettingsRow("Version \(updater.version)", detail: updater.ready.map { "Canvas \($0.version) is ready" } ?? (updater.busy ? "Checking\u{2026}" : nil)) {
+                if updater.ready != nil {
+                    FieldButton(title: "Restart to Update", symbol: nil) { updater.restartToUpdate() }
+                } else {
+                    FieldButton(title: "Check for Updates", symbol: nil) { updater.check(userInitiated: true) }
+                        .disabled(updater.busy)
+                }
+            }
+        }
     }
 }
