@@ -33,11 +33,13 @@ extension URLComponents {
 }
 
 /// Finds the node binary without the login shell's PATH: Finder and launchd start apps with a bare
-/// /usr/bin:/bin:/usr/sbin:/sbin. CANVAS_NODE wins, then the usual install places, then PATH.
+/// /usr/bin:/bin:/usr/sbin:/sbin. CANVAS_NODE wins, then the Node inside the app (a release carries its own), then
+/// the usual install places, then PATH.
 enum NodeLocator {
-    static func candidates(env: [String: String], home: String) -> [String] {
+    static func candidates(env: [String: String], home: String, bundled: String? = nil) -> [String] {
         var out = [String]()
         if let n = env["CANVAS_NODE"], !n.isEmpty { out.append(n) }
+        if let b = bundled { out.append(b) }
         out += [
             home + "/.local/share/mise/installs/node/24/bin/node",
             home + "/.local/share/mise/shims/node",
@@ -48,8 +50,8 @@ enum NodeLocator {
         return out
     }
 
-    static func find(env: [String: String], home: String, isExecutable: (String) -> Bool) -> String? {
-        candidates(env: env, home: home).first(where: isExecutable)
+    static func find(env: [String: String], home: String, bundled: String? = nil, isExecutable: (String) -> Bool) -> String? {
+        candidates(env: env, home: home, bundled: bundled).first(where: isExecutable)
     }
 }
 
@@ -1033,8 +1035,14 @@ enum MenuSpec {
         nil,
     ]
 
+    static let help: [Entry] = [
+        Item(title: "Report a Bug\u{2026}", command: "reportBug", mods: []),
+        Item(title: "Download Latest Version\u{2026}", command: "downloadLatest", mods: []),
+    ]
+
     static let menus: [(title: String, items: [Entry])] = [
         ("Canvas", app), ("File", file), ("Edit", edit), ("View", view), ("Object", object), ("Arrange", arrange), ("Window", window),
+        ("Help", help),
     ]
 
     /// Key and modifiers, for finding a key bound twice.
@@ -1386,5 +1394,60 @@ enum OpenTypeFeatures {
     static func isSystem(_ family: String) -> Bool {
         let f = family.trimmingCharacters(in: .whitespaces).lowercased()
         return f.hasPrefix("sf pro") || f.hasPrefix("san francisco") || ["system-ui", "-apple-system", "blinkmacsystemfont", ".applesystemuifont"].contains(f)
+    }
+}
+
+/// The website's pages for this build (getcanvas.cc): reporting a bug, the download page, and the release manifest the
+/// app reads once a day. The report link carries only the app's version and commit, the macOS version and the
+/// architecture, each in the shape the page accepts (it ignores anything else): nothing is sent until the person
+/// presses Send there. The manifest is a plain GET with no identifiers.
+enum ReleaseLinks {
+    static let site = "https://getcanvas.cc"
+    static let download = URL(string: site + "/download")!
+    static let manifest = URL(string: site + "/releases.json")!
+
+    static func report(version: String, build: String?, os: OperatingSystemVersion, arch: String) -> URL {
+        var c = URLComponents(string: site + "/report")!
+        var q = [URLQueryItem(name: "from", value: "app")]
+        if version.range(of: #"^[0-9A-Za-z.+-]{1,32}$"#, options: .regularExpression) != nil { q.append(URLQueryItem(name: "v", value: version)) }
+        if let b = build, b.range(of: #"^[0-9a-f]{7,40}$"#, options: .regularExpression) != nil { q.append(URLQueryItem(name: "build", value: b)) }
+        q.append(URLQueryItem(name: "os", value: osString(os)))
+        if arch == "arm64" || arch == "x86_64" { q.append(URLQueryItem(name: "arch", value: arch)) }
+        c.queryItems = q
+        return c.url!
+    }
+
+    /// 15.2, or 15.2.1 when there is a patch version.
+    static func osString(_ v: OperatingSystemVersion) -> String {
+        v.patchVersion > 0 ? "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)" : "\(v.majorVersion).\(v.minorVersion)"
+    }
+
+    /// The manifest's latest version, when it is newer than `current`. Versions compare by their numeric parts
+    /// (0.1.10 is newer than 0.1.9); a pre-release suffix ("-alpha.2") is older than the same version without one.
+    static func newer(manifest: Data, than current: String) -> String? {
+        guard let j = try? JSONSerialization.jsonObject(with: manifest) as? [String: Any],
+              let latest = j["latest"] as? [String: Any], let v = latest["version"] as? String,
+              v.range(of: #"^[0-9A-Za-z.+-]{1,32}$"#, options: .regularExpression) != nil else { return nil }
+        return isNewer(v, than: current) ? v : nil
+    }
+
+    static func isNewer(_ a: String, than b: String) -> Bool {
+        func parts(_ s: String) -> (nums: [Int], pre: String?) {
+            let main = s.split(separator: "+", maxSplits: 1).first.map(String.init) ?? s
+            let halves = main.split(separator: "-", maxSplits: 1).map(String.init)
+            let nums = (halves.first ?? "").split(separator: ".").map { Int($0) ?? 0 }
+            return (nums, halves.count > 1 ? halves[1] : nil)
+        }
+        let (x, y) = (parts(a), parts(b))
+        for i in 0..<max(x.nums.count, y.nums.count) {
+            let p = i < x.nums.count ? x.nums[i] : 0, q = i < y.nums.count ? y.nums[i] : 0
+            if p != q { return p > q }
+        }
+        switch (x.pre, y.pre) {
+        case (nil, nil): return false
+        case (nil, _): return true
+        case (_, nil): return false
+        case let (p?, q?): return p.compare(q, options: .numeric) == .orderedDescending
+        }
     }
 }

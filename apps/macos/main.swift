@@ -7,8 +7,12 @@ import SwiftUI
 import Combine
 
 let port = Int(ProcessInfo.processInfo.environment["CANVAS_PORT"] ?? "") ?? 5189
-// CANVAS_SERVER, else the checkout `pnpm app` built this app from (Info.plist CanvasRepo), else ~/Code/canvas.
+// CANVAS_SERVER, else the server inside the app (a release: Contents/Resources/server, see scripts/release-app.sh),
+// else the checkout `pnpm app` built this app from (Info.plist CanvasRepo), else ~/Code/canvas.
+let bundledServer = Bundle.main.resourceURL.map { $0.appendingPathComponent("server/src/server.ts").path }
+  .flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
 let serverScript = ProcessInfo.processInfo.environment["CANVAS_SERVER"]
+  ?? bundledServer
   ?? (Bundle.main.object(forInfoDictionaryKey: "CanvasRepo") as? String).map { $0 + "/src/server.ts" }.flatMap { FileManager.default.fileExists(atPath: $0) ? $0 : nil }
   ?? NSHomeDirectory() + "/Code/canvas/src/server.ts"
 let base = URL(string: "http://127.0.0.1:\(port)")!
@@ -54,7 +58,8 @@ func startServer() {
   defer { serverLock.unlock() }
   if let p = serverProc, p.isRunning { return }
   // Finder starts apps with PATH=/usr/bin:/bin, where `env node` finds nothing: look node up directly.
-  guard let node = NodeLocator.find(env: ProcessInfo.processInfo.environment, home: NSHomeDirectory(),
+  let bundledNode = Bundle.main.resourceURL.map { $0.appendingPathComponent("node/bin/node").path }
+  guard let node = NodeLocator.find(env: ProcessInfo.processInfo.environment, home: NSHomeDirectory(), bundled: bundledNode,
                                     isExecutable: { FileManager.default.isExecutableFile(atPath: $0) }) else {
     reportServerProblem("Canvas could not find Node to start its server. Install Node 24 with mise, or set CANVAS_NODE.")
     return
@@ -79,6 +84,50 @@ func keepServerUp() {
   startServer()
   serverFailures += 1
   if serverFailures >= 3 { reportServerProblem("Canvas\u{2019}s server will not start. Details in ~/Library/Logs/Canvas/server.log.") }
+}
+
+/// This build's version and commit (Info.plist; build.sh writes CanvasCommit from git).
+let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
+let appCommit = Bundle.main.object(forInfoDictionaryKey: "CanvasCommit") as? String
+func reportURL() -> URL {
+  #if arch(arm64)
+  let arch = "arm64"
+  #else
+  let arch = "x86_64"
+  #endif
+  return ReleaseLinks.report(version: appVersion, build: appCommit, os: ProcessInfo.processInfo.operatingSystemVersion, arch: arch)
+}
+
+/// Once a day at most: the website's release manifest (a plain GET, no identifiers). A newer version shows a quiet
+/// toast with a Download button, once per version. Nothing installs on its own.
+func checkForUpdate() {
+  let d = UserDefaults.standard
+  let last = d.double(forKey: "canvas.updates.lastCheck")
+  guard Date().timeIntervalSince1970 - last > 24 * 3600 else { return }
+  d.set(Date().timeIntervalSince1970, forKey: "canvas.updates.lastCheck")
+  var req = URLRequest(url: ReleaseLinks.manifest, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+  URLSession(configuration: .ephemeral).dataTask(with: req) { data, response, _ in
+    guard (response as? HTTPURLResponse)?.statusCode == 200, let data, let v = ReleaseLinks.newer(manifest: data, than: appVersion),
+          d.string(forKey: "canvas.updates.told") != v else { return }
+    d.set(v, forKey: "canvas.updates.told")
+    DispatchQueue.main.async {
+      MainActor.assumeIsolated {
+        model.flash("Canvas \(v) is out", durationMs: 12000, actions: [ToastAction(id: "download", label: "Download", symbol: nil) {
+          model.clearToast(); NSWorkspace.shared.open(ReleaseLinks.download)
+        }])
+      }
+    }
+  }.resume()
+}
+// QA builds and runs with CANVAS_NO_UPDATE_CHECK never ask.
+#if CANVAS_QA
+let isQABuild = true
+#else
+let isQABuild = false
+#endif
+if ProcessInfo.processInfo.environment["CANVAS_NO_UPDATE_CHECK"] == nil && !isQABuild {
+  DispatchQueue.main.asyncAfter(deadline: .now() + 20) { checkForUpdate() }
+  Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in checkForUpdate() }
 }
 
 // Keep the server up for as long as the window exists; it idles out after 30 quiet minutes.
@@ -583,6 +632,11 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   /// Option+L (collapse layers): every open row in the Layers panel closes.
   @objc func collapseLayers(_ s: Any?) { LayersStore.of(model).collapseAll() }
   @objc func showWindow(_ s: Any?) { showMainWindow() }
+  /// Help > Report a Bug: the website's form in the browser, with this build's version, commit, macOS and
+  /// architecture filled in (ReleaseLinks.report). Nothing is sent until the person presses Send there.
+  @objc func reportBug(_ s: Any?) { NSWorkspace.shared.open(reportURL()) }
+  /// Help > Download Latest Version: the website's download page.
+  @objc func downloadLatest(_ s: Any?) { NSWorkspace.shared.open(ReleaseLinks.download) }
   private var nativeText: Bool { keyWindowNow.firstResponder is NSText }
   func validateMenuItem(_ item: NSMenuItem) -> Bool {
     let key = NSApp.currentEvent?.type == .keyDown
@@ -693,6 +747,8 @@ func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op:
   case "rename": return (menuActions, #selector(MenuActions.rename(_:)), nil)
   case "collapseLayers": return (menuActions, #selector(MenuActions.collapseLayers(_:)), nil)
   case "palette": return (paletteMenuTarget, #selector(PaletteMenuTarget.toggle(_:)), nil)
+  case "reportBug": return (menuActions, #selector(MenuActions.reportBug(_:)), nil)
+  case "downloadLatest": return (menuActions, #selector(MenuActions.downloadLatest(_:)), nil)
   case "minimize": return (nil, #selector(NSWindow.performMiniaturize(_:)), nil)
   case "zoomWindow": return (nil, #selector(NSWindow.performZoom(_:)), nil)
   default: return nil

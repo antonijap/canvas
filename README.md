@@ -232,6 +232,6 @@ pnpm start "$PWD/demos/learn.canvas"   # open the URL it prints
 
 It has simpler web chrome than the app. Without the engine build (`engine/pkg`, which git ignores) it draws with the fallback HTML (DOM) renderer and says so at the bottom of the page; `pnpm build:engine` builds it, then reload.
 
-The [build guide](docs/developer-guide.md#build-from-source) covers the toolchains, `apps/macos/build.sh` and checkouts outside `~/Code/canvas`. `pnpm release:app` prepares a release (the app zipped with its version, and draft notes in `qa/out/release/`) without publishing anything.
+The [build guide](docs/developer-guide.md#build-from-source) covers the toolchains, `apps/macos/build.sh` and checkouts outside `~/Code/canvas`. `pnpm release:app` prepares a signed, self-contained release (the app with Node and its server inside, zipped, with draft notes in `qa/out/release/`) without publishing anything.
 
 Architecture, tests and troubleshooting are in the [developer guide](docs/developer-guide.md). Third-party licenses are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Canvas itself is released under the [Apache License 2.0](LICENSE).

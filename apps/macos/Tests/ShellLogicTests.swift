@@ -291,6 +291,20 @@ struct ShellLogicTests {
         check(NodeLocator.find(env: ["CANVAS_NODE": "/x/node", "PATH": ""], home: home, isExecutable: { _ in true }) == "/x/node", "CANVAS_NODE wins")
         check(NodeLocator.find(env: ["PATH": "/a:/b"], home: home, isExecutable: { $0 == "/b/node" }) == "/b/node", "PATH is the last resort")
         check(NodeLocator.find(env: finderEnv, home: home, isExecutable: { _ in false }) == nil, "none found is nil, not /usr/bin/env")
+        // The website's report link and the release manifest (getcanvas.cc).
+        let os = OperatingSystemVersion(majorVersion: 15, minorVersion: 2, patchVersion: 0)
+        let r = ReleaseLinks.report(version: "0.1.0", build: "716e9a5", os: os, arch: "arm64").absoluteString
+        check(r == "https://getcanvas.cc/report?from=app&v=0.1.0&build=716e9a5&os=15.2&arch=arm64", "the report link: \(r)")
+        let r2 = ReleaseLinks.report(version: "0.1.0 beta", build: "/Users/x", os: OperatingSystemVersion(majorVersion: 26, minorVersion: 1, patchVersion: 3), arch: "ppc").absoluteString
+        check(r2 == "https://getcanvas.cc/report?from=app&os=26.1.3", "malformed values are left out, nothing else is sent: \(r2)")
+        check(ReleaseLinks.isNewer("0.1.10", than: "0.1.9") && !ReleaseLinks.isNewer("0.1.0", than: "0.1.0"), "numeric version order")
+        check(ReleaseLinks.isNewer("0.1.0", than: "0.1.0-alpha.2") && ReleaseLinks.isNewer("0.1.0-alpha.3", than: "0.1.0-alpha.2") && !ReleaseLinks.isNewer("0.1.0-alpha.1", than: "0.1.0"), "pre-releases")
+        let m = #"{"latest":{"version":"0.2.0","file":"Canvas-0.2.0.zip"},"releases":[]}"#.data(using: .utf8)!
+        check(ReleaseLinks.newer(manifest: m, than: "0.1.0") == "0.2.0" && ReleaseLinks.newer(manifest: m, than: "0.2.0") == nil, "the manifest's newer version")
+        check(ReleaseLinks.newer(manifest: #"{"latest":null}"#.data(using: .utf8)!, than: "0.1.0") == nil && ReleaseLinks.newer(manifest: Data("x".utf8), than: "0.1.0") == nil, "no release, or garbage: nothing")
+        let inApp = "/Applications/Canvas.app/Contents/Resources/node/bin/node"
+        check(NodeLocator.find(env: finderEnv, home: home, bundled: inApp, isExecutable: { _ in true }) == inApp, "a release's own Node comes before any install")
+        check(NodeLocator.find(env: ["CANVAS_NODE": "/x/node"], home: home, bundled: inApp, isExecutable: { _ in true }) == "/x/node", "CANVAS_NODE still wins over the app's Node")
     }
 
     // Finding swift-2: 1e20 in a widget number field trapped in Int(v).

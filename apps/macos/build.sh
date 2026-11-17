@@ -17,6 +17,9 @@ fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp Info.plist "$APP/Contents/Info.plist"
+# The commit it was built from: Help > Report a Bug sends it with the report (nothing else about the build).
+COMMIT="$(git -C .. rev-parse --short HEAD 2>/dev/null || true)"
+[ -n "$COMMIT" ] && plutil -insert CanvasCommit -string "$COMMIT" "$APP/Contents/Info.plist"
 if [ -n "${CANVAS_REPO:-}" ]; then
   plutil -insert CanvasRepo -string "$CANVAS_REPO" "$APP/Contents/Info.plist"
 fi
