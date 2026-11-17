@@ -17,10 +17,11 @@ import { readBodyText } from "./body.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
 import { resolveDoc } from "./docpath.ts";
 import { agentSettings } from "./settings.ts";
+import { hooks, isShared, NIL_DOC as NIL, queueLocal, viewOf, withDoc, type SyncFile } from "./cloud-sync.ts";
 import { countUsage } from "./usage-counts.ts";
 
 /** An envelope that says "the document of the file this request names". */
-export const NIL_DOC = "00000000-0000-4000-8000-000000000000";
+export const NIL_DOC = NIL;
 
 const MAX_BODY = 4 * 1024 * 1024;
 
@@ -39,7 +40,7 @@ export function agentName(raw: unknown): string {
 
 /** Who a request's comments are by: an MCP client by its name, else the person here. No email: nothing verified it. */
 export function authorOf(req: Pick<http.IncomingMessage, "headers">): Author {
-  return req.headers["x-canvas-source"] === "mcp" ? { name: agentName(req.headers["x-canvas-agent"]) } : { name: localName() };
+  return req.headers["x-canvas-source"] === "mcp" ? { name: agentName(req.headers["x-canvas-agent"]), agent: true } : { name: localName() };
 }
 
 /** The package folder a file argument names, or a CommentsError for a single-file document (comments need a package). */
@@ -54,7 +55,7 @@ export function packageOf(file: string): string {
   return ref.displayPath;
 }
 
-export type OpsResult = { doc: string; applied: { opId: string; seq: number }[]; rejected: Rejected[]; threads: Thread[]; counts: string[] };
+export type OpsResult = { doc: string; applied: { opId: string; seq: number }[]; rejected: Rejected[]; threads: Thread[]; counts: string[]; queued?: boolean };
 
 /**
  * Checks and applies envelopes to the file in `pkg` and writes it once, atomically, when anything applied. Written
@@ -69,6 +70,7 @@ export function applyEnvelopes(pkg: string, envelopes: unknown, by: Author, now 
   const rejected: Rejected[] = [];
   const counts: string[] = [];
   const at = now.toISOString();
+  if (isShared(file)) return queueShared(pkg, file as SyncFile, envelopes, by);
   const seen = new Set<string>();
   for (const raw of envelopes) {
     const bad = checkEnvelope(raw);
@@ -92,6 +94,19 @@ export function applyEnvelopes(pkg: string, envelopes: unknown, by: Author, now 
   return { doc: file.doc, applied, rejected, threads: file.threads, counts };
 }
 
+/**
+ * A shared file: a change made here goes to the outbox (with the real doc on it) and shows at once; src/cloud.ts sends
+ * it when the socket is up. Nothing is applied to the confirmed threads: only the server's answer does that.
+ */
+function queueShared(pkg: string, file: SyncFile, envelopes: unknown[], by: Author): OpsResult {
+  const list = envelopes.map((e) => (e && typeof e === "object" ? withDoc(e as OpEnvelope, file.doc) : e)) as OpEnvelope[];
+  const { queued, refused } = queueLocal(file, list, by, { name: localName() });
+  const counts: string[] = [];
+  for (const e of list) if (queued.includes(e.opId)) { const c = countOf(e.op); if (c) counts.push(c); }
+  if (queued.length) { writeCommentsFile(pkg, file); hooks.touch(pkg, null); }
+  return { doc: file.doc, applied: queued.map((opId) => ({ opId, seq: 0 })), rejected: refused, threads: viewOf(file, { name: localName() }), counts, queued: true };
+}
+
 const countOf = (op: Op): string | null =>
   op.kind === "thread.create" ? "comment.thread_created" : op.kind === "comment.add" ? "comment.replied" : op.kind === "thread.resolve" && op.resolved ? "comment.resolved" : null;
 
@@ -101,10 +116,12 @@ function replayed(threads: Thread[], op: Op): boolean {
   return false;
 }
 
-/** The threads of a file and its doc id; a file with no comments yet answers doc null. */
-export function readThreads(pkg: string): { doc: string | null; threads: Thread[] } {
+/** The threads of a file and its doc id; a file with no comments yet answers doc null. A shared file answers what the page shows (confirmed plus outbox) and its sync state. */
+export function readThreads(pkg: string): { doc: string | null; threads: Thread[]; sync?: unknown } {
   const f = readCommentsFile(pkg);
-  return { doc: f?.doc ?? null, threads: f?.threads ?? [] };
+  if (!f) return { doc: null, threads: [] };
+  if (!isShared(f)) return { doc: f.doc, threads: f.threads };
+  return { doc: f.doc, threads: viewOf(f, { name: localName() }), sync: hooks.info(pkg, f as SyncFile) };
 }
 
 /** Builds the ops a client would send for one new thread (the page and canvas-mcp build theirs the same way). */
@@ -126,6 +143,7 @@ export async function handleCommentsRoute(req: http.IncomingMessage, res: http.S
     const pkg = packageOf(file);
     if (url.pathname === "/api/comments") {
       if (req.method !== "GET") return out(405, { error: "method not allowed" });
+      hooks.touch(pkg, file); // opening a shared file's comments connects it (a no-op for any other file)
       return out(200, { ...readThreads(pkg), me: localName() });
     }
     if (req.method !== "POST") return out(405, { error: "method not allowed" });
@@ -141,7 +159,8 @@ export async function handleCommentsRoute(req: http.IncomingMessage, res: http.S
     const r = applyEnvelopes(pkg, body.ops, authorOf(req));
     for (const c of r.counts) countUsage(c);
     if (r.applied.length && changed) changed(file, pkg);
-    return out(200, { doc: r.doc, applied: r.applied, rejected: r.rejected, threads: r.threads, me: localName() });
+    const sync = r.queued ? readThreads(pkg).sync : undefined;
+    return out(200, { doc: r.doc, applied: r.applied, rejected: r.rejected, threads: r.threads, me: localName(), ...(sync ? { sync } : {}) });
   } catch (e) {
     if (e instanceof CommentsError) return out(e.status, { error: e.message, code: e.code });
     return out(500, { error: (e as Error).message });

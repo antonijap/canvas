@@ -191,7 +191,7 @@ describe("routes", () => {
     const d = create("from another");
     await post(p, [d.e], { "x-canvas-source": "mcp", "x-canvas-agent": "Some Tool <b>markup</b>" });
     const names = onDisk(p).threads.map((t) => t.createdBy);
-    assert.deepEqual(names, [{ name: "Ana Test" }, { name: "Claude Code" }, { name: "Codex" }, { name: "Some Tool b markup b" }]);
+    assert.deepEqual(names, [{ name: "Ana Test" }, { name: "Claude Code", agent: true }, { name: "Codex", agent: true }, { name: "Some Tool b markup b", agent: true }]);
     assert.equal(C.agentName(undefined), "Agent");
   });
 

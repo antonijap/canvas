@@ -66,10 +66,10 @@ export function colorOf(name) {
 }
 
 /**
- * Comments by an agent show a grey sparkles mark, not an initial. The protocol's author has only a name (and an
- * email once verified), so an agent is told by the name canvas-mcp gives its client (src/comments.ts agentName).
+ * Comments by an agent show a grey sparkles mark, not an initial. Author.agent says it; files written before that field
+ * are told by the name canvas-mcp gave its client (src/comments.ts agentName).
  */
-export const isAgent = (author) => !!author && !author.email && /^(claude code|codex|cursor|agent|gemini|windsurf|copilot|zed)\b/i.test(String(author.name || ""));
+export const isAgent = (author) => !!author && (author.agent === true || (!author.email && /^(claude code|codex|cursor|agent|gemini|windsurf|copilot|zed)\b/i.test(String(author.name || ""))));
 
 /** What the thread card says a deleted layer was: "Start free trial, a frame 288 x 44". */
 export function previewLine(preview) {
