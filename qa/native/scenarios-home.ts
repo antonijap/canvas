@@ -2,6 +2,7 @@
 // shortcut and Window > Home show it, a card opens its file, a missing file offers Remove from recents, the comment
 // count and the team server on a card, the server view, the first-launch cards, thumbnails in the state folder,
 // and the alignment of the controls. Screenshots of the three states, light and dark, go to qa/out/native.
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
@@ -257,4 +258,52 @@ sc("home", "Home on a first launch: three cards and the empty recents", { covers
   } finally {
     await fresh.stop();
   }
+});
+
+/** Drags the handle at `handle` by dx and answers the stored width read by `key`. */
+async function dragEdge(t: NT, key: "sidebarWidth" | "homeSidebarWidth", dx: number) {
+  const h = await t.mark({ id: "sidebar-resize" });
+  const from = { x: h.x + h.w / 2, y: h.y + h.h / 2 };
+  await t.drag(from, { x: from.x + dx, y: from.y }, { steps: 20 });
+  await sleep(250);
+  return (await t.state())[key] as number;
+}
+
+sc("home", "Both sidebars drag from their right edge, stop at a minimum and a maximum, reset on double-click", { covers: ["sidebar-resize:home", "sidebar-resize:editor"] }, async (t: NT) => {
+  // Home sidebar.
+  await home(t);
+  let h = await t.mark({ id: "sidebar-resize" });
+  t.ok(h.w >= 12, `the grab strip is at least 12 pt wide (${h.w})`);
+  const start = (await t.state()).homeSidebarWidth as number;
+  t.eq(start, 232, "the Home sidebar starts at its default");
+  t.near(await dragEdge(t, "homeSidebarWidth", 60), 292, 1.5, "dragging right 60 pt widens by 60");
+  t.eq(await dragEdge(t, "homeSidebarWidth", -900), 200, "dragging far left stops at the minimum");
+  const row = await t.mark({ id: "home-row", label: "Add Cloud" });
+  const label = await t.mark({ id: "text", label: "Add Cloud" });
+  t.ok(label.x + label.w <= row.x + row.w - 8, "at the minimum the longest label still fits its row");
+  await shot(t, "home-sidebar-min");
+  const max = await dragEdge(t, "homeSidebarWidth", 900);
+  t.ok(max <= 360 && max >= 280, `dragging far right stops at the maximum (${max})`);
+  await shot(t, "home-sidebar-max");
+  h = await t.mark({ id: "sidebar-resize" });
+  await t.doubleClick({ x: h.x + h.w / 2, y: h.y + h.h / 2 });
+  await sleep(250);
+  t.eq((await t.state()).homeSidebarWidth, 232, "double-click puts the Home sidebar back to its default");
+  // Kept across launches: the widths are in the app's preferences the moment they change.
+  const stored = (key: string) => Number(execFileSync("defaults", ["read", t.app.bundleId, key], { encoding: "utf8" }).trim());
+  await dragEdge(t, "homeSidebarWidth", 40);
+  t.eq(stored("canvas.homeSidebarWidth"), 272, "the Home sidebar's width is kept in preferences");
+  // Editor panel.
+  await leaveHome(t, baseName(t.file));
+  await t.section("Layers");
+  t.eq(await dragEdge(t, "sidebarWidth", -900), 200, "the editor panel stops at its minimum");
+  await shot(t, "editor-sidebar-min");
+  t.eq(await dragEdge(t, "sidebarWidth", 900) <= 420, true, "and at its maximum");
+  await shot(t, "editor-sidebar-max");
+  const e = await t.mark({ id: "sidebar-resize" });
+  await t.doubleClick({ x: e.x + e.w / 2, y: e.y + e.h / 2 });
+  await sleep(250);
+  t.eq((await t.state()).sidebarWidth, 244, "double-click puts the editor panel back to its default");
+  await dragEdge(t, "sidebarWidth", 30);
+  t.eq(stored("canvas.sidebarWidth"), 274, "the editor panel's width is kept in preferences");
 });

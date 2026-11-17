@@ -194,8 +194,12 @@ private extension View {
     }
 }
 
-private enum HomeMetric {
+enum HomeMetric {
     static let sidebar: CGFloat = 232
+    static let sidebarMin: CGFloat = 200
+    static let sidebarMax: CGFloat = 360
+    /// The most of the window the sidebar may take, so the file list keeps its room.
+    static let sidebarShare: CGFloat = 0.4
     static let gutter: CGFloat = 28
     static let cardMin: CGFloat = 220
     static let cardMax: CGFloat = 340
@@ -214,12 +218,24 @@ struct HomeView: View {
     private var configured: Bool { CloudURL.clean(model.prefs.cloudUrl) != nil }
     private var serverUrl: String { CloudURL.clean(model.prefs.cloudUrl) ?? "" }
 
+    @State private var windowWidth: CGFloat = 0
+
+    /// The sidebar's width in this window: the stored one, held between the minimum and what the window allows.
+    private var sidebarMax: CGFloat {
+        windowWidth > 0 ? SidebarSize.cap(window: windowWidth, share: HomeMetric.sidebarShare, min: HomeMetric.sidebarMin, max: HomeMetric.sidebarMax) : HomeMetric.sidebarMax
+    }
+    private var sidebarShown: CGFloat { min(max(model.homeSidebarWidth, HomeMetric.sidebarMin), sidebarMax) }
+
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             GlassIsland(radius: Metric.radiusIsland, padding: Metric.islandPad, dense: true) {
                 HomeSidebar(model: model, store: store, account: account, configured: configured, serverUrl: serverUrl)
             }
-            .frame(width: HomeMetric.sidebar)
+            .frame(width: sidebarShown)
+            .overlay(alignment: .trailing) {
+                SidebarResizeHandle(model: model, shown: sidebarShown, minWidth: HomeMetric.sidebarMin, maxWidth: sidebarMax,
+                                    defaultWidth: HomeMetric.sidebar) { model.homeSidebarWidth = $0 }
+            }
             .frame(maxHeight: .infinity, alignment: .top)
             .padding(.leading, Metric.inset)
             .padding(.top, Metric.inset + Metric.pill + Metric.islandGap)
@@ -229,6 +245,10 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.canvasBg.ignoresSafeArea())
+        .background(GeometryReader { g in
+            Color.clear.onAppear { windowWidth = g.size.width }.onChange(of: g.size.width) { _, w in windowWidth = w }
+        })
+        .transaction { if model.resizingSidebar { $0.animation = nil } }
         .onAppear { store.reload() }
         .task {
             // The server's status: asked now, then every 30 s while Home is up (a connected answer is reused for a

@@ -101,7 +101,7 @@ export const METRICS = {
   sidebarWidth: 244,
   sidebarMin: 200,
   sidebarMax: 420,
-  resizeHit: 8,
+  resizeHit: 12,
   propsWidth: 284,
   scrollbar: 10,
   pill: 40,

@@ -19,7 +19,7 @@ struct ShellLogicTests {
         docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
-        powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
+        sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
         updateManifest(); updateVerdict(); updateInstall(); updateHelper()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
@@ -378,6 +378,37 @@ struct ShellLogicTests {
         } else { check(true, "") }
         check(w(520, 420, false) == 320, "narrow window without inspector: clamped to the room left")
         check(w(600, 420, true) == nil, "no room at all hides the panel")
+    }
+
+    // Sidebar resize: the editor panel and the Home sidebar share one set of rules.
+    static func sidebarResize() {
+        let lo: CGFloat = 200, hi: CGFloat = 420
+        check(SidebarSize.drag(start: 244, translation: 30, min: lo, max: hi) == 274, "drag right widens")
+        check(SidebarSize.drag(start: 244, translation: -500, min: lo, max: hi) == lo, "drag stops at the minimum")
+        check(SidebarSize.drag(start: 244, translation: 900, min: lo, max: hi) == hi, "drag stops at the maximum")
+        check(SidebarSize.drag(start: 244, translation: 10.4, min: lo, max: hi) == 254, "whole points, so edges stay sharp")
+        check(SidebarSize.drag(start: 244, translation: 10.6, min: lo, max: hi) == 255, "whole points round to nearest")
+        // A window with less room than the maximum: the drag stops where the panel stops, no dead travel after it.
+        check(SidebarSize.drag(start: 300, translation: 200, min: lo, max: 340) == 340, "drag stops at the room left")
+        check(SidebarSize.drag(start: .nan, translation: 5, min: lo, max: hi) == lo, "a NaN start cannot poison the width")
+        check(SidebarSize.restore(0, fallback: 244, min: lo, max: hi) == 244, "nothing stored: the default")
+        check(SidebarSize.restore(-5, fallback: 244, min: lo, max: hi) == 244, "negative stored: the default")
+        check(SidebarSize.restore(.nan, fallback: 244, min: lo, max: hi) == 244, "NaN stored: the default")
+        check(SidebarSize.restore(.infinity, fallback: 244, min: lo, max: hi) == 244, "infinite stored: the default")
+        check(SidebarSize.restore(90, fallback: 244, min: lo, max: hi) == lo, "stored below the minimum: the minimum")
+        check(SidebarSize.restore(900, fallback: 244, min: lo, max: hi) == hi, "stored above the maximum: the maximum")
+        check(SidebarSize.restore(300, fallback: 244, min: lo, max: hi) == 300, "stored in range: kept")
+        // A share of the window caps the Home sidebar, between its own minimum and maximum.
+        check(SidebarSize.cap(window: 1400, share: 0.4, min: 200, max: 360) == 360, "wide window: the maximum")
+        check(SidebarSize.cap(window: 700, share: 0.4, min: 200, max: 360) == 280, "mid window: a share of it")
+        check(SidebarSize.cap(window: 300, share: 0.4, min: 200, max: 360) == 200, "tiny window: never under the minimum")
+        // The editor panel's room is the same figure sidebarWidth clamps to.
+        check(ShellLayout.room(window: 1560, inspector: true, inset: 10, rail: 40, gap: 10, props: 284) == 1560 - 20 - 40 - 20 - 120 - 294,
+              "room beside the inspector")
+        check(ShellLayout.room(window: 1560, inspector: false, inset: 10, rail: 40, gap: 10, props: 284) == 1560 - 20 - 40 - 20 - 120,
+              "room without the inspector")
+        // The edge's hit strip is wide enough to grab and its centre sits on the edge.
+        check(SidebarSize.hitWidth >= 12, "hit strip at least 12 pt")
     }
 
     // Backlog: Locate… for a tab whose file moved.

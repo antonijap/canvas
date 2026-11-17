@@ -75,12 +75,43 @@ enum JSONNumber {
 enum ShellLayout {
     static let minCanvas: CGFloat = 120
 
-    static func sidebarWidth(window: CGFloat, stored: CGFloat, inspector: Bool,
-                             inset: CGFloat, rail: CGFloat, gap: CGFloat, props: CGFloat, minWidth: CGFloat) -> CGFloat? {
+    /// The widest the panel can be in this window.
+    static func room(window: CGFloat, inspector: Bool, inset: CGFloat, rail: CGFloat, gap: CGFloat, props: CGFloat) -> CGFloat {
         var room = window - inset * 2 - rail - gap * 2 - minCanvas
         if inspector { room -= props + gap }
+        return room
+    }
+
+    static func sidebarWidth(window: CGFloat, stored: CGFloat, inspector: Bool,
+                             inset: CGFloat, rail: CGFloat, gap: CGFloat, props: CGFloat, minWidth: CGFloat) -> CGFloat? {
+        let room = room(window: window, inspector: inspector, inset: inset, rail: rail, gap: gap, props: props)
         if room < minWidth { return nil }
         return min(max(stored, minWidth), room)
+    }
+}
+
+/// Resizing a sidebar by its edge: the editor panel and the Home sidebar follow the same rules.
+enum SidebarSize {
+    /// The edge's grab strip: it straddles the edge, half over the sidebar and half over what lies beside it.
+    static let hitWidth: CGFloat = 12
+
+    /// The width a stored value means: the default when nothing sensible is stored, else clamped.
+    static func restore(_ stored: Double, fallback: CGFloat, min lo: CGFloat, max hi: CGFloat) -> CGFloat {
+        guard stored.isFinite, stored > 0 else { return fallback }
+        return Swift.min(Swift.max(CGFloat(stored), lo), hi)
+    }
+
+    /// The width while dragging: where the drag started plus how far it went, in whole points, held between
+    /// the minimum and the maximum (which the caller lowers to the room the window has left).
+    static func drag(start: CGFloat, translation: CGFloat, min lo: CGFloat, max hi: CGFloat) -> CGFloat {
+        let raw = start + translation
+        guard raw.isFinite else { return lo }
+        return Swift.min(Swift.max(raw.rounded(), lo), Swift.max(hi, lo))
+    }
+
+    /// The widest a sidebar may be in a window: a share of it, between the sidebar's own minimum and maximum.
+    static func cap(window: CGFloat, share: CGFloat, min lo: CGFloat, max hi: CGFloat) -> CGFloat {
+        Swift.min(Swift.max((window * share).rounded(), lo), hi)
     }
 }
 
