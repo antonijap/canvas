@@ -765,6 +765,11 @@ features:
     area: chrome
     driven: [native]
     cases: [pinned, shortcut, recents, card-open, remove, first-launch, server, server-name, thumbnail, alignment, $themes]
+  - id: sidebar-resize
+    name: Both sidebars (editor panel, Home) drag from their right edge, stop at a minimum and maximum, reset on double-click, and keep their width
+    area: chrome
+    driven: [native]
+    cases: [editor, home]
   - id: theme
     name: App theme light and dark
     area: chrome

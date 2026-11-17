@@ -48,6 +48,14 @@ struct RootView: View {
                                         inset: Metric.inset, rail: Metric.railWidth, gap: Metric.islandGap, props: Metric.propsWidth, minWidth: Metric.sidebarMin)
     }
 
+    /// The widest the panel may be dragged in this window: the maximum, or the room the window leaves.
+    private var panelMax: CGFloat {
+        guard windowWidth > 0 else { return Metric.sidebarMax }
+        let room = ShellLayout.room(window: windowWidth, inspector: inspectorShown, inset: Metric.inset, rail: Metric.railWidth,
+                                    gap: Metric.islandGap, props: Metric.propsWidth)
+        return min(Metric.sidebarMax, room)
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             WebCanvas(host: model.tabHost).ignoresSafeArea()
@@ -78,7 +86,7 @@ struct RootView: View {
                 ZStack(alignment: .topLeading) {
                     TopBar(model: model)
                     // View > Hide UI (Cmd+backslash): only the canvas and the tabs stay.
-                    if !model.uiHidden && !model.homeShown { LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth) }
+                    if !model.uiHidden && !model.homeShown { LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth, panelMax: panelMax) }
                     if inspectorShown { Inspector(model: model, fonts: model.fonts) }
                     // Nothing to zoom on an empty page: the pill comes back with the first board.
                     if !model.uiHidden && !model.homeShown && !model.pageEmpty { ZoomCorner(model: model) }
@@ -178,6 +186,8 @@ struct LeftColumn: View {
     @Binding var panelOpen: Bool
     /// From RootView: the stored width clamped to the window; nil hides the panel (no room beside the inspector).
     let panelWidth: CGFloat?
+    /// The widest a drag may make the panel in this window.
+    let panelMax: CGFloat
 
     var body: some View {
         HStack(alignment: .top, spacing: Metric.islandGap) {
@@ -199,7 +209,9 @@ struct LeftColumn: View {
             if panelOpen, let section = model.section, let width = panelWidth {
                 GlassIsland(padding: Metric.islandPad, dense: true) { SidePanel(model: model, section: section) }
                     .frame(width: width)
-                    .overlay(alignment: .trailing) { SidebarResizeHandle(model: model, shown: width) }
+                    .overlay(alignment: .trailing) {
+                        SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax, defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
+                    }
                     .frame(maxHeight: .infinity, alignment: .top)
                     .transition(.move(edge: .leading).combined(with: .opacity))
             }
@@ -210,33 +222,62 @@ struct LeftColumn: View {
     }
 }
 
-/// Invisible strip on the panel's right edge: resize cursor on hover, drag to set the width.
+/// Invisible strip, SidebarSize.hitWidth wide, along a sidebar's right edge, inside it: resize cursor over it, drag to
+/// set the width, double-click to put it back to its default. Used by the editor panel and the Home sidebar.
+/// An AppKit view, not a SwiftUI gesture: the cursor comes from a cursor rect (no push and pop to get out of step),
+/// and what lies beside the sidebar (the canvas page, the file list's scroll view) takes the mouse before anything
+/// drawn over it, so the strip stays inside the sidebar.
 struct SidebarResizeHandle: View {
+    @ObservedObject var model: CanvasModel
+    let shown: CGFloat
+    let minWidth: CGFloat
+    let maxWidth: CGFloat
+    let defaultWidth: CGFloat
+    let set: (CGFloat) -> Void
+    var body: some View {
+        EdgeHandle(model: model, shown: shown, minWidth: minWidth, maxWidth: maxWidth, defaultWidth: defaultWidth, set: set)
+            .frame(width: SidebarSize.hitWidth)
+            .qaID("sidebar-resize", label: "Resize sidebar")
+    }
+}
+
+private struct EdgeHandle: NSViewRepresentable {
     @ObservedObject var model: CanvasModel
     /// The width on screen, which the window may have clamped below the stored one: a drag starts from here.
     let shown: CGFloat
-    @State private var startWidth: CGFloat?
-    /// Whether this handle pushed the resize cursor: every pop matches a push of its own, so it never pops a
-    /// cursor someone else pushed, and a handle that vanishes while hovered still pops.
-    @State private var pushed = false
+    let minWidth: CGFloat
+    /// The widest this drag may go: the maximum, or less where the window has no more room.
+    let maxWidth: CGFloat
+    let defaultWidth: CGFloat
+    let set: (CGFloat) -> Void
 
-    var body: some View {
-        Color.clear
-            .frame(width: Metric.resizeHit)
-            .contentShape(Rectangle())
-            .onHover { inside in
-                if inside, !pushed { NSCursor.resizeLeftRight.push(); pushed = true }
-                else if !inside, pushed { NSCursor.pop(); pushed = false }
-            }
-            .onDisappear { if pushed { NSCursor.pop(); pushed = false } }
-            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                .onChanged { g in
-                    let start = startWidth ?? shown
-                    startWidth = start
-                    model.resizingSidebar = true
-                    model.sidebarWidth = min(max(start + g.translation.width, Metric.sidebarMin), Metric.sidebarMax)
-                }
-                .onEnded { _ in startWidth = nil; model.resizingSidebar = false })
+    func makeNSView(context: Context) -> EdgeView { EdgeView() }
+    func updateNSView(_ v: EdgeView, context: Context) {
+        v.shown = shown; v.minWidth = minWidth; v.maxWidth = maxWidth; v.defaultWidth = defaultWidth; v.set = set
+        v.dragging = { [weak model] on in model?.resizingSidebar = on }
+    }
+    final class EdgeView: NSView {
+        var shown: CGFloat = 0, minWidth: CGFloat = 0, maxWidth: CGFloat = 0, defaultWidth: CGFloat = 0
+        var set: (CGFloat) -> Void = { _ in }
+        var dragging: (Bool) -> Void = { _ in }
+        private var startX: CGFloat = 0
+        private var startWidth: CGFloat = 0
+
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+
+        override func mouseDown(with event: NSEvent) {
+            if event.clickCount == 2 { set(defaultWidth); return }
+            startX = event.locationInWindow.x
+            startWidth = shown
+            dragging(true)
+        }
+        override func mouseDragged(with event: NSEvent) {
+            if event.clickCount >= 2 { return }
+            set(SidebarSize.drag(start: startWidth, translation: event.locationInWindow.x - startX, min: minWidth, max: maxWidth))
+        }
+        override func mouseUp(with event: NSEvent) { dragging(false) }
     }
 }
 
@@ -356,3 +397,5 @@ struct ZoomCorner: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     }
 }
+
+
