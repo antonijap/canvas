@@ -266,21 +266,33 @@ struct AgentOffer {
     }
 }
 
-/// The commands that register Canvas MCP (as "canvas") with Claude Code and Codex, each with Copy, and whether an
-/// agent is talking to Canvas now. The Welcome card shows the same (GET /api/mcp/setup, src/onboarding.ts).
+/// The commands that register Canvas MCP (as "canvas") with Claude Code and Codex, each with Connect (the app runs the
+/// command: POST /api/mcp/connect, src/mcp-connect.ts) and Copy, and whether an agent is talking to Canvas now. The
+/// Welcome card shows the same, in the same words (GET /api/mcp/setup, src/onboarding.ts; ConnectCopy).
 struct ConnectAgentCard: View {
     @ObservedObject var model: CanvasModel
     @State private var setup: [String: Any] = [:]
     @State private var copied: String?
+    /// Agents whose Connect is running.
+    @State private var busy: Set<String> = []
+    /// A Connect's error, per agent, shown under its command until the next Connect.
+    @State private var errors: [String: String] = [:]
+    /// The next step after a Connect worked.
+    @State private var note: String?
 
     var body: some View {
         SettingsCard(title: "Connect an agent") {
             ForEach([("Claude Code", "claude"), ("Codex", "codex")], id: \.1) { title, key in
                 if key != "claude" { SettingsDivider() }
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
+                    HStack(spacing: 8) {
                         Text(title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1)
                         Spacer(minLength: 12)
+                        if let b = ConnectCopy.button(installed: flag("installed", key), registered: flag("registered", key), busy: busy.contains(key)) {
+                            FieldButton(title: b, symbol: b == "Added" ? "checkmark" : nil) { connect(key, title) }
+                                .disabled(b != "Connect").opacity(b == "Connect" ? 1 : 0.6)
+                                .qaID("connect-\(key)", label: b)
+                        }
                         FieldButton(title: copied == key ? "Copied" : "Copy", symbol: copied == key ? "checkmark" : "doc.on.doc") { copy(key) }
                             .disabled(setup[key] == nil)
                     }
@@ -290,11 +302,16 @@ struct ConnectAgentCard: View {
                         .padding(.horizontal, 10).padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field.opacity(0.6)))
+                    if let e = errors[key] {
+                        Text(e).font(Typography.micro).foregroundStyle(Palette.danger)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            .qaID("connect-error-\(key)", label: e)
+                    }
                 }
                 .padding(.horizontal, 14).padding(.vertical, 12)
             }
             SettingsDivider()
-            SettingsRow("Status", detail: connected ? nil : "Run a command above in Terminal, then start a new agent session") {
+            SettingsRow("Status") {
                 HStack(spacing: 6) {
                     Circle().fill(connected ? Palette.ok : Palette.mutedFg.opacity(0.5)).frame(width: 8, height: 8)
                     Text(connected ? "Connected\((setup["client"] as? String).map { ": \($0)" } ?? "")" : "Not connected")
@@ -302,6 +319,20 @@ struct ConnectAgentCard: View {
                 }
                 .frame(height: Metric.field)
             }
+            VStack(alignment: .leading, spacing: 4) {
+                if !connected || note != nil {
+                    Text(note ?? ConnectCopy.hint).font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .qaID("connect-hint", label: note ?? ConnectCopy.hint)
+                }
+                Button { NSWorkspace.shared.open(ConnectCopy.elsewhereURL) } label: {
+                    Text(ConnectCopy.elsewhere).font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.bottom, 12)
         }
         // While the pane shows: the status follows the agent within a couple of seconds.
         .task {
@@ -313,6 +344,37 @@ struct ConnectAgentCard: View {
     }
 
     private var connected: Bool { setup["connected"] as? Bool == true }
+
+    /// installed.claude, registered.codex and so on, from the setup answer.
+    private func flag(_ group: String, _ key: String) -> Bool { (setup[group] as? [String: Any])?[key] as? Bool == true }
+
+    /// Runs the agent's own `mcp add` through the server, then shows the next step or the CLI's error.
+    private func connect(_ key: String, _ title: String) {
+        guard !busy.contains(key) else { return }
+        busy.insert(key)
+        errors[key] = nil
+        note = nil
+        Task {
+            var req = URLRequest(url: model.base.appendingPathComponent("api/mcp/connect"))
+            req.httpMethod = "POST"
+            req.timeoutInterval = 30
+            req.setValue("1", forHTTPHeaderField: "X-Canvas")
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: ["agent": key])
+            var answer: [String: Any]?
+            if let (data, _) = try? await URLSession.shared.data(for: req) { answer = try? JSONSerialization.jsonObject(with: data) as? [String: Any] }
+            busy.remove(key)
+            if answer?["ok"] as? Bool == true {
+                note = answer?["message"] as? String ?? ConnectCopy.added(title)
+                var reg = setup["registered"] as? [String: Any] ?? [:]
+                reg[key] = true
+                setup["registered"] = reg
+            } else {
+                errors[key] = answer?["error"] as? String ?? "Canvas did not answer. Copy the command into Terminal instead."
+            }
+            await load()
+        }
+    }
 
     private func load() async {
         var req = URLRequest(url: model.base.appendingPathComponent("api/mcp/setup"))
