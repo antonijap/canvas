@@ -29,8 +29,12 @@ final class CloudAccount: ObservableObject {
     @Published var busy = false
     private var signIn: CloudSignInWindow?
 
-    func refresh(_ model: CanvasModel) async {
-        var req = URLRequest(url: model.base.appendingPathComponent("api/cloud/status"))
+    /// `fresh` asks the team's server again once its answer is 3 s old (on open and when Canvas comes to the front);
+    /// otherwise a connected answer is reused for a minute (src/cloud.ts STATUS_REUSE_MS), so polling here stays local.
+    func refresh(_ model: CanvasModel, fresh: Bool = false) async {
+        var c = URLComponents(url: model.base.appendingPathComponent("api/cloud/status"), resolvingAgainstBaseURL: false)!
+        if fresh { c.queryItems = [URLQueryItem(name: "fresh", value: "1")] }
+        var req = URLRequest(url: c.url!)
         req.timeoutInterval = 15
         guard let (data, _) = try? await URLSession.shared.data(for: req),
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -43,7 +47,7 @@ final class CloudAccount: ObservableObject {
     func signIn(_ model: CanvasModel) {
         let url = model.prefs.cloudUrl
         guard let clean = CloudURL.clean(url) else { return }
-        if CloudURL.isLocal(clean) { Task { await refresh(model) }; return }
+        if CloudURL.isLocal(clean) { Task { await refresh(model, fresh: true); announce(model) }; return }
         signIn?.close()
         let w = CloudSignInWindow(origin: clean) { [weak self] token in
             guard let self else { return }
@@ -65,8 +69,26 @@ final class CloudAccount: ObservableObject {
                 if !saved { model.flash("Signed in, but the token could not be saved to the Keychain. You will sign in again after a restart.") }
                 self.busy = false
             }
-            await self.refresh(model)
+            await self.refresh(model, fresh: true)
+            await self.announce(model)
         }
+    }
+
+    /// After a sign-in: Home opens on the team server and a toast says it worked, or says why it did not.
+    func announce(_ model: CanvasModel) {
+        let host = ServerName.host(model.prefs.cloudUrl)
+        guard state.status == "connected" else {
+            model.flash("Signed in, but \(host) says: \(CloudStatusText.line(state.status, configured: state.configured))")
+            return
+        }
+        SettingsWindow.shared.close()
+        if let w = model.webView.window {
+            if w.isMiniaturized { w.deminiaturize(nil) }
+            w.makeKeyAndOrderFront(nil)
+        }
+        HomeStore.shared.section = .server
+        model.showHome()
+        model.flash("You\u{2019}re connected to \(host)", level: "success")
     }
 
     func signOut(_ model: CanvasModel) {
@@ -246,11 +268,12 @@ struct CloudSettings: View {
                 }
             }
         }
-        // While the pane shows: the server is asked now, and again every few seconds.
+        // While this pane shows (rarely, and briefly): the server is asked every few seconds, so a fix or an outage shows
+        // at once. Home asks far less often.
         .task(id: model.prefs.cloudUrl + "|" + model.prefs.cloudDevEmail) {
             try? await Task.sleep(nanoseconds: 600_000_000)
             while !Task.isCancelled {
-                await account.refresh(model)
+                await account.refresh(model, fresh: true)
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
         }

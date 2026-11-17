@@ -231,11 +231,18 @@ struct HomeView: View {
         .background(Palette.canvasBg.ignoresSafeArea())
         .onAppear { store.reload() }
         .task {
-            // The server's status: now, then while Home is up.
+            // The server's status: asked now, then every 30 s while Home is up (a connected answer is reused for a
+            // minute, so the team's server hears from this Mac about once a minute at most), and again when Canvas
+            // comes to the front.
+            var first = true
             while !Task.isCancelled {
-                await account.refresh(model)
-                try? await Task.sleep(nanoseconds: 8_000_000_000)
+                await account.refresh(model, fresh: first)
+                first = false
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await account.refresh(model, fresh: true) }
         }
         .environment(\.titlebarTips, false)
     }

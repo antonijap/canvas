@@ -54,6 +54,16 @@ async function dotOnText(t: NT, k: AlignChecker, s: Shot, dotId: string, text: M
   k.near(`${name}: the dot's middle on the text's cap middle`, midY(ink), line(s, text, size)?.cap);
 }
 
+/** Settings > Agents shows one part at a time: Connect, Models or Cursor. */
+async function agentsPart(t: NT, part: string) {
+  // The segment's own word, not the whole control: the control's mark carries the selected part's name too.
+  await t.waitText(part, undefined, 4000, "settings");
+  const word = (await t.marks({ label: part, window: "settings" })).filter((m) => m.id !== "agents-part").sort((a, b) => a.w - b.w)[0];
+  t.ok(word, `no ${part} segment in Settings > Agents`);
+  await t.click(center(word), { window: "settings" });
+  await t.waitFor(async () => (await t.marks({ id: "agents-part", window: "settings" }))[0]?.label === part, `the ${part} part of Settings > Agents`, 4000);
+}
+
 async function openSettings(t: NT, tab: string) {
   if (!(await t.state()).windows.some((w: any) => w.settings)) {
     await t.key(",", ["cmd"]);
@@ -116,16 +126,20 @@ sc("settings", "alignment: General, Cloud and Agents controls are optically cent
       bad.push(...k.bad);
       // Agents: Connect and Copy, the status dot, Installed, the model and reasoning menus.
       await openSettings(t, "Agents");
-      await t.mark({ id: "menu-field", window: "settings" }, 4000);
+      await agentsPart(t, "Connect");
+      await t.mark({ id: "status-text", window: "settings" }, 4000);
       await sleep(600);
       s = await grab(t, "settings");
       k = new AlignChecker("native-settings", theme, s.img, s.k);
       if (await one(t, "settings", "field-button", "Connect")) await fieldButton(t, k, s, "Connect", "agents-connect");
       await fieldButton(t, k, s, "Copy", "agents-copy");
       await dotOnText(t, k, s, "status-dot", await one(t, "settings", "status-text"), 13, "agents-status");
-      const inst = await one(t, "settings", "install-text");
-      const instGlyph = inside(await marks(t, "settings", "install-glyph"), inst ? { x: inst.x - 40, y: inst.y - 4, w: 40, h: inst.h + 8 } : null);
-      if (instGlyph) k.near("Installed: the check's middle on the text's cap middle", midY(k.ink("agents-installed-glyph", bare(box(instGlyph)), { inset: 0 })), line(s, inst, 13)?.cap);
+      bad.push(...k.bad);
+      await agentsPart(t, "Models");
+      await t.mark({ id: "menu-field", window: "settings" }, 4000);
+      await sleep(600);
+      s = await grab(t, "settings");
+      k = new AlignChecker("native-settings", theme, s.img, s.k);
       const menu = (await marks(t, "settings", "menu-field"))[0] ?? null;
       const mText = inside(await marks(t, "settings", "menu-field-text"), menu), chev = inside(await marks(t, "settings", "menu-field-chevron"), menu);
       const tInk = k.ink("agents-menu-text", bare(box(mText)), { inset: 0 }), cInk = k.ink("agents-menu-chevron", bare(box(chev)), { inset: 0 });

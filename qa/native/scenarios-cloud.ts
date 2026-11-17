@@ -21,7 +21,7 @@ async function settingsCloud(t: NT) {
   await tab(t, "Cloud", 3);
 }
 
-sc("settings", "Settings > Cloud: the server address, Sign in against a local development server shows Signed in as, and Sign out", { covers: ["settings:cloud"] }, async (t: NT) => {
+sc("settings", "Settings > Cloud: the server address, Sign in against a local development server opens Home on the server with a connected toast, shows Signed in as, and Sign out", { covers: ["settings:cloud"] }, async (t: NT) => {
   const asked: { url: string; email: string | undefined; token: string | undefined }[] = [];
   const team = http.createServer((req, res) => {
     asked.push({ url: req.url ?? "", email: req.headers["x-canvas-dev-email"] as string | undefined, token: req.headers["cf-access-token"] as string | undefined });
@@ -47,6 +47,13 @@ sc("settings", "Settings > Cloud: the server address, Sign in against a local de
     await t.type("anna@studio.test", { window: "settings" });
     const signIn = await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000);
     await t.click(center(signIn), { window: "settings" });
+    // Connected: Settings steps aside, Home opens on the team server, and a toast says so.
+    const host = `127.0.0.1:${port}`;
+    await t.waitState((s) => s.homeShown && s.homeSection === "server" && !s.windows.some((w: any) => w.settings), "Home on the team server, Settings closed", 8000);
+    await t.waitState((s) => s.toast === `You\u2019re connected to ${host}` && s.toastKind === "success", "the connected toast");
+    await t.waitText("Connected as anna@studio.test, owner", undefined, 8000);
+    await t.shot(`${process.cwd()}/qa/out/native/cloud-connected-home.png`);
+    await settingsCloud(t);
     await t.waitText("Signed in as anna@studio.test, owner", undefined, 8000, "settings");
     await t.waitText("Connected", undefined, 4000, "settings");
     t.ok(asked.some((a) => a.url === "/v1/me" && a.email === "anna@studio.test" && a.token === undefined), "the server was asked who this is, with the development email and no token");
@@ -71,6 +78,8 @@ sc("settings", "Settings > Cloud: the server address, Sign in against a local de
     await t.click(center(await t.mark({ id: "cloud-dev-email", window: "settings" }, 4000)), { window: "settings" });
     await t.type("anna@studio.test", { window: "settings" });
     await t.click(center(await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000)), { window: "settings" });
+    await t.waitState((s) => s.homeShown && !s.windows.some((w: any) => w.settings), "Home again after the second sign-in", 8000);
+    await settingsCloud(t);
     await t.waitText("Connected", undefined, 8000, "settings");
     // The pane says Offline.
     await new Promise<void>((r) => team.close(() => r()));

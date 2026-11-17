@@ -286,6 +286,64 @@ describe("the 401 rules", () => {
     }
   });
 
+  test("a connected answer is reused for a minute, a fresh look after 3 s, and a new development email asks again", async () => {
+    const fake = await fakeServer((req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(req.url === "/v1/info" ? JSON.stringify({ protocol: 1, server: "0.1.0", capabilities: ["comments"] }) : JSON.stringify({ email: "anna@studio.test", name: "anna", role: "owner" }));
+    });
+    const saved = { ...Cl.STATUS_REUSE_MS };
+    try {
+      const origin = `http://127.0.0.1:${fake.port}`;
+      Cfg.setCloudConfig({ cloudUrl: origin, cloudDevEmail: "anna@studio.test" });
+      assert.equal((await Cl.checkServer(origin, true)).status, "connected");
+      assert.equal(fake.hits.length, 2, "info and me");
+      // Within the minute: no request, plain or fresh (fresh waits for 3 s).
+      for (let i = 0; i < 5; i++) await Cl.checkServer(origin);
+      await Cl.checkServer(origin, false, true);
+      assert.equal(fake.hits.length, 2, "reused");
+      // A fresh look once the answer is older than STATUS_REUSE_MS.fresh asks again.
+      Cl.STATUS_REUSE_MS.fresh = 20;
+      await new Promise((r) => setTimeout(r, 40));
+      await Cl.checkServer(origin, false, true);
+      assert.equal(fake.hits.length, 4, "fresh asks");
+      await Cl.checkServer(origin);
+      assert.equal(fake.hits.length, 4, "and a plain look reuses that");
+      // Past the minute (shortened here): asked again.
+      Cl.STATUS_REUSE_MS.connected = 20;
+      await new Promise((r) => setTimeout(r, 40));
+      await Cl.checkServer(origin);
+      assert.equal(fake.hits.length, 6, "asked after the connected window");
+      // Another development email is another person: asked at once.
+      Cl.STATUS_REUSE_MS.connected = 60_000;
+      Cfg.setCloudConfig({ cloudUrl: origin, cloudDevEmail: "ben@studio.test" });
+      await Cl.checkServer(origin);
+      assert.equal(fake.hits.length, 8, "a new email asks again");
+      assert.equal(fake.hits[7].headers["x-canvas-dev-email"], "ben@studio.test");
+    } finally {
+      Object.assign(Cl.STATUS_REUSE_MS, saved);
+      await fake.close();
+    }
+  });
+
+  test("an answer that is not connected is reused for 3 s only", async () => {
+    const fake = await fakeServer((_req, res) => { res.writeHead(503); res.end(); });
+    const saved = { ...Cl.STATUS_REUSE_MS };
+    try {
+      const origin = `http://127.0.0.1:${fake.port}`;
+      Cfg.setCloudConfig({ cloudUrl: origin, cloudDevEmail: "anna@studio.test" });
+      assert.equal((await Cl.checkServer(origin, true)).status, "offline");
+      await Cl.checkServer(origin);
+      assert.equal(fake.hits.length, 1, "reused within 3 s");
+      Cl.STATUS_REUSE_MS.other = 20;
+      await new Promise((r) => setTimeout(r, 40));
+      await Cl.checkServer(origin);
+      assert.equal(fake.hits.length, 2, "asked again after it");
+    } finally {
+      Object.assign(Cl.STATUS_REUSE_MS, saved);
+      await fake.close();
+    }
+  });
+
   test("a too old server says so", async () => {
     const fake = await fakeServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ protocol: 0, server: "0.0.1", capabilities: [] })); });
     try {

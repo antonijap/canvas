@@ -39,6 +39,8 @@ final class SettingsWindow {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func close() { window?.orderOut(nil) }
+
     private func make(_ model: CanvasModel) -> NSWindow {
         // Read first: adding the first tab selects it, which saves it as the last tab.
         let saved = UserDefaults.standard.string(forKey: "canvas.settings.tab").flatMap(Tab.init) ?? .general
@@ -174,62 +176,82 @@ struct AgentSettings: View {
     @State private var installed: Set<String>?
     /// Per installed agent: the models it offers (id, label, the reasoning levels each takes) and its levels.
     @State private var offers: [String: AgentOffer] = [:]
+    /// The pane shows one part at a time, so it stays short: connecting, the models asks use, the agent's cursor.
+    @State private var part: Part = .connect
+
+    enum Part: String, CaseIterable {
+        case connect, models, cursor
+        var title: String { rawValue.capitalized }
+    }
 
     var body: some View {
         SettingsStack {
-            ConnectAgentCard(model: model)
-            SettingsCard(title: "Ask about the selection") {
-                SettingsRow("Default agent") {
-                    SettingsSegments(items: AgentHarness.allCases.map { ($0.title, $0) }, selection: model.prefs.harness) { model.prefs.harness = $0 }.frame(width: 220)
-                }
-                ForEach(AgentHarness.allCases) { h in
-                    SettingsDivider()
-                    SettingsRow(h.title, detail: h == model.prefs.harness ? "Runs first" : "Runs when the other is missing") {
-                        InstallState(installed: installed.map { $0.contains(h.rawValue) })
-                    }
-                }
-                SettingsDivider()
-                SettingsRow("Stop a run after") {
-                    StepperField(value: model.prefs.runCapMin, range: SettingsLimits.runCap, step: 1, unit: "min", label: "Run time cap in minutes") { model.prefs.runCapMin = $0 }
-                }
-            }
-            SettingsCard(title: "Model and reasoning") {
-                ForEach(Array(AgentHarness.allCases.enumerated()), id: \.element) { i, h in
-                    if i > 0 { SettingsDivider() }
-                    SettingsRow(h.title, detail: offers[h.rawValue] == nil ? "Not installed" : "For asks and variations") {
-                        HStack(spacing: 6) {
-                            MenuField(title: modelTitle(h)) {
-                                Button("Default") { model.prefs.setModel(h, "") }
-                                ForEach(offers[h.rawValue]?.models ?? [], id: \.id) { m in
-                                    Button(m.label) {
-                                        model.prefs.setModel(h, m.id)
-                                        if !efforts(h, model: m.id).contains(model.prefs.effort(h)) { model.prefs.setEffort(h, "") }
-                                    }
-                                }
-                            }
-                            .frame(width: 150).qaID("model-\(h.rawValue)")
-                            MenuField(title: model.prefs.effort(h).isEmpty ? "Default" : AgentOffer.effortTitle(model.prefs.effort(h))) {
-                                Button("Default") { model.prefs.setEffort(h, "") }
-                                ForEach(efforts(h, model: model.prefs.model(h)), id: \.self) { e in
-                                    Button(AgentOffer.effortTitle(e)) { model.prefs.setEffort(h, e) }
-                                }
-                            }
-                            .frame(width: 110).qaID("effort-\(h.rawValue)")
-                        }
-                        .disabled(offers[h.rawValue] == nil).opacity(offers[h.rawValue] == nil ? 0.5 : 1)
-                    }
-                }
-            }
-            SettingsCard(title: "Agent cursor") {
-                SettingsRow("Show the agent\u{2019}s cursor", detail: "Follows each edit an agent makes on the canvas") { SettingsSwitch(isOn: $model.prefs.agentCursor) }
-                SettingsDivider()
-                SettingsRow("Speed") {
-                    SettingsSegments(items: CursorSpeed.allCases.map { ($0.title, $0) }, selection: model.prefs.cursorSpeed) { model.prefs.cursorSpeed = $0 }
-                        .frame(width: 220).disabled(!model.prefs.agentCursor).opacity(model.prefs.agentCursor ? 1 : 0.5)
-                }
+            SettingsSegments(items: Part.allCases.map { ($0.title, $0) }, selection: part) { part = $0 }
+                .frame(width: 300).frame(maxWidth: .infinity)
+                .qaID("agents-part", label: part.title)
+            switch part {
+            case .connect: ConnectAgentCard(model: model)
+            case .models: asks
+            case .cursor: cursor
             }
         }
         .task { await loadInstalled() }
+    }
+
+    /// The default agent, each agent's model and reasoning (or Not installed), and the run cap.
+    private var asks: some View {
+        SettingsCard(title: "Ask about the selection") {
+            SettingsRow("Default agent") {
+                SettingsSegments(items: AgentHarness.allCases.map { ($0.title, $0) }, selection: model.prefs.harness) { model.prefs.harness = $0 }.frame(width: 220)
+            }
+            ForEach(AgentHarness.allCases) { h in
+                SettingsDivider()
+                SettingsRow(h.title, detail: detail(h)) {
+                    HStack(spacing: 6) {
+                        MenuField(title: modelTitle(h)) {
+                            Button("Default") { model.prefs.setModel(h, "") }
+                            ForEach(offers[h.rawValue]?.models ?? [], id: \.id) { m in
+                                Button(m.label) {
+                                    model.prefs.setModel(h, m.id)
+                                    if !efforts(h, model: m.id).contains(model.prefs.effort(h)) { model.prefs.setEffort(h, "") }
+                                }
+                            }
+                        }
+                        .frame(width: 150).qaID("model-\(h.rawValue)")
+                        MenuField(title: model.prefs.effort(h).isEmpty ? "Default" : AgentOffer.effortTitle(model.prefs.effort(h))) {
+                            Button("Default") { model.prefs.setEffort(h, "") }
+                            ForEach(efforts(h, model: model.prefs.model(h)), id: \.self) { e in
+                                Button(AgentOffer.effortTitle(e)) { model.prefs.setEffort(h, e) }
+                            }
+                        }
+                        .frame(width: 110).qaID("effort-\(h.rawValue)")
+                    }
+                    .disabled(offers[h.rawValue] == nil).opacity(offers[h.rawValue] == nil ? 0.5 : 1)
+                }
+            }
+            SettingsDivider()
+            SettingsRow("Stop a run after") {
+                StepperField(value: model.prefs.runCapMin, range: SettingsLimits.runCap, step: 1, unit: "min", label: "Run time cap in minutes") { model.prefs.runCapMin = $0 }
+            }
+        }
+    }
+
+    private var cursor: some View {
+        SettingsCard(title: "Agent cursor") {
+            SettingsRow("Show the agent\u{2019}s cursor", detail: "Follows each edit an agent makes on the canvas") { SettingsSwitch(isOn: $model.prefs.agentCursor) }
+            SettingsDivider()
+            SettingsRow("Speed") {
+                SettingsSegments(items: CursorSpeed.allCases.map { ($0.title, $0) }, selection: model.prefs.cursorSpeed) { model.prefs.cursorSpeed = $0 }
+                    .frame(width: 220).disabled(!model.prefs.agentCursor).opacity(model.prefs.agentCursor ? 1 : 0.5)
+            }
+        }
+    }
+
+    /// Under each agent's name: which runs first, or that it is missing.
+    private func detail(_ h: AgentHarness) -> String {
+        guard let installed else { return "Checking" }
+        if !installed.contains(h.rawValue) { return "Not installed" }
+        return h == model.prefs.harness ? "Runs first" : "Runs when the other is missing"
     }
 
     private func modelTitle(_ h: AgentHarness) -> String {
@@ -405,21 +427,6 @@ struct ConnectAgentCard: View {
         canvasPasteboard.setString(text, forType: .string)
         copied = key
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { if copied == key { copied = nil } }
-    }
-}
-
-/// Installed or not, neutral: a check for installed, plain text for missing.
-private struct InstallState: View {
-    let installed: Bool?
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if installed == true { Image(systemName: "checkmark.circle.fill").glyph(GlyphSize.row).foregroundStyle(Palette.fg).qaID("install-glyph") }
-            Text(installed == nil ? "Checking" : installed! ? "Installed" : "Not installed")
-                .font(Typography.body).foregroundStyle(installed == true ? Palette.fg : Palette.mutedFg).lineLimit(1)
-                .qaID("install-text", label: installed == nil ? "Checking" : installed! ? "Installed" : "Not installed")
-        }
-        .capCentered(13)
-        .frame(height: Metric.field)
     }
 }
 
