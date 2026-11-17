@@ -142,6 +142,10 @@ async function main() {
   await call(sa, "/api/cloud/host/remove", { personId: ben.id });
   await until("Ben removed", async () => (await comments(sb, pkgB)).sync?.status === "removed", 15_000);
   line(true, "Ben's socket closed and he reads \"removed\"");
+  const keys = JSON.parse(fs.readFileSync(path.join(fakeDir, fs.readdirSync(fakeDir).find((f) => f.endsWith(".json") && JSON.parse(fs.readFileSync(path.join(fakeDir, f), "utf8")).allow)!), "utf8")).allow;
+  line(Array.isArray(keys) && keys.length === 0, "the member tunnel no longer lets his Mac's key in");
+  await sleep(4000);
+  line((await comments(sb, pkgB)).sync?.status === "removed", "and he still reads \"removed\", not \"down\", once the tunnel shuts him out");
 
   const files = (fs.readdirSync(dirB, { recursive: true }) as string[]).map((f) => path.join(dirB, f)).filter((f) => fs.statSync(f).isFile());
   line(!files.some((f) => /ccd_|ccj_|"tc[A-Za-z0-9_-]{20}/.test(fs.readFileSync(f, "latin1"))), `no token, code or tunnel address in Ben's ${files.length} files`);
