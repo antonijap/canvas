@@ -95,3 +95,35 @@ sc("comments", "a shared file shows the bar (people and a status dot, no server 
   await t.ev(`delete window.__sync`);
   await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "dark" }] });
 });
+
+// A file shared to a Cloud hosted on a Mac: Cloud down in the dot while it does not answer, a pending comment still
+// shows, removed says to ask for an invite; the bar never shows the Cloud's id.
+sc("cloud", "hosted Cloud down or removed, never its id", { covers: ["comments:shared-bar", "comments:pending"] }, async (t: T) => {
+  await t.focus("lay_nest");
+  const uid = () => crypto.randomUUID();
+  const doc = uid(), th = uid(), host = uid();
+  const anna = { id: uid(), email: "anna@studio.test", name: "anna@studio.test" };
+  const comment = { id: uid(), thread: th, author: anna, body: "Written while the Cloud was down", createdAt: new Date().toISOString() };
+  const thread = { id: th, doc, anchor: { nodeId: "r_free", x: 0.5, y: 0.5, board: "lay_nest" }, createdAt: comment.createdAt, createdBy: anna, comments: [comment] };
+  fs.writeFileSync(path.join(t.file, "comments.json"), JSON.stringify({ format: 1, doc, seq: 1, threads: [thread], outbox: [] }));
+  await t.open();
+  await t.focus("lay_nest");
+  const stub = (status: string) => t.ev(`(() => {
+    if (!window.__origFetch) { window.__origFetch = window.fetch; window.fetch = async (u, o) => { const r = await window.__origFetch(u, o); if (typeof u === "string" && u.startsWith("/api/comments?file=") && window.__sync) { const j = await r.json(); j.sync = window.__sync; return new Response(JSON.stringify(j), { headers: { "content-type": "application/json" } }); } return r; }; }
+    window.__sync = { url: "canvas-cloud://${host}", host: "${host}", role: "editor", status: ${JSON.stringify(status)}, connected: false, pending: [{ opId: ${JSON.stringify(uid())}, kind: "thread.create", thread: ${JSON.stringify(th)}, comment: ${JSON.stringify(comment.id)} }], rejected: [] };
+    return window.canvasHost.comments.reload();
+  })()`);
+  await stub("down");
+  await t.waitFor(`document.querySelector(".cm-shared")?.classList.contains("on")`, "the shared bar");
+  await t.frames(3);
+  const read = () => t.ev<{ text: string; label: string; title: string }>(`(() => { const b = document.querySelector(".cm-shared"); return { text: b.innerText, label: b.getAttribute("aria-label") || "", title: b.querySelector(".cm-server")?.title || "" }; })()`);
+  const down = await read();
+  t.ok(/^Cloud down: its Mac isn.t open right now\. Comments are kept and sent when it is back$/.test(down.title), `the dot says Cloud down (${down.title})`);
+  t.ok(!(down.text + down.label + down.title).includes(host), "the bar never shows the Cloud's id");
+  t.ok(await t.ev<boolean>(`!!document.querySelector(".cm-pin")`), "the comment written while down is on the canvas");
+  await shot(t, "comments-cloud-down");
+  await stub("removed");
+  await t.frames(3);
+  t.ok(/Ask the host for a new invite/.test((await read()).title), "removed says what to do");
+  await t.ev(`delete window.__sync`);
+});
