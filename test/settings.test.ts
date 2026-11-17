@@ -13,7 +13,7 @@ const codex: HarnessInfo = { id: "codex", label: "Codex", path: "/x/codex", real
 describe("agent settings", () => {
   test("defaults: Claude Code, 10 minutes", () => {
     assert.deepEqual(cleanSettings(undefined), DEFAULT_SETTINGS);
-    assert.deepEqual(DEFAULT_SETTINGS, { harness: "claude", runCapMin: 10 });
+    assert.deepEqual(DEFAULT_SETTINGS, { harness: "claude", runCapMin: 10, claude: { model: "", effort: "" }, codex: { model: "", effort: "" } });
   });
   test("unknown harnesses and out-of-range caps fall back or clamp", () => {
     assert.equal(cleanSettings({ harness: "rm -rf" }).harness, "claude");
