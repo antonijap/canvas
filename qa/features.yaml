@@ -159,7 +159,7 @@ features:
     driven: [page]
     cases: [$layers, many, in-autolayout, keyboard, rotated, in-frame, nested]
   - id: snapping
-    name: Snap to objects, pixel grid, smart guides; Control or Cmd bypasses
+    name: Snap to objects, pixel grid, smart guides; Control bypasses
     area: move
     driven: [page]
     cases: [one, many, mouse, ctrl]

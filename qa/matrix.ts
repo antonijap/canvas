@@ -182,13 +182,14 @@ const EDITS: Edit[] = [
       if (layer(x)) {
         const n0 = nodeOf(t, x.id)!;
         const c = await t.center(x.id);
-        await t.measureWrites("move", () => t.io.drag(c.x, c.y, c.x + 37, c.y + 23, { late: { meta: true } }));
+        // Control turns snapping off; in an auto layout flow it would take the layer out, and a flow does not snap.
+        await t.measureWrites("move", () => t.io.drag(c.x, c.y, c.x + 37, c.y + 23, { late: inFlow(t, x.id) ? {} : { ctrl: true } }));
         const n1 = nodeOf(t, x.id);
         if (!n1) return `move: ${x.id} is gone`;
         if (!inFlow(t, x.id) && typeof n0.x === "number" && (Math.abs(n1.x - n0.x - 37) > 0.5 || Math.abs(n1.y - n0.y - 23) > 0.5)) return `move: ${x.id} at ${n1.x},${n1.y}, want ${n0.x + 37},${n0.y + 23}`;
       } else {
         const { w, r } = await cardRect(t, x.widget);
-        await t.measureWrites("move", () => t.io.drag(r.x + r.w / 2, r.y + 14, r.x + r.w / 2 + 37, r.y + 14 + 23, { late: { meta: true } }));
+        await t.measureWrites("move", () => t.io.drag(r.x + r.w / 2, r.y + 14, r.x + r.w / 2 + 37, r.y + 14 + 23, { late: { ctrl: true } }));
         const w1 = t.widgets().widgets.find((y: any) => y.id === w.id);
         if (w1.x !== w.x + 37 || w1.y !== w.y + 23) return `move: card at ${w1.x},${w1.y}, want ${w.x + 37},${w.y + 23}`;
       }
