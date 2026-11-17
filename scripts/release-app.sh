@@ -10,7 +10,7 @@
 #   CANVAS_SIGN_IDENTITY=-              ad-hoc signature (a test run that must not touch the keychain)
 #   CANVAS_SIGN_IDENTITY="Developer ID Application: ..."   (default: the first Developer ID identity in the keychain)
 #   CANVAS_NOTARY_PROFILE=<name>        notarize and staple with that notarytool keychain profile (default: the team's
-#                                       `worktrees-notary` when it works; `none` skips notarizing, for local tests only)
+#                                       `apple-notary`, else `worktrees-notary`; `none` skips notarizing, local tests only)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
@@ -76,8 +76,11 @@ codesign --force --options runtime "${TS[@]}" --sign "$ID" "$APP"
 codesign --verify --deep --strict "$APP" || fail "the built app's signature does not verify"
 
 NOTARIZED="no"
-if [ -z "${CANVAS_NOTARY_PROFILE:-}" ] && xcrun notarytool history --keychain-profile worktrees-notary >/dev/null 2>&1; then
-  CANVAS_NOTARY_PROFILE=worktrees-notary
+# The team's shared profile: apple-notary, else its older name worktrees-notary.
+if [ -z "${CANVAS_NOTARY_PROFILE:-}" ]; then
+  for p in apple-notary worktrees-notary; do
+    if xcrun notarytool history --keychain-profile "$p" >/dev/null 2>&1; then CANVAS_NOTARY_PROFILE="$p"; break; fi
+  done
 fi
 if [ -n "${CANVAS_NOTARY_PROFILE:-}" ] && [ "$CANVAS_NOTARY_PROFILE" != none ] && [ "$ID" != "-" ]; then
   echo "Notarizing (a few minutes)"
