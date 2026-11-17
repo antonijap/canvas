@@ -4,8 +4,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { decodePng } from "../fidelity/png.ts";
-import { sc, type T } from "./harness.ts";
-import { ROOT, gradientPng, sleep } from "./lib.ts";
+import { sc, T } from "./harness.ts";
+import { ROOT, gradientPng, openTab, sleep } from "./lib.ts";
 
 const OUT = path.join(ROOT, "qa", "out");
 
@@ -138,4 +138,53 @@ sc("properties", "the engine draws a tiled, turned and adjusted image, blend mod
   t.ok(grey / (img.width * img.height) > 0.9, `saturation -100 drew grey pixels (${Math.round((100 * grey) / (img.width * img.height))}%)`);
   fs.mkdirSync(OUT, { recursive: true });
   fs.writeFileSync(path.join(OUT, "fills-render.png"), await t.shot());
+});
+
+/** A package of one board holding a shader fill and an image fill, beside the scenario's own file. */
+function shaderAndImageFile(t: T): string {
+  const file = path.join(path.dirname(t.file), "Fills.canvas");
+  fs.mkdirSync(path.join(file, "images"), { recursive: true });
+  fs.writeFileSync(path.join(file, "images", "qa-grad.png"), gradientPng(640, 400));
+  const doc = { version: "2.21", children: [
+    { type: "frame", id: "qa_fills", name: "Fills", x: 0, y: 0, width: 800, height: 600, fill: "#FFFFFF", children: [
+      { type: "rectangle", id: "qa_shader", name: "Shader", x: 20, y: 20, width: 300, height: 200, fill: { type: "shader", shader: "mesh-gradient", preset: "Default", params: { speed: 0.25 } } },
+      { type: "rectangle", id: "qa_image", name: "Image", x: 360, y: 20, width: 300, height: 200, fill: { type: "image", url: "images/qa-grad.png", mode: "fill" } },
+    ] },
+  ] };
+  fs.writeFileSync(path.join(file, "document.json"), JSON.stringify(doc, null, 1));
+  fs.writeFileSync(path.join(file, "widgets.json"), JSON.stringify({ version: 1, pages: [{ id: "page-1", name: "Page 1", boards: ["qa_fills"] }], widgets: [] }, null, 2));
+  return file;
+}
+
+// The image arriving painted the board again mid-frame: its shader fill got a new placeholder without a texture,
+// vello panicked on it ("Tried to draw an invalid empty image") and the restarted engine never came up.
+sc("render", "a board with a shader fill and an image fill opens on the engine without a panic", { covers: ["shader-fill:with-image"], skip: { visual: "checks the renderer of another file; the scenario's own file is unchanged" } }, async (t: T) => {
+  const file = shaderAndImageFile(t);
+  const tab = await openTab(t.chromePort);
+  try {
+    // Headless Chrome draws only the front tab; another host name keeps the first tab's long polls out of the way.
+    await tab.page.send("Page.bringToFront");
+    const o = new T(tab.page, file, { ...t.srv, base: t.srv.base.replace("127.0.0.1", "localhost") });
+    await o.open();
+    // Past the image's arrival and a few shader frames.
+    await sleep(1500);
+    await o.frames(8);
+    const bad = tab.page.console.filter((l) => l.includes("canvas engine panic") || l.includes("starting a new engine"));
+    t.eq(bad.map((l) => l.slice(0, 160)), [], "no engine panic or restart");
+    t.eq(await o.ev<string>("window.__canvas.renderer"), "engine", "the engine draws the file");
+  } finally { await tab.close(); }
+  await t.page.send("Page.bringToFront");
+  await t.settle();
+});
+
+// A frame that traps leaves its wasm instance unusable: a new engine started in it never came up and the renderer
+// stayed "pending". The restart must start in a fresh instance (or fall back to the DOM, never wait forever).
+sc("render", "after the engine traps, a new engine starts in a fresh wasm instance", { covers: ["renderer-fallback:engine-restart"], skip: { visual: "the playground as the other scenarios draw it" } }, async (t: T) => {
+  // The running instance behaves as a trapped one: every frame throws, and an engine started in it never settles.
+  await t.ev(`import("/engine/canvas_engine.js").then((m) => { m.Engine.prototype.frame = function () { throw new WebAssembly.RuntimeError("unreachable"); }; m.Engine.create = () => new Promise(() => {}); return true; })`);
+  await t.ev("window.canvasHost.setCam({ z: 1, x: 40, y: 60 })");
+  await t.waitFor("/unreachable/.test(window.__canvas.note || '')", "the engine to fail its frame", 8000);
+  const r = await t.waitFor<string>("['engine', 'dom'].includes(window.__canvas.renderer) && window.__canvas.renderer", "the renderer to leave pending", 25000);
+  t.eq(r, "engine", "a new engine runs");
+  await t.settle();
 });

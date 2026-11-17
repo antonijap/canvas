@@ -107,8 +107,11 @@ pub fn now() -> f64 {
     web_sys::window().and_then(|w| w.performance()).map_or(0.0, |p| p.now())
 }
 
+/// Once per wasm instance: a second `set_hook` from an engine started after a panic panics itself ("cannot modify
+/// the panic hook from a panicking thread"), and `Engine.create` then never settled.
 fn install_panic_hook() {
-    std::panic::set_hook(Box::new(|info| web_sys::console::error_1(&JsValue::from_str(&format!("canvas engine panic: {info}")))));
+    static HOOK: std::sync::Once = std::sync::Once::new();
+    HOOK.call_once(|| std::panic::set_hook(Box::new(|info| web_sys::console::error_1(&JsValue::from_str(&format!("canvas engine panic: {info}"))))));
 }
 
 #[derive(Default, Clone, Copy)]
@@ -181,6 +184,9 @@ pub struct Engine {
     more: bool,
     /// Some board was painted again: drop effect textures nothing draws.
     jobs_dirty: bool,
+    /// A board with shader fills was painted again mid-frame (`ensure_images`): its fills have new placeholders
+    /// that need their textures before the board renders.
+    fills_stale: bool,
     /// GPU bytes for blurred effect textures (least recently used go first; tiles keep their pixels).
     effect_budget: u64,
     /// `setTextureBudget` was called: the tile budget no longer follows the drawing buffer's size.
@@ -302,6 +308,7 @@ impl Engine {
             dirty: true,
             more: true,
             jobs_dirty: false,
+            fills_stale: false,
             effect_budget: EFFECT_BUDGET,
             texture_budget_set: false,
             debug: 0,
@@ -507,6 +514,7 @@ impl Engine {
             // Effect jobs that draw no image keep their textures (a shadow is the same shadow).
             let o = BuildOptions { images: &st, debug_boxes: self.debug & DEBUG_LAYOUT != 0, now: &now, keep_jobs: true };
             b.repaint_same(&mut self.text, &o);
+            self.fills_stale |= !b.fills.is_empty();
             self.jobs_dirty = true;
         }
         let b = &self.boards[bi];
@@ -641,6 +649,7 @@ impl Engine {
                 let st = store_for(&self.sources, &self.mips, &b.images, &b.image_levels, &b.image_tiles, &b.image_picks);
                 let o = BuildOptions { images: &st, debug_boxes: self.debug & DEBUG_LAYOUT != 0, now: &now, keep_jobs: true };
                 b.repaint_same(&mut self.text, &o);
+                self.fills_stale |= !b.fills.is_empty();
                 self.jobs_dirty = true;
             }
             return short;
@@ -765,6 +774,7 @@ impl Engine {
         let o = BuildOptions { images: &st, debug_boxes: self.debug & DEBUG_LAYOUT != 0, now: &now, keep_jobs: true };
         let without = std::mem::take(&mut b.drawn_without);
         b.repaint_same(&mut self.text, &o);
+        self.fills_stale |= !b.fills.is_empty();
         // Images the tiles were drawn without (a layer shown again after a drag, its picture attached only now):
         // a paint at another resolution keeps the tiles, a picture that was not there at all draws them again.
         let came: Option<Rect> = without
@@ -1269,6 +1279,11 @@ impl Engine {
             let t1 = now();
             // Base textures keep whatever image levels the board holds (no decode or repaint for them).
             let short = self.ensure_images(bi, ts, moving || matches!(what, Work::Base(_)), (!matches!(what, Work::Base(_))).then_some(t.rect + kurbo::Vec2::new(self.boards[bi].x, self.boards[bi].y)), reach[bi], is_ahead);
+            // A paint just now gave its shader fills new placeholders: they get their textures before vello sees them
+            // (it panics on a placeholder with none).
+            if std::mem::take(&mut self.fills_stale) {
+                self.sync_fills();
+            }
             let b = &self.boards[bi];
             if let Err(e) = self.gpu.prepare_jobs(&b.jobs) {
                 self.push_error(e);

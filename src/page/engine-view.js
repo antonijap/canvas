@@ -41,15 +41,25 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
   canvas.id = "engine";
   canvas.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;display:block";
   view.prepend(canvas);
-  let engine, device = null;
-  try {
-    const mod = await import("/engine/canvas_engine.js");
+  let engine, device = null, late = false;
+  const start = async () => {
+    // A new wasm instance for every engine after the first (engineModuleUrl): one that trapped (a panic aborts) stays
+    // trapped, and an engine started in it again never came up.
+    const mod = await import(engineModuleUrl(engineStarts++));
     await mod.default();
     // Keep the GPUDevice the engine asks for, only to hear when it is lost (driver reset, GPU switch).
     const proto = window.GPUAdapter && GPUAdapter.prototype, orig = proto && proto.requestDevice;
     if (orig) proto.requestDevice = async function (...a) { const d = await orig.apply(this, a); device = d; return d; };
-    try { engine = await mod.Engine.create(canvas); } finally { if (orig) proto.requestDevice = orig; }
+    let e;
+    try { e = await mod.Engine.create(canvas); } finally { if (orig) proto.requestDevice = orig; }
+    // Came after the page gave up on it (ENGINE_START_MS): let it go.
+    if (late) { try { e.free(); } catch {} return null; }
+    return e;
+  };
+  try {
+    engine = await withTimeout(start(), ENGINE_START_MS, "the engine did not start within " + ENGINE_START_MS / 1000 + " s");
   } catch (e) {
+    late = true;
     canvas.remove();
     throw e;
   }
@@ -733,6 +743,22 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
 }
 
 // ---------------------------------------------------------------- pure helpers (node-tested)
+
+/** Engines started in this page so far (engineModuleUrl). */
+let engineStarts = 0;
+/** How long an engine may take to start before the page draws with the DOM instead (it never stays pending). */
+export const ENGINE_START_MS = 15_000;
+/**
+ * The engine's module URL for the `n`th engine started in this page (0 first): the first uses the plain URL, every
+ * later one its own query, so the browser instantiates the wasm again instead of handing back the instance the lost
+ * engine ran in (the server reads only the path).
+ */
+export const engineModuleUrl = (n) => "/engine/canvas_engine.js" + (n > 0 ? "?i=" + n : "");
+/** `p`, or a rejection with `message` after `ms`. */
+export function withTimeout(p, ms, message) {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(message)), ms); })]).finally(() => clearTimeout(t));
+}
 
 /** Images decoding at once in the decoder worker (an 8k decode holds 256 MB until it is shrunk). */
 /** Parked boards (pages not shown) kept in the engine: at most this many nodes and boards together. */
