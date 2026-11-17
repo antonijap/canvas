@@ -65,10 +65,10 @@ features:
     driven: [page]
     cases: [board, instance, text, many, $themes]
   - id: renderer-fallback
-    name: DOM renderer when WebGPU is missing
+    name: DOM renderer when WebGPU is missing; a new engine after one traps, never stuck pending
     area: canvas
     driven: [page]
-    cases: [tiny, large]
+    cases: [tiny, large, engine-restart]
 
   # ------------------------------------------------------------ selection
   - id: select-click
@@ -608,7 +608,7 @@ features:
     name: Shader fills (drop a shader tile on a layer, Option-drop for a card, Cmd-drag a shader card on a layer with a tip without Cmd, set_node_props); animate clipped to the shape, headless render
     area: cards
     driven: [page, native, mcp]
-    cases: [frame, rectangle, ellipse, text, in-instance, board, mouse, agent, outline, card, option-card, card-tip]
+    cases: [frame, rectangle, ellipse, text, in-instance, board, mouse, agent, outline, card, option-card, card-tip, with-image]
   - id: image-drop
     name: Image files dropped from Finder (a layer where it lands, side by side; Cmd-drop fills the layer under it)
     area: cards

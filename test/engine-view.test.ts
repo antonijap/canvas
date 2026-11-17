@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 // @ts-expect-error: a browser module without types
-import { boardsToReorder, contentKey, sceneTextAndKey, cssColorToHex, DECODE_CONCURRENCY, decodedBytes, DECODER_SRC, ENGINE_MAX_RESTARTS, ENGINE_RESTART_WINDOW_MS, engineRestartDelay, FULL_IMAGE_SIDE, hash53, IMAGE_BUDGET, IMAGE_CAPS, imageCapFor, imageRetryDelay, indexScene, inSlices, MAX_IMAGE_SIDE, PARK_MAX_BOARDS, PARK_MAX_NODES, parkedToEvict, PLACE_SLICE_IDLE_MS, PLACE_SLICE_MS, placeOrder, planImageDecodes, raiseInOrder, SMALL_IMAGE_SIDE, useInView } from "../src/page/engine-view.js";
+import { boardsToReorder, contentKey, sceneTextAndKey, cssColorToHex, DECODE_CONCURRENCY, decodedBytes, DECODER_SRC, engineModuleUrl, ENGINE_MAX_RESTARTS, ENGINE_RESTART_WINDOW_MS, engineRestartDelay, FULL_IMAGE_SIDE, hash53, IMAGE_BUDGET, IMAGE_CAPS, imageCapFor, imageRetryDelay, indexScene, inSlices, MAX_IMAGE_SIDE, PARK_MAX_BOARDS, PARK_MAX_NODES, parkedToEvict, PLACE_SLICE_IDLE_MS, PLACE_SLICE_MS, placeOrder, planImageDecodes, raiseInOrder, SMALL_IMAGE_SIDE, useInView, withTimeout } from "../src/page/engine-view.js";
 
 describe("cssColorToHex (the engine background follows the page's canvas colour)", () => {
   test("rgb, rgba and hex forms", () => {
@@ -114,6 +114,16 @@ describe("GPU device loss (hunt 5: one loss used to mean the DOM renderer for th
     const losses = Array.from({ length: ENGINE_MAX_RESTARTS }, (_, i) => 1000 + i * 1000);
     assert.equal(engineRestartDelay(losses, 5000), -1);
     assert.ok(engineRestartDelay(losses, 1000 + ENGINE_RESTART_WINDOW_MS + 3000) > 0, "old losses age out");
+  });
+  // A wasm panic aborts its instance: an engine restarted in the same instance never came up (renderer "pending").
+  test("every engine after the first loads its own wasm instance", () => {
+    assert.equal(engineModuleUrl(0), "/engine/canvas_engine.js");
+    assert.equal(engineModuleUrl(1), "/engine/canvas_engine.js?i=1");
+    assert.notEqual(engineModuleUrl(2), engineModuleUrl(1));
+  });
+  test("an engine that never starts is given up on", async () => {
+    await assert.rejects(withTimeout(new Promise(() => {}), 20, "no start"), /no start/);
+    assert.equal(await withTimeout(Promise.resolve(7), 20, "no start"), 7);
   });
 });
 
