@@ -73,6 +73,8 @@ final class CloudAccount: ObservableObject {
     @Published var state = CloudState()
     @Published var host = HostState()
     @Published var busy = false
+    /// Host a Cloud was just turned on and the Cloud is starting: the switch shows on meanwhile.
+    @Published var starting = false
     private var signIn: CloudSignInWindow?
     /// While hosting: no idle sleep (a closed lid still sleeps).
     private var awake: IOPMAssertionID = 0
@@ -125,10 +127,10 @@ final class CloudAccount: ObservableObject {
 
     /// Host on this Mac, on: the Cloud starts, and this Canvas is its first member (as the owner, on loopback).
     func startHosting(_ model: CanvasModel) {
-        busy = true
+        starting = true
         Task {
             let (status, j) = await CloudAccount.post(model, "api/cloud/host/start", names(model))
-            busy = false
+            starting = false
             if status == 200, let id = j["hostId"] as? String {
                 model.prefs.cloudHosting = true
                 model.prefs.cloudUrl = "canvas-cloud://\(id)"
@@ -286,7 +288,7 @@ final class CloudAccount: ObservableObject {
 
     /// After a sign-in: Home opens on the team server and a toast says it worked, or says why it did not.
     func announce(_ model: CanvasModel) {
-        let host = ServerName.host(model.prefs.cloudUrl)
+        let host = CloudURL.isHosted(model.prefs.cloudUrl) ? ServerName.label(model.prefs.cloudUrl, name: model.prefs.cloudName) : ServerName.host(model.prefs.cloudUrl)
         guard state.status == "connected" else {
             model.flash("Signed in, but \(host) says: \(CloudStatusText.line(state.status, configured: state.configured))")
             return
@@ -324,7 +326,7 @@ final class CloudAccount: ObservableObject {
         Task {
             let (status, j) = await CloudAccount.post(model, "api/cloud/share", [:], query: [URLQueryItem(name: "file", value: file)])
             if status == 200 {
-                let host = CloudURL.host(model.prefs.cloudUrl)
+                let host = CloudURL.isHosted(model.prefs.cloudUrl) ? ServerName.label(model.prefs.cloudUrl, name: model.prefs.cloudName) : CloudURL.host(model.prefs.cloudUrl)
                 model.flash((j["already"] as? Bool == true) ? "Already shared. Connected to \(host)" : "Comments shared to \(host)", level: "success")
                 model.reloadPage()
             } else {
@@ -422,7 +424,7 @@ struct CloudSettings: View {
     private var tone: Color {
         switch account.state.status {
         case "connected": Palette.ok
-        case "offline": Palette.mutedFg.opacity(0.5)
+        case "offline", "down": Palette.mutedFg.opacity(0.5)
         default: account.state.configured ? Palette.warn : Palette.mutedFg.opacity(0.5)
         }
     }
@@ -490,10 +492,10 @@ struct CloudSettings: View {
     @ViewBuilder private var hostCard: some View {
         SettingsCard(title: "Host on this Mac") {
             SettingsRow("Host a Cloud", detail: account.host.available ? "Others join with an invite while this Mac is open" : "Needs the tunnel helper, which this build does not have") {
-                SettingsSwitch(isOn: Binding(get: { account.host.hosting || (account.busy && model.prefs.cloudHosting) }, set: { on in
+                SettingsSwitch(isOn: Binding(get: { account.host.hosting || account.starting }, set: { on in
                     if on { account.startHosting(model) } else { account.stopHosting(model) }
                 }))
-                .disabled(!account.host.available || account.busy)
+                .disabled(!account.host.available || account.busy || account.starting)
                 .qaID("cloud-host", label: "Host a Cloud")
             }
             if account.host.hosting {
@@ -511,7 +513,7 @@ struct CloudSettings: View {
                     }
                 }
                 SettingsDivider()
-                SettingsRow("Add person", detail: "Copies a link that works once, within 48 hours") {
+                SettingsRow("Add person", detail: "Works once, for 48 hours") {
                     HStack(spacing: 8) {
                         FieldBox {
                             TextField(String("ben@studio.test"), text: Binding(get: { invitee }, set: { invitee = String($0.prefix(120)) }))
@@ -519,10 +521,11 @@ struct CloudSettings: View {
                                 .onSubmit { account.invite(model, label: invitee); invitee = "" }
                                 .accessibilityLabel("Name or email").qaID("cloud-invitee")
                         }
-                        .frame(width: 180)
+                        .frame(width: 160)
                         FieldButton(title: "Copy Invite", symbol: "doc.on.doc") { account.invite(model, label: invitee); invitee = "" }
                             .disabled(invitee.trimmingCharacters(in: .whitespaces).isEmpty)
                             .qaID("cloud-invite", label: "Copy Invite")
+                            .fixedSize()
                     }
                 }
                 SettingsDivider()
@@ -597,7 +600,7 @@ struct CloudSettings: View {
                     }
                 }
                 SettingsDivider()
-                SettingsRow("Account", detail: CloudStatusText.account(email: account.state.email, role: account.state.role).flatMap { signedIn ? $0 : nil } ?? "Not signed in") {
+                SettingsRow("Account", detail: CloudStatusText.account(email: account.state.email, role: account.state.role).flatMap { signedIn ? $0 : nil } ?? (CloudURL.isHosted(urlText) ? (account.host.hosting ? "You host this Cloud" : "Joined with an invite") : "Not signed in")) {
                     if CloudURL.isHosted(urlText) {
                         if !account.host.hosting { FieldButton(title: "Leave", symbol: nil) { account.leave(model) }.qaID("cloud-leave", label: "Leave") }
                     } else if signedIn {

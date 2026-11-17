@@ -759,7 +759,7 @@ features:
     name: Settings tabs (General, Canvas, Agents, Sounds, Performance, Privacy, Shortcuts)
     area: chrome
     driven: [native]
-    cases: [$themes, privacy, agents-model, updates, comment-name, cloud, cloud-name, alignment]
+    cases: [$themes, privacy, agents-model, updates, comment-name, cloud, cloud-name, cloud-host, alignment]
   - id: home
     name: Home, the pinned first tab (recents, files on this Mac, a team server, first launch)
     area: chrome

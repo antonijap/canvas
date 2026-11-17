@@ -70,6 +70,14 @@ export class QaApp {
       CANVAS_CONNECT_TEMPORARY: "1",
       CANVAS_SERVER: path.join(ROOT, "src/server.ts"),
       CANVAS_NODE: process.execPath,
+      // Host a Cloud: the fake tunnel helper (test/fixtures/fake-tunnel.ts), the Cloud on a free port (never the
+      // Mac's own 5190), secrets in this instance's folder instead of the Keychain.
+      CANVAS_TUNNEL_BIN: path.join(ROOT, "test", "fixtures", "fake-tunnel.sh"),
+      CANVAS_FAKE_TUNNEL_DIR: path.join(this.dir, "tunnels"),
+      CANVAS_FAKE_TUNNEL_NODE: process.execPath,
+      CANVAS_FAKE_TUNNEL_ANY_PORT: "1",
+      CANVAS_CLOUD_HOST_PORT: "0",
+      CANVAS_CLOUD_SECRETS_FILE: path.join(this.dir, "cloud-secrets.json"),
       ...(process.env.CANVAS_ENGINE_PKG ? { CANVAS_ENGINE_PKG: process.env.CANVAS_ENGINE_PKG } : {}),
       // Debug switches for the QA build (CANVAS_QA_TRACE=1 logs the drag machinery).
       ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("CANVAS_QA_"))),
@@ -77,7 +85,7 @@ export class QaApp {
   }
 
   async start(builtApp: string) {
-    for (const d of [this.home, this.docs, this.logs]) fs.mkdirSync(d, { recursive: true });
+    for (const d of [this.home, this.docs, this.logs, path.join(this.dir, "tunnels")]) fs.mkdirSync(d, { recursive: true });
     // Fonts the maintainer installed are read (never written) so text measures as it does in her app.
     const fonts = path.join(os.homedir(), "Library", "Fonts");
     fs.mkdirSync(path.join(this.home, "Library"), { recursive: true });

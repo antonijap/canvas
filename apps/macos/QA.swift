@@ -285,6 +285,9 @@ enum QA {
             if let u = a["url"] as? String { model.prefs.cloudUrl = u }
             if let e = a["devEmail"] as? String { model.prefs.cloudDevEmail = e }
             if let n = a["name"] as? String { model.prefs.cloudName = n }
+            if let h = a["hosting"] as? Bool { model.prefs.cloudHosting = h }
+            // The name the host is shown by: a placeholder in QA, never the Mac's user name.
+            if let c = a["commentName"] as? String { model.prefs.commentName = c }
             return ["url": model.prefs.cloudUrl, "devEmail": model.prefs.cloudDevEmail, "name": model.prefs.cloudName]
         case "qa.exportdir":
             // Shift+Cmd+E's folder: a QA instance never shows the open panel (it would be modal), it exports here.

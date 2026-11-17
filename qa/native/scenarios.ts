@@ -13,6 +13,7 @@ import { buildLink, parseLink } from "../../src/page/link-logic.js";
 import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";
 import "./scenarios-cloud.ts";
+import "./scenarios-cloud-host.ts";
 import "./scenarios-home.ts";
 import "./scenarios-alignment.ts";
 import "./scenarios-arrange.ts";
