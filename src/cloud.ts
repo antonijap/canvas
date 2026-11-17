@@ -14,17 +14,81 @@
 // The token is sent as `cf-access-token` to the configured server only, never written to a file, never logged.
 // For http://localhost or http://127.0.0.1 (a server run with DEV=1) it sends `x-canvas-dev-email` instead, and for no
 // other host.
+//
+// A Cloud hosted on a Mac (canvas-cloud://<host id>, src/cloud-host.ts) is another kind: never a dev email, never an
+// Access token. This Mac reaches it through its own tunnel helper's local port (checked to be the helper's), or on
+// 127.0.0.1 when it is the host, with `authorization: Bearer <device token>`. When it cannot be reached at all the
+// status is "down": the host's Mac is asleep, closed or offline; comments wait in the outbox.
 
 import type http from "node:http";
 import { PROTOCOL_VERSION, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread } from "../cloud/protocol.ts";
 import { readBodyText } from "./body.ts";
-import { cloudConfig, hostOf, isLocalDev } from "./cloud-config.ts";
+import { cloudConfig, hostedId, hostedUrl, hostOf, isLocalDev, parseInvite, setJoined } from "./cloud-config.ts";
+import { hostStatus, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
+import { deleteJoined, readJoined, writeJoined, type JoinedSecrets } from "./cloud-secrets.ts";
+import { forward, genkey, helperPath, type Helper } from "./cloud-tunnel.ts";
+import { newSecret } from "../cloud/node/host.ts";
 import { acknowledge, confirm, discard, hooks, isShared, opsForShare, pendingStates, reject, retry, shareLocal, snapshot, viewOf, type SyncFile } from "./cloud-sync.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
 import { localName, packageOf } from "./comments.ts";
 import { clearSecret, getSecret } from "./widgets/keychain.ts";
 
-export type Status = "signedOut" | "connected" | "offline" | "signInAgain" | "forbidden" | "tooOld" | "tooNew";
+export type Status = "signedOut" | "connected" | "offline" | "signInAgain" | "forbidden" | "tooOld" | "tooNew" | "down" | "removed" | "unavailable";
+
+// ---------- hosted Clouds: where they are reached ----------
+
+const joinedCache = new Map<string, JoinedSecrets | null>();
+const forwards = new Map<string, { helper: Helper; origin: string } | Promise<{ helper: Helper; origin: string }>>();
+
+async function joinedSecrets(id: string): Promise<JoinedSecrets | null> {
+  if (!joinedCache.has(id)) joinedCache.set(id, await readJoined(id));
+  return joinedCache.get(id) ?? null;
+}
+
+/** The local origin of a joined Cloud's tunnel: this Mac's helper, started once and again when it dies. */
+async function tunnelOrigin(id: string, s: JoinedSecrets): Promise<string> {
+  const known = forwards.get(id);
+  if (known && !(known instanceof Promise) && known.helper.alive) return known.origin;
+  if (known instanceof Promise) return (await known).origin;
+  const bin = helperPath();
+  if (!bin) throw Object.assign(new Error("no helper"), { status: "unavailable" });
+  const p = forward(bin, s.key, s.addr);
+  forwards.set(id, p);
+  try {
+    const f = await p;
+    forwards.set(id, f);
+    f.helper.onExit = () => { if (forwards.get(id) === f) forwards.delete(id); };
+    return f.origin;
+  } catch (e) {
+    forwards.delete(id);
+    throw e;
+  }
+}
+
+/** Where to send a request for a Cloud address, and as whom. For a hosted Cloud this starts its tunnel if needed. */
+export async function target(url: string): Promise<{ base: string; headers: Record<string, string>; hosted: boolean } | { fail: Status }> {
+  const id = hostedId(url);
+  if (!id) {
+    const headers = await authHeaders(url);
+    return headers ? { base: url, headers, hosted: false } : { fail: "signedOut" };
+  }
+  const self = localHost();
+  if (self && self.hostId === id) return { base: self.origin, headers: { authorization: `Bearer ${self.token}` }, hosted: true };
+  const s = await joinedSecrets(id);
+  if (!s) return { fail: "signedOut" };
+  try {
+    return { base: await tunnelOrigin(id, s), headers: { authorization: `Bearer ${s.token}` }, hosted: true };
+  } catch (e) {
+    return { fail: (e as { status?: Status }).status ?? "down" };
+  }
+}
+
+/** Stops a joined Cloud's tunnel helper (leaving, or a test). */
+export function closeTunnel(id: string): void {
+  const f = forwards.get(id);
+  forwards.delete(id);
+  if (f && !(f instanceof Promise)) f.helper.stop();
+}
 
 /** The Keychain item the shell writes the token to (account: the server's host). The service is overridable for tests. */
 export const keychainService = () => process.env.CANVAS_CLOUD_KEYCHAIN_SERVICE || "cc.getcanvas.canvas.cloud";
@@ -85,23 +149,33 @@ const servers = new Map<string, ServerState>();
 type Reply = { fail: Status } | { fail?: undefined; res: Response; json: any };
 
 async function request(origin: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<Reply> {
-  const auth = await authHeaders(origin);
-  if (!auth) return { fail: "signedOut" };
+  const t = await target(origin);
+  if ("fail" in t) return { fail: t.fail };
   let res: Response;
   try {
-    res = await fetch(origin + path, {
+    res = await fetch(t.base + path, {
       method: init.method ?? "GET",
-      headers: { ...auth, ...(init.body !== undefined ? { "content-type": "application/json" } : {}) },
+      headers: { ...t.headers, ...(init.body !== undefined ? { "content-type": "application/json" } : {}) },
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
       redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
-    return { fail: "offline" };
+    // A hosted Cloud that does not answer through its tunnel: its Mac is asleep, closed or offline.
+    if (t.hosted) { const id = hostedId(origin); if (id) closeTunnel(id); }
+    return { fail: t.hosted ? "down" : "offline" };
   }
   const contentType = res.headers.get("content-type");
   let json: any = null;
   if (/json/i.test(contentType ?? "")) json = await res.json().catch(() => null);
+  if (t.hosted) {
+    // The tunnel pins the host's key, so this answer is the host's own. A 401 means this device was removed; the
+    // Keychain item stays until the person leaves the Cloud (Settings > Cloud), so nothing is lost by a mistake.
+    if (res.status === 401) return { fail: "removed" };
+    if (res.status === 403) return { fail: "forbidden" };
+    if (res.status >= 500 || res.status === 429) return { fail: "down" };
+    return { res, json };
+  }
   const verdict = classify({ status: res.status, type: res.type, contentType, code: json?.code });
   if (verdict === "signInAgain" && !isLocalDev(origin)) clearSecret({ service: keychainService(), account: hostOf(origin) });
   if (verdict !== "ok") return { fail: verdict };
@@ -210,23 +284,37 @@ function reconnectNow(s: Session): void {
 
 async function connect(s: Session): Promise<void> {
   if (s.stopped || s.ws) return;
-  const auth = await authHeaders(s.origin);
+  const t = await target(s.origin);
   if (s.stopped || s.ws) return;
-  if (!auth) { setStatus(s, "signedOut"); schedule(s); return; }
+  if ("fail" in t) { setStatus(s, t.fail); schedule(s); return; }
   let ws: WebSocket;
   try {
     // Node's own WebSocket (undici) takes headers as an option, which a browser's does not.
-    ws = new WebSocket(`${s.origin.replace(/^http/, "ws")}/v1/docs/${s.doc}/socket`, { headers: auth } as unknown as string[]);
+    ws = new WebSocket(`${t.base.replace(/^http/, "ws")}/v1/docs/${s.doc}/socket`, { headers: t.headers } as unknown as string[]);
   } catch {
     setStatus(s, "offline");
     schedule(s);
     return;
   }
   s.ws = ws;
+  if (t.hosted) watch(s, ws);
   ws.onopen = () => send(s, { type: "hello", protocol: PROTOCOL_VERSION, doc: s.doc, since: seqOf(s) });
   ws.onmessage = (ev) => { try { onMessage(s, JSON.parse(String(ev.data)) as ServerMessage); } catch { /* a bad message is skipped */ } };
   ws.onerror = () => { /* the close that follows decides */ };
   ws.onclose = () => void closed(s, ws);
+}
+
+/**
+ * A hosted Cloud's Mac can vanish without closing anything (a lid shut): no close ever arrives. While its socket is
+ * open, the Cloud is asked every 20 s; no answer in 10 s and the socket is closed, which reads as "Cloud down".
+ */
+function watch(s: Session, ws: WebSocket): void {
+  const timer = setInterval(async () => {
+    if (s.ws !== ws) { clearInterval(timer); return; }
+    const r = await request(s.origin, "/v1/info").catch(() => ({ fail: "down" as Status }));
+    if (s.ws === ws && r.fail === "down") { try { ws.close(); } catch { /* closed */ } void closed(s, ws); }
+  }, Number(process.env.CANVAS_CLOUD_WATCH_MS) || 20_000);
+  timer.unref?.();
 }
 
 function seqOf(s: Session): number {
@@ -385,6 +473,9 @@ export class CloudError extends CommentsError {}
 
 const WHY: Record<string, string> = {
   signedOut: "Sign in to your team's server in Settings > Cloud first.",
+  down: "The Cloud isn't open right now. Its Mac may be asleep or closed.",
+  removed: "The host removed this Mac from the Cloud. Ask them for a new invite.",
+  unavailable: "This Canvas has no tunnel helper, so it cannot reach a Cloud hosted on a Mac.",
   signInAgain: "Sign in again in Settings > Cloud.",
   offline: "The server did not answer. Check the address and your connection.",
   forbidden: "This account has no access to the team's server.",
@@ -402,11 +493,11 @@ export async function shareFile(pkg: string, display: string | null): Promise<{ 
   const { url } = cloudConfig();
   if (!url) throw new CloudError(400, "invalid", "Set your team's server address in Settings > Cloud first.");
   const st = await checkServer(url, true);
-  if (st.status !== "connected") throw new CloudError(st.status === "offline" ? 502 : 401, st.status, WHY[st.status] ?? "Could not reach the server.");
+  if (st.status !== "connected") throw new CloudError(st.status === "offline" || st.status === "down" ? 502 : 401, st.status, WHY[st.status] ?? "Could not reach the server.");
   if (st.role !== "owner" && st.role !== "editor") throw new CloudError(403, "forbidden", "Only an owner or an editor can share a file to the server.");
   const file = (readCommentsFile(pkg) as SyncFile | null) ?? emptyComments();
   const reg = await request(url, "/v1/docs", { method: "POST", body: { doc: file.doc } });
-  if (reg.fail) throw new CloudError(reg.fail === "offline" ? 502 : 401, reg.fail, WHY[reg.fail] ?? "Could not register the file.");
+  if (reg.fail) throw new CloudError(reg.fail === "offline" || reg.fail === "down" ? 502 : 401, reg.fail, WHY[reg.fail] ?? "Could not register the file.");
   if (!reg.res.ok) throw new CloudError(reg.res.status === 409 ? 409 : 403, "quota", String(reg.json?.message ?? "The server refused to register this file."));
   // Read again: a comment may have been made while the server answered.
   const fresh = (readCommentsFile(pkg) as SyncFile | null) ?? file;
@@ -433,8 +524,9 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
       const cfg = cloudConfig();
       if (!cfg.url) return out(200, { configured: false, url: "", host: "", status: "signedOut", dev: false });
       const st = await checkServer(cfg.url, false, url.searchParams.get("fresh") === "1");
-      return out(200, { configured: true, url: cfg.url, host: hostOf(cfg.url), dev: isLocalDev(cfg.url), status: st.status, email: st.email ?? null, name: st.name ?? null, role: st.role ?? null, server: st.server ?? null });
+      return out(200, { configured: true, url: cfg.url, host: hostOf(cfg.url), dev: isLocalDev(cfg.url), hosted: !!hostedId(cfg.url), status: st.status, email: st.email ?? null, name: st.name ?? null, role: st.role ?? null, server: st.server ?? null });
     }
+    if (p === "/api/cloud/host" && req.method === "GET") return out(200, await hostStatus());
     if (req.method !== "POST") return out(405, { error: "method not allowed" });
     if (req.headers["x-canvas"] !== "1") return out(403, { error: "forbidden", code: "forbidden" });
     if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) return out(415, { error: "The request body must be JSON" });
@@ -442,6 +534,8 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
     if (raw === null) return out(413, { error: "too large" });
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw || "{}"); } catch { return out(400, { error: "The request body must be JSON" }); }
+    const host = await hostRoute(p, body);
+    if (host) return out(host[0], host[1]);
     if (p === "/api/cloud/token" || p === "/api/cloud/signout") {
       const target = typeof body.url === "string" ? body.url : "";
       const origin = safeOrigin(target);
@@ -478,4 +572,89 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
 
 function safeOrigin(u: string): string {
   try { return new URL(u).origin; } catch { return ""; }
+}
+
+// ---------- hosting and joining (Settings > Cloud) ----------
+
+const text = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max) : "");
+
+/** The host and join routes, or null for another path. Errors never carry a secret. */
+async function hostRoute(p: string, body: Record<string, unknown>): Promise<[number, unknown] | null> {
+  const fail = (e: unknown, status = 400): [number, unknown] => [status, { error: (e as Error).message }];
+  try {
+    switch (p) {
+      case "/api/cloud/host/start":
+        await startHosting({ name: text(body.name, 60), label: text(body.label, 120) || "Host" });
+        // The hosting Canvas is a member of its own Cloud, on loopback, from now on.
+        { const self = localHost(); if (self) { setJoined(hostedUrl(self.hostId)); servers.delete(hostedUrl(self.hostId)); } }
+        return [200, await hostStatus()];
+      case "/api/cloud/host/stop":
+        await stopHosting();
+        return [200, await hostStatus()];
+      case "/api/cloud/host/wipe":
+        await wipeHosting();
+        return [200, await hostStatus()];
+      case "/api/cloud/host/invite":
+        return [200, { link: await invite(text(body.label, 120), text(body.role, 20) || "editor") }];
+      case "/api/cloud/host/remove":
+        await removePerson(text(body.personId, 64));
+        return [200, await hostStatus()];
+      case "/api/cloud/join":
+        return [200, await join(body.link, text(body.device, 60) || "A Mac")];
+      case "/api/cloud/leave": {
+        const id = hostedId(text(body.url, 100));
+        if (!id) return [400, { error: "That is not a hosted Cloud" }];
+        closeTunnel(id);
+        joinedCache.delete(id);
+        await deleteJoined(id);
+        servers.delete(hostedUrl(id));
+        for (const s of sessions.values()) if (s.origin === hostedUrl(id)) { setStatus(s, "signedOut"); reconnectNow(s); }
+        return [200, { ok: true }];
+      }
+      default: return null;
+    }
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/**
+ * Joins a hosted Cloud from an invite link: this Mac makes its tunnel key and its device token, reaches the Cloud
+ * through the invite's tunnel address (which pins the host's key), redeems the single-use code, and checks the answer
+ * comes from the Cloud the link names. Only then is anything saved (Keychain). The shell asked the person first.
+ */
+export async function join(link: unknown, device: string): Promise<{ url: string; hostId: string; name: string; me: unknown }> {
+  const inv = parseInvite(link);
+  if (!inv) throw new CloudError(400, "invalid", "That is not a Canvas invite link");
+  const bin = helperPath();
+  if (!bin) throw new CloudError(400, "invalid", WHY.unavailable);
+  const key = await genkey(bin, "client");
+  let f: { helper: Helper; origin: string } | null = null;
+  try {
+    f = await forward(bin, key.key, inv.addr);
+    const token = newSecret("ccd");
+    let res: Response;
+    try {
+      res = await fetch(`${f.origin}/v1/join`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${inv.code}`, "content-type": "application/json" },
+        body: JSON.stringify({ token, device, key: key.public }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      throw new CloudError(502, "down", "The Cloud did not answer. Its Mac may be asleep or closed; try again when it is open.");
+    }
+    const j = await res.json().catch(() => null) as any;
+    if (res.status === 401) throw new CloudError(401, "unauthenticated", "This invite was already used or has expired. Ask for a new one.");
+    if (!res.ok || !j) throw new CloudError(502, "server", "The Cloud refused the invite.");
+    if (j.hostId !== inv.hostId || typeof j.member !== "string") throw new CloudError(409, "conflict", "The Cloud that answered is not the one in the invite.");
+    if (!(await writeJoined(inv.hostId, { token, addr: j.member, key: key.key }))) throw new CloudError(500, "server", "Could not save the invite to the Keychain.");
+    joinedCache.delete(inv.hostId);
+    const url = hostedUrl(inv.hostId);
+    setJoined(url);
+    servers.delete(url);
+    return { url, hostId: inv.hostId, name: inv.name, me: j.me };
+  } finally {
+    f?.helper.stop();
+  }
 }

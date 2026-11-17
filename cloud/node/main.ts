@@ -35,6 +35,7 @@ async function handle(m: Record<string, unknown>): Promise<unknown> {
     }
     case "invite": return host.invite(label, (typeof m.role === "string" ? m.role : "editor") as Role);
     case "people": return { people: host.people(), keys: host.deviceKeys(), pending: host.pendingInvites() };
+    case "config": { host.memberAddr = typeof m.memberAddr === "string" ? m.memberAddr : null; return { ok: true }; }
     case "remove": return { removed: host.remove(String(m.personId ?? "")) };
     case "stop": {
       // Stop hosting: every token revoked, then the process ends.
