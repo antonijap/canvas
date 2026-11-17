@@ -26,33 +26,47 @@ sc("first-run", "the browser page points at the Mac app; Hide keeps it away", { 
   t.eq(await t.ev("localStorage.getItem('canvas:webhint')"), "hidden", "Hide is remembered");
 });
 
-sc("first-run", "the welcome card shows the canvas MCP commands, copies one, and turns Connected on", { covers: ["first-run:welcome", "first-run:copy-command", "first-run:connected"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone" } }, async (t: T) => {
-  const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -560, y: 0, w: 460, h: 500 })).widget;
+sc("first-run", "the welcome card has a row per agent, its menu copies the canvas MCP command, and the row turns Connected", { covers: ["first-run:welcome", "first-run:copy-command", "first-run:connected"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone" } }, async (t: T) => {
+  const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -560, y: 0, w: 400, h: 180 })).widget;
   t.subject = ["widget:" + w.id];
   await t.look(-580, -20);
-  await t.waitFor("(() => { const c = document.querySelector('.wc .wc-code'); return c && c.textContent.startsWith('claude mcp add canvas --scope user -- '); })()", "the Claude Code command");
-  const codex = await t.ev<string>("document.querySelectorAll('.wc .wc-code')[1].textContent");
-  t.ok(/^codex mcp add canvas -- \S+ \S+\/mcp\/server\.ts$/.test(codex), `the Codex command: ${codex}`);
-  t.eq(await t.ev("document.querySelector('.wc .wc-said').textContent"), "Not connected yet", "before any agent");
-  t.ok(await t.ev("(() => { const c = document.querySelector('.wc').getBoundingClientRect(), h = document.querySelector('.wc .wc-hint').getBoundingClientRect(); return h.height > 0 && h.bottom <= c.bottom - 8; })()"), "the hint under Not connected yet fits on the card");
-  // Copy: a real click on the button. Headless Chrome has no clipboard permission, so the page's writeText is caught.
+  const row = (key: string) => `.wc .wc-row[data-agent="${key}"]`;
+  // The first setup answer: each row's button is live (Connect, or Copy command where the agent's CLI is not found).
+  await t.waitFor(`(() => { const b = document.querySelector('${row("claude")} .wc-btn'); return b && !b.disabled && /^(Connect|Copy command)$/.test(b.textContent); })()`, "the Claude Code row");
+  t.eq(await t.ev("document.querySelector('.wc .wc-title').textContent"), "Connect an agent", "the card's title");
+  t.eq(await t.ev("[...document.querySelectorAll('.wc .wc-name')].map((e) => e.textContent)"), ["Claude Code", "Codex"], "a row per agent");
+  t.eq(await t.ev("document.querySelector('.wc .wc-hint').textContent"), "Then select a layer and ask for a change. ⌘Z undoes its work.", "the footer line");
+  t.eq(await t.ev(`document.querySelector('${row("claude")} .wc-on').hidden`), true, "not Connected before any agent");
+  t.ok(await t.ev("(() => { const c = document.querySelector('.wc').getBoundingClientRect(), h = document.querySelector('.wc .wc-hint').getBoundingClientRect(); return h.height > 0 && h.bottom <= c.bottom; })()"), "the footer fits on the card");
+  // Copy command, from each row's menu: real clicks. Headless Chrome has no clipboard permission, so writeText is caught.
   await t.ev("window.__copied = null; navigator.clipboard.writeText = (s) => { window.__copied = s; return Promise.resolve(); }");
-  await clickOn(t, ".wc .wc-copy");
-  const copied = await t.waitFor<string>("window.__copied", "the copied command");
-  t.eq(copied, await t.ev("document.querySelector('.wc .wc-code').textContent"), "Copy copies the command shown");
+  await clickOn(t, `${row("claude")} .wc-more`);
+  await t.waitFor("!!document.querySelector('.wc .wc-menu button')", "the row's menu");
+  t.eq(await t.ev("document.querySelector('.wc .wc-menu button').textContent"), "Copy command", "the menu offers Copy command");
+  await clickOn(t, ".wc .wc-menu button");
+  const claude = await t.waitFor<string>("window.__copied", "the copied command");
+  t.ok(claude.startsWith("claude mcp add canvas --scope user -- "), `the Claude Code command: ${claude}`);
+  t.eq(await t.ev("!!document.querySelector('.wc .wc-menu')"), false, "the menu closes after Copy command");
   await t.waitFor("document.getElementById('wtoast').textContent === 'Copied'", "the Copied toast");
+  await t.ev("window.__copied = null");
+  await clickOn(t, `${row("codex")} .wc-more`);
+  await t.waitFor("!!document.querySelector('.wc .wc-menu button')", "the Codex row's menu");
+  await clickOn(t, ".wc .wc-menu button");
+  const codex = await t.waitFor<string>("window.__copied", "the copied Codex command");
+  t.ok(/^codex mcp add canvas -- \S+ \S+\/mcp\/server\.ts$/.test(codex), `the Codex command: ${codex}`);
   const after = t.widgets().widgets.find((x: any) => x.id === w.id);
-  t.eq([after.x, after.y], [w.x, w.y], "the Copy click does not drag the card");
-  // An agent connects: canvas-mcp's hello, as mcp/client.ts sends it.
+  t.eq([after.x, after.y], [w.x, w.y], "the menu clicks do not drag the card");
+  // An agent connects: canvas-mcp's hello, as mcp/client.ts sends it. Its row shows the green dot and Connected.
   await fetch(`${t.srv.base}/api/mcp/hello`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": "mcp-qa-1", "x-canvas-agent": "claude-code" }, body: "{}" });
-  await t.waitFor("document.querySelector('.wc').classList.contains('on')", "Connected", 6000);
-  t.eq(await t.ev("document.querySelector('.wc .wc-said').textContent"), "Connected: Claude", "who is connected");
+  await t.waitFor(`document.querySelector('${row("claude")} .wc-on').hidden === false`, "Connected", 6000);
+  t.eq(await t.ev(`document.querySelector('${row("claude")} .wc-on').textContent`), "Connected", "the Claude Code row says Connected");
+  t.eq(await t.ev(`document.querySelector('${row("claude")} .wc-btn').hidden`), true, "and has no button");
   const r = await rectOf(t, `.wd[data-id="widget:${w.id}"]`);
   await shot(t, "web-welcome-connected", { x: r.x - 20, y: r.y - 20, w: r.w + 40, h: r.h + 40 });
 });
 
-sc("first-run", "Connect on the welcome card registers an agent, says the next step, and shows an error with Copy still there", { covers: ["first-run:connect"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone", reopen: "Added comes from the live page's stubbed connect answer; the reopened tab reads the scratch agent config, where nothing is registered" } }, async (t: T) => {
-  const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -600, y: 0, w: 460, h: 500 })).widget;
+sc("first-run", "Connect on the welcome card registers an agent, says the next step, and shows an error with Copy command still in the menu", { covers: ["first-run:connect"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone", reopen: "Connected comes from the live page's stubbed connect answer; the reopened tab reads the scratch agent config, where nothing is registered" } }, async (t: T) => {
+  const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -600, y: 0, w: 400, h: 180 })).widget;
   t.subject = ["widget:" + w.id];
   // The endpoint changes the person's agent config: the page's fetch is stubbed here (test/mcp-connect.test.ts runs
   // the real route against fake CLIs). Setup answers say both agents are installed and neither is registered yet.
@@ -72,37 +86,40 @@ sc("first-run", "Connect on the welcome card registers an agent, says the next s
       const r = await real(u, o);
       if (!url.includes("/api/mcp/setup")) return r;
       const j = await r.json();
-      return new Response(JSON.stringify({ ...j, connected: false, installed: { claude: true, codex: true }, registered: { claude: false, codex: false, ...window.__reg } }));
+      return new Response(JSON.stringify({ ...j, connected: false, temporary: false, installed: { claude: true, codex: true }, registered: { claude: false, codex: false, ...window.__reg } }));
     };
   })()`);
   await t.look(-620, -20);
-  const btn = (i: number) => `.wc .wc-cmd:nth-child(${i}) .wc-connect`;
-  await t.waitFor(`(() => { const b = document.querySelectorAll('.wc .wc-connect'); return b.length === 2 && [...b].every((x) => !x.hidden && x.textContent === 'Connect'); })()`, "Connect beside both commands");
-  t.eq(await t.ev("document.querySelector('.wc .wc-hint').textContent"), "Press Connect, or copy a command into Terminal. Then start a new agent session.", "the hint says what to do");
-  t.eq(await t.ev("document.querySelector('.wc .wc-else').textContent"), "Other apps, or Canvas not in Applications: getcanvas.cc/download#connect", "the line for other apps");
-  t.ok(await t.ev("(() => { const c = document.querySelector('.wc').getBoundingClientRect(), h = document.querySelector('.wc .wc-else').getBoundingClientRect(); return h.height > 0 && h.bottom <= c.bottom - 8; })()"), "the last line fits on the card");
+  const btn = (key: string) => `.wc .wc-row[data-agent="${key}"] .wc-btn`;
+  const on = (key: string) => `.wc .wc-row[data-agent="${key}"] .wc-on`;
+  await t.waitFor(`(() => { const b = document.querySelectorAll('.wc .wc-btn'); return b.length === 2 && [...b].every((x) => !x.hidden && !x.disabled && x.textContent === 'Connect'); })()`, "Connect in both rows");
+  t.eq(await t.ev("document.querySelector('.wc .wc-hint').textContent"), "Then select a layer and ask for a change. ⌘Z undoes its work.", "the footer says what comes next");
   let r = await rectOf(t, `.wd[data-id="widget:${w.id}"]`);
   await shot(t, "web-welcome-connect", { x: r.x - 20, y: r.y - 20, w: r.w + 40, h: r.h + 40 });
-  await clickOn(t, btn(1));
-  await t.waitFor(`document.querySelector('${btn(1)}').textContent === 'Connecting…'`, "Connecting…");
-  await t.waitFor(`document.querySelector('${btn(1)}').textContent === 'Added'`, "Added");
+  await clickOn(t, btn("claude"));
+  await t.waitFor(`document.querySelector('${btn("claude")}').textContent === 'Connecting…'`, "Connecting…");
+  await t.waitFor(`document.querySelector('${on("claude")}').hidden === false`, "Connected");
+  t.eq(await t.ev(`document.querySelector('${btn("claude")}').hidden`), true, "Connect gives way to Connected");
   t.eq(await t.ev("document.querySelector('.wc .wc-hint').textContent"), "Added. Start a new Claude Code session.", "the next step");
-  t.eq(await t.ev(`document.querySelector('${btn(1)}').disabled`), true, "Added is not a button any more");
   t.eq(await t.ev("window.__connects"), [{ agent: "claude", method: "POST", header: "1" }], "one POST with the x-canvas header");
-  // Still Added after the next poll: the setup answer says registered.
+  // Still Connected after the next poll: the setup answer says registered.
   await new Promise((res) => setTimeout(res, 2500));
-  t.eq(await t.ev(`document.querySelector('${btn(1)}').textContent`), "Added", "the setup poll keeps Added");
+  t.eq(await t.ev(`document.querySelector('${on("claude")}').hidden`), false, "the setup poll keeps Connected");
   r = await rectOf(t, `.wd[data-id="widget:${w.id}"]`);
   await shot(t, "web-welcome-added", { x: r.x - 20, y: r.y - 20, w: r.w + 40, h: r.h + 40 });
-  // An error: the CLI's words in the hint, Connect again, and Copy still copies the command.
-  await clickOn(t, btn(2));
+  // An error: the CLI's words in the footer, Connect again, and the menu still copies the command.
+  await clickOn(t, btn("codex"));
   await t.waitFor("document.querySelector('.wc .wc-hint').classList.contains('err')", "the error");
   t.eq(await t.ev("document.querySelector('.wc .wc-hint').textContent"), "Codex: Error: could not write config.toml", "the error names the agent");
-  t.eq(await t.ev(`document.querySelector('${btn(2)}').textContent`), "Connect", "Connect can be tried again");
-  t.eq(await t.ev(`document.querySelector('.wc .wc-cmd:nth-child(2) .wc-copy').hidden`), false, "Copy is still there");
-  t.ok(await t.ev("(() => { const c = document.querySelector('.wc').getBoundingClientRect(), h = document.querySelector('.wc .wc-else').getBoundingClientRect(); return h.bottom <= c.bottom - 8; })()"), "the error fits on the card");
+  t.eq(await t.ev(`document.querySelector('${btn("codex")}').textContent`), "Connect", "Connect can be tried again");
+  t.ok(await t.ev("(() => { const c = document.querySelector('.wc').getBoundingClientRect(), h = document.querySelector('.wc .wc-hint').getBoundingClientRect(); return h.bottom <= c.bottom; })()"), "the error fits on the card");
   r = await rectOf(t, `.wd[data-id="widget:${w.id}"]`);
   await shot(t, "web-welcome-connect-error", { x: r.x - 20, y: r.y - 20, w: r.w + 40, h: r.h + 40 });
+  await clickOn(t, `.wc .wc-row[data-agent="codex"] .wc-more`);
+  await t.waitFor("!!document.querySelector('.wc .wc-menu button')", "the Codex row's menu");
+  t.eq(await t.ev("document.querySelector('.wc .wc-menu button').disabled"), false, "Copy command is still there");
+  await clickOn(t, ".wc .wc-title");
+  await t.waitFor("!document.querySelector('.wc .wc-menu')", "a press elsewhere closes the menu");
   const after = t.widgets().widgets.find((x: any) => x.id === w.id);
   t.eq([after.x, after.y], [w.x, w.y], "the Connect clicks do not drag the card");
 });

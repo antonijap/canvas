@@ -415,22 +415,22 @@ sc("comments", "alignment: in the app's page, the pins, the bars, the thread's h
   report(t, bad);
 });
 
-sc("first-run", "alignment: in the app's page, the welcome card's Connect and Copy centre their words, light and dark", { covers: ["first-run:alignment"] }, async (t: NT) => {
+sc("first-run", "alignment: in the app's page, the welcome card's row button centres its words on the agent's name, light and dark", { covers: ["first-run:alignment"] }, async (t: NT) => {
   fresh("native-welcome");
-  const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -600, y: 0, w: 460, h: 500 })).widget;
+  const w = (await t.a.post("/api/widgets", { kind: "welcome", name: "Welcome", x: -600, y: 0, w: 400, h: 180 })).widget;
   await t.look(-620, -20);
-  await t.waitJs(`(() => { const c = document.querySelector('.wc .wc-code'); return c && c.textContent.length > 10; })()`, "the welcome card's commands");
+  // Connect, or Copy command where this Mac has no Claude Code: either is the row's button.
+  await t.waitJs(`(() => { const b = document.querySelector('.wc .wc-row[data-agent=claude] .wc-btn'); return b && !b.disabled; })()`, "the welcome card's rows");
   const bad: string[] = [];
   try {
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
       const s = await grab(t);
-      const m = await pageMeasure(t, s, { copy: "b:.wc .wc-copy", copyT: "t:.wc .wc-copy", connect: "b:.wc .wc-connect:not([hidden])", connectT: "t:.wc .wc-connect:not([hidden])", name: "t:.wc .wc-cmd-name", dot: "b:.wc .wc-dot", said: "t:.wc .wc-said" });
+      const m = await pageMeasure(t, s, { btn: "b:.wc .wc-row[data-agent=claude] .wc-btn:not([hidden])", btnT: "t:.wc .wc-row[data-agent=claude] .wc-btn:not([hidden])", name: "t:.wc .wc-row[data-agent=claude] .wc-name", more: "b:.wc .wc-row[data-agent=claude] .wc-more" });
       const k = new AlignChecker("native-welcome", theme, s.img, s.k);
-      k.label("app-welcome-copy", m.copy, m.copyT);
-      if (m.connect) k.label("app-welcome-connect", m.connect, m.connectT);
-      k.near("app welcome: the agent's name, cap middle on the buttons' centre line", m.name?.cap, cy(m.copy));
-      k.near("app welcome: the dot's middle on the status's cap middle", cy(m.dot), m.said?.cap);
+      if (m.btn) k.label("app-welcome-button", m.btn, m.btnT);
+      k.near("app welcome: the agent's name, cap middle on the menu button's centre line", m.name?.cap, cy(m.more));
+      if (m.btn) k.near("app welcome: the row button on the menu button's centre line", cy(m.btn), cy(m.more));
       bad.push(...k.bad);
     }
   } finally {

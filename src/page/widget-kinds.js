@@ -586,60 +586,100 @@ function videoCard(ctx) {
 }
 
 // ---------- welcome ----------
-// The card on the Welcome file a first launch opens (src/onboarding.ts): what Canvas is for in three lines, the
-// commands that register Canvas MCP with Claude Code and Codex, each with Connect (POST /api/mcp/connect runs it for
-// the person, src/mcp-connect.ts) and Copy, and a Connected dot that follows GET /api/mcp/setup every 2 s while the
-// card is on the page. Settings > Agents says the same words (apps/macos/Settings.swift, ConnectAgentCard).
-const WELCOME_LINES = [
-  "Canvas is a design canvas you share with an AI agent.",
-  "Connect Claude Code or Codex once, select a board or layer, and ask for a change.",
-  "The agent edits this file while you watch, and ⌘Z undoes its work.",
-];
-export const CONNECT_HINT = "Press Connect, or copy a command into Terminal. Then start a new agent session.";
-export const CONNECT_ELSEWHERE = "Other apps, or Canvas not in Applications: getcanvas.cc/download#connect";
+// The card on the Welcome file a first launch opens (src/onboarding.ts): "Connect an agent", one row per agent
+// (Claude Code, Codex) with Connect (POST /api/mcp/connect runs the register command for the person,
+// src/mcp-connect.ts) or a green dot and Connected, and a ... menu whose Copy command copies that command for Terminal.
+// GET /api/mcp/setup is asked every 2 s while the card is on the page. Settings > Agents connects the same way
+// (apps/macos/Settings.swift, ConnectAgentCard).
+export const WELCOME_TITLE = "Connect an agent";
+export const WELCOME_HINT = "Then select a layer and ask for a change. ⌘Z undoes its work.";
+/** TEMPORARY_SERVER in src/mcp-connect.ts (test/welcome-card.test.ts keeps them the same): Connect refuses there. */
+export const WELCOME_TEMPORARY = "This Canvas runs from a temporary worktree; connect from the installed app or the main checkout.";
 const AGENT_LABEL = { claude: "Claude Code", codex: "Codex" };
+const AGENT_CLIENT = { claude: "Claude", codex: "Codex" };
+
+/**
+ * What an agent's row shows, from GET /api/mcp/setup (`s`) and whether its Connect is running. connected: the green
+ * dot and Connected (canvas is registered with it, or it is the client talking now). button: "Connect",
+ * "Connecting…", or "Copy command" when Connect cannot run here (the agent's CLI was not found, or this server runs
+ * from a temporary worktree: `temporary`); null with connected.
+ */
+export function welcomeRow(s, key, busy = false) {
+  s = s || {};
+  const connected = !busy && (!!(s.registered && s.registered[key]) || (s.connected === true && s.client === AGENT_CLIENT[key]));
+  if (connected) return { connected: true, button: null };
+  if (busy) return { connected: false, button: "Connecting…" };
+  return { connected: false, button: s.installed && s.installed[key] && !s.temporary ? "Connect" : "Copy command" };
+}
+
+/** The footer line with no Connect answer to report: why Connect is missing on a temporary worktree, else the next step. */
+export const welcomeHint = (s) => (s && s.temporary ? WELCOME_TEMPORARY : WELCOME_HINT);
+
 function welcomeCard(ctx) {
   const root = h("div", "wc");
-  const head = h("div", "wd-head");
-  head.append(h("div", "wd-title", "Welcome to Canvas"));
-  const lines = h("div", "wc-lines");
-  for (const t of WELCOME_LINES) lines.append(h("p", "", t));
-  const cmds = h("div", "wc-cmds");
+  const title = h("div", "wc-title", WELCOME_TITLE);
+  root.append(title);
   const rows = {};
-  const status = h("div", "wc-status");
-  const dot = h("span", "wc-dot");
-  const said = h("span", "wc-said", "Not connected yet");
-  const hint = h("span", "wc-hint", CONNECT_HINT);
-  const elsewhere = h("span", "wc-else", CONNECT_ELSEWHERE);
-  status.append(dot, said, hint, elsewhere);
+  const hint = h("div", "wc-hint", WELCOME_HINT);
   let last = {};
-  /** What the hint says after a Connect: the next step, or the error. Null: the default. */
+  /** What the footer says after a Connect: the next step, or the error. Null: the default. */
   let note = null;
+  let menu = null;
   for (const [key, label] of Object.entries(AGENT_LABEL)) {
-    const row = h("div", "wc-cmd");
-    const top = h("div", "wc-cmd-head");
-    const btns = h("div", "wc-btns");
-    const connect = nodrag(h("button", "wc-btn wc-connect", "Connect"));
-    connect.type = "button";
-    connect.hidden = true;
-    connect.setAttribute("aria-label", "Connect " + label + " to Canvas");
-    const btn = nodrag(h("button", "wc-btn wc-copy", "Copy"));
+    const row = h("div", "wc-row");
+    row.dataset.agent = key;
+    const btn = nodrag(h("button", "wc-btn", "Connect"));
     btn.type = "button";
-    btn.setAttribute("aria-label", "Copy the " + label + " command");
-    const code = nodrag(h("code", "wc-code", "…"));
-    btns.append(connect, btn);
-    top.append(h("span", "wc-cmd-name", label), btns);
-    row.append(top, code);
-    btn.onclick = () => { if (rows[key].text) ctx.copy(rows[key].text); };
-    connect.onclick = () => connectAgent(key);
-    rows[key] = { code, connect, text: "", busy: false };
-    cmds.append(row);
+    const on = h("span", "wc-on");
+    on.append(h("span", "wc-dot"), h("span", "wc-on-t", "Connected"));
+    const more = nodrag(h("button", "wc-more"));
+    more.type = "button";
+    more.setAttribute("aria-label", "More for " + label);
+    more.setAttribute("aria-haspopup", "menu");
+    more.title = "More";
+    more.append(h("i"), h("i"), h("i"));
+    row.append(h("span", "wc-name", label), h("span", "wc-sp"), btn, on, more);
+    btn.onclick = () => { if (rows[key].button === "Copy command") copyCommand(key); else connectAgent(key); };
+    more.onclick = (e) => { e.stopPropagation(); if (menu && menu.key === key) closeMenu(); else openMenu(key, more); };
+    rows[key] = { btn, on, text: "", busy: false, button: "Connect" };
+    root.append(row, h("div", "wc-line"));
   }
-  root.append(head, lines, cmds, status);
+  root.append(hint);
+
+  function copyCommand(key) { if (rows[key].text) ctx.copy(rows[key].text); }
+  function closeMenu() {
+    if (!menu) return;
+    menu.el.remove();
+    menu.anchor.setAttribute("aria-expanded", "false");
+    removeEventListener("pointerdown", menu.away, true);
+    menu = null;
+  }
+  function openMenu(key, anchor) {
+    closeMenu();
+    const el = nodrag(h("div", "wc-menu"));
+    el.setAttribute("role", "menu");
+    const item = nodrag(h("button", "", "Copy command"));
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.setAttribute("aria-label", "Copy the " + AGENT_LABEL[key] + " command");
+    item.disabled = !rows[key].text;
+    item.onclick = (e) => { e.stopPropagation(); closeMenu(); copyCommand(key); };
+    el.append(item);
+    root.append(el);
+    // Under the button, its right edges lined up; above it when the card ends first. The card scales with the
+    // camera, so offsets come from layout boxes (offsetTop/Left), not the screen.
+    const top = anchor.offsetTop + anchor.offsetHeight + 4;
+    el.style.right = root.clientWidth - (anchor.offsetLeft + anchor.offsetWidth) + "px";
+    el.style.top = (top + el.offsetHeight > root.clientHeight ? anchor.offsetTop - el.offsetHeight - 4 : top) + "px";
+    const away = (e) => { if (!el.contains(e.target) && !anchor.contains(e.target)) closeMenu(); };
+    addEventListener("pointerdown", away, true);
+    anchor.setAttribute("aria-expanded", "true");
+    menu = { key, el, away, anchor };
+  }
 
   async function connectAgent(key) {
     const r = rows[key];
-    if (r.busy || (last.registered && last.registered[key])) return;
+    if (r.busy || welcomeRow(last, key).connected) return;
     r.busy = true;
     note = null;
     show(last);
@@ -662,34 +702,36 @@ function welcomeCard(ctx) {
   }
 
   let timer = 0;
+  /** Until the first answer the rows show Connect, greyed: no flash of Copy command while Canvas looks. */
+  let loaded = false;
   function show(j) {
     last = j || {};
     for (const key of Object.keys(AGENT_LABEL)) {
       const r = rows[key];
-      const t = typeof last[key] === "string" ? last[key] : "";
-      r.text = t;
-      setText(r.code, t || "…");
-      const installed = !!(last.installed && last.installed[key]);
-      const added = !!(last.registered && last.registered[key]);
-      r.connect.hidden = !installed && !r.busy;
-      r.connect.disabled = r.busy || added;
-      r.connect.classList.toggle("done", added && !r.busy);
-      setText(r.connect, r.busy ? "Connecting…" : added ? "Added" : "Connect");
+      r.text = typeof last[key] === "string" ? last[key] : "";
+      const s = loaded ? welcomeRow(last, key, r.busy) : { connected: false, button: "Connect" };
+      r.button = s.button;
+      r.on.hidden = !s.connected;
+      r.btn.hidden = !s.button;
+      if (s.button) {
+        setText(r.btn, s.button);
+        r.btn.disabled = !loaded || r.busy || (s.button === "Copy command" && !r.text);
+        r.btn.setAttribute("aria-label", s.button === "Copy command" ? "Copy the " + AGENT_LABEL[key] + " command" : s.button === "Connect" ? "Connect " + AGENT_LABEL[key] + " to Canvas" : s.button);
+      }
     }
-    const on = last.connected === true;
-    root.classList.toggle("on", on);
-    setText(said, on ? "Connected" + (last.client ? ": " + last.client : "") : "Not connected yet");
-    hint.hidden = on && !(note && note.err);
+    root.classList.toggle("on", last.connected === true);
     hint.classList.toggle("err", !!(note && note.err));
-    setText(hint, note ? note.text : CONNECT_HINT);
-    elsewhere.hidden = on;
+    hint.classList.toggle("long", !note && !!last.temporary);
+    setText(hint, note ? note.text : welcomeHint(last));
+    hint.title = note && note.err ? note.text : "";
   }
   async function poll() {
     timer = 0;
-    if (!root.isConnected) return; // off the page: update() starts it again when the card is mounted again
-    try { show(await (await fetch("/api/mcp/setup")).json()); } catch {}
+    if (!root.isConnected) { closeMenu(); return; } // off the page: update() starts it again when the card is mounted again
+    try { const j = await (await fetch("/api/mcp/setup")).json(); loaded = true; show(j); } catch {}
     if (root.isConnected && !timer) timer = setTimeout(poll, 2000);
   }
+  show(last);
   return { el: root, update() { if (!timer) timer = setTimeout(poll, 0); } };
 }
 
