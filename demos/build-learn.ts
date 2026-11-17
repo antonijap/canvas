@@ -37,7 +37,14 @@ const SHADOW_KEY = [
 ];
 
 let seq = 0;
-const nid = (p: string) => `${p}${(++seq).toString(36)}`;
+/** Set while a later addition builds (scoped): its ids come from its own counter, so the older boards keep theirs. */
+let scope: { name: string; seq: number } | null = null;
+const nid = (p: string) => (scope ? `${scope.name}_${p}${(++scope.seq).toString(36)}` : `${p}${(++seq).toString(36)}`);
+function scoped<R>(name: string, build: () => R): R {
+  const was = scope;
+  scope = { name, seq: 0 };
+  try { return build(); } finally { scope = was; }
+}
 
 /** SF Pro text. `wrap`: fills its row and wraps (with leading); otherwise one line at line height 1. */
 function text(content: string, size: number, o: { weight?: string; fill?: string; wrap?: boolean; width?: number | string; name?: string; align?: string } = {}): Node {
@@ -73,6 +80,16 @@ function keys(tokens: string[]): Node {
 const step = (tokens: string[], what: string): Node => ({
   type: "frame", id: nid("s"), name: what.slice(0, 40), width: "fill_container", gap: 16, alignItems: "center",
   children: [keys(tokens), text(what, 15, { wrap: true })],
+});
+/** A numbered step (a sequence, not a shortcut): the number on a round cap where the keys would be. */
+const numbered = (n: number, what: string): Node => ({
+  type: "frame", id: nid("s"), name: what.slice(0, 40), width: "fill_container", gap: 16, alignItems: "center",
+  children: [
+    { type: "frame", id: nid("ks"), name: "Step", width: 112, height: 24, alignItems: "center", children: [
+      { type: "frame", id: nid("k"), name: `Step ${n}`, width: 24, height: 24, cornerRadius: 12, fill: PAPER, effect: SHADOW_KEY, justifyContent: "center", alignItems: "center", children: [text(String(n), 12, { weight: "600", name: String(n) })] },
+    ] },
+    text(what, 15, { wrap: true }),
+  ],
 });
 
 /** The body under the heading: the steps on the left, the practice area filling the rest. */
@@ -122,19 +139,25 @@ const placed = (n: Node, x: number, y: number): Node => ({ ...n, x, y });
 
 // ---------------------------------------------------------------- the lessons
 
-const T = 10;
+const T = 11;
+/** The lesson titles, in order: the Welcome board's list and the progress card. */
+const TITLES = ["Move around", "Connect your agent", "Select", "Move and copy", "Auto layout", "Style", "Text", "Components", "Work with an agent", "Cards and pages", "Share and export"];
 const COL = 1360, ROW = 920;
 const at = (i: number) => ({ x: (i % 3) * COL, y: Math.floor(i / 3) * ROW });
 
 function welcome(): Node {
-  const rows = [
-    "Move around", "Select", "Move and copy", "Auto layout", "Style", "Text", "Components", "Work with an agent", "Cards and pages", "Share and export",
-  ].map((t, i) => ({
+  const rows = TITLES.map((t, i) => (t === "Connect your agent" ? scoped("wel_cn", () => welcomeRow(t, i)) : welcomeRow(t, i)));
+  return welcomeBoard(rows);
+}
+function welcomeRow(t: string, i: number): Node {
+  return ({
     type: "frame", id: `wel_row${i + 1}`, name: t, width: "fill_container", gap: 12, alignItems: "center", children: [
       { type: "frame", id: nid("n"), name: "Number", width: 22, height: 22, cornerRadius: 11, fill: ACCENTS[i], justifyContent: "center", alignItems: "center", children: [text(String(i + 1), 11, { weight: "700", fill: PAPER })] },
       text(t, 15, { weight: "500" }),
     ],
-  }));
+  });
+}
+function welcomeBoard(rows: Node[]): Node {
   return {
     type: "frame", id: "welcome", name: "Welcome", ...at(0), width: 1200, height: BOARD_H, fill: PAPER, cornerRadius: 20, clip: true, layout: "vertical", padding: 64, gap: 40,
     children: [
@@ -145,12 +168,12 @@ function welcome(): Node {
       ] },
       { type: "frame", id: "wel_body", name: "Body", width: "fill_container", height: BODY_H, gap: 48, children: [
         { type: "frame", id: "wel_how", name: "How this file works", width: 480, layout: "vertical", gap: 20, children: [
-          text("This file is a short course: ten lessons, one board each. Every board says what to press and has something to try it on.", 15, { wrap: true }),
+          text("This file is a short course: eleven lessons, one board each. Every board says what to press and has something to try it on.", 15, { wrap: true }),
           step(["N"], "Go to the next lesson."),
           step(["⇧", "N"], "Go back one."),
           step(["⇧", "1"], "See every lesson at once."),
           step(["⌘", "Z"], "Undo anything. Nothing here can break."),
-          text("Using Claude Code or Codex? The card to the left connects it to Canvas. Lesson 8 shows what to do next.", 15, { wrap: true }),
+          text("Using Claude Code or Codex? Press Connect on the card to the left. Lesson 2 shows the rest.", 15, { wrap: true }),
           text("Canvas is in alpha. When something feels wrong, slow or confusing, report it on GitHub (Issues). Every report makes the first real version come sooner.", 15, { wrap: true, fill: MUTED }),
         ] },
         { type: "frame", id: "wel_list", name: "Lessons", width: "fill_container", height: BODY_H, cornerRadius: 20, fill: TRY, layout: "vertical", padding: [28, 28], gap: 14, children: [
@@ -180,6 +203,25 @@ function lessons(): Node[] {
     { ...text("You found it. Press Shift+1.", 2, { weight: "600", fill: "#B23A12", name: "Secret" }), letterSpacing: 0, x: 255, y: 263 },
     { ...text("Small, isn't it?", 13, { fill: FAINT }), x: 225, y: 312 },
   ]);
+
+  // The same words as the welcome card and Settings > Agents (ConnectCopy in apps/macos/SettingsLogic.swift).
+  scoped("cn", () => add("connect", "Connect your agent", "Canvas MCP lets Claude Code or Codex see this file and edit it while you watch. You connect it once.", [
+    numbered(1, "Press Connect on the welcome card, or copy its command into Terminal."),
+    numbered(2, "Start a new Claude Code or Codex session."),
+    numbered(3, "The dot on the welcome card turns green."),
+    numbered(4, "Select something and ask: \u201cWhat do I have selected in Canvas?\u201d"),
+    text("Other apps, or Canvas not in Applications: getcanvas.cc/download#connect", 15, { wrap: true, fill: MUTED, name: "Other apps" }),
+  ], "Select the card, then ask your agent: What do I have selected in Canvas?", [
+    { type: "frame", id: "connect_pill", name: "Connected", x: 28, y: 110, height: 32, padding: [0, 14], gap: 8, cornerRadius: 16, fill: PAPER, effect: SHADOW_KEY, alignItems: "center", children: [
+      ellipse("Dot", 0, 0, 8, "#34C759"),
+      text("Connected: Claude", 13, { weight: "600", name: "Connected: Claude" }),
+    ] },
+    card("Hello card", 122, 180, 300, 180, [
+      icon("sparkles", 28, 28, 28, "#30B0FF"),
+      { ...text("Hello, agent", 22, { weight: "700" }), x: 28, y: 76 },
+      { ...text("Ask what is selected. The answer names this card.", 15, { fill: MUTED, wrap: true, width: 244 }), x: 28, y: 112 },
+    ]),
+  ]));
 
   add("select", "Select", "Click picks the top layer. Cmd+click reaches the one deepest under the pointer.", [
     step(["click"], "Select a layer."),
@@ -271,7 +313,7 @@ function lessons(): Node[] {
     { ...text("Password", 13, { fill: FAINT }), x: 42, y: 150 },
     { type: "frame", id: "agent_btn", name: "Button", x: 28, y: 204, width: 244, height: 44, cornerRadius: 12, fill: "#5E5CE6", justifyContent: "center", alignItems: "center", children: [text("Continue", 15, { weight: "600", fill: PAPER })] },
   ]);
-  add("agent", "Work with an agent", "Connect Claude Code or Codex once (the card on the Welcome board has the command). Then point at a layer and ask.", [
+  add("agent", "Work with an agent", "Connect Claude Code or Codex once (lesson 2). Then point at a layer and ask.", [
     step(["⌘", "L"], "Copy a link to the selection. Paste it to your agent."),
     step(["⌘", "↩"], "Ask about the selection right here."),
     step(["⇧", "⌘", "↩"], "Three variations of a board, side by side."),
@@ -309,6 +351,27 @@ function playground(): Node {
 
 // ---------------------------------------------------------------- write
 
+/**
+ * The ids the last build gave its widgets and to-do items, kept for the same widget (kind and name) and item (text):
+ * a rebuild changes only what changed, and a Welcome file someone already has keeps matching.
+ */
+function keepIds(fresh: string, old: string) {
+  if (!fs.existsSync(old)) return;
+  const was = JSON.parse(fs.readFileSync(old, "utf8"));
+  const now = JSON.parse(fs.readFileSync(fresh, "utf8"));
+  for (const w of now.widgets ?? []) {
+    const o = (was.widgets ?? []).find((x: Node) => x.kind === w.kind && x.name === w.name);
+    if (!o) continue;
+    w.id = o.id;
+    const items = (o.config as { items?: { id: string; text: string }[] } | undefined)?.items ?? [];
+    for (const it of w.config?.items ?? []) {
+      const same = items.find((x) => x.text === it.text);
+      if (same) it.id = same.id;
+    }
+  }
+  fs.writeFileSync(fresh, JSON.stringify(now, null, 2) + "\n");
+}
+
 async function main() {
   const boards = [welcome(), ...lessons()];
   const yours = playground();
@@ -330,15 +393,14 @@ async function main() {
       { id: "learn", name: "Learn", boards: boards.map((b) => b.id) },
       { id: "playground", name: "Playground", boards: ["playground"] },
     ] });
-    const cp = at(9);
-    await a.post("/api/widgets", { kind: "todo", name: "Your progress", x: cp.x + 684, y: cp.y + 330, w: 360, h: 380, page: "learn", config: { title: "Your progress", items: [
-      "Move around", "Select", "Move and copy", "Auto layout", "Style", "Text", "Components", "Work with an agent", "Cards and pages", "Share and export",
-    ].map((t) => ({ text: t, done: false })) } });
+    const cp = at(TITLES.indexOf("Cards and pages") + 1);
+    await a.post("/api/widgets", { kind: "todo", name: "Your progress", x: cp.x + 684, y: cp.y + 330, w: 360, h: 380, page: "learn", config: { title: "Your progress", items: TITLES.map((t) => ({ text: t, done: false })) } });
     const f = await a.flush();
     if (!f.ok) throw new Error(`flush: ${JSON.stringify(f)}`);
   } finally {
     await srv.stop();
   }
+  keepIds(path.join(pkg, "widgets.json"), path.join(LEARN, "widgets.json"));
   fs.rmSync(LEARN, { recursive: true, force: true });
   fs.mkdirSync(LEARN, { recursive: true });
   for (const e of fs.readdirSync(pkg, { withFileTypes: true })) {

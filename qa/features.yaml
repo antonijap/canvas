@@ -652,10 +652,10 @@ features:
     driven: [page, native]
     cases: [copy-path, copy-error, undo-board, undo-page, ask-agent, mouse]
   - id: first-run
-    name: First launch opens the Welcome file; the welcome card's MCP commands copy; Connected follows the agent; Settings > Agents shows the same; the browser page points at the app
+    name: First launch opens the Welcome file; the welcome card's MCP commands copy, and Connect registers them; Connected follows the agent; Settings > Agents shows the same; the browser page points at the app
     area: agent
     driven: [page, native, mcp]
-    cases: [welcome, copy-command, connected, settings-agents, web-hint, engine-missing]
+    cases: [welcome, copy-command, connect, connected, settings-agents, settings-connect, web-hint, engine-missing]
 
   # ------------------------------------------------------------ MCP tools (cases are tool names)
   - id: mcp-read
