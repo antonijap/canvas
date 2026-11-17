@@ -35,6 +35,7 @@ export const USAGE_EVENTS = [
   "agent.connected.claude",
   "agent.connected.codex",
   "agent.connected.other",
+  "mcp.connect_clicked",
   "agent.prompt",
   "agent.run_done",
   "agent.run_undone",
