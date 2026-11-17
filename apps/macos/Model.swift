@@ -151,6 +151,16 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var allFiles: [FileEntry] = []
     @Published var openFiles: [String] = UserDefaults.standard.stringArray(forKey: "canvas.openFiles") ?? []
     @Published var currentFile: String?
+    /// The Home tab is the shown one (Home.swift): the shown file's page stays alive underneath, hidden, and takes no keys.
+    @Published var homeShown = false {
+        didSet {
+            guard homeShown != oldValue else { return }
+            tabHost.isHidden = homeShown
+            if homeShown { webView.window?.makeFirstResponder(nil) } else if let w = webView.window { w.makeFirstResponder(webView) }
+        }
+    }
+    /// Files the app opens on its own (the first launch's course): not recents until the person opens them.
+    var quietRecents = Set<String>()
     @Published var toast: String?
     @Published var toastKind: Toast.Kind = .plain
     /// The toast's buttons (Undo from the page, Ask agent on an error) and what a click on it copies (ToastLogic).
@@ -384,6 +394,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         if !openFiles.contains(file) { openFiles.append(file) }
         if openFiles.count > 40 { openFiles.removeFirst(openFiles.count - 40) }
         UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
+        if quietRecents.remove(file) == nil { MainActor.assumeIsolated { HomeStore.shared.touch(file) } }
     }
 
     func name(of file: String) -> String {
@@ -398,6 +409,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             return
         }
         guard let url = DocURL.page(base: base, file: file) else { return }
+        homeShown = false
+        // Opening a file on purpose (a card, Open, a tab) is "last opened", even when its tab already shows it.
+        if !quietRecents.contains(file) { MainActor.assumeIsolated { HomeStore.shared.touch(file) } }
         let opening = !openFiles.contains(file)
         show(file, url: url)
         // Usage counts: a document opened in a tab (not a switch to one already open), and the Welcome course.
@@ -458,6 +472,8 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             if old.url == nil || staleViews.contains(ObjectIdentifier(old)) { staleViews.remove(ObjectIdentifier(old)); old.load(URLRequest(url: url)) }
             return
         }
+        // The page going out of sight is photographed for its card on Home (it must be in the window to be drawn).
+        if let k = oldKey, !k.isEmpty, !homeShown, !boards.isEmpty { saveThumbnail(of: old, file: k) }
         // The inspector must never write the old document's selection into the new one (same node ids).
         clearDocumentState()
         // The panels show nothing (not the old tab's pages and layers) until the new tab's page reports its state.
@@ -657,6 +673,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         openFiles = TabList.replacing(openFiles, file, with: url.path)
         UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
+        MainActor.assumeIsolated { HomeStore.shared.replace(file, with: url.path) }
         open(url.path)
     }
 
@@ -722,11 +739,15 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
         drop(file) // a hidden tab's page goes with it (the shown one goes once another is shown)
         guard file == currentFile else { return }
+        // Closing a tab while Home is showing leaves Home showing.
+        let wasHome = homeShown
+        defer { if wasHome { homeShown = true } }
         // The next tab that still exists on disk; a missing one would load a broken page.
         let after = openFiles[min(i, openFiles.count)...] + openFiles[..<min(i, openFiles.count)].reversed()
         if let next = after.first(where: { !isMissing($0) }) {
             open(next)
         } else {
+            snapshotShown()
             currentFile = nil
             UserDefaults.standard.removeObject(forKey: "canvas.lastFile")
             clearDocumentState()
@@ -738,6 +759,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
 
     /// The empty page (no file open). It stays inside the native shell (no browser sidebar under the SwiftUI chrome).
     func showEmpty() {
+        homeShown = true // nothing is open: Home is the screen
         if let url = DocURL.page(base: base, file: nil) { show("", url: url) }
     }
 

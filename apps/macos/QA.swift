@@ -271,6 +271,15 @@ enum QA {
             let on = item.isEnabled
             if a["perform"] as? Bool == true, on { menu.performActionForItem(at: menu.index(of: item)) }
             return ["enabled": on, "key": item.keyEquivalent, "mods": item.keyEquivalentModifierMask.rawValue, "state": item.state == .on]
+        case "qa.theme":
+            // {theme: "light" | "dark" | "system"}: the app theme, as Settings > General sets it.
+            if let t = (a["theme"] as? String).flatMap(AppTheme.init(rawValue:)) { model.theme = t }
+            return ["theme": model.theme.rawValue]
+        case "qa.cloud":
+            // {url, devEmail}: the team server address and development email, as Settings > Cloud types them.
+            if let u = a["url"] as? String { model.prefs.cloudUrl = u }
+            if let e = a["devEmail"] as? String { model.prefs.cloudDevEmail = e }
+            return ["url": model.prefs.cloudUrl, "devEmail": model.prefs.cloudDevEmail]
         case "qa.exportdir":
             // Shift+Cmd+E's folder: a QA instance never shows the open panel (it would be modal), it exports here.
             exportFolder = a["dir"] as? String
@@ -690,7 +699,7 @@ enum QA {
              "x": $0.frame.minX, "y": $0.frame.minY, "alpha": $0.alphaValue, "onScreen": $0.isOnActiveSpace]
         }
         return [
-            "file": m.currentFile ?? NSNull(), "openFiles": m.openFiles, "revision": m.revision, "zoom": m.zoom,
+            "file": m.currentFile ?? NSNull(), "openFiles": m.openFiles, "homeShown": m.homeShown, "recents": MainActor.assumeIsolated { HomeStore.shared.recents.map(\.path) }, "homeSection": MainActor.assumeIsolated { String(describing: HomeStore.shared.section) }, "stateDir": StateFolder.path, "revision": m.revision, "zoom": m.zoom,
             "section": m.section?.rawValue ?? NSNull(), "panelOpen": m.panelOpen, "inspectorOpen": m.inspectorOpen, "uiHidden": m.uiHidden,
             "pages": m.pages.map { ["id": $0.id, "name": $0.name, "count": $0.count] }, "activePage": m.activePage ?? NSNull(),
             "boards": m.boards.map(\.id), "selection": sel, "selectedWidget": m.selectedWidgetId ?? NSNull(),

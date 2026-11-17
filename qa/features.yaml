@@ -760,6 +760,11 @@ features:
     area: chrome
     driven: [native]
     cases: [$themes, privacy, agents-model, updates, comment-name, cloud]
+  - id: home
+    name: Home, the pinned first tab (recents, files on this Mac, a team server, first launch)
+    area: chrome
+    driven: [native]
+    cases: [pinned, shortcut, recents, card-open, remove, first-launch, server, thumbnail, alignment, $themes]
   - id: theme
     name: App theme light and dark
     area: chrome

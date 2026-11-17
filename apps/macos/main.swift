@@ -196,6 +196,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // (or a server that does not answer) keeps the app open, with the edit still on screen. With every edit saved and
   // an update ready, the updater stops the server and starts its helper before the app goes (Updater.beforeQuit).
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    // The shown file is photographed for its card on Home (a second at most), then the saves below.
+    var photographed = false
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if !photographed { photographed = true; self.finishQuit() } }
+    model.snapshotShown { if !photographed { photographed = true; self.finishQuit() } }
+    return .terminateLater
+  }
+  func finishQuit() {
     model.flushTextEdit { textOK in
       let finish = { (ok: Bool) in
         if !ok { model.flash("Canvas could not save the last change, so it stayed open. Try again, or quit once more to discard it.") }
@@ -210,7 +217,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       if model.writesIdle { finish(textOK); return }
       model.drainWrites { ok in finish(ok && textOK) }
     }
-    return .terminateLater
   }
   // A normal quit clears the running marker (RunMarker): found set at the next launch, it counts one crash.
   func applicationWillTerminate(_ notification: Notification) { RunMarker.quit(.standard) }
@@ -252,6 +258,8 @@ class FileActions: NSObject, NSMenuItemValidation {
   /// Cmd+W: closes the file's tab, not the window. With no tab open it closes the window.
   @objc func closeTab(_ s: Any?) {
     if keyWindowNow !== window { keyWindowNow.performClose(nil); return }
+    // Home is pinned: Cmd+W with Home showing closes nothing (the file tabs under it stay as they are).
+    if model.homeShown { if model.openFiles.isEmpty { window.performClose(nil) }; return }
     if let f = model.currentFile { model.close(f) } else { window.performClose(nil) }
   }
   func validateMenuItem(_ item: NSMenuItem) -> Bool {
@@ -658,6 +666,8 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   /// Option+L (collapse layers): every open row in the Layers panel closes.
   @objc func collapseLayers(_ s: Any?) { LayersStore.of(model).collapseAll() }
   @objc func showWindow(_ s: Any?) { showMainWindow() }
+  /// Window > Home (Shift+Cmd+0): the pinned first tab.
+  @objc func showHome(_ s: Any?) { model.showHome() }
   /// Help > Report a Bug: the website's form in the browser, with this build's version, commit, macOS and
   /// architecture filled in (ReleaseLinks.report). Nothing is sent until the person presses Send there.
   @objc func reportBug(_ s: Any?) { NSWorkspace.shared.open(reportURL()); UsageCount.send("bug.report_opened", to: base) }
@@ -786,6 +796,7 @@ func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op:
   case "downloadLatest": return (menuActions, #selector(MenuActions.downloadLatest(_:)), nil)
   case "checkForUpdates": return (menuActions, #selector(MenuActions.checkForUpdates(_:)), nil)
   case "restartToUpdate": return (menuActions, #selector(MenuActions.restartToUpdate(_:)), nil)
+  case "home": return (menuActions, #selector(MenuActions.showHome(_:)), nil)
   case "minimize": return (nil, #selector(NSWindow.performMiniaturize(_:)), nil)
   case "zoomWindow": return (nil, #selector(NSWindow.performZoom(_:)), nil)
   default: return nil
@@ -1053,6 +1064,7 @@ func openWelcome() {
       guard !openedFromFinder else { return }
       if let file {
         UserDefaults.standard.set(true, forKey: FirstRun.key)
+        model.quietRecents.insert(file) // the app opened it, not the person: Home's first-launch cards stay
         model.open(file)
       } else {
         DispatchQueue.global(qos: .userInitiated).async { loadDesign() }
