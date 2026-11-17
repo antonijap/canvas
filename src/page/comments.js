@@ -1,8 +1,9 @@
 // Comments on the canvas (design: design/comments/comments.canvas). Press C (or the Comment button in the browser's
 // bar) and click to pin a thread to the layer under the pointer; the layer under it lights up first. A pin is a small
 // teardrop with the author's initial; it follows its layer when it moves or resizes and when the camera moves. A click
-// on a pin opens the thread (replies, Resolve, Delete). A thread whose layer was deleted sits at its board's corner
-// and says so; Pin to a layer puts it on another layer by hand. Esc leaves comment mode.
+// on a pin opens the thread: replies, a Resolve check on the first comment, Delete thread in its right-click menu. A
+// thread whose layer was deleted sits at its board's corner and says so; Pin to a layer puts it on another layer by
+// hand. Esc leaves comment mode.
 //
 // The threads live in comments.json inside the .canvas package (src/comments.ts, docs/cloud/protocol.md). This page
 // reads them with GET /api/comments and changes them by sending ops to POST /api/comments/ops; the answer is the
@@ -21,7 +22,6 @@ const PIN = 28;
 const svg = (body, w = 14) => `<svg width="${w}" height="${w}" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICON = {
   check: svg('<path d="M2.5 7.4l3 3 6-6.4"/>'),
-  more: svg('<circle cx="3" cy="7" r=".6" fill="currentColor"/><circle cx="7" cy="7" r=".6" fill="currentColor"/><circle cx="11" cy="7" r=".6" fill="currentColor"/>'),
   trash: svg('<path d="M2.5 3.8h9M5.5 3.8V2.6h3v1.2M3.8 3.8l.5 7.6h5.4l.5-7.6M5.8 6v3.6M8.2 6v3.6"/>'),
   send: svg('<path d="M7 11.5v-9M3.2 6.2L7 2.4l3.8 3.8"/>'),
   ret: svg('<path d="M11.5 3v4.2H3M5.8 4.6L3 7.2l2.8 2.6"/>', 11),
@@ -63,7 +63,6 @@ function start(host) {
 .cm-pop,.cm-comp{position:absolute;left:0;top:0;border-radius:16px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:13px;line-height:18px;-webkit-user-select:text;user-select:text;cursor:default}
 .cm-pop{width:340px}.cm-comp{width:320px}
 .cm-pop[hidden],.cm-comp[hidden]{display:none}
-.cm-head{display:flex;align-items:center;gap:6px;padding:10px 10px 10px 14px}
 .cm-chip{display:inline-flex;align-items:center;gap:5px;height:22px;min-width:0;padding:0 7px 0 6px;border-radius:7px;background:var(--cm-chip);color:color-mix(in srgb,var(--c-fg) 75%,transparent);font:500 12px/100% var(--c-font-sans)}
 .cm-chip svg{flex:none;color:var(--c-muted-fg)}
 .cm-chip span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:3px 0;margin:-3px 0}
@@ -85,6 +84,10 @@ function start(host) {
 .cm-who time{flex:none;color:var(--cm-time);font-size:12px}
 .cm-who .cm-btn{position:absolute;right:0;top:-1px;opacity:0;height:20px;min-width:20px;background:transparent;color:var(--c-muted-fg)}
 .cm-item:hover .cm-who .cm-btn,.cm-item:focus-within .cm-who .cm-btn{opacity:1}
+.cm-who .cm-btn.cm-res{top:-2px;height:22px;min-width:22px;width:22px;border-radius:11px;opacity:1}
+.cm-who .cm-btn.cm-res:hover{background:var(--cm-chip);color:var(--c-fg)}
+.cm-who .cm-btn.cm-res.on{background:var(--c-fg);color:var(--c-popover)}
+.cm-who.first:has(.cm-res){padding-right:28px}
 .cm-text{color:var(--cm-body);white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.385}
 .cm-note{padding:10px 14px;color:var(--c-muted-fg);font-size:12px;line-height:100%}
 .cm-row{display:flex;align-items:flex-end;gap:8px;padding:10px 10px 10px 14px}
@@ -100,7 +103,7 @@ function start(host) {
 .cm-compfield .cm-fieldwrap{flex:1;min-width:0;padding-top:3px}
 .cm-foot{display:flex;align-items:center;gap:8px;padding:4px 12px 12px 14px}
 .cm-key{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 5px;border-radius:4px;background:var(--cm-chip);color:var(--c-muted-fg);font:500 11px/100% var(--c-font-sans)}
-.cm-menu{position:absolute;right:10px;top:46px;min-width:150px;padding:4px;border-radius:10px;background:var(--c-popover);box-shadow:var(--cm-card);z-index:2}
+.cm-menu{position:absolute;left:0;top:0;min-width:150px;padding:4px;border-radius:10px;background:var(--c-popover);box-shadow:var(--cm-card);z-index:2}
 .cm-menu button{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--c-danger);font:500 12px/100% var(--c-font-sans);cursor:pointer;text-align:left}
 .cm-menu button:hover{background:var(--c-hover)}
 .cm-gone{display:flex;flex-direction:column;gap:10px;padding:12px 10px 10px 14px;border-radius:16px 16px 0 0;background:#fff7ed;color:#c2410c}
@@ -405,7 +408,7 @@ function start(host) {
     }
     const where = layerLabel(t);
     const live = L.liveComments(t);
-    const key = JSON.stringify([t.id, t.resolvedAt || "", where, st.menu, live.map((c) => [c.id, c.body, c.editedAt || ""]), syncKey()]);
+    const key = JSON.stringify([t.id, t.resolvedAt || "", where, live.map((c) => [c.id, c.body, c.editedAt || ""]), syncKey()]);
     pop.hidden = false;
     if (popFor === t.id && popKey === key) return;
     const keep = popFor === t.id ? pop.querySelector(".cm-field") : null;
@@ -413,17 +416,13 @@ function start(host) {
     const hadFocus = keep && document.activeElement === keep;
     popFor = t.id; popKey = key;
     pop.textContent = "";
+    // Resolve is a check at the end of the first comment's name row; Delete thread is in the thread's right-click menu.
     const resolveBtn = () => {
-      const b = h("button", "cm-btn txt" + (t.resolvedAt ? " on" : ""));
-      b.type = "button";
-      b.innerHTML = ICON.check;
-      b.append(lbl(t.resolvedAt ? "Reopen" : "Resolve"));
-      b.setAttribute("aria-label", t.resolvedAt ? "Reopen thread" : "Resolve thread");
+      const b = btnEl("cm-btn cm-res" + (t.resolvedAt ? " on" : ""), ICON.check, t.resolvedAt ? "Reopen thread" : "Resolve thread");
+      b.title = t.resolvedAt ? "Reopen" : "Resolve";
       b.onclick = () => sendOps([env({ kind: "thread.resolve", thread: t.id, resolved: !t.resolvedAt })]).then(() => { if (!showResolved && !t.resolvedAt) { st.open = null; render(); } }).catch((e) => tell(e.message));
       return b;
     };
-    const more = btnEl("cm-btn", ICON.more, "More");
-    more.onclick = () => { st.menu = !st.menu; popKey = ""; drawThread(); };
     if (where.gone) {
       const band = h("div", "cm-gone");
       const g = h("span", "cm-ghost"); g.innerHTML = ICON.ghost;
@@ -433,26 +432,10 @@ function start(host) {
       re.onclick = () => { st.repin = t.id; st.open = null; setMode(true); render(); };
       const top = h("div", "cm-top"), acts = h("div", "cm-acts");
       top.append(g, gt);
-      acts.append(re, resolveBtn(), h("span", "cm-sp"), more);
+      acts.append(re);
       band.append(top, acts);
-      pop.append(band);
-    } else {
-      const head = h("div", "cm-head");
-      head.append(chip(where.name, !t.anchor.nodeId), h("span", "cm-sp"), resolveBtn(), more);
-      pop.append(head);
+      pop.append(band, h("div", "cm-sep"));
     }
-    if (st.menu) {
-      const m = h("div", "cm-menu");
-      const del = h("button", "", "Delete thread");
-      del.type = "button";
-      del.innerHTML = ICON.trash + "";
-      del.append(lbl("Delete thread"));
-      del.setAttribute("aria-label", "Delete thread");
-      del.onclick = () => { st.menu = false; st.open = null; sendOps([env({ kind: "thread.delete", thread: t.id })]).catch((e) => tell(e.message)); render(); };
-      m.append(del);
-      pop.append(m);
-    }
-    pop.append(h("div", "cm-sep"));
     const lst = h("div", "cm-list");
     live.forEach((c, i) => {
       const it = h("div", "cm-item");
@@ -462,6 +445,7 @@ function start(host) {
       const tm = h("time", "", L.ago(c.createdAt));
       tm.title = c.createdAt;
       who.append(h("b", "", c.author && c.author.name ? c.author.name : "Someone"), waiting ? pendingState() : tm);
+      if (i === 0) { who.classList.add("first"); who.append(resolveBtn()); }
       if (i > 0) {
         const x = btnEl("cm-btn", ICON.trash, "Delete comment");
         x.title = "Delete comment";
@@ -492,10 +476,32 @@ function start(host) {
     wrap.append(ta);
     row.append(wrap, send);
     pop.append(row);
+    drawMenu();
     autoGrow(ta);
     lst.scrollTop = lst.scrollHeight;
     if (hadFocus) ta.focus();
     schedule();
+  }
+  /** The open thread's right-click menu (Delete thread) at st.menu, a point in the card; removed when st.menu is false. */
+  function drawMenu() {
+    const old = pop.querySelector(".cm-menu");
+    if (old) old.remove();
+    const t = st.menu && st.open && thread(st.open);
+    if (!t || pop.hidden) return;
+    const m = h("div", "cm-menu");
+    m.setAttribute("role", "menu");
+    const del = h("button");
+    del.type = "button";
+    del.setAttribute("role", "menuitem");
+    del.innerHTML = ICON.trash;
+    del.append(lbl("Delete thread"));
+    del.setAttribute("aria-label", "Delete thread");
+    del.onclick = () => { st.menu = false; st.open = null; sendOps([env({ kind: "thread.delete", thread: t.id })]).catch((e) => tell(e.message)); render(); };
+    m.append(del);
+    pop.append(m);
+    // At the pointer, kept inside the card.
+    m.style.left = Math.max(4, Math.min(st.menu.x, pop.clientWidth - m.offsetWidth - 4)) + "px";
+    m.style.top = Math.max(4, Math.min(st.menu.y, pop.clientHeight - m.offsetHeight - 4)) + "px";
   }
   function openThread(id) {
     st.open = id;
@@ -669,6 +675,7 @@ function start(host) {
   addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
     if (e.key === "Escape" && !typing(e.target)) {
+      if (st.menu && st.open) { st.menu = false; drawMenu(); e.preventDefault(); e.stopPropagation(); return; }
       if (st.draft) { closeDraft(); render(); e.preventDefault(); e.stopPropagation(); return; }
       if (st.open) { openThread(null); e.preventDefault(); e.stopPropagation(); return; }
       if (st.mode) { setMode(false); e.preventDefault(); e.stopPropagation(); }
@@ -711,6 +718,20 @@ function start(host) {
   }
   // Presses inside a card or on a pin must not start a canvas gesture either.
   for (const n of ["pointerdown", "pointerup", "mousedown", "dblclick"]) layer.addEventListener(n, (e) => { if (inUi(e.target)) e.stopPropagation(); }, false);
+  // A right-click on the open thread shows its menu (Delete thread) at the pointer; the reply field keeps the system's
+  // own (paste, spelling). Never the canvas's layer menu. A press anywhere else in the card closes it.
+  pop.addEventListener("contextmenu", (e) => {
+    e.stopPropagation();
+    if (typing(e.target)) return;
+    e.preventDefault();
+    const r = pop.getBoundingClientRect(), z = pop.offsetWidth ? r.width / pop.offsetWidth : 1;
+    st.menu = { x: Math.round((e.clientX - r.left) / z), y: Math.round((e.clientY - r.top) / z) };
+    drawMenu();
+  });
+  pop.addEventListener("pointerdown", (e) => {
+    if (!st.menu || e.button === 2 || (e.target.closest && e.target.closest(".cm-menu"))) return;
+    st.menu = false; drawMenu();
+  });
 
   host.comments = {
     get mode() { return st.mode; },
