@@ -245,6 +245,8 @@ class FileActions: NSObject, NSMenuItemValidation {
   @objc func newCanvas(_ s: Any?) { model.newCanvas() }
   @objc func openDocument(_ s: Any?) { model.openDocument() }
   @objc func saveAsCanvas(_ s: Any?) { model.saveAsCanvas() }
+  /// File > Share Comments to Server...: the open file's comments go to the team server set in Settings > Cloud.
+  @objc func shareComments(_ s: Any?) { MainActor.assumeIsolated { CloudAccount.shared.shareOpenFile(model) } }
   /// File > Export (Shift+Cmd+E): the selection, else every layer on the page with export settings (Library.swift).
   @objc func exportSettings(_ s: Any?) { model.exportSelectionWithSettings() }
   /// Cmd+W: closes the file's tab, not the window. With no tab open it closes the window.
@@ -253,7 +255,7 @@ class FileActions: NSObject, NSMenuItemValidation {
     if let f = model.currentFile { model.close(f) } else { window.performClose(nil) }
   }
   func validateMenuItem(_ item: NSMenuItem) -> Bool {
-    if item.action == #selector(exportSettings(_:)) { return model.currentFile != nil }
+    if item.action == #selector(exportSettings(_:)) || item.action == #selector(shareComments(_:)) { return model.currentFile != nil }
     return true
   }
 }
@@ -728,6 +730,7 @@ func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op:
   case "open": return (fileActions, #selector(FileActions.openDocument(_:)), nil)
   case "closeTab": return (fileActions, #selector(FileActions.closeTab(_:)), nil)
   case "saveAs": return (fileActions, #selector(FileActions.saveAsCanvas(_:)), nil)
+  case "shareComments": return (fileActions, #selector(FileActions.shareComments(_:)), nil)
   case "reload": return (fileActions, #selector(FileActions.reloadPage(_:)), nil)
   case "undo": return (editActions, #selector(EditActions.undo(_:)), nil)
   case "redo": return (editActions, #selector(EditActions.redo(_:)), nil)
