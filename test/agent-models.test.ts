@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { buildCommand, modelsOf } from "../src/agent-run.ts";
 import { cleanSettings } from "../src/settings.ts";
 
-const base = { mcpSession: "s", mcpConfigPath: "/tmp/m.json", node: "/usr/bin/node", port: 5189, serverVersion: "v" };
+const base = { resume: false, mcpSession: "s", mcpConfigPath: "/tmp/m.json", node: "/usr/bin/node", port: 5189, serverVersion: "v" };
 const claude = { id: "claude" as const, label: "Claude Code", path: "/x/claude", real: "/x/claude" };
 const codex = { id: "codex" as const, label: "Codex", path: "/x/codex", real: "/x/codex" };
 
