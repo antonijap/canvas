@@ -34,6 +34,8 @@ export type LoadedDoc = {
   logStale?: boolean;
   /** That stale log was copied here with its package (doclog.ts isCopy): recovered over these bytes, never dropped. */
   logCopy?: boolean;
+  /** That stale log is for these very bytes in this very file, only its ctime moved: put back in place (a restore). */
+  logRestored?: boolean;
   /** A save log this build does not read (a newer version): ignored, and never removed. */
   logUnknown?: boolean;
   /** The save log's first line (who appends to it, what it applies to). */
@@ -47,6 +49,7 @@ export const logFields = (lg: WithLog): Partial<LoadedDoc> => ({
   ...(lg.log ? { log: lg.log } : {}),
   ...(lg.stale ? { logStale: true } : {}),
   ...(lg.copy ? { logCopy: true } : {}),
+  ...(lg.restored ? { logRestored: true } : {}),
   ...(lg.unknown ? { logUnknown: true } : {}),
   ...(lg.head ? { logHead: lg.head } : {}),
   ...(lg.seen ? { logSeen: lg.seen } : {}),

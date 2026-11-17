@@ -49,12 +49,35 @@ const HEAD = "CANVASLOG";
 
 export const logPathOf = (docFile: string) => path.join(path.dirname(docFile), `.${path.basename(docFile)}.canvas-log`);
 export const lockPathOf = (docFile: string) => path.join(path.dirname(docFile), `.${path.basename(docFile)}.canvas-lock`);
-/** The tie of a document file: inode and mtime, as fs.stat gives them. */
-export const tieOf = (st: { ino: number; mtimeMs: number }) => `${st.ino}:${st.mtimeMs}`;
+/** The tie of a document file: inode, mtime and ctime, as fs.stat gives them. */
+export const tieOf = (st: { ino: number; mtimeMs: number; ctimeMs: number }) => `${st.ino}:${st.mtimeMs}:${st.ctimeMs}`;
 /** The document part of a header's tie (inode:mtime), without the log's own inode. */
 const docTie = (t: string | undefined) => t?.split(":").slice(0, 2).join(":");
 /** The inode a header says its log file has (undefined: a log made before that was written). */
 const logInoOf = (t: string | undefined) => t?.split(":")[2];
+/** The document's ctime a header's tie names (undefined: a log made before the ctime was in it). */
+export const tieCtimeOf = (t: string | undefined) => t?.split(":")[3];
+/**
+ * Whether a header's tie names the document file whose tie (tieOf) is `now`: the same inode and mtime, and the same
+ * ctime when the header has one. A write in place that sets the mtime back (cp -p, a backup tool restoring a file)
+ * still moves the ctime, which nothing can set back.
+ */
+function tieMatches(head: string | undefined, now: string): boolean {
+  const [ino, mtime, ctime] = now.split(":");
+  if (docTie(head) !== `${ino}:${mtime}`) return false;
+  const c = tieCtimeOf(head);
+  return c === undefined || ctime === undefined || c === ctime;
+}
+/**
+ * The document was put back in place to the very bytes the log applies to (same inode, same mtime, only the ctime
+ * moved): a restore (cp -p, a backup tool), or someone touched only its attributes. The log's edits are not put on top.
+ */
+function restoredInPlace(head: LogHead, base: string, now: string | undefined): boolean {
+  if (!now || head.base !== base || !head.tie) return false;
+  const [ino, mtime, ctime] = now.split(":");
+  const c = tieCtimeOf(head.tie);
+  return docTie(head.tie) === `${ino}:${mtime}` && c !== undefined && ctime !== undefined && c !== ctime;
+}
 /**
  * A log read from a file other than the one its header was written in: a copy of the package (or a backup put
  * back). `sig` is the log file's inode:bytes as read (inode 0: not read from a file, never a copy).
@@ -135,7 +158,7 @@ export function encodeRecord(seq: number, boards: Buffer[], ids?: string[], top?
 export function parseLog(raw: Buffer, base: string, tie?: string, anyBase = false): { info: LogInfo; records: LogRecord[]; ends: { hash: string; end: number }[]; head: LogHead } | { stale: string; head: LogHead } | { unknown: string } | null {
   const h = headOf(raw);
   if (!h || "unknown" in h) return h;
-  const tieOk = tie === undefined || h.version < 2 || docTie(h.tie) === tie;
+  const tieOk = tie === undefined || h.version < 2 || tieMatches(h.tie, tie);
   if (!anyBase && (h.base !== base || !tieOk)) return { stale: h.base, head: h };
   const records: LogRecord[] = [];
   const ends: { hash: string; end: number }[] = [];
@@ -239,6 +262,11 @@ export type WithLog = {
   stale?: boolean;
   /** That stale log is a copy of another package's (isCopy): its edits are recovered over these bytes, never dropped. */
   copy?: boolean;
+  /**
+   * That stale log is for these very bytes in this very file, and only the file's ctime moved (restoredInPlace): the
+   * file was put back to them (a restore in place), so its edits are not put on top; they are kept as a recovery copy.
+   */
+  restored?: boolean;
   /** A log this build does not read (a newer version): not applied, never removed. */
   unknown?: boolean;
   /** Its first line, when it has one this build reads. */
@@ -263,7 +291,7 @@ export function withLog(docFile: string, base: string, doc: CanvasDoc, read: { r
     // A copy of a package whose log came along, next to the very bytes it was written for: it applies (the copy
     // holds the same edits as the original), and is folded into the copy's document.json at once.
     const q = copy && p.head.base === base ? parseLog(raw, base) : null;
-    if (!q || !("records" in q)) return { doc, stale: true, head: p.head, seen: sig, ...(copy ? { copy } : {}) };
+    if (!q || !("records" in q)) return { doc, stale: true, head: p.head, seen: sig, ...(copy ? { copy } : !copy && restoredInPlace(p.head, base, tie) ? { restored: true } : {}) };
     p = q;
   }
   const meta = { head: p.head, seen: sig };

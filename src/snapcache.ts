@@ -44,6 +44,8 @@ export type SnapshotCacheOptions = {
    * edits that were not on disk yet onto the new bytes, and may hand back the revision to use instead of the hash.
    */
   reconcile?: (file: string, loaded: LoadedDoc, sig: string) => { revision?: string } | void;
+  /** A signature `sig` whose ctime alone moved changes the document even with the same bytes (docwriter.ts restoreSuspected). */
+  ctimeOnlyChanges?: (file: string, sig: string) => boolean;
   /** Skip fs.watch and poll with fs.watchFile (what the cache falls back to when fs.watch fails). */
   forcePoll?: boolean;
   pollMs?: number;
@@ -52,7 +54,7 @@ export type SnapshotCacheOptions = {
 export class SnapshotCache {
   private entries = new Map<string, Entry>();
   private dirs = new Map<string, DirWatch>();
-  private o: Required<Omit<SnapshotCacheOptions, "onFirst" | "pinned" | "reconcile">> & Pick<SnapshotCacheOptions, "onFirst" | "pinned" | "reconcile">;
+  private o: Required<Omit<SnapshotCacheOptions, "onFirst" | "pinned" | "reconcile" | "ctimeOnlyChanges">> & Pick<SnapshotCacheOptions, "onFirst" | "pinned" | "reconcile" | "ctimeOnlyChanges">;
   /**
    * Files the server itself wrote (docwriter.ts), the last few per document: the temp file's inode:size:mtime, the
    * ctime the rename left (once known) and the hash of the bytes. A stat that matches all of it is ours, even when
@@ -114,7 +116,7 @@ export class SnapshotCache {
     if (e && own === true) return (e.sig = sig), (e.ownSince = false), e.snap;
     // A write of ours whose ctime is not confirmed, or a file whose ctime alone moved (a tag, a link): its bytes
     // decide, hashed without parsing them.
-    const known = own && own !== true && own.hash ? own.hash : e && !e.ownSince && key3Of(sig) === key3Of(e.sig) ? e.diskHash : undefined;
+    const known = own && own !== true && own.hash ? own.hash : e && !e.ownSince && key3Of(sig) === key3Of(e.sig) && !this.o.ctimeOnlyChanges?.(file, sig) ? e.diskHash : undefined;
     if (e && known) {
       const h = await hashFile(file).catch(() => "");
       const still = sigOf(await fs.promises.stat(file)) === sig;
@@ -162,7 +164,7 @@ export class SnapshotCache {
     if (e && e.sig === sig) return e.snap;
     const own = e ? this.ownOf(file, sig) : undefined;
     if (e && own === true) return (e.sig = sig), (e.ownSince = false), e.snap;
-    const known = own && own !== true && own.hash ? own.hash : e && !e.ownSince && key3Of(sig) === key3Of(e.sig) ? e.diskHash : undefined;
+    const known = own && own !== true && own.hash ? own.hash : e && !e.ownSince && key3Of(sig) === key3Of(e.sig) && !this.o.ctimeOnlyChanges?.(file, sig) ? e.diskHash : undefined;
     if (e && known) {
       let h = "";
       try {
