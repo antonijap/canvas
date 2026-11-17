@@ -37,7 +37,7 @@ import { promisify } from "node:util";
 import zlib from "node:zlib";
 import { boardCache, forgetBoard } from "./boardcache.ts";
 import { boardLacks } from "./doc/boardindex.ts";
-import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logPathOf, logSig, logSigSync, parseLog, readLogSync, removeLogSync, tieCtimeOf, tryLockLog, type LogInfo } from "./doc/doclog.ts";
+import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logLockable, logPathOf, logSig, logSigSync, parseLog, readLogSync, removeLogSync, tieCtimeOf, tryLockLog, type LogInfo } from "./doc/doclog.ts";
 import { boardDigestStale, snapshotOfDoc, type Snapshot } from "./boards.ts";
 import { backupDirFor, findNode, loadDoc, loadDocAsync, revisionOf, sha, StaleFileError, writeDoc, type LoadedDoc, type CanvasDoc, type DocNode } from "./engine.ts";
 import type { NodeOp, Op } from "./history.ts";
@@ -1806,6 +1806,7 @@ function retireLog(st: FileState): void {
 function logEligible(st: FileState): boolean {
   if (!(st.bytes >= writeConfig.logMinBytes) || !Number.isFinite(st.bytes)) return false;
   if (!st.logDoc || st.compactDue || st.undurable || !st.diskHash || st.logUnknown) return false;
+  if (!logLockable(st.docFile)) return false; // no flock on this volume: no log (doc/doclog.ts, the lock)
   if (st.log) {
     // Only our own log, for the bytes on disk, and not older than compactMaxMs (the window an older build or another app
     // reads document.json without it stays short even while edits never pause).

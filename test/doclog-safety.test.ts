@@ -592,6 +592,7 @@ async function spawnEnv(root: string, env: Record<string, string>): Promise<Scra
 }
 /** A preload that makes every volume look like one without flock (a network share whose server has no lock support). */
 function noFlockPreload(): string {
+  fs.mkdirSync(dir, { recursive: true });
   const f = path.join(dir, "no-flock.mjs");
   fs.writeFileSync(
     f,
