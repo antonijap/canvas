@@ -1413,33 +1413,44 @@ describe("writer data safety, eleventh review (Codex)", () => {
     const file = make("groupcommit");
     await open(file);
     const journal = () => fs.readdirSync(dir).filter((f) => f.startsWith(".groupcommit.canvas.json.canvas-journal-")).map((f) => fs.readFileSync(path.join(dir, f), "utf8")).join("\n");
+    const waitFor = async (condition: () => boolean, message: string) => {
+      const deadline = performance.now() + 10_000;
+      while (!condition()) {
+        assert.ok(performance.now() < deadline, message);
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    };
     const fsync0 = fs.fsync;
     let held: (() => void)[] = [];
     let calls = 0;
     await slowWrites(async () => {
       // The first edit opens the journal (written and fsynced before it answers).
       assert.equal((await update(file, "R0_0", { fill: "#580000" })).status, 200);
+      const journalInode = fs.statSync(path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith(".groupcommit.canvas.json.canvas-journal-"))!)).ino;
       (fs as any).fsync = (fd: number, cb: (e: Error | null) => void) => {
+        // Other background saves can sync the folder while this journal's round is held.
+        if (fs.fstatSync(fd).ino !== journalInode) return (fsync0 as any)(fd, cb);
         calls++;
         held.push(() => (fsync0 as any)(fd, cb));
       };
       try {
         let answered = false;
         const pending = update(file, "R0_1", { fill: "#580001" }).then((r) => ((answered = true), r));
-        for (let i = 0; i < 50 && !held.length; i++) await new Promise((r) => setTimeout(r, 10));
+        await waitFor(() => held.length > 0, "the journal fsync was not asked for");
         assert.equal(held.length, 1, "the journal fsync was asked for");
         assert.match(journal(), /#580001/, "the line is in the journal before the fsync");
         await new Promise((r) => setTimeout(r, 150));
         assert.equal(answered, false, "no answer while the fsync covering the edit has not finished");
         // A burst while that fsync is held: every line joins one next round.
-        const burst = Array.from({ length: 20 }, (_, i) => update(file, `R${1 + (i % 9)}_${i % 5}`, { fill: `#5801${String(i).padStart(2, "0")}` }));
-        await new Promise((r) => setTimeout(r, 150));
+        const fills = Array.from({ length: 20 }, (_, i) => `#5801${String(i).padStart(2, "0")}`);
+        const burst = fills.map((fill, i) => update(file, `R${1 + (i % 9)}_${i % 5}`, { fill }));
+        await waitFor(() => { const lines = journal(); return fills.every((fill) => lines.includes(fill)); }, "the burst did not reach the journal");
         assert.equal(calls, 1, "the burst waits for the round in flight, not one fsync each");
         let burstAnswered = 0;
         for (const b of burst) void b.then(() => burstAnswered++);
         held.shift()!();
         assert.equal((await pending).status, 200);
-        for (let i = 0; i < 50 && !held.length; i++) await new Promise((r) => setTimeout(r, 10));
+        await waitFor(() => held.length > 0, "the burst fsync was not asked for");
         assert.equal(calls, 2, "one more fsync covers the whole burst");
         await new Promise((r) => setTimeout(r, 100));
         assert.equal(burstAnswered, 0, "no edit of the burst answers before the fsync that covers it");

@@ -342,14 +342,14 @@ describe("in one server", () => {
 // The second review (docs/evidence/speed.md, "Save log, second review fixes"): each case lost acknowledged edits with
 // the log on, none with it off.
 
-/** Another process holds the log's lock for `ms` (a hung or slow Canvas in the middle of a whole write). */
-async function holdLock(lockPath: string, ms: number) {
+/** Another process holds the log's lock until released, or for `ms` when given. */
+async function holdLock(lockPath: string, ms?: number) {
   const { spawn: spawnProc } = await import("node:child_process");
-  const code = `const fs=require("fs");const fd=fs.openSync(process.argv[1],fs.constants.O_RDWR|fs.constants.O_CREAT|0x20,0o600);console.log("HELD");setTimeout(()=>{fs.closeSync(fd);console.log("RELEASED")},Number(process.argv[2]))`;
-  const h = spawnProc(process.execPath, ["-e", code, lockPath, String(ms)], { stdio: ["ignore", "pipe", "inherit"] });
+  const code = `const fs=require("fs");const fd=fs.openSync(process.argv[1],fs.constants.O_RDWR|fs.constants.O_CREAT|0x20,0o600);const release=()=>{fs.closeSync(fd);console.log("RELEASED");process.stdin.destroy()};console.log("HELD");if(Number(process.argv[2]))setTimeout(release,Number(process.argv[2]));else{process.stdin.resume();process.stdin.once("end",release)}`;
+  const h = spawnProc(process.execPath, ["-e", code, lockPath, String(ms ?? 0)], { stdio: ["pipe", "pipe", "inherit"] });
   await new Promise<void>((r) => h.stdout!.on("data", (d) => String(d).includes("HELD") && r()));
   const released = new Promise<void>((r) => (h.exitCode !== null ? r() : h.once("exit", () => r())));
-  return { released, kill: () => void h.kill("SIGKILL") };
+  return { released, release: () => h.stdin!.end(), kill: () => void h.kill("SIGKILL") };
 }
 /** Where an edit is kept: in the document (with its log), or in a recovery copy beside it (false: nowhere). */
 function keptAnywhere(p: { pkg: string; docPath: string }, id: string, name: string): string | false {
@@ -474,7 +474,7 @@ describe("second review: the lock held by another Canvas", () => {
     await kill9(s);
     outsideSave(p.docPath, (d) => (nodeIn(d, "B5N6").name = "OUT")); // the log is stale now, its server gone
     const logBytes = fs.readFileSync(p.logPath);
-    const h = await holdLock(L.lockPathOf(p.docPath), 7000);
+    const h = await holdLock(L.lockPathOf(p.docPath));
     try {
       s = await spawn(p.root);
       const c = client(s.base, p.pkg);
@@ -490,6 +490,7 @@ describe("second review: the lock held by another Canvas", () => {
       assert.ok(worst < 1000, `the server kept answering while the lock was held (slowest answer ${worst} ms)`);
       assert.deepEqual(fs.readFileSync(p.logPath), logBytes, "the log is untouched while another Canvas holds the lock");
       assert.equal(fs.readdirSync(p.pkg).filter((f) => f.startsWith("document.json.recovered-")).length, 0, "no recovery made without the lock");
+      h.release();
       await h.released;
       assert.ok(await until(() => !fs.existsSync(p.logPath), 8000), "settled once the lock was free");
       assert.ok(keptAnywhere(p, "B0N1", "E1"), "E1 kept (a recovery copy)");
