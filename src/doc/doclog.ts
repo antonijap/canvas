@@ -49,12 +49,35 @@ const HEAD = "CANVASLOG";
 
 export const logPathOf = (docFile: string) => path.join(path.dirname(docFile), `.${path.basename(docFile)}.canvas-log`);
 export const lockPathOf = (docFile: string) => path.join(path.dirname(docFile), `.${path.basename(docFile)}.canvas-lock`);
-/** The tie of a document file: inode and mtime, as fs.stat gives them. */
-export const tieOf = (st: { ino: number; mtimeMs: number }) => `${st.ino}:${st.mtimeMs}`;
+/** The tie of a document file: inode, mtime and ctime, as fs.stat gives them. */
+export const tieOf = (st: { ino: number; mtimeMs: number; ctimeMs: number }) => `${st.ino}:${st.mtimeMs}:${st.ctimeMs}`;
 /** The document part of a header's tie (inode:mtime), without the log's own inode. */
 const docTie = (t: string | undefined) => t?.split(":").slice(0, 2).join(":");
 /** The inode a header says its log file has (undefined: a log made before that was written). */
 const logInoOf = (t: string | undefined) => t?.split(":")[2];
+/** The document's ctime a header's tie names (undefined: a log made before the ctime was in it). */
+export const tieCtimeOf = (t: string | undefined) => t?.split(":")[3];
+/**
+ * Whether a header's tie names the document file whose tie (tieOf) is `now`: the same inode and mtime, and the same
+ * ctime when the header has one. A write in place that sets the mtime back (cp -p, a backup tool restoring a file)
+ * still moves the ctime, which nothing can set back.
+ */
+function tieMatches(head: string | undefined, now: string): boolean {
+  const [ino, mtime, ctime] = now.split(":");
+  if (docTie(head) !== `${ino}:${mtime}`) return false;
+  const c = tieCtimeOf(head);
+  return c === undefined || ctime === undefined || c === ctime;
+}
+/**
+ * The document was put back in place to the very bytes the log applies to (same inode, same mtime, only the ctime
+ * moved): a restore (cp -p, a backup tool), or someone touched only its attributes. The log's edits are not put on top.
+ */
+function restoredInPlace(head: LogHead, base: string, now: string | undefined): boolean {
+  if (!now || head.base !== base || !head.tie) return false;
+  const [ino, mtime, ctime] = now.split(":");
+  const c = tieCtimeOf(head.tie);
+  return docTie(head.tie) === `${ino}:${mtime}` && c !== undefined && ctime !== undefined && c !== ctime;
+}
 /**
  * A log read from a file other than the one its header was written in: a copy of the package (or a backup put
  * back). `sig` is the log file's inode:bytes as read (inode 0: not read from a file, never a copy).
@@ -135,7 +158,7 @@ export function encodeRecord(seq: number, boards: Buffer[], ids?: string[], top?
 export function parseLog(raw: Buffer, base: string, tie?: string, anyBase = false): { info: LogInfo; records: LogRecord[]; ends: { hash: string; end: number }[]; head: LogHead } | { stale: string; head: LogHead } | { unknown: string } | null {
   const h = headOf(raw);
   if (!h || "unknown" in h) return h;
-  const tieOk = tie === undefined || h.version < 2 || docTie(h.tie) === tie;
+  const tieOk = tie === undefined || h.version < 2 || tieMatches(h.tie, tie);
   if (!anyBase && (h.base !== base || !tieOk)) return { stale: h.base, head: h };
   const records: LogRecord[] = [];
   const ends: { hash: string; end: number }[] = [];
@@ -239,6 +262,13 @@ export type WithLog = {
   stale?: boolean;
   /** That stale log is a copy of another package's (isCopy): its edits are recovered over these bytes, never dropped. */
   copy?: boolean;
+  /**
+   * That stale log is for these very bytes in this very file, and only the file's ctime moved (restoredInPlace): the
+   * file was put back to them (a restore in place), so its edits are not put on top; they are kept as a recovery copy.
+   */
+  restored?: boolean;
+  /** That stale log ends with a fold line naming these very bytes (foldedInto): they hold its edits; it only waits to be removed. */
+  folded?: boolean;
   /** A log this build does not read (a newer version): not applied, never removed. */
   unknown?: boolean;
   /** Its first line, when it has one this build reads. */
@@ -259,11 +289,12 @@ export function withLog(docFile: string, base: string, doc: CanvasDoc, read: { r
   if ("unknown" in p) return { doc, unknown: true, seen: sig };
   let copy = false;
   if ("stale" in p) {
+    if (foldedInto(raw) === base) return { doc, stale: true, folded: true, head: p.head, seen: sig };
     copy = isCopy(p.head, sig);
     // A copy of a package whose log came along, next to the very bytes it was written for: it applies (the copy
     // holds the same edits as the original), and is folded into the copy's document.json at once.
     const q = copy && p.head.base === base ? parseLog(raw, base) : null;
-    if (!q || !("records" in q)) return { doc, stale: true, head: p.head, seen: sig, ...(copy ? { copy } : {}) };
+    if (!q || !("records" in q)) return { doc, stale: true, head: p.head, seen: sig, ...(copy ? { copy } : !copy && restoredInPlace(p.head, base, tie) ? { restored: true } : {}) };
     p = q;
   }
   const meta = { head: p.head, seen: sig };
@@ -340,61 +371,65 @@ export const stateHashOf = (l: { hash: string; log?: LogInfo }) => (l.log && l.l
 
 // ---------------------------------------------------------------- the lock
 
-// Appending to the log, and writing the document whole while a log is there, happen under an exclusive lock on
-// `.<document>.canvas-lock`, so two Canvas servers on one file never interleave them: an append never lands in a
-// log another server is folding into a whole write, and a whole write never misses a record appended meanwhile.
-// On macOS it is flock (open with O_EXLOCK): the kernel lets go of it when its process dies. Elsewhere, or on a
-// volume without flock, a lock file of its own (`.held`, created exclusively, holding the pid) stands in.
+// Appending to the log, and writing the document whole, happen under an exclusive lock on `.<document>.canvas-lock`,
+// so two Canvas servers on one file never interleave them: an append never lands in a log another server is folding
+// into a whole write, and a whole write never misses a record appended meanwhile. It is flock (open with O_EXLOCK,
+// macOS): the kernel lets go of it when its process dies, and a network volume's server keeps it for every client.
+//
+// There is no stand-in where flock is missing (another platform, or a volume that answers ENOTSUP or ENOLCK, such as a
+// network share without lock support). A lock file of our own (it was `.held`, holding the pid) is taken from a holder
+// on another Mac (its pid means nothing here), stays held for good when its process dies between making it and
+// writing the pid, and two processes that both find a dead holder's file can both remove it and both take it. So there
+// the log stays off (logLockable is false: saves are whole, as before the log) and the lock is a no-op: whole writes go
+// as they did before the log, and a log that came along (a package copied there) is still read and folded.
 const O_EXLOCK = 0x20; // <sys/fcntl.h>, macOS
 const BUSY = new Set(["EAGAIN", "EWOULDBLOCK"]);
-const NO_FLOCK = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL"]);
+const NO_FLOCK = new Set(["ENOTSUP", "EOPNOTSUPP", "EINVAL", "ENOLCK"]);
 const heldHere = new Set<string>();
+/** Folders whose volume has no flock (found when a lock was tried there). */
 const noFlock = new Set<string>();
+/** Folders whose volume has it. */
+const hasFlock = new Set<string>();
+const NO_LOCK = () => {};
 
-const pidAlive = (pid: number) => {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
-
-/** One try. A release function, or null when someone holds it. */
+/** One try. A release function (a no-op where flock is missing), or null when someone holds it. */
 function tryLock(file: string): (() => void) | null {
-  if (process.platform === "darwin" && !noFlock.has(path.dirname(file))) {
-    try {
-      const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT | O_EXLOCK | fs.constants.O_NONBLOCK, 0o600);
-      return () => {
-        try {
-          fs.closeSync(fd);
-        } catch {}
-      };
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code ?? "";
-      if (BUSY.has(code)) return null;
-      if (!NO_FLOCK.has(code)) throw e;
-      noFlock.add(path.dirname(file));
-    }
-  }
-  const held = `${file}.held`;
+  const dir = path.dirname(file);
+  if (process.platform !== "darwin" || noFlock.has(dir)) return NO_LOCK;
   try {
-    const fd = fs.openSync(held, "wx", 0o600);
-    try {
-      fs.writeSync(fd, String(process.pid));
-    } finally {
-      fs.closeSync(fd);
-    }
-    return () => fs.rmSync(held, { force: true });
+    const fd = fs.openSync(file, fs.constants.O_RDWR | fs.constants.O_CREAT | O_EXLOCK | fs.constants.O_NONBLOCK, 0o600);
+    hasFlock.add(dir);
+    return () => {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    };
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    let pid = 0;
-    try {
-      pid = Number(fs.readFileSync(held, "utf8"));
-    } catch {}
-    if (pid && pid !== process.pid && !pidAlive(pid)) fs.rmSync(held, { force: true }); // its process is gone: the next try takes it
-    return null;
+    const code = (e as NodeJS.ErrnoException).code ?? "";
+    if (BUSY.has(code)) return null;
+    if (!NO_FLOCK.has(code)) throw e;
+    noFlock.add(dir);
+    return NO_LOCK;
+  }
+}
+
+/**
+ * Whether the save log may be used for `docFile`: its folder's volume has flock (tried once per folder, by taking and
+ * letting go of the lock). False on another platform, on a volume without it, and where the lock file cannot be made.
+ */
+export function logLockable(docFile: string): boolean {
+  const file = lockPathOf(docFile);
+  const dir = path.dirname(file);
+  if (process.platform !== "darwin" || noFlock.has(dir)) return false;
+  if (hasFlock.has(dir) || heldHere.has(file)) return true;
+  try {
+    const r = tryLock(file);
+    if (r === NO_LOCK) return false;
+    r?.(); // null: someone holds it, so the volume has flock
+    hasFlock.add(dir);
+    return true;
+  } catch {
+    return false; // the lock file cannot be made (a read-only folder): no log either
   }
 }
 
@@ -452,6 +487,78 @@ export function lockLogSync(docFile: string, timeoutMs = lockConfig.syncWaitMs):
     if (r) return claim(docFile, r);
     if (Date.now() - t0 > timeoutMs) throw new Error(`the save log of ${path.basename(docFile)} stayed locked by another Canvas for ${timeoutMs} ms`);
     Atomics.wait(nap, 0, 0, wait);
+  }
+}
+
+// ---------------------------------------------------------------- the fold line
+
+// A whole write that folds the log (its edits are in the bytes it writes) appends `F <sha256 of those bytes>\n` to the
+// log, under the lock, right before its rename, and removes the log once the rename is durable. A crash in between
+// leaves the log beside bytes that hold it: its last line names them, so nobody applies its edits again (on top of
+// them they would land twice) or keeps them as a recovery copy. A reader that does not know the line stops at it
+// (it is not a record): the records before it stay valid.
+const FOLD_LEN = 67; // "F " + 64 hex + "\n"
+const foldLine = (hash: string) => Buffer.from(`F ${hash}\n`);
+
+/** The document hash a log's fold line names, when it ends with one. */
+export function foldedInto(raw: Buffer): string | undefined {
+  if (raw.length < FOLD_LEN) return undefined;
+  return /^F ([0-9a-f]{64})\n$/.exec(raw.subarray(raw.length - FOLD_LEN).toString("latin1"))?.[1];
+}
+
+/** Append the fold line for the bytes hashing to `hash` (the caller holds the lock). Its undo, or null: no log. */
+export async function markFold(docFile: string, hash: string): Promise<(() => void) | null> {
+  let fh: fs.promises.FileHandle;
+  try {
+    fh = await fs.promises.open(logPathOf(docFile), "r+");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+  try {
+    const size = (await fh.stat()).size;
+    const buf = foldLine(hash);
+    for (let off = 0; off < buf.length; ) {
+      const { bytesWritten } = await fh.write(buf, off, buf.length - off, size + off);
+      if (!(bytesWritten > 0)) throw new Error("a write made no progress");
+      off += bytesWritten;
+    }
+    await fh.sync();
+    return () => {
+      try {
+        fs.truncateSync(logPathOf(docFile), size);
+      } catch {}
+    };
+  } finally {
+    await fh.close();
+  }
+}
+
+/** markFold for synchronous callers (store.ts saveDoc). */
+export function markFoldSync(docFile: string, hash: string): (() => void) | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(logPathOf(docFile), "r+");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    const buf = foldLine(hash);
+    for (let off = 0; off < buf.length; ) {
+      const n = fs.writeSync(fd, buf, off, buf.length - off, size + off);
+      if (!(n > 0)) throw new Error("a write made no progress");
+      off += n;
+    }
+    fs.fsyncSync(fd);
+    return () => {
+      try {
+        fs.truncateSync(logPathOf(docFile), size);
+      } catch {}
+    };
+  } finally {
+    fs.closeSync(fd);
   }
 }
 

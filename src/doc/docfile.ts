@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import type { Json, DocNode } from "./schema.ts";
-import { holdsLogLock, lockLogSync, logSigSync, readLogSync, removeLogSync, tieOf, withLog, type LogHead, type LogInfo, type WithLog } from "./doclog.ts";
+import { holdsLogLock, lockLogSync, logSigSync, markFoldSync, readLogSync, removeLogSync, tieOf, withLog, type LogHead, type LogInfo, type WithLog } from "./doclog.ts";
 
 export type CanvasDoc = {
   version?: string;
@@ -34,6 +34,10 @@ export type LoadedDoc = {
   logStale?: boolean;
   /** That stale log was copied here with its package (doclog.ts isCopy): recovered over these bytes, never dropped. */
   logCopy?: boolean;
+  /** That stale log is for these very bytes in this very file, only its ctime moved: put back in place (a restore). */
+  logRestored?: boolean;
+  /** That stale log was folded into these very bytes (its fold line names them): nothing in it is applied again. */
+  logFolded?: boolean;
   /** A save log this build does not read (a newer version): ignored, and never removed. */
   logUnknown?: boolean;
   /** The save log's first line (who appends to it, what it applies to). */
@@ -47,6 +51,8 @@ export const logFields = (lg: WithLog): Partial<LoadedDoc> => ({
   ...(lg.log ? { log: lg.log } : {}),
   ...(lg.stale ? { logStale: true } : {}),
   ...(lg.copy ? { logCopy: true } : {}),
+  ...(lg.restored ? { logRestored: true } : {}),
+  ...(lg.folded ? { logFolded: true } : {}),
   ...(lg.unknown ? { logUnknown: true } : {}),
   ...(lg.head ? { logHead: lg.head } : {}),
   ...(lg.seen ? { logSeen: lg.seen } : {}),
@@ -235,15 +241,15 @@ export function saveDoc(loaded: LoadedDoc, doc: CanvasDoc): { hash: string; back
   // Without a way to keep them (no hard links on the volume: a clone checked against what was loaded), nothing is replaced.
   const prev = `${tmp}.prev`;
   let kind: "link" | "copy" | undefined;
-  // A save log beside the file (doclog.ts): no Canvas may append to it or fold it while this save swaps the file,
-  // it must still be the log this load applied, and once the swap is done it is retired (this save holds its edits).
+  // The save log's lock (doclog.ts), whether or not this load saw a log: another Canvas may have made one since, and
+  // may be folding it into a whole write right now (between its last look at the disk and its rename). Under the lock
+  // no Canvas appends to the log or folds it while this save swaps the file; the log must still be the one this load
+  // applied (or still none), and once the swap is done it is retired (this save holds its edits).
   let unlock: (() => void) | undefined;
   try {
-    if (loaded.logSeen) {
-      if (holdsLogLock(loaded.path)) throw new StaleFileError(`${loaded.path} is being saved by Canvas right now. Nothing was written. Read it again and redo the change.`);
-      unlock = lockLogSync(loaded.path);
-      if (logSigSync(loaded.path) !== loaded.logSeen) throw new StaleFileError(`${loaded.path} changed on disk after it was read (its save log). Nothing was written. Read it again and redo the change.`);
-    }
+    if (holdsLogLock(loaded.path)) throw new StaleFileError(`${loaded.path} is being saved by Canvas right now. Nothing was written. Read it again and redo the change.`);
+    unlock = lockLogSync(loaded.path);
+    if (logSigSync(loaded.path) !== (loaded.logSeen ?? "none")) throw new StaleFileError(`${loaded.path} changed on disk after it was read (its save log). Nothing was written. Read it again and redo the change.`);
     fs.chmodSync(tmp, loaded.mode || 0o644);
     assertUnchanged(); // last check right before the swap
     try {
@@ -255,7 +261,15 @@ export function saveDoc(loaded: LoadedDoc, doc: CanvasDoc): { hash: string; back
       kind = "copy";
       if (sha(fs.readFileSync(prev, "utf8")) !== loaded.hash) throw new StaleFileError(`${loaded.path} changed on disk after it was read. Nothing was written. Read it again and redo the change.`);
     }
-    fs.renameSync(tmp, loaded.path);
+    // The log this save retires: its fold line first (a crash before it is removed leaves a log that names these bytes).
+    const retires = !!loaded.log || (!!loaded.logSeen && !loaded.logHead && !loaded.logUnknown);
+    const unmark = retires ? markFoldSync(loaded.path, sha(out)) : null;
+    try {
+      fs.renameSync(tmp, loaded.path);
+    } catch (e) {
+      unmark?.();
+      throw e;
+    }
   } catch (e) {
     unlock?.();
     fs.rmSync(tmp, { force: true });
