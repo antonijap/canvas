@@ -195,6 +195,7 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
   switch (op.kind) {
     case "thread.create": {
       if (thread(op.thread)) return "thread exists";
+      if (comment(op.comment)) return "comment exists";
       threads.push({ id: op.thread, doc, anchor: op.anchor, createdAt: at, createdBy: by, comments: [{ id: op.comment, thread: op.thread, author: by, body: op.body, createdAt: at }] });
       return null;
     }

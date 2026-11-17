@@ -47,3 +47,10 @@ test("people rules: deny wins, then an exact email, then the domain", () => {
   assert.equal(roleFor("mallory@evil.com", rules), null);
   assert.equal(roleFor("not-an-email", rules), null);
 });
+
+test("a new thread cannot reuse an existing comment's id (it would take over that comment)", () => {
+  const ts: Thread[] = [];
+  applyOp(ts, doc, { kind: "thread.create", thread: u(1), anchor: { x: 0, y: 0 }, comment: u(2), body: "Anna's" }, anna, "t1");
+  assert.equal(applyOp(ts, doc, { kind: "thread.create", thread: u(3), anchor: { x: 0, y: 0 }, comment: u(2), body: "Ben's" }, ben, "t2"), "comment exists");
+  assert.equal(ts.length, 1);
+});
