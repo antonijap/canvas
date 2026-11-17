@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
 import type { Json, DocNode } from "./schema.ts";
-import { holdsLogLock, lockLogSync, logSigSync, readLogSync, removeLogSync, tieOf, withLog, type LogHead, type LogInfo, type WithLog } from "./doclog.ts";
+import { holdsLogLock, lockLogSync, logSigSync, markFoldSync, readLogSync, removeLogSync, tieOf, withLog, type LogHead, type LogInfo, type WithLog } from "./doclog.ts";
 
 export type CanvasDoc = {
   version?: string;
@@ -36,6 +36,8 @@ export type LoadedDoc = {
   logCopy?: boolean;
   /** That stale log is for these very bytes in this very file, only its ctime moved: put back in place (a restore). */
   logRestored?: boolean;
+  /** That stale log was folded into these very bytes (its fold line names them): nothing in it is applied again. */
+  logFolded?: boolean;
   /** A save log this build does not read (a newer version): ignored, and never removed. */
   logUnknown?: boolean;
   /** The save log's first line (who appends to it, what it applies to). */
@@ -50,6 +52,7 @@ export const logFields = (lg: WithLog): Partial<LoadedDoc> => ({
   ...(lg.stale ? { logStale: true } : {}),
   ...(lg.copy ? { logCopy: true } : {}),
   ...(lg.restored ? { logRestored: true } : {}),
+  ...(lg.folded ? { logFolded: true } : {}),
   ...(lg.unknown ? { logUnknown: true } : {}),
   ...(lg.head ? { logHead: lg.head } : {}),
   ...(lg.seen ? { logSeen: lg.seen } : {}),
@@ -258,7 +261,15 @@ export function saveDoc(loaded: LoadedDoc, doc: CanvasDoc): { hash: string; back
       kind = "copy";
       if (sha(fs.readFileSync(prev, "utf8")) !== loaded.hash) throw new StaleFileError(`${loaded.path} changed on disk after it was read. Nothing was written. Read it again and redo the change.`);
     }
-    fs.renameSync(tmp, loaded.path);
+    // The log this save retires: its fold line first (a crash before it is removed leaves a log that names these bytes).
+    const retires = !!loaded.log || (!!loaded.logSeen && !loaded.logHead && !loaded.logUnknown);
+    const unmark = retires ? markFoldSync(loaded.path, sha(out)) : null;
+    try {
+      fs.renameSync(tmp, loaded.path);
+    } catch (e) {
+      unmark?.();
+      throw e;
+    }
   } catch (e) {
     unlock?.();
     fs.rmSync(tmp, { force: true });

@@ -37,7 +37,7 @@ import { promisify } from "node:util";
 import zlib from "node:zlib";
 import { boardCache, forgetBoard } from "./boardcache.ts";
 import { boardLacks } from "./doc/boardindex.ts";
-import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logLockable, logPathOf, logSig, logSigSync, parseLog, readLogSync, removeLogSync, tieCtimeOf, tryLockLog, type LogInfo } from "./doc/doclog.ts";
+import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logLockable, logPathOf, logSig, logSigSync, markFold, parseLog, readLogSync, removeLogSync, tieCtimeOf, tryLockLog, type LogInfo } from "./doc/doclog.ts";
 import { boardDigestStale, snapshotOfDoc, type Snapshot } from "./boards.ts";
 import { backupDirFor, findNode, loadDoc, loadDocAsync, revisionOf, sha, StaleFileError, writeDoc, type LoadedDoc, type CanvasDoc, type DocNode } from "./engine.ts";
 import type { NodeOp, Op } from "./history.ts";
@@ -1026,7 +1026,7 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
   // folding it into a whole write at this moment (it would remove it right after), so whether it is still there says
   // whose it is. Without the lock it is never recovered or removed: the load waits for it (not on the main thread).
   const owner = l.logHead?.owner;
-  const needLock = !!(l.logStale && l.logHead && (l.logCopy || owner === OWNER || !ownerAlive(owner)));
+  const needLock = !!(l.logStale && l.logHead && (l.logFolded || l.logCopy || owner === OWNER || !ownerAlive(owner)));
   let unlock: (() => void) | undefined;
   let deferred = false;
   if (st.loadLock) {
@@ -1100,7 +1100,17 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
       // Another live server's log: edits of ours that were in a log of ours are in it (the whole write that retired
       // ours held them).
     } else if (l.logStale && l.logHead && !deferred && locked) {
-      if (l.logCopy) {
+      if (l.logFolded) {
+        // A Canvas folded it into these very bytes and stopped before removing it (its fold line names them): they
+        // hold every edit in it. Nothing is put on top again (it would land twice) and nothing is recovered.
+        if (stillThere()) {
+          retire = true;
+          if (sameFile) {
+            const seq = logSeqNow(docFile);
+            st.pending = st.pending.filter((p) => !(p.seq !== undefined && p.seq <= seq));
+          }
+        }
+      } else if (l.logCopy) {
         // A copy of another package's log, for bytes that are not the ones it was written for: its edits over these
         // bytes as a recovery copy.
         if (stillThere()) retire = recoverStaleLog(st, l, format);
@@ -2458,10 +2468,23 @@ async function runWrites(st: FileState): Promise<void> {
         continue;
       }
       host.markOwn(docFile, key, hash);
+      // This write folds the log it holds: the fold line first, so a crash between the rename and the log's removal
+      // leaves a log that names these bytes (doc/doclog.ts) instead of one whose edits would be put on top again.
+      let unmark: (() => void) | null = null;
+      try {
+        if (st.logFold && st.logSeen !== "none") unmark = await markFold(docFile, hash);
+      } catch (e) {
+        host.markOwn(docFile, null);
+        await fs.promises.rm(tmp, { force: true });
+        await fs.promises.rm(prev, { force: true });
+        if (kind === "link") ownCtime(st, base);
+        throw e;
+      }
       st.renaming = true;
       try {
         await fs.promises.rename(tmp, docFile);
       } catch (e) {
+        unmark?.();
         st.renaming = false;
         host.markOwn(docFile, null);
         await fs.promises.rm(tmp, { force: true });
