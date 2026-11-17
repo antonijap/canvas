@@ -150,8 +150,8 @@ sc("settings", "Settings > Cloud: a name for the server shows in Home's sidebar,
     t.eq((await t.marks({ id: "home-row", label: host })).length, 0, "the host is gone from the sidebar");
     for (let i = 0; i < 30 && read("canvas.settings.cloudName") !== "Studio team"; i++) await sleep(150);
     t.eq(read("canvas.settings.cloudName"), "Studio team", "the name is stored with the server's address");
-    await t.waitText("Studio team", undefined, 6000); // the shared file's card names it too
-    t.ok((await t.marks({ label: "Studio team" })).filter((m) => m.id !== "home-row" && m.id !== "home-row-glyph").length >= 1, "the shared file's card names the server by its name");
+    await t.waitText("Studio team", undefined, 6000); // the shared file's card names it too, in its cloud's tooltip
+    t.ok((await t.marks({ label: "Studio team" })).filter((m) => m.id !== "home-row" && m.id !== "home-row-glyph").length >= 1, "the shared file's card names the server by its name (its cloud's tooltip)");
     await t.click(center(await t.mark({ id: "home-row", label: "Studio team" })));
     await t.waitState((s) => s.homeSection === "server", "the server view");
     await t.waitFor(async () => (await t.marks({ label: "Studio team" })).length >= 2, "the server view's title", 4000);

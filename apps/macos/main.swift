@@ -1068,7 +1068,10 @@ func openWelcome() {
       guard !openedFromFinder else { return }
       if let file {
         UserDefaults.standard.set(true, forKey: FirstRun.key)
-        model.quietRecents.insert(file) // the app opened it, not the person: Home's first-launch cards stay
+        model.quietRecents.insert(file) // the app opened it, not the person: Home's empty first launch stays
+        // Home's recents are read now, before the file joins the open tabs: a first read after it would take the
+        // open tabs for an install from before Home and list the course as a recent.
+        MainActor.assumeIsolated { _ = HomeStore.shared }
         model.open(file)
       } else {
         DispatchQueue.global(qos: .userInitiated).async { loadDesign() }
