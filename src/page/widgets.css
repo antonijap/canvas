@@ -172,18 +172,25 @@
 .vd-scrub{flex:1;min-width:24px;height:16px;accent-color:#fff;cursor:pointer}
 
 /* welcome (the Welcome file's card, src/onboarding.ts). Type: title 17/24 semibold like the to-do, lines 14/20, the
-   commands 11/16 mono in a muted well, the status 13/20. Copy is grey, never the accent. */
+   commands 11/16 mono in a muted well, the status 13/20. Connect and Copy are grey, never the accent. */
 .wc{display:flex;flex-direction:column;height:100%;padding:16px;box-sizing:border-box;font-size:14px;line-height:20px;overflow:hidden}
 .wc .wd-head{margin-bottom:8px}
 .wc-lines p{margin:0}
 .wc-cmds{display:flex;flex-direction:column;gap:12px;margin-top:16px}
 .wc-cmd-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:24px;margin-bottom:6px}
 .wc-cmd-name{font-weight:600}
-.wc-copy{height:24px;padding:0 10px;border:0;border-radius:999px;background:color-mix(in srgb,var(--c-fg) 8%,transparent);color:var(--c-fg);font:600 12px/24px var(--c-font-sans);cursor:pointer}
-.wc-copy:hover{background:color-mix(in srgb,var(--c-fg) 14%,transparent)}
+.wc-btns{display:flex;gap:6px}
+.wc-btn{height:24px;padding:0 10px;border:0;border-radius:999px;background:color-mix(in srgb,var(--c-fg) 8%,transparent);color:var(--c-fg);font:600 12px/24px var(--c-font-sans);cursor:pointer}
+.wc-btn:hover{background:color-mix(in srgb,var(--c-fg) 14%,transparent)}
+.wc-connect{background:color-mix(in srgb,var(--c-fg) 14%,transparent)}
+.wc-connect:hover{background:color-mix(in srgb,var(--c-fg) 20%,transparent)}
+.wc-connect:disabled{cursor:default;background:color-mix(in srgb,var(--c-fg) 8%,transparent);color:var(--c-muted-fg)}
+.wc-connect.done{background:transparent;color:var(--c-muted-fg)}
 .wc-code{display:block;padding:8px 10px;border-radius:8px;background:color-mix(in srgb,var(--c-fg) 6%,transparent);font:11px/16px var(--c-font-mono);word-break:break-all;white-space:pre-wrap;user-select:text;-webkit-user-select:text;cursor:text}
 .wc-status{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;margin-top:auto;padding-top:16px;font-size:13px;line-height:20px}
 .wc-dot{flex:none;width:8px;height:8px;border-radius:50%;background:color-mix(in srgb,var(--c-muted-fg) 55%,transparent)}
 .wc.on .wc-dot{background:var(--c-ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--c-ok) 25%,transparent)}
 .wc-said{font-weight:600}
 .wc-hint{flex-basis:100%;color:var(--c-muted-fg)}
+.wc-hint.err{color:var(--c-danger);word-break:break-word}
+.wc-else{flex-basis:100%;color:var(--c-muted-fg);user-select:text;-webkit-user-select:text;cursor:text}

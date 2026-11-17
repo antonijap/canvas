@@ -164,6 +164,21 @@ enum UsageLinks {
     static let privacy = URL(string: "https://getcanvas.cc/privacy#usage")!
 }
 
+/// Connect in Settings > Agents (POST /api/mcp/connect, src/mcp-connect.ts): the same words as the welcome card
+/// (src/page/widget-kinds.js) and the course's Connect your agent board (demos/build-learn.ts).
+enum ConnectCopy {
+    static let hint = "Press Connect, or copy a command into Terminal. Then start a new agent session."
+    static let elsewhere = "Other apps, or Canvas not in Applications: getcanvas.cc/download#connect"
+    static let elsewhereURL = URL(string: "https://getcanvas.cc/download#connect")!
+    static func added(_ agent: String) -> String { "Added. Start a new \(agent) session." }
+    /// The button's title; nil hides it (the agent's CLI is not installed: Copy is all there is).
+    static func button(installed: Bool, registered: Bool, busy: Bool) -> String? {
+        if busy { return "Connecting\u{2026}" }
+        if !installed { return nil }
+        return registered ? "Added" : "Connect"
+    }
+}
+
 /// A crash, for usage counts: a marker set at launch and cleared on a normal quit. Found set at the next launch, the
 /// last run ended without quitting (a crash, or a force quit).
 enum RunMarker {

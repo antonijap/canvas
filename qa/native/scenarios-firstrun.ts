@@ -95,7 +95,7 @@ sc("toasts", "deleting a page shows Undo, and Undo brings the page back", { cove
   await t.waitDisk(() => t.widgets().pages.some((p: any) => p.id === id), "the page back");
 });
 
-sc("first-run", "a first launch opens the Welcome file; Connected follows an agent; Settings > Agents shows the commands", { covers: ["first-run:welcome", "first-run:connected", "first-run:settings-agents"] }, async (t: NT) => {
+sc("first-run", "a first launch opens the Welcome file; Connected follows an agent; Settings > Agents shows the commands; Connect registers canvas", { covers: ["first-run:welcome", "first-run:connected", "first-run:settings-agents", "first-run:connect", "first-run:settings-connect"] }, async (t: NT) => {
   // A second QA instance, started like a fresh install: its own HOME (where ~/Documents/Canvas goes), empty
   // preferences, and CANVAS_QA_FIRST_RUN so it does what a first launch does.
   const fresh = new QaApp(path.dirname(t.app.dir), 90 + t.app.shard);
@@ -127,6 +127,19 @@ sc("first-run", "a first launch opens the Welcome file; Connected follows an age
     await fetch(`${fresh.base}/api/mcp/hello`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": "mcp-qa-first", "x-canvas-agent": "claude-code" }, body: "{}" });
     await f.waitJs("document.querySelector('.wc .wc-said').textContent === 'Connected: Claude'", "Connected on the card", 8000);
     await shot(f, "welcome-connected");
+    // Connect, for real: this instance's server runs with the fresh HOME, so the agents' own CLIs write their config
+    // there (~/.codex/config.toml, ~/.claude.json under it), never the person's.
+    const installed = ((await (await fetch(`${fresh.base}/api/mcp/setup`)).json()) as any).installed ?? {};
+    const serverTs = path.join(path.resolve(import.meta.dirname, "../.."), "mcp", "server.ts");
+    if (installed.codex) {
+      await f.waitJs("(() => { const b = document.querySelectorAll('.wc .wc-connect')[1]; return b && !b.hidden && b.textContent === 'Connect'; })()", "Connect for Codex on the card", 8000);
+      await f.js("document.querySelectorAll('.wc .wc-connect')[1].click();");
+      await f.waitJs("document.querySelectorAll('.wc .wc-connect')[1].textContent === 'Added'", "Added on the card", 30_000);
+      t.eq(await f.js("return document.querySelector('.wc .wc-hint').textContent;"), "Added. Start a new Codex session.", "the card says the next step");
+      const toml = fs.readFileSync(path.join(fresh.home, ".codex", "config.toml"), "utf8");
+      t.ok(/^\[mcp_servers\.canvas\]$/m.test(toml) && toml.includes(JSON.stringify(serverTs)), `canvas in the fresh HOME's Codex config: ${toml}`);
+      await shot(f, "welcome-connect-codex");
+    } else t.notes.push("Codex is not installed on this Mac: the card's Connect was not clicked");
     // Settings > Agents: the same commands, and the same status.
     await f.key(",", ["cmd"]);
     await f.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
@@ -142,6 +155,22 @@ sc("first-run", "a first launch opens the Welcome file; Connected follows an age
     await f.click(center(tab), { window: "settings" });
     await sleep(2500); // the pane asks /api/mcp/setup on appear
     await shot(f, "settings-agents", "settings");
+    if (installed.claude) {
+      const m = await f.mark({ id: "connect-claude", window: "settings" }, 8000);
+      t.eq(m.label, "Connect", "Connect beside the Claude Code command");
+      fs.mkdirSync(`${process.cwd()}/qa/out/native`, { recursive: true });
+      await f.shot(`${process.cwd()}/qa/out/native/settings-agents-connect.png`, "settings");
+      await f.click(center(m), { window: "settings" });
+      for (let i = 0; i < 120 && (await f.marks({ id: "connect-claude", window: "settings" }))[0]?.label !== "Added"; i++) await sleep(250);
+      t.eq((await f.marks({ id: "connect-claude", window: "settings" }))[0]?.label, "Added", "Added after the click");
+      t.eq((await f.marks({ id: "connect-hint", window: "settings" }))[0]?.label ?? null, "Added. Start a new Claude Code session.", "Settings says the next step");
+      const cj = JSON.parse(fs.readFileSync(path.join(fresh.home, ".claude.json"), "utf8"));
+      t.ok(cj.mcpServers?.canvas?.args?.includes(serverTs), `canvas in the fresh HOME's ~/.claude.json: ${JSON.stringify(cj.mcpServers)}`);
+      // The card in the main window follows: its setup poll reads the same config.
+      await f.waitJs("document.querySelectorAll('.wc .wc-connect')[0].textContent === 'Added'", "Added for Claude Code on the card too", 8000);
+      await sleep(400);
+      await f.shot(`${process.cwd()}/qa/out/native/settings-agents-added.png`, "settings");
+    } else t.notes.push("Claude Code is not installed on this Mac: Settings' Connect was not clicked");
     // No text recognition in this second instance: loading the model in a second process under load broke it for the
     // main instance (e5rt errors in every later scenario). The Agents tab is the one shown; the screenshot shows its card.
     t.eq(execFileSync("defaults", ["read", fresh.bundleId, "canvas.settings.tab"], { encoding: "utf8" }).trim(), "agents", "the Agents tab shows");

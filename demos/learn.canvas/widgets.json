@@ -7,6 +7,7 @@
       "boards": [
         "welcome",
         "move_around",
+        "connect",
         "select",
         "move_copy",
         "auto_layout",
@@ -31,7 +32,7 @@
       "id": "w_hjve7o5t",
       "kind": "todo",
       "name": "Your progress",
-      "x": 684,
+      "x": 2044,
       "y": 3090,
       "w": 360,
       "h": 380,
@@ -43,6 +44,11 @@
           {
             "id": "i_8xkoq0",
             "text": "Move around",
+            "done": false
+          },
+          {
+            "id": "i_tb2s9x",
+            "text": "Connect your agent",
             "done": false
           },
           {
