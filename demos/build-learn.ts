@@ -187,8 +187,8 @@ function lessons(): Node[] {
     step(["drag"], "On empty canvas: select everything the box touches."),
     step(["⌘", "click"], "Select the deepest layer under the pointer."),
     step(["↩"], "Select the children. Shift+Return: the parent."),
-    step(["Esc"], "Up one level, then nothing."),
-  ], "Select the star inside the card with Cmd+click. Then press Esc twice.", [
+    step(["Esc"], "Select nothing."),
+  ], "Select the star inside the card with Cmd+click. Press Shift+Return for the card, then Esc.", [
     card("Profile card", 81, 160, 260, 200, [
       ellipse("Avatar", 24, 24, 48, "#D6E4FF"),
       { ...text("Mira Novak", 15, { weight: "600" }), x: 88, y: 32 },

@@ -561,14 +561,15 @@ export function rotatedResizeRect(r0, handle, dx, dy, o = {}) {
 }
 
 /**
- * textResizeWrites for a turned text box (live.js writesOf): a left or right edge keeps its height its own (Auto
- * height stays, an auto-width text becomes Auto height); the top, bottom or a corner makes it Fixed size. Its x/y
+ * textResizeWrites for a turned text box (live.js writesOf): a left or right edge keeps Auto height text Auto
+ * height (its height its own) and makes auto-width text Fixed size; the top, bottom or a corner makes it Fixed size. Its x/y
  * stay (rotatedResize moved them). `props` changes in place.
  */
 export function rotatedTextWrites(props, handle, growth) {
   if (!/[ns]/.test(handle)) {
+    // Auto width dragged by a side: Fixed size at the height it had (rotatedResize keeps it on a side drag).
+    if (!growth || growth === "auto") { props.textGrowth = "fixed-width-height"; return props; }
     delete props.height;
-    if (!growth || growth === "auto") props.textGrowth = "fixed-width";
     return props;
   }
   if (growth !== "fixed-width-height") props.textGrowth = "fixed-width-height";
@@ -576,21 +577,25 @@ export function rotatedTextWrites(props, handle, growth) {
 }
 
 /**
- * A text box resized by a handle changes how it grows: a left or right edge makes an auto-width text
- * Auto height ("fixed-width") and never touches its height, even when pixel rounding nudged the box; the top or
- * bottom edge or a corner makes it Fixed size ("fixed-width-height"). `w`: resizeWrites' result (changed in place),
- * `handle`: "e", "nw", ...; `growth`: the text's textGrowth; `r`: the world rect it goes to.
+ * A text box resized by a handle changes how it grows, the common convention: a resize by hand makes it Fixed
+ * size ("fixed-width-height"). The one exception is a left or right edge on Auto height text ("fixed-width"):
+ * it stays Auto height and never touches its height, so a paragraph made wider keeps fitting its lines.
+ * `w`: resizeWrites' result (changed in place), `handle`: "e", "nw", ...; `growth`: the text's textGrowth;
+ * `r`: the world rect it goes to; `r0`: the rect it had (auto width keeps that height, not a rounded one).
  */
-export function textResizeWrites(w, handle, growth, r) {
+export function textResizeWrites(w, handle, growth, r, r0) {
   const p = w.props;
   if (p.width === undefined && p.height === undefined) return w;
   const vert = /[ns]/.test(handle);
   if (!vert) {
-    // A side drag: the height is the text's own (auto height or the fixed size it had), never a rounding artefact.
+    // A side drag: the height is the text's own (the lines it had or the fixed size), never a rounding artefact.
     delete p.height;
     delete p.y;
     if (p.width === undefined) return w;
-    if (!growth || growth === "auto") p.textGrowth = "fixed-width";
+    if (!growth || growth === "auto") {
+      p.textGrowth = "fixed-width-height";
+      p.height = r0 ? r0.h : r.h;
+    }
     return w;
   }
   if (growth !== "fixed-width-height") p.textGrowth = "fixed-width-height";

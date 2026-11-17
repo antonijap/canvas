@@ -2493,7 +2493,7 @@
                 {
                   "type": "frame",
                   "id": "s3u",
-                  "name": "Up one level, then nothing.",
+                  "name": "Select nothing.",
                   "width": "fill_container",
                   "gap": 16,
                   "alignItems": "center",
@@ -2562,8 +2562,8 @@
                     {
                       "type": "text",
                       "id": "t3y",
-                      "name": "Up one level, then nothing.",
-                      "content": "Up one level, then nothing.",
+                      "name": "Select nothing.",
+                      "content": "Select nothing.",
                       "fill": "#1D1D1F",
                       "fontFamily": "SF Pro",
                       "fontSize": 15,
@@ -2606,7 +2606,7 @@
                   "type": "text",
                   "id": "t4c",
                   "name": "Try it prompt",
-                  "content": "Select the star inside the card with Cmd+click. Then press Esc twice.",
+                  "content": "Select the star inside the card with Cmd+click. Press Shift+Return for the card, then Esc.",
                   "fill": "#1D1D1F",
                   "fontFamily": "SF Pro",
                   "fontSize": 15,

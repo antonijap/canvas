@@ -545,14 +545,14 @@ function start(host) {
       const p = rotatedResize(z.own, z.r0.w, z.r0.h, z.rot, z.r, z.info.flipX, z.info.flipY);
       const props = { width: p.width, height: p.height };
       if (z.positioned) { props.x = p.x; props.y = p.y; }
-      // A side drag keeps Auto height, like the upright resize (textResizeWrites).
+      // A side drag keeps Auto height; auto width becomes Fixed size, like the upright resize (textResizeWrites).
       if (z.info.type === "text") rotatedTextWrites(props, z.h, z.info.textGrowth);
       return { props, children: [] };
     }
     // info.kids holds the children with a place of their own: all of a free frame's, an auto-layout frame's absolute ones.
     const w = resizeWrites(z.r0, z.r, { positioned: z.positioned, own: z.own, keepChildren: z.keep, kids: z.info.kids });
-    // A text box that grew by itself becomes fixed: a side drag gives Auto height, top, bottom or a corner Fixed size.
-    if (z.info.type === "text") textResizeWrites(w, z.h, z.info.textGrowth, z.r);
+    // A text box resized by hand becomes Fixed size; a side drag on Auto height text keeps Auto height.
+    if (z.info.type === "text") textResizeWrites(w, z.h, z.info.textGrowth, z.r, z.r0);
     // An edge dragged past the opposite one mirrors the layer; a flipped layer's x/y is its far corner.
     if (z.r.flipX || z.r.flipY || z.info.flipX || z.info.flipY) flipWrites(w, z.r0, z.r, { flipX: z.info.flipX, flipY: z.info.flipY, positioned: z.positioned, own: z.own });
     return w;

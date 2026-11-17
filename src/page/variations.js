@@ -226,7 +226,7 @@ function start(host) {
     e.preventDefault();
     make();
   });
-  // Esc discards the set up for review (or stops and discards one being made), before Esc's select-parent.
+  // Esc discards the set up for review (or stops and discards one being made), before Esc deselects.
   addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || e.defaultPrevented || typing(e.target) || sheet) return;
     if ((host.textEdit && host.textEdit.active) || (host.moving && host.moving())) return;

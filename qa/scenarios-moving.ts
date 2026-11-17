@@ -92,10 +92,10 @@ sc("move", "Space held while dragging keeps the layer in its parent; Space alone
 
 // ---------------------------------------------------------------- modifier keys
 
-sc("move", "Control turns snapping off for a move and a resize; Cmd still does", { covers: ["snapping:one", "snapping:mouse", "snapping:ctrl", "resize:rectangle"] }, async (t: T) => {
+sc("move", "Control turns snapping off for a move and a resize; Cmd does not", { covers: ["snapping:one", "snapping:mouse", "snapping:ctrl", "resize:rectangle"] }, async (t: T) => {
   await t.focus("lay_nest");
-  // r_free's left edge 3 px from the group's left (290): a plain drag snaps there, Control and Cmd do not.
-  for (const [late, want] of [[{}, 290], [{ ctrl: true }, 293], [{ meta: true }, 293]] as const) {
+  // r_free's left edge 3 px from the group's left (290): a plain drag snaps there, Control does not; Cmd snaps like a plain drag.
+  for (const [late, want] of [[{}, 290], [{ ctrl: true }, 293], [{ meta: true }, 290]] as const) {
     await t.select(["r_free"]);
     const c = await t.center("r_free");
     // Mid-drag: the snap guide shows on a plain drag, none with Control.

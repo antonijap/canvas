@@ -79,7 +79,7 @@ The same keys work in Canvas.app and the browser version. Settings > Shortcuts s
 | Option+Cmd+A | Select matching layers |
 | Option+Space | Keyboard selection cursor |
 | Right-click > Select layer | Pick from the layers under the pointer |
-| Esc | Cancel, else select the parent, else deselect |
+| Esc | Cancel, else deselect |
 
 ### Move and arrange
 
@@ -89,7 +89,7 @@ The same keys work in Canvas.app and the browser version. Settings > Shortcuts s
 | Cmd + arrows | Resize |
 | Cmd+Option+Up / Down | Rotate 1 degree |
 | Shift while dragging | Move on one axis |
-| Cmd while dragging | Skip snapping |
+| Control while dragging | Skip snapping |
 | Option + drag | Drag copies |
 | Option + hover | Distances to the hovered layer |
 | K | Scale tool (V or Esc leaves it) |
