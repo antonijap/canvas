@@ -286,6 +286,7 @@ enum QA {
             // Between scenarios: nothing left open or held from the last one.
             VirtualDrag.current = nil
             PaintHooks.answerDelay = 0
+            UserDefaults.standard.set(false, forKey: BindQA.key)
             panels = []
             hides = []
             heldMods = []
@@ -302,6 +303,11 @@ enum QA {
             window.makeFirstResponder(model.webView)
             try await sleep(100)
             return ["reset": true]
+        case "qa.hoverbind":
+            // Every numeric field shows its token button as if hovered (InspectorTokens.swift BindQA).
+            UserDefaults.standard.set(a["on"] as? Bool ?? true, forKey: BindQA.key)
+            try await sleep(150)
+            return ["on": UserDefaults.standard.bool(forKey: BindQA.key)]
         case "qa.idle": try await idle(a); return ["idle": true]
         default: throw QAError(code: "unsupported", message: "no QA op \(op)")
         }
