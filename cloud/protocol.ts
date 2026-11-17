@@ -154,6 +154,7 @@ export const LIMITS = {
   threadsPerDoc: 5_000,
   commentsPerThread: 500,
   socketsPerUserPerDoc: 5,
+  anchorBytes: 2_048,
 } as const;
 
 // ---------- pure helpers (both sides use these, so they agree) ----------
@@ -161,17 +162,37 @@ export const LIMITS = {
 const isUuid = (s: unknown): s is string => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s);
 const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
 
+const ANCHOR_KEYS = new Set(["page", "nodeId", "x", "y", "board", "revision", "preview"]);
+const PREVIEW_KEYS = new Set(["name", "type", "width", "height"]);
+const shortText = (v: unknown, max: number) => v === undefined || (typeof v === "string" && v.length <= max);
+
+/** Null when an anchor is small and plain: known keys only, short strings, finite numbers, under LIMITS.anchorBytes. */
+export function checkAnchor(a: unknown): string | null {
+  if (!a || typeof a !== "object" || Array.isArray(a)) return "anchor is not an object";
+  const x = a as Record<string, unknown>;
+  if (Object.keys(x).some((k) => !ANCHOR_KEYS.has(k))) return "anchor has an unknown key";
+  if (!finite(x.x) || !finite(x.y)) return "anchor needs finite x and y";
+  if (!shortText(x.page, 200) || !shortText(x.nodeId, 200) || !shortText(x.board, 200) || !shortText(x.revision, 64)) return "anchor text is too long";
+  if (x.preview !== undefined) {
+    const p = x.preview as Record<string, unknown>;
+    if (!p || typeof p !== "object" || Array.isArray(p) || Object.keys(p).some((k) => !PREVIEW_KEYS.has(k))) return "anchor preview is not plain";
+    if (!shortText(p.name, 200) || !shortText(p.type, 40)) return "anchor preview text is too long";
+    if ((p.width !== undefined && !finite(p.width)) || (p.height !== undefined && !finite(p.height))) return "anchor preview size is not a number";
+  }
+  return JSON.stringify(x).length > LIMITS.anchorBytes ? "anchor is too large" : null;
+}
+
 /** Null when the envelope is well formed, else why not. Shape and limits only; permissions are the server's job. */
 export function checkEnvelope(e: unknown): string | null {
   if (!e || typeof e !== "object") return "not an object";
   const x = e as Partial<OpEnvelope>;
   if (!isUuid(x.opId)) return "opId is not a uuid";
   if (!isUuid(x.doc)) return "doc is not a uuid";
-  if (typeof x.at !== "string") return "at is missing";
+  if (typeof x.at !== "string" || x.at.length > 40) return "at is missing or too long";
   const op = x.op as Op | undefined;
   if (!op || typeof op !== "object") return "op is missing";
   const body = (b: unknown) => (typeof b !== "string" ? "body is not text" : b.trim() === "" ? "body is empty" : b.length > LIMITS.bodyChars ? "body is too long" : null);
-  const anchor = (a: unknown) => (!a || typeof a !== "object" || !finite((a as Anchor).x) || !finite((a as Anchor).y) ? "anchor needs finite x and y" : null);
+  const anchor = (a: unknown) => checkAnchor(a);
   switch (op.kind) {
     case "thread.create": return !isUuid(op.thread) || !isUuid(op.comment) ? "thread and comment need uuids" : anchor(op.anchor) ?? body(op.body);
     case "comment.add": return !isUuid(op.thread) || !isUuid(op.comment) ? "thread and comment need uuids" : body(op.body);
@@ -195,6 +216,7 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
   switch (op.kind) {
     case "thread.create": {
       if (thread(op.thread)) return "thread exists";
+      if (comment(op.comment)) return "comment exists";
       threads.push({ id: op.thread, doc, anchor: op.anchor, createdAt: at, createdBy: by, comments: [{ id: op.comment, thread: op.thread, author: by, body: op.body, createdAt: at }] });
       return null;
     }
