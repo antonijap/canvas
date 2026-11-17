@@ -4,6 +4,7 @@
 // Snapping and the big nudge are SnapSettings (Shell.swift): Settings > Canvas
 // edit the same values.
 
+import CryptoKit
 import Foundation
 
 /// Where a file's view starts when it opens.
@@ -58,6 +59,8 @@ struct AppSettings: Equatable {
     var cloudDevEmail = ""
     /// What the team server is called in Home; empty: its host.
     var cloudName = ""
+    /// Settings > Cloud > Host on this Mac: on, the Cloud starts again with Canvas.
+    var cloudHosting = false
     // Agents
     var harness = AgentHarness.claude
     var agentCursor = true
@@ -91,6 +94,7 @@ struct AppSettings: Equatable {
         s.cloudUrl = d.string(forKey: k("cloudUrl")) ?? ""
         s.cloudDevEmail = d.string(forKey: k("cloudDevEmail")) ?? ""
         s.cloudName = d.string(forKey: k("cloudName")) ?? ""
+        s.cloudHosting = d.bool(forKey: k("cloudHosting"))
         if let v = d.string(forKey: k("harness")).flatMap(AgentHarness.init) { s.harness = v }
         if has("agentCursor") { s.agentCursor = d.bool(forKey: k("agentCursor")) }
         if let v = d.string(forKey: k("cursorSpeed")).flatMap(CursorSpeed.init) { s.cursorSpeed = v }
@@ -117,6 +121,7 @@ struct AppSettings: Equatable {
         d.set(cloudUrl, forKey: k("cloudUrl"))
         d.set(cloudDevEmail, forKey: k("cloudDevEmail"))
         d.set(cloudName, forKey: k("cloudName"))
+        d.set(cloudHosting, forKey: k("cloudHosting"))
         d.set(harness.rawValue, forKey: k("harness"))
         d.set(agentCursor, forKey: k("agentCursor"))
         d.set(cursorSpeed.rawValue, forKey: k("cursorSpeed"))
@@ -282,10 +287,12 @@ enum ShortcutCatalog {
 
 /// Settings > Cloud: the server address and the words for where sign-in stands. The same rules as src/cloud-config.ts.
 enum CloudURL {
-    /// The origin of an address: https with a dotted host, or http on this Mac. Nil for anything else; a path is dropped.
+    /// The origin of an address: https with a dotted host, a hosted Cloud by its id (canvas-cloud://<id>), or http on
+    /// this Mac. Nil for anything else (http to another host never: a hosted Cloud is reached through its tunnel).
     static func clean(_ raw: String) -> String? {
         guard let u = URLComponents(string: raw.trimmingCharacters(in: .whitespaces)), let scheme = u.scheme?.lowercased(),
               let host = u.host?.lowercased(), !host.isEmpty, u.user == nil, u.password == nil else { return nil }
+        if scheme == "canvas-cloud" { return UUID(uuidString: host) != nil && u.port == nil ? "canvas-cloud://\(host)" : nil }
         let port = u.port.map { ":\($0)" } ?? ""
         if scheme == "https" && host.contains(".") { return "https://\(host)\(u.port == 443 ? "" : port)" }
         if scheme == "http" && (host == "localhost" || host == "127.0.0.1") { return "http://\(host)\(u.port == 80 ? "" : port)" }
@@ -293,6 +300,8 @@ enum CloudURL {
     }
     /// http://localhost or http://127.0.0.1: where a server run with DEV=1 takes an email in place of Access.
     static func isLocal(_ raw: String) -> Bool { clean(raw)?.hasPrefix("http://") ?? false }
+    /// A Cloud hosted on a Mac (canvas-cloud://<id>): joined with an invite, left rather than signed out of.
+    static func isHosted(_ raw: String) -> Bool { clean(raw)?.hasPrefix("canvas-cloud://") ?? false }
     /// The host (and port) of a cleaned address, as the Keychain item's account.
     static func host(_ raw: String) -> String {
         guard let c = clean(raw), let u = URL(string: c), let h = u.host else { return "" }
@@ -331,7 +340,18 @@ enum CloudStatusText {
         case "forbidden": return "No access to this team"
         case "tooOld": return "The server is too old"
         case "tooNew": return "The server is newer than this Canvas"
+        case "down": return "Cloud down"
+        case "removed": return "Removed from this Cloud"
+        case "unavailable": return "Not available in this build"
         default: return "Offline"
+        }
+    }
+    /// The one plain line under a status that needs it: "Studio Cloud isn't open right now".
+    static func detail(_ status: String, name: String) -> String? {
+        switch status {
+        case "down": return "\(name) isn\u{2019}t open right now"
+        case "removed": return "Ask the host for a new invite"
+        default: return nil
         }
     }
     /// "Signed in as anna@studio.com, owner".
@@ -339,4 +359,44 @@ enum CloudStatusText {
         guard let email, !email.isEmpty else { return nil }
         return "Signed in as \(email)" + ((role?.isEmpty ?? true) ? "" : ", \(role!)")
     }
+}
+
+/// An invite to a Cloud hosted on a Mac: canvas://cloud/join?v=1&name=&host=&tc=&code=. The same rules as
+/// src/cloud-config.ts parseInvite. The link is a secret (its code lets one Mac in): Canvas copies it, never shows it.
+struct CloudInvite: Equatable {
+    let name: String
+    let hostId: String
+    let addr: String
+    let code: String
+    let link: String
+
+    static func parse(_ raw: String) -> CloudInvite? {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard t.count <= 8192, let u = URLComponents(string: t), u.scheme?.lowercased() == "canvas", u.host == "cloud", u.path == "/join" else { return nil }
+        func q(_ k: String) -> String { u.queryItems?.first { $0.name == k }?.value ?? "" }
+        let host = q("host").lowercased(), addr = q("tc"), code = q("code")
+        guard q("v") == "1", UUID(uuidString: host) != nil, host.count == 36,
+              addr.range(of: "^tc[A-Za-z0-9_-]{20,4000}$", options: .regularExpression) != nil,
+              code.range(of: "^ccj_[0-9a-f]{16}\\.[A-Za-z0-9_-]{43}$", options: .regularExpression) != nil else { return nil }
+        let name = q("name").components(separatedBy: .controlCharacters).joined(separator: " ")
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return CloudInvite(name: name.isEmpty ? "Cloud" : String(name.prefix(60)), hostId: host, addr: addr, code: code, link: t)
+    }
+
+    /// A short fingerprint of the tunnel address to compare with the host's by eye: "3F9A-C21B" (src/cloud-tunnel.ts).
+    var fingerprint: String { CloudInvite.fingerprint(addr) }
+    static func fingerprint(_ addr: String) -> String {
+        let h = SHA256.hash(data: Data(addr.utf8)).prefix(4).map { String(format: "%02X", $0) }.joined()
+        return "\(h.prefix(4))-\(h.suffix(4))"
+    }
+}
+
+/// The plain words Settings > Cloud shows before someone hosts or joins (docs/cloud/hosting.md says the same).
+enum CloudDisclosure {
+    static let lines = [
+        "Everyone in a Cloud can read the comments on every file shared to it.",
+        "A deleted comment\u{2019}s text stays in the Cloud\u{2019}s history, and each person keeps their own copy.",
+        "When two Macs can\u{2019}t connect directly, traffic goes through a relay that sees who connects and when, not what is said.",
+        "Invite tokens are kept in the macOS Keychain, where apps running as you can read them.",
+    ]
 }

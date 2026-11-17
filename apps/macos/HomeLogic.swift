@@ -86,8 +86,9 @@ enum ServerName {
         guard let c = URLComponents(string: url.trimmingCharacters(in: .whitespaces)), let h = c.host, !h.isEmpty else { return url }
         return c.port.map { "\(h):\($0)" } ?? h
     }
-    /// The short name in lists: a workers.dev address by its first label, any other host whole.
+    /// The short name in lists: a workers.dev address by its first label, a hosted Cloud as "Cloud", any other host whole.
     static func display(_ url: String) -> String {
+        if url.lowercased().hasPrefix("canvas-cloud://") { return "Cloud" }
         let h = host(url)
         if h.hasSuffix(".workers.dev"), let first = h.split(separator: ".").first { return String(first) }
         return h
@@ -208,12 +209,13 @@ enum HomeLogic {
     }
 
     /// The sidebar dot for the server's status word: connected, offline, or the amber of "sign in again" and the rest.
-    enum Dot: Equatable { case connected, offline, attention }
+    enum Dot: Equatable { case connected, offline, down, attention }
     static func dot(status: String, configured: Bool) -> Dot {
         if !configured { return .offline }
         switch status {
         case "connected": return .connected
         case "offline": return .offline
+        case "down": return .down
         default: return .attention
         }
     }
@@ -221,6 +223,7 @@ enum HomeLogic {
         switch d {
         case .connected: "Connected"
         case .offline: "Offline"
+        case .down: "Cloud down"
         case .attention: "Sign in again"
         }
     }
