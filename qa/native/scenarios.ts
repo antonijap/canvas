@@ -704,6 +704,36 @@ sc("settings", "Settings > Agents: a model and reasoning menu for each agent, De
   await t.shot(`${process.cwd()}/qa/out/native/settings-agents-model.png`, "settings");
 });
 
+sc("settings", "Settings > General > Updates: the version, Update automatically (on, stored), Check for Updates; a build from source says it does not update itself", { covers: ["settings:updates"] }, async (t: NT) => {
+  await t.key(",", ["cmd"]);
+  await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
+  await settingsTab(t, "General");
+  const version = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+  await t.waitText(`Version ${version}`, undefined, 4000, "settings");
+  const read = (key: string) => { try { return execFileSync("defaults", ["read", t.app.bundleId, key], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch { return ""; } };
+  t.eq(read("canvas.updates.automatic"), "", "Update automatically is on by default (nothing stored)");
+  const flip = async (want: string) => {
+    const row = await t.waitText("Update automatically", undefined, 4000, "settings");
+    const sw = (await t.views("settings")).filter((v) => v.kind === "switch" || v.kind === "button").find((v) => Math.abs(v.y + v.h / 2 - row.y) < 14 && v.x > row.x);
+    t.ok(sw, "no switch beside Update automatically");
+    await t.click(center(sw), { window: "settings" });
+    for (let i = 0; i < 30 && read("canvas.updates.automatic") !== want; i++) await sleep(150);
+    t.eq(read("canvas.updates.automatic"), want, `Update automatically stored as ${want}`);
+  };
+  await flip("0");
+  await flip("1");
+  await sleep(500); // the switch's animation
+  await t.shot(`${process.cwd()}/qa/out/native/settings-general-updates.png`, "settings");
+  // A QA build is not a release: Check for Updates says so instead of asking the website.
+  await t.click(await t.waitText("Check for Updates", undefined, 4000, "settings"), { window: "settings" });
+  const fromSource = "This copy of Canvas was built from source, so it does not update itself.";
+  await t.waitState((s) => s.toast === fromSource, "the built-from-source toast");
+  // The Canvas menu: Check for Updates always, Restart to Update only while an update is ready (none here).
+  t.eq((await t.cmd("qa.mainmenu", { title: "Restart to Update" })).enabled, false, "Restart to Update is off with nothing ready");
+  await t.cmd("qa.mainmenu", { title: "Check for Updates…", perform: true });
+  await t.waitState((s) => s.toast === fromSource, "the same answer from the Canvas menu");
+});
+
 sc("settings", "Settings > Privacy: Share usage counts on, Help improve Canvas adds the monthly id, Show what's sent shows today's JSON", { covers: ["settings:privacy"] }, async (t: NT) => {
   await t.key(",", ["cmd"]);
   await t.waitState((s) => s.windows.some((w: any) => w.settings), "the Settings window");
