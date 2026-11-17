@@ -605,6 +605,8 @@ enum QA {
             // As the hardware does: Shift still shapes the characters under Command (Shift+Cmd+L reads "L"), so the menus
             // match a Shift chord the way they do for a person.
             plain = f.contains(.shift) && base.isLetter ? base.uppercased() : String(base)
+            // Shift+[ and Shift+] read "{" and "}" on the hardware, so they never match Cmd+[ and Cmd+] (Bring Forward).
+            if f.contains(.shift), base == "[" || base == "]" { plain = base == "[" ? "{" : "}" }
             chars = f.contains(.command) || f.contains(.control) ? plain : String(ch)
         }
         if [123, 124, 125, 126].contains(code) { f.insert([.numericPad, .function]) }

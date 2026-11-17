@@ -128,6 +128,70 @@ enum TabList {
     }
 }
 
+/// Reordering the open file tabs by dragging. Home is pinned outside this list: it is never in `files`, never moves,
+/// and a tab never lands before it. Positions are in the tab strip's own space: tab i starts after the widths before
+/// it plus `gap` between neighbours.
+enum TabOrder {
+    /// A press that moves less than this (points) is a click, never a drag.
+    static let dragThreshold: CGFloat = 4
+
+    static func isDrag(_ dx: CGFloat) -> Bool { dx.isFinite && abs(dx) >= dragThreshold }
+
+    /// `files` with the tab at `from` taken out and put at index `to` (both clamped to the list).
+    static func move(_ files: [String], from: Int, to: Int) -> [String] {
+        guard files.indices.contains(from) else { return files }
+        var out = files
+        let f = out.remove(at: from)
+        out.insert(f, at: min(max(to, 0), out.count))
+        return out
+    }
+
+    /// Where tab `i`'s left edge sits, before any drag.
+    static func start(_ i: Int, widths: [CGFloat], gap: CGFloat) -> CGFloat {
+        widths[..<min(max(i, 0), widths.count)].reduce(0) { $0 + $1 + gap }
+    }
+
+    /// The drag offset held so the tab stays inside the strip (its glyphs are never cut at an edge).
+    static func clamp(_ dx: CGFloat, index i: Int, widths: [CGFloat], gap: CGFloat) -> CGFloat {
+        guard widths.indices.contains(i), dx.isFinite else { return 0 }
+        let lo = -start(i, widths: widths, gap: gap)
+        let last = widths.count - 1
+        let hi = start(last, widths: widths, gap: gap) + widths[last] - start(i, widths: widths, gap: gap) - widths[i]
+        return min(max(dx, lo), max(hi, lo))
+    }
+
+    /// The index the dragged tab takes when dropped now: moving right it passes a neighbour once its right edge
+    /// crosses that neighbour's middle, moving left once its left edge does. (Edges, not centres: a wide tab can
+    /// only reach the last slot with its right edge at the strip's end.)
+    static func target(from i: Int, offset dx: CGFloat, widths: [CGFloat], gap: CGFloat) -> Int {
+        guard widths.indices.contains(i) else { return i }
+        let mid = { (j: Int) -> CGFloat in start(j, widths: widths, gap: gap) + widths[j] / 2 }
+        let left = start(i, widths: widths, gap: gap) + dx
+        let right = left + widths[i]
+        var t = i
+        if dx > 0 { while t + 1 < widths.count, right > mid(t + 1) { t += 1 } }
+        else if dx < 0 { while t - 1 >= 0, left < mid(t - 1) { t -= 1 } }
+        return t
+    }
+
+    /// How far tab `j` slides aside while tab `i` is dragged over index `t`.
+    static func slide(_ j: Int, dragged i: Int, target t: Int, width: CGFloat, gap: CGFloat) -> CGFloat {
+        if j > i, j <= t { return -(width + gap) }
+        if j < i, j >= t { return width + gap }
+        return 0
+    }
+
+    /// Shift+Cmd+[ and ]: the tab before or after, in strip order with Home first. The result nil is "no move",
+    /// `.some(nil)` is Home. Wraps round.
+    static func step(_ files: [String], current: String?, homeShown: Bool, forward: Bool) -> String?? {
+        guard !files.isEmpty else { return nil }
+        let strip: [String?] = [nil] + files.map { Optional($0) }
+        let at = homeShown ? 0 : (files.firstIndex { $0 == current }.map { $0 + 1 } ?? 0)
+        let n = strip.count
+        return .some(strip[(at + (forward ? 1 : n - 1)) % n])
+    }
+}
+
 /// Whether a failed page load should be tried again: the server is starting or restarting (connection refused,
 /// dropped, timed out), and not forever.
 enum NavRetry {
@@ -1131,6 +1195,9 @@ enum MenuSpec {
     static let window: [Entry] = [
         // Home (Home.swift): the pinned first tab. Shift+Cmd+0 is free: the page's Shift+0 (zoom to 100%) has no Cmd.
         Item(title: "Home", command: "home", key: "0", mods: [.command, .shift]),
+        // Shift+Cmd+[ and ]: the tab before and after, in the strip's order (Home first).
+        Item(title: "Previous Tab", command: "previousTab", key: "{", mods: [.command, .shift]),
+        Item(title: "Next Tab", command: "nextTab", key: "}", mods: [.command, .shift]),
         nil,
         Item(title: "Minimize", command: "minimize", key: "m"),
         Item(title: "Zoom", command: "zoomWindow", mods: []),

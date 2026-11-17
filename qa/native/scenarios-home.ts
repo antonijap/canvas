@@ -329,3 +329,75 @@ sc("home", "Both sidebars drag from their right edge, stop at a minimum and a ma
   await dragEdge(t, "sidebarWidth", 30);
   t.eq(stored("canvas.sidebarWidth"), 274, "the editor panel's width is kept in preferences");
 });
+
+sc("tabs", "File tabs: drag one left or right to reorder, a short move is a click, Home stays first, the order is kept and Shift+Cmd+[ and ] follow it", { covers: ["tabs:drag", "tabs:threshold", "tabs:home-pinned", "tabs:saved", "tabs:step"] }, async (t: NT) => {
+  for (const f of (await t.state()).openFiles.filter((x: string) => x !== t.file)) await t.app.cmd({ op: "close", args: { file: f } });
+  const mk = (n: string) => { const f = path.join(t.app.docs, `tabs-${n}.canvas`); copyDir(PLAYGROUND, f); return f; };
+  const [b, c] = [mk("b"), mk("c")];
+  for (const f of [b, c]) {
+    await t.app.cmd({ op: "open", args: { file: f }, timeoutMs: 20_000 });
+    await t.waitState((s) => s.file === f && s.pages.length > 0, `${baseName(f)} to open`, 20_000);
+  }
+  await t.settle();
+  const order = async () => (await t.state()).openFiles as string[];
+  const tabs = async () => (await t.marks({ id: "file-tab" })).sort((p, q) => p.x - q.x);
+  const stored = () => JSON.parse(execFileSync("sh", ["-c", `defaults export ${t.app.bundleId} - | plutil -extract 'canvas\\.openFiles' json -o - -`], { encoding: "utf8" })) as string[];
+  const mid = (m: { x: number; w: number; y: number; h: number }) => ({ x: m.x + m.w * 0.4, y: m.y + m.h / 2 });
+  const last = async () => { const r = await tabs(); return r[r.length - 1]; };
+  t.eq(await order(), [t.file, b, c], "three tabs in the order they were opened");
+
+  // A press that moves a couple of points is a click: nothing reorders.
+  let tb = await tabs();
+  await t.drag(mid(tb[2]), { x: mid(tb[2]).x + 2, y: mid(tb[2]).y }, { steps: 4 });
+  await sleep(300);
+  t.eq(await order(), [t.file, b, c], "a 2 pt move never starts a drag");
+
+  // Drag the last tab to the front: the others slide aside, the drop saves the order.
+  const home0 = await t.mark({ id: "home-tab" });
+  tb = await tabs();
+  await t.drag(mid(tb[2]), { x: tb[0].x + 6, y: mid(tb[2]).y }, { steps: 24 });
+  await sleep(500);
+  t.eq(await order(), [c, t.file, b], "the dragged tab took the first place");
+  t.eq(stored(), [c, t.file, b], "the order is saved in preferences");
+  const listed = await t.app.cmd({ op: "tabs" });
+  t.eq(listed.tabs.map((x: { file: string }) => x.file), [c, t.file, b], "list_tabs reports the new order");
+  tb = await tabs();
+  t.eq(tb.map((m) => m.label), [baseName(c), baseName(t.file), baseName(b)], "the tabs are drawn in the new order");
+  const home1 = await t.mark({ id: "home-tab" });
+  t.ok(Math.abs(home1.x - home0.x) < 0.5 && home1.x + home1.w <= tb[0].x, "Home did not move and is still before the first file tab");
+  t.near(tb[0].h, 32, 0.6, "tabs keep the control height");
+
+  // Home is not draggable: pulling it right changes nothing.
+  const l1 = await last();
+  await t.drag(center(home1), { x: l1.x + l1.w, y: center(home1).y }, { steps: 24 });
+  await sleep(400);
+  t.eq(await order(), [c, t.file, b], "dragging Home reorders nothing");
+  t.ok(Math.abs((await t.mark({ id: "home-tab" })).x - home0.x) < 0.5, "Home stays first");
+
+  // A tab dragged right, to the end.
+  tb = await tabs();
+  const l2 = await last();
+  await t.drag(mid(tb[0]), { x: l2.x + l2.w - 6, y: mid(tb[0]).y }, { steps: 24 });
+  await sleep(500);
+  t.eq(await order(), [t.file, b, c], "the first tab dragged to the end");
+
+  // Shift+Cmd+[ and ] walk the strip in its new order.
+  tb = await tabs();
+  const l3 = await last();
+  await t.drag(mid(tb[0]), { x: l3.x + l3.w - 6, y: mid(tb[0]).y }, { steps: 24 });
+  await sleep(500);
+  t.eq(await order(), [b, c, t.file], "dragged again: the order is b, c, the first file");
+  await t.app.cmd({ op: "open", args: { file: b }, timeoutMs: 20_000 });
+  await t.waitState((s) => s.file === b && !s.homeShown, "b to show");
+  t.eq((await t.cmd("qa.mainmenu", { title: "Next Tab" })).mods, (1 << 17) | (1 << 20), "Window > Next Tab has Shift and Cmd");
+  await t.key("]", ["cmd", "shift"]);
+  await t.waitState((s) => s.file === c, "Shift+Cmd+] to show the tab after b in the new order");
+  await t.key("]", ["cmd", "shift"]);
+  await t.waitState((s) => s.file === t.file, "Shift+Cmd+] to show the last tab");
+  await t.key("]", ["cmd", "shift"]);
+  await t.waitState((s) => s.homeShown, "Shift+Cmd+] after the last tab to show Home");
+  await t.key("[", ["cmd", "shift"]);
+  await t.waitState((s) => !s.homeShown && s.file === t.file, "Shift+Cmd+[ from Home to the last tab");
+  await t.key("[", ["cmd", "shift"]);
+  await t.waitState((s) => s.file === c, "Shift+Cmd+[ to the tab before");
+});

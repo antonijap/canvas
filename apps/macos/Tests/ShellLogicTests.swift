@@ -20,9 +20,60 @@ struct ShellLogicTests {
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
-        updateManifest(); updateVerdict(); updateInstall(); updateHelper()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    // Dragging file tabs into a new order: Home stays outside the list, a short move is a click.
+    static func tabOrder() {
+        typealias T = TabOrder
+        let f = ["/a", "/b", "/c", "/d"]
+        check(T.move(f, from: 0, to: 2) == ["/b", "/c", "/a", "/d"], "move right")
+        check(T.move(f, from: 3, to: 0) == ["/d", "/a", "/b", "/c"], "move left to the very first file tab")
+        check(T.move(f, from: 1, to: 1) == f, "same place")
+        check(T.move(f, from: 1, to: -5) == ["/b", "/a", "/c", "/d"], "never before the first file (Home stays ahead)")
+        check(T.move(f, from: 1, to: 99) == ["/a", "/c", "/d", "/b"], "never past the last")
+        check(T.move(f, from: 9, to: 0) == f, "unknown index changes nothing")
+        check(Set(T.move(f, from: 0, to: 3)) == Set(f), "no tab lost or doubled")
+
+        check(!T.isDrag(0) && !T.isDrag(3.9) && !T.isDrag(-3.9), "under a few points is a click")
+        check(T.isDrag(4) && T.isDrag(-12), "past the threshold is a drag")
+        check(!T.isDrag(.nan), "NaN is no drag")
+
+        let w: [CGFloat] = [100, 80, 120], gap: CGFloat = 2
+        check(T.start(0, widths: w, gap: gap) == 0 && T.start(2, widths: w, gap: gap) == 184, "tab starts")
+        check(T.target(from: 0, offset: 0, widths: w, gap: gap) == 0, "no move, no change")
+        check(T.target(from: 0, offset: 30, widths: w, gap: gap) == 0, "not yet past the neighbour's middle")
+        check(T.target(from: 0, offset: 60, widths: w, gap: gap) == 1, "past the middle of the next")
+        check(T.target(from: 0, offset: 400, widths: w, gap: gap) == 2, "far right: last")
+        check(T.target(from: 2, offset: -400, widths: w, gap: gap) == 0, "far left: first")
+        check(T.target(from: 2, offset: -60, widths: w, gap: gap) == 1, "one left")
+        check(T.target(from: 2, offset: -30, widths: w, gap: gap) == 2, "not yet past the neighbour on the left")
+        let u: [CGFloat] = [200, 60, 60]
+        check(T.target(from: 0, offset: T.clamp(999, index: 0, widths: u, gap: gap), widths: u, gap: gap) == 2, "a wide tab dragged to the far end reaches the last slot")
+        check(T.target(from: 2, offset: T.clamp(-999, index: 2, widths: u, gap: gap), widths: u, gap: gap) == 0, "and the far start")
+        check(T.slide(1, dragged: 0, target: 2, width: 100, gap: gap) == -102, "passed tabs slide back by the dragged width")
+        check(T.slide(2, dragged: 0, target: 2, width: 100, gap: gap) == -102, "the target slot slides too")
+        check(T.slide(2, dragged: 0, target: 1, width: 100, gap: gap) == 0, "tabs beyond the target stay")
+        check(T.slide(0, dragged: 2, target: 0, width: 120, gap: gap) == 122, "dragging left pushes the others right")
+        check(T.slide(1, dragged: 1, target: 1, width: 80, gap: gap) == 0, "the dragged tab itself is not slid")
+        check(T.clamp(-50, index: 0, widths: w, gap: gap) == 0, "cannot drag left of the strip")
+        check(T.clamp(900, index: 0, widths: w, gap: gap) == 204, "cannot drag right of the strip")
+        check(T.clamp(30, index: 1, widths: w, gap: gap) == 30, "inside the strip it follows the pointer")
+
+        typealias S = TabOrder
+        check(S.step(f, current: "/b", homeShown: false, forward: true) == .some("/c"), "next tab")
+        check(S.step(f, current: "/b", homeShown: false, forward: false) == .some("/a"), "previous tab")
+        check(S.step(f, current: "/d", homeShown: false, forward: true) == .some(nil), "next after the last wraps to Home")
+        check(S.step(f, current: "/a", homeShown: false, forward: false) == .some(nil), "previous before the first is Home")
+        check(S.step(f, current: "/a", homeShown: true, forward: true) == .some("/a"), "from Home, next is the first file")
+        check(S.step(f, current: "/c", homeShown: true, forward: false) == .some("/d"), "from Home, previous wraps to the last")
+        check(S.step([], current: nil, homeShown: true, forward: true) == nil, "no files, no move")
+        let moved = T.move(f, from: 0, to: 2)
+        check(S.step(moved, current: "/b", homeShown: false, forward: true) == .some("/c") && S.step(moved, current: "/a", homeShown: false, forward: false) == .some("/c"), "stepping follows the new order")
+        check(MenuSpec.window.compactMap { $0 }.contains { $0.command == "nextTab" && $0.key == "}" && $0.mods == [.command, .shift] }, "Window > Next Tab is Shift+Cmd+]")
+        check(MenuSpec.window.compactMap { $0 }.contains { $0.command == "previousTab" && $0.key == "{" && $0.mods == [.command, .shift] }, "Window > Previous Tab is Shift+Cmd+[")
     }
 
     // Align, distribute and tidy up for several layers: the inspector's Arrange row and right-click > Align.

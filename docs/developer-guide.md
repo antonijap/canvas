@@ -253,6 +253,7 @@ App menus (Canvas.app; the browser handles the same keys on the page). Menus: Ca
 | Cmd+] / Cmd+[ | Bring forward / send backward |
 | Opt+Cmd+] / Opt+Cmd+[ | Bring to front / send to back |
 | Shift+Cmd+0 | Home: the pinned first tab (Window > Home) |
+| Shift+Cmd+[ / ] | Previous / next tab (Window menu, keys "{" and "}"), Home first. A file tab drags sideways to reorder (`TabOrder` in ShellLogic.swift; the order is kept in `canvas.openFiles`) |
 | Cmd+M | Minimize |
 | Cmd+Q | Quit |
 
