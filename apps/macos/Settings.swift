@@ -1,5 +1,5 @@
-// Canvas > Settings (Cmd+,): a macOS settings window with toolbar tabs, General, Canvas, Agents, Sounds, Performance
-// and Shortcuts, drawn with the design system. The values live in CanvasModel.prefs (SettingsLogic.swift) and
+// Canvas > Settings (Cmd+,): a macOS settings window with toolbar tabs, General, Canvas, Agents, Sounds, Performance,
+// Privacy and Shortcuts, drawn with the design system. The values live in CanvasModel.prefs (SettingsLogic.swift) and
 // CanvasModel.snap (snapping) and theme; changing one saves it and sends it
 // where it is read (the page, the server) at once.
 
@@ -14,7 +14,7 @@ final class SettingsWindow {
     private var window: NSWindow?
 
     enum Tab: String, CaseIterable {
-        case general, canvas, agents, sounds, performance, shortcuts
+        case general, canvas, agents, sounds, performance, privacy, shortcuts
         var title: String { rawValue.capitalized }
         var symbol: String {
             switch self {
@@ -23,6 +23,7 @@ final class SettingsWindow {
             case .agents: "sparkles"
             case .sounds: "speaker.wave.2"
             case .performance: "gauge.with.dots.needle.67percent"
+            case .privacy: "hand.raised"
             case .shortcuts: "keyboard"
             }
         }
@@ -101,6 +102,7 @@ struct SettingsPane: View {
             case .agents: AgentSettings(model: model)
             case .sounds: SoundSettings(model: model)
             case .performance: PerformanceSettings(model: model)
+            case .privacy: PrivacySettings(model: model)
             case .shortcuts: ShortcutSettings()
             }
         }
@@ -320,6 +322,87 @@ struct PerformanceSettings: View {
     private var used: String? {
         guard let b = model.snapshotBytes else { return nil }
         return b == 0 ? "Empty" : ByteCountFormatter.string(fromByteCount: Int64(b), countStyle: .file) + " used"
+    }
+}
+
+/// Anonymous usage counts (src/usage-counts.ts): whether they are shared, whether a monthly random id goes with them,
+/// what the website says about them, and the exact JSON for today (GET /api/usage/preview).
+struct PrivacySettings: View {
+    @ObservedObject var model: CanvasModel
+    @State private var showing = false
+
+    var body: some View {
+        SettingsStack {
+            VStack(alignment: .leading, spacing: 8) {
+                SettingsCard(title: "Usage counts") {
+                    SettingsRow("Share usage counts", detail: "How often each feature is used, sent once a day") { SettingsSwitch(isOn: $model.prefs.shareUsage) }
+                    SettingsDivider()
+                    SettingsRow("Help improve Canvas", detail: "Adds a random ID that changes every month") {
+                        SettingsSwitch(isOn: Binding(get: { model.prefs.improveEffective }, set: { model.prefs.improveCanvas = $0 }))
+                            .disabled(!model.prefs.shareUsage).opacity(model.prefs.shareUsage ? 1 : 0.5)
+                    }
+                    SettingsDivider()
+                    SettingsRow("Today") {
+                        HStack(spacing: 8) {
+                            FieldButton(title: "What Canvas collects", symbol: "arrow.up.right") { NSWorkspace.shared.open(UsageLinks.privacy) }
+                            FieldButton(title: "Show what\u{2019}s sent", symbol: nil) { showing = true }
+                                .qaID("usage-show", label: "Show what\u{2019}s sent")
+                                .popover(isPresented: $showing, arrowEdge: .bottom) { UsagePreview(base: model.base) }
+                        }
+                    }
+                }
+                Text("Counts only, like how many files you opened. Never file names, contents, prompts or anything about you.")
+                    .font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+            }
+        }
+    }
+}
+
+/// Show what's sent: the body the next send would carry for today, exactly as the server builds it.
+private struct UsagePreview: View {
+    let base: URL
+    @State private var json: String?
+    @State private var note = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Today\u{2019}s counts").font(Typography.section).foregroundStyle(Palette.mutedFg).lineLimit(1)
+            ScrollView {
+                Text(json ?? "Asking Canvas\u{2026}")
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(Palette.fg)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.vertical, 8)
+                    .qaID("usage-json", label: json)
+            }
+            .frame(height: 260)
+            .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field.opacity(0.6)))
+            if !note.isEmpty {
+                Text(note).font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(width: 420)
+        // Opaque, in the app's theme: the JSON reads the same over any window behind the popover.
+        .background(Palette.popover)
+        .task { await load() }
+    }
+
+    private func load() async {
+        var req = URLRequest(url: base.appendingPathComponent("api/usage/preview"))
+        req.timeoutInterval = 4
+        guard let (data, _) = try? await URLSession.shared.data(for: req),
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { json = "Canvas did not answer"; return }
+        guard j["share"] as? Bool == true, let text = j["json"] as? String else {
+            json = "Nothing. Share usage counts is off."
+            return
+        }
+        json = text
+        note = j["sends"] as? Bool == true
+            ? "Sent once the day ends (UTC), at the next launch or the next day."
+            : "This build never sends. Only release builds do."
     }
 }
 

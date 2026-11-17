@@ -142,7 +142,9 @@ func checkForUpdate() {
       MainActor.assumeIsolated {
         model.flash("Canvas \(v) is out", durationMs: 12000, actions: [ToastAction(id: "download", label: "Download", symbol: nil) {
           model.clearToast(); NSWorkspace.shared.open(ReleaseLinks.download)
+          UsageCount.send("update.download_clicked", to: base)
         }])
+        UsageCount.send("update.toast_shown", to: base)
       }
     }
   }.resume()
@@ -223,6 +225,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     return .terminateLater
   }
+  // A normal quit clears the running marker (RunMarker): found set at the next launch, it counts one crash.
+  func applicationWillTerminate(_ notification: Notification) { RunMarker.quit(.standard) }
 }
 /// A second Quit after a failed save quits without waiting again.
 var quitAnyway = false
@@ -243,6 +247,8 @@ func showMainWindow() {
   window.makeKeyAndOrderFront(nil)
 }
 let appDelegate = AppDelegate()
+/// Whether the last run ended without quitting (RunMarker): counted once the server is up.
+let lastRunCrashed = RunMarker.launch(.standard)
 let app = NSApplication.shared
 app.delegate = appDelegate
 app.setActivationPolicy(.regular)
@@ -662,9 +668,9 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   @objc func showWindow(_ s: Any?) { showMainWindow() }
   /// Help > Report a Bug: the website's form in the browser, with this build's version, commit, macOS and
   /// architecture filled in (ReleaseLinks.report). Nothing is sent until the person presses Send there.
-  @objc func reportBug(_ s: Any?) { NSWorkspace.shared.open(reportURL()) }
+  @objc func reportBug(_ s: Any?) { NSWorkspace.shared.open(reportURL()); UsageCount.send("bug.report_opened", to: base) }
   /// Help > Download Latest Version: the website's download page.
-  @objc func downloadLatest(_ s: Any?) { NSWorkspace.shared.open(ReleaseLinks.download) }
+  @objc func downloadLatest(_ s: Any?) { NSWorkspace.shared.open(ReleaseLinks.download); UsageCount.send("update.download_clicked", to: base) }
   private var nativeText: Bool { keyWindowNow.firstResponder is NSText }
   func validateMenuItem(_ item: NSMenuItem) -> Bool {
     let key = NSApp.currentEvent?.type == .keyDown
@@ -1004,6 +1010,9 @@ func loadDesign() {
 DispatchQueue.global(qos: .userInitiated).async {
   if !serverUp() { startServer() }
   for _ in 0..<200 { if serverUp() { break }; usleep(100_000) }
+  // Usage counts (src/usage-counts.ts): this launch, and a crash when the last run never quit.
+  if lastRunCrashed { UsageCount.send("crash", to: base) }
+  UsageCount.send("app.open", to: base)
   DispatchQueue.main.async {
     serverReady = true
     // A Finder open that arrived before the server was up goes first; otherwise the remembered file.

@@ -72,6 +72,8 @@ function start(host) {
     const ok = await write(text);
     host.lastLink = { text, written: ok };
     tell(ok ? "Link copied" : "Could not copy the link", ok ? "link" : null);
+    // Usage counts (src/usage-counts.ts): the name only, never the link.
+    if (ok && typeof fetch === "function") fetch("/api/usage/count", { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ name: "link.copy" }) }).catch(() => {});
   }
   host.copyLink = copyLink;
 

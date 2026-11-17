@@ -751,10 +751,10 @@ features:
     driven: [mcp]
     cases: [board, text, card-todo]
   - id: settings
-    name: Settings tabs (General, Canvas, Agents, Sounds, Performance, Shortcuts)
+    name: Settings tabs (General, Canvas, Agents, Sounds, Performance, Privacy, Shortcuts)
     area: chrome
     driven: [native]
-    cases: [$themes]
+    cases: [$themes, privacy]
   - id: theme
     name: App theme light and dark
     area: chrome
