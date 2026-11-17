@@ -267,6 +267,8 @@ export type WithLog = {
    * file was put back to them (a restore in place), so its edits are not put on top; they are kept as a recovery copy.
    */
   restored?: boolean;
+  /** That stale log ends with a fold line naming these very bytes (foldedInto): they hold its edits; it only waits to be removed. */
+  folded?: boolean;
   /** A log this build does not read (a newer version): not applied, never removed. */
   unknown?: boolean;
   /** Its first line, when it has one this build reads. */
@@ -287,6 +289,7 @@ export function withLog(docFile: string, base: string, doc: CanvasDoc, read: { r
   if ("unknown" in p) return { doc, unknown: true, seen: sig };
   let copy = false;
   if ("stale" in p) {
+    if (foldedInto(raw) === base) return { doc, stale: true, folded: true, head: p.head, seen: sig };
     copy = isCopy(p.head, sig);
     // A copy of a package whose log came along, next to the very bytes it was written for: it applies (the copy
     // holds the same edits as the original), and is folded into the copy's document.json at once.
@@ -484,6 +487,78 @@ export function lockLogSync(docFile: string, timeoutMs = lockConfig.syncWaitMs):
     if (r) return claim(docFile, r);
     if (Date.now() - t0 > timeoutMs) throw new Error(`the save log of ${path.basename(docFile)} stayed locked by another Canvas for ${timeoutMs} ms`);
     Atomics.wait(nap, 0, 0, wait);
+  }
+}
+
+// ---------------------------------------------------------------- the fold line
+
+// A whole write that folds the log (its edits are in the bytes it writes) appends `F <sha256 of those bytes>\n` to the
+// log, under the lock, right before its rename, and removes the log once the rename is durable. A crash in between
+// leaves the log beside bytes that hold it: its last line names them, so nobody applies its edits again (on top of
+// them they would land twice) or keeps them as a recovery copy. A reader that does not know the line stops at it
+// (it is not a record): the records before it stay valid.
+const FOLD_LEN = 67; // "F " + 64 hex + "\n"
+const foldLine = (hash: string) => Buffer.from(`F ${hash}\n`);
+
+/** The document hash a log's fold line names, when it ends with one. */
+export function foldedInto(raw: Buffer): string | undefined {
+  if (raw.length < FOLD_LEN) return undefined;
+  return /^F ([0-9a-f]{64})\n$/.exec(raw.subarray(raw.length - FOLD_LEN).toString("latin1"))?.[1];
+}
+
+/** Append the fold line for the bytes hashing to `hash` (the caller holds the lock). Its undo, or null: no log. */
+export async function markFold(docFile: string, hash: string): Promise<(() => void) | null> {
+  let fh: fs.promises.FileHandle;
+  try {
+    fh = await fs.promises.open(logPathOf(docFile), "r+");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+  try {
+    const size = (await fh.stat()).size;
+    const buf = foldLine(hash);
+    for (let off = 0; off < buf.length; ) {
+      const { bytesWritten } = await fh.write(buf, off, buf.length - off, size + off);
+      if (!(bytesWritten > 0)) throw new Error("a write made no progress");
+      off += bytesWritten;
+    }
+    await fh.sync();
+    return () => {
+      try {
+        fs.truncateSync(logPathOf(docFile), size);
+      } catch {}
+    };
+  } finally {
+    await fh.close();
+  }
+}
+
+/** markFold for synchronous callers (store.ts saveDoc). */
+export function markFoldSync(docFile: string, hash: string): (() => void) | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(logPathOf(docFile), "r+");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    const buf = foldLine(hash);
+    for (let off = 0; off < buf.length; ) {
+      const n = fs.writeSync(fd, buf, off, buf.length - off, size + off);
+      if (!(n > 0)) throw new Error("a write made no progress");
+      off += n;
+    }
+    fs.fsyncSync(fd);
+    return () => {
+      try {
+        fs.truncateSync(logPathOf(docFile), size);
+      } catch {}
+    };
+  } finally {
+    fs.closeSync(fd);
   }
 }
 
