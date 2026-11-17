@@ -612,6 +612,7 @@ async function docsClaims(): Promise<Item[]> {
     const [file, anchor] = target.split("#");
     const f = path.join(ROOT, file);
     if (!fs.existsSync(f)) { claim(false, `README link ${target}`, `${file} does not exist`); continue; }
+    if (fs.statSync(f).isDirectory()) { claim(true, `README link ${target}`); continue; }
     if (anchor) {
       const heads = fs.readFileSync(f, "utf8").split("\n").filter((l) => /^#{1,6} /.test(l)).map((l) => slug(l.replace(/^#+ /, "")));
       claim(heads.includes(anchor), `README link ${target}`, `no heading #${anchor} in ${file}`);
