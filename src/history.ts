@@ -17,6 +17,7 @@ import { allIds, buildIndex, findNode, loadDoc, revisionOf, stateHashOf, StaleFi
 import { currentDoc, editDoc, pendingEdits, writerHooks } from "./docwriter.ts";
 import { envelopeHook, storeForAsync, type EnvelopeState } from "./widgets/store.ts";
 import type { Widget } from "./widgets/types.ts";
+import { countUsage } from "./usage-counts.ts";
 
 export const MERGE_MS = 500;
 export const MAX_ENTRIES = 200;
@@ -1149,6 +1150,8 @@ async function step(docFile: string, dir: Dir, hooks: ApplyHooks, opts: { skip?:
     const at = from.lastIndexOf(e);
     if (at >= 0) from.splice(at, 1);
     if (e.agent) e.agent.open = false; // an undone agent step never takes more edits
+    // A step made by Canvas's own agent run (talk to the selection: its MCP session is "run-<id>", src/agent-run.ts).
+    if (dir === "undo" && e.agent?.session.startsWith("run-")) countUsage("agent.run_undone");
     e.at = 0; // a reversed step never merges with the next edit
     if (revision) e.revision = revision;
     (dir === "undo" ? s.redo : s.undo).push(e);

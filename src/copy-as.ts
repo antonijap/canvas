@@ -11,6 +11,7 @@
 import type http from "node:http";
 import type { CodeAnswer } from "./codegen.ts";
 import { decodePng, encodePng, ExportError, MAX_SIDE, runExport, type ExportDeps, type ExportedFile, type ExportRequest, type Pixels } from "./export.ts";
+import { countUsage } from "./usage-counts.ts";
 
 export type CopyFormat = "png" | "svg" | "css" | "swiftui" | "text";
 export const COPY_FORMATS: CopyFormat[] = ["png", "svg", "css", "swiftui", "text"];
@@ -121,7 +122,9 @@ export async function handleCopyAsRoute(req: http.IncomingMessage, res: http.Ser
     }
     const c = validateCopy(b);
     await deps.prime(c.file);
-    return reply(200, await copyAs(deps.port(), deps.docFileOf(c.file), c)), true;
+    const out = await copyAs(deps.port(), deps.docFileOf(c.file), c);
+    countUsage(`copy_as.${c.format}`);
+    return reply(200, out), true;
   } catch (e) {
     if (e instanceof ExportError) return reply(e.status, { error: e.message, code: e.code }), true;
     return reply(422, { error: (e as Error).message, code: "failed" }), true;

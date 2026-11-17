@@ -23,6 +23,7 @@ import type http from "node:http";
 import path from "node:path";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
+import { countUsage } from "./usage-counts.ts";
 
 export type ExportFormat = "png" | "svg" | "jpg" | "webp" | "pdf";
 export const FORMATS: ExportFormat[] = ["png", "jpg", "webp", "svg", "pdf"];
@@ -402,7 +403,9 @@ export async function handleExportRoute(req: http.IncomingMessage, res: http.Ser
     const docFile = deps.docFileOf(r.file);
     const target = r.path ? path.dirname(r.path) : r.dir!;
     if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) throw new ExportError(404, "not_found", `No folder ${target}`);
-    return reply(200, await runExport(deps.port(), docFile, r)), true;
+    const out = await runExport(deps.port(), docFile, r);
+    for (const f of new Set(r.items.map((i) => i.format))) countUsage(`export.${f}`);
+    return reply(200, out), true;
   } catch (e) {
     if (e instanceof ExportError) return reply(e.status, { error: e.message, code: e.code }), true;
     return reply(422, { error: (e as Error).message, code: "failed" }), true;

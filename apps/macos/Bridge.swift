@@ -288,6 +288,8 @@ final class BridgeClient {
       "client": clientId, "role": "shell", "host": "native", "windowFocused": windowFocused, "windowVisible": windowVisible,
       "theme": themeInfo, "openFiles": model.openFiles, "currentFile": model.currentFile as Any? ?? NSNull(),
       "settings": model.prefs.serverSettings,
+      // Settings > Privacy and the facts only the app knows, for usage counts (src/usage-counts.ts).
+      "usage": model.prefs.usageFacts(version: appVersion, commit: appCommit, os: ReleaseLinks.osString(ProcessInfo.processInfo.operatingSystemVersion), qa: isQABuild),
     ]
     guard let key = try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]), force || key != lastPosted else { return }
     lastPosted = key
@@ -299,5 +301,19 @@ final class BridgeClient {
       if status == 404 { self.stream.invalidateAndCancel(); self.rebuildStream() }
       else if status != 200 { self.lastPosted = nil }
     }
+  }
+}
+
+/// Usage counts (src/usage-counts.ts): one more of `name` today. Only the name goes; the server ignores names outside
+/// its list, and everything while Settings > Privacy > Share usage counts is off.
+enum UsageCount {
+  static func send(_ name: String, to base: URL) {
+    var req = URLRequest(url: base.appendingPathComponent("api/usage/count"))
+    req.httpMethod = "POST"
+    req.timeoutInterval = 5
+    req.setValue("1", forHTTPHeaderField: "X-Canvas")
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.httpBody = try? JSONSerialization.data(withJSONObject: ["name": name])
+    URLSession.shared.dataTask(with: req).resume()
   }
 }

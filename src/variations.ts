@@ -41,6 +41,7 @@ import type { LayoutBody } from "./autolayout.ts";
 import type { Harness } from "./threads.ts";
 import { storeFor, storeForAsync } from "./widgets/store.ts";
 import { docFileFor } from "./widgets.ts";
+import { countUsage } from "./usage-counts.ts";
 
 export const COUNT = 3;
 export const GAP = 80;
@@ -1101,11 +1102,21 @@ export async function handleVariationsRoute(req: http.IncomingMessage, res: http
     const file = String(b.file ?? "");
     if (p === "/api/variations/make") {
       const rects = b.rects && typeof b.rects === "object" ? (b.rects as Record<string, Rect>) : undefined;
-      return reply(200, { ok: true, set: await makeVariations(ctx, { file, ids: Array.isArray(b.ids) ? b.ids : [], harness: b.harness === "codex" || b.harness === "claude" ? b.harness : undefined, rects }) }), true;
+      const set = await makeVariations(ctx, { file, ids: Array.isArray(b.ids) ? b.ids : [], harness: b.harness === "codex" || b.harness === "claude" ? b.harness : undefined, rects });
+      countUsage("variations.make");
+      return reply(200, { ok: true, set }), true;
     }
     if (p === "/api/variations/stop") return reply(200, { ok: stopVariations(String(b.set ?? "")) }), true;
-    if (p === "/api/variations/keep") return reply(200, { ok: true, set: await keepVariation(ctx, file, String(b.set ?? ""), String(b.id ?? "")) }), true;
-    if (p === "/api/variations/discard") return reply(200, { ok: true, set: await discardVariations(ctx, file, String(b.set ?? "")) }), true;
+    if (p === "/api/variations/keep") {
+      const set = await keepVariation(ctx, file, String(b.set ?? ""), String(b.id ?? ""));
+      countUsage("variations.keep");
+      return reply(200, { ok: true, set }), true;
+    }
+    if (p === "/api/variations/discard") {
+      const set = await discardVariations(ctx, file, String(b.set ?? ""));
+      countUsage("variations.discard");
+      return reply(200, { ok: true, set }), true;
+    }
     if (p === "/api/variations/mark") return reply(200, await markVariation(file, { id: String(b.id ?? ""), direction: b.direction, why: b.why, refs: b.refs })), true;
     if (p === "/api/variations/brief") {
       const brief = await writeBrief(file, String(b.text ?? ""), b.drafted === true);

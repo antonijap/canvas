@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { agentLabel } from "./agent-cursor.ts";
 import { DESIGN_FILE } from "./docpath.ts";
 import { kindOf, validateWidget } from "./widgets/registry.ts";
+import { countUsage } from "./usage-counts.ts";
 
 export const MCP_NAME = "canvas";
 /** canvas-mcp says hello every 20 s (HEARTBEAT_MS in mcp/client.ts); the indicator goes off after OFF_AFTER_MS of silence. */
@@ -67,6 +68,14 @@ export function setupCommands(node = stableNode(), script = MCP_SCRIPT, home = u
 // ---------- who is talking ----------
 
 let seen: { at: number; client: string } | null = null;
+/** MCP sessions already counted as a connection (usage counts): one per session, not one per heartbeat. */
+const counted = new Set<string>();
+
+/** agent.connected.claude, .codex or .other, from the client's name (x-canvas-agent). */
+export function connectedEvent(agent: unknown): string {
+  const s = typeof agent === "string" ? agent.toLowerCase() : "";
+  return s.includes("claude") ? "agent.connected.claude" : s.includes("codex") ? "agent.connected.codex" : "agent.connected.other";
+}
 
 /** Notes a request from canvas-mcp. Only clients the person runs count, never Canvas's own runs. */
 export function noteMcp(req: http.IncomingMessage, now = Date.now()): boolean {
@@ -76,6 +85,11 @@ export function noteMcp(req: http.IncomingMessage, now = Date.now()): boolean {
   const session = String(req.headers["x-canvas-session"] ?? mcpRead ?? "");
   if (!session || session.startsWith("run-")) return false;
   const agent = req.headers["x-canvas-agent"];
+  if (!counted.has(session)) {
+    if (counted.size > 500) counted.clear();
+    counted.add(session);
+    countUsage(connectedEvent(agent));
+  }
   seen = { at: now, client: typeof agent === "string" && agent ? agentLabel(agent.slice(0, 80)) : seen?.client ?? "An agent" };
   return true;
 }
@@ -86,7 +100,7 @@ export function mcpStatus(now = Date.now()) {
 }
 
 /** Tests: forget who talked. */
-export const resetMcpSeen = () => void (seen = null);
+export const resetMcpSeen = () => { seen = null; counted.clear(); };
 
 // ---------- the Welcome file ----------
 
