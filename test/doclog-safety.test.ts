@@ -710,7 +710,7 @@ describe("last cases", () => {
         assert.equal(nodeIn(withLog(p.docPath), "B0N1").name, "E1", `${owner}: the original still holds it`);
       } finally {
         if (A) await stop(A);
-        await stop(B);
+        if (owner === "alive") await stop(B);
       }
     }
   });
