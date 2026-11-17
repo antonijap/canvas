@@ -245,7 +245,6 @@ function start(host) {
   async function align(how, toParent = false) {
     const sel = ids();
     if (!sel.length) return;
-    let target;
     const parentRect = async (id) => {
       if (isW(id) || host.boards.has(id)) return undefined;
       let pid = parentOf.get(id);
@@ -262,12 +261,19 @@ function start(host) {
       moveBy(sel, sel.map(() => d), "align");
       return;
     }
-    if (sel.length > 1) target = S.unionOf(sel.map((id) => host.worldRectOf(id)));
-    else {
-      const pid = await parentRect(sel[0]);
-      if (pid === undefined) return;
-      target = pid ? host.worldRectOf(pid) : null;
+    if (sel.length > 1) {
+      // Layers auto layout places (or locked ones) stay, and stay out of the box the rest align in.
+      const plan = await planFor(sel, "align");
+      if (plan.note) tell(plan.note);
+      if (!plan.ok) return;
+      const rs = plan.ids.map((id) => host.worldRectOf(id));
+      const box = S.unionOf(rs);
+      if (box) moveBy(plan.ids, S.alignDeltas(rs, box, how), "align");
+      return;
     }
+    const pid = await parentRect(sel[0]);
+    if (pid === undefined) return;
+    const target = pid ? host.worldRectOf(pid) : null;
     if (!target) return;
     moveBy(sel, S.alignDeltas(sel.map((id) => host.worldRectOf(id)), target, how), "align");
   }
@@ -331,8 +337,21 @@ function start(host) {
   async function distribute(axis) {
     const sel = ids();
     if (sel.length < 3) { tell("Select three or more layers to distribute"); return; }
-    const deltas = S.distributeDeltas(sel.map((id) => host.worldRectOf(id)), axis);
-    moveBy(sel, deltas, "distribute");
+    const plan = await planFor(sel, "distribute");
+    if (plan.note) tell(plan.note);
+    if (!plan.ok) return;
+    moveBy(plan.ids, S.distributeDeltas(plan.ids.map((id) => host.worldRectOf(id)), axis), "distribute");
+  }
+  /** Which of `sel` align and distribute may move (S.arrangePlan): /api/node says which ones auto layout places. */
+  async function planFor(sel, what) {
+    const info = new Map();
+    await Promise.all(sel.map(async (id) => {
+      if (isW(id)) return;
+      if (id.includes("/")) { info.set(id, { placed: true }); return; } // inside an instance: its component places it
+      const j = host.boards.has(id) ? null : await nodeInfo(id, 0);
+      info.set(id, { placed: !!(j && j.placed) });
+    }));
+    return S.arrangePlan(sel, info, what);
   }
   let look = null;
   async function copyProps() {

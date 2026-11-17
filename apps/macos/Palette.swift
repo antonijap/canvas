@@ -475,7 +475,9 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
             case "removeAutoLayout": return sel.map { LayoutLogic.isAutoLayout($0.node) } ?? false
             case "detach": return type == "ref" || (many && type == nil)
             case "component": return editable && sel?.node["reusable"] as? Bool != true
-            case "distribute-h", "distribute-v": return (sel?.ids.count ?? 0) > 2
+            case "distribute-h", "distribute-v", "tidy":
+                guard let sel, let a = ArrangeActions.spread.first(where: { $0.op == cmd }) else { return false }
+                return ArrangeActions.enabled(a, count: sel.ids.count, free: sel.free)
             case "rename": return editable
             case "repeat": return hasSel && model.repeatLabel != nil
             default: return hasSel

@@ -693,7 +693,7 @@ enum QA {
         if let s = m.selection {
             sel = ["id": s.id, "ids": s.ids, "parentId": s.parentId ?? NSNull(), "type": s.node["type"] as? String ?? NSNull(),
                    "resolvedType": s.resolvedType ?? NSNull(), "width": s.width ?? NSNull(), "height": s.height ?? NSNull(),
-                   "isComponent": s.isComponent, "inInstance": s.inInstance, "overrides": s.overrides, "node": json(s.node),
+                   "isComponent": s.isComponent, "inInstance": s.inInstance, "overrides": s.overrides, "node": json(s.node), "free": s.free ?? NSNull(),
                    "paintRow": m.paintRowNow.map { ["key": $0.key, "row": $0.row] as [String: Any] } ?? NSNull()]
         }
         let layers = LayersStore.of(m)

@@ -95,6 +95,33 @@ export function alignDeltas(rects, target, how) {
   });
 }
 
+/** The fewest layers each arrange action takes once auto layout and locks have had their say. */
+export const ARRANGE_MIN = { align: 2, distribute: 3, tidy: 2 };
+const ARRANGE_ASK = { align: "Select two or more layers to align", distribute: "Select three or more layers to distribute", tidy: "Select two or more layers to tidy up" };
+
+/**
+ * Align, distribute and tidy up on a selection: which layers they move. A layer an auto layout frame places
+ * (`placed`, from /api/node) stays where it is and stays out of the box the rest align in. A locked layer stays in:
+ * it counts (the others align to it) and the server leaves it where it is. `info`: Map id -> {placed?} (a missing
+ * entry counts as free: cards, boards, layers not read yet). Returns {ids, stayed, ok, note}: `note` is what the
+ * toast says, or null.
+ */
+export function arrangePlan(sel, info, what) {
+  const ids = [], min = ARRANGE_MIN[what] ?? 2;
+  let stayed = 0;
+  for (const id of sel) {
+    const i = info && info.get(id);
+    if (i && i.placed) stayed++;
+    else ids.push(id);
+  }
+  const ok = ids.length >= min;
+  let note = null;
+  if (!ok && stayed && ids.length < 2) note = "Auto layout places these layers. Change the frame's alignment and gap instead";
+  else if (!ok) note = ARRANGE_ASK[what] ?? null;
+  else if (stayed) note = `Auto layout keeps ${stayed} of these layers in place`;
+  return { ids, stayed, ok, note };
+}
+
 /**
  * Tab / Shift+Tab: the next or previous sibling in the layers panel's order (top of the stack first, so
  * Tab walks down the stack), wrapping at the ends. `children` is the parent's list as the file has it (bottom

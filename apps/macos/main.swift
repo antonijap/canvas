@@ -527,7 +527,12 @@ final class StructureActions: NSObject, NSMenuItemValidation {
       // Shift+H, Option+A and the rest typed anywhere are keys, not these items: the page handles them on the canvas
       // (and leaves them to text being typed); a menu click runs them here.
       if NSApp.currentEvent?.type == .keyDown { return false }
-      return nativeText == nil && !otherWindowKey && !model.textEditing && model.selection != nil
+      guard nativeText == nil, !otherWindowKey, !model.textEditing, let sel = model.selection else { return false }
+      // One layer aligns in its parent; several need two the canvas may move (ArrangeActions).
+      if item.action != #selector(flipHorizontal(_:)), item.action != #selector(flipVertical(_:)), sel.ids.count > 1 {
+        return ArrangeActions.enabled(ArrangeActions.align[0], count: sel.ids.count, free: sel.free)
+      }
+      return true
     case #selector(pageShortcut(_:)):
       // Option+Cmd+K and the rest typed on the canvas are the page's keys (src/page/shortcuts.js); typed in a text
       // field they belong to the field. A menu click runs them here.
@@ -542,8 +547,7 @@ final class StructureActions: NSObject, NSMenuItemValidation {
       let type = sel.node["type"] as? String
       if op == "detach" { return type == "ref" || (sel.ids.count > 1 && type == nil) }
       if op == "component" { return sel.node["reusable"] as? Bool != true && !sel.isPath && !sel.inInstance }
-      if op.hasPrefix("distribute") { return sel.ids.count > 2 }
-      if op == "tidy" { return sel.ids.count > 1 }
+      if let a = ArrangeActions.spread.first(where: { $0.op == op }) { return ArrangeActions.enabled(a, count: sel.ids.count, free: sel.free) }
       return true
     case #selector(ungroup(_:)):
       // Only groups and frames (and a multi-selection holding one) ungroup; a rectangle has nothing to let go.

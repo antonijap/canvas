@@ -498,6 +498,58 @@ enum ContextMenuLayout {
     ]
 }
 
+/// Align, distribute and tidy up for several selected layers or boards: the inspector's Arrange row and the
+/// right-click Align submenu. Each runs the Arrange menu's own page op (src/page/shortcuts.js, smart.js) and shows
+/// its key. An action needs `min` layers it works with: layers an auto layout frame places and ones inside an
+/// instance stay put and do not count (a locked layer counts and stays where it is) (src/page/shortcuts-logic.js arrangePlan, ARRANGE_MIN).
+enum ArrangeActions {
+    struct Action: Equatable {
+        let op: String
+        let title: String
+        let symbol: String
+        var min = 2
+    }
+    static let align: [Action] = [
+        Action(op: "align-left", title: "Align left", symbol: "align.horizontal.left"),
+        Action(op: "align-hcenter", title: "Align horizontal centers", symbol: "align.horizontal.center"),
+        Action(op: "align-right", title: "Align right", symbol: "align.horizontal.right"),
+        Action(op: "align-top", title: "Align top", symbol: "align.vertical.top"),
+        Action(op: "align-vcenter", title: "Align vertical centers", symbol: "align.vertical.center"),
+        Action(op: "align-bottom", title: "Align bottom", symbol: "align.vertical.bottom"),
+    ]
+    static let spread: [Action] = [
+        Action(op: "distribute-h", title: "Distribute horizontal spacing", symbol: "distribute.horizontal", min: 3),
+        Action(op: "distribute-v", title: "Distribute vertical spacing", symbol: "distribute.vertical", min: 3),
+        Action(op: "tidy", title: "Tidy up", symbol: "square.grid.2x2"),
+    ]
+    static var all: [Action] { align + spread }
+
+    /// The Arrange menu's key for the action, as the menu draws it (Control, Option, Shift, Command, then the key).
+    static func shortcut(_ a: Action) -> String {
+        guard let k = menuKey(a) else { return "" }
+        let glyphs: [(MenuSpec.Mod, String)] = [(.control, "\u{2303}"), (.option, "\u{2325}"), (.shift, "\u{21E7}"), (.command, "\u{2318}")]
+        return glyphs.filter { k.mods.contains($0.0) }.map(\.1).joined() + k.key.uppercased()
+    }
+    /// The Arrange menu item's key and modifiers (the right-click submenu shows the same key).
+    static func menuKey(_ a: Action) -> (key: String, mods: Set<MenuSpec.Mod>)? {
+        guard let item = MenuSpec.arrange.compactMap({ $0 }).first(where: { $0.command == a.op }), !item.key.isEmpty else { return nil }
+        return (item.key, item.mods)
+    }
+    static func help(_ a: Action) -> String {
+        let k = shortcut(a)
+        return k.isEmpty ? a.title : "\(a.title)  \(k)"
+    }
+    /// The row and the submenu are for two or more layers.
+    static func shows(count: Int) -> Bool { count > 1 }
+    /// `free`: how many of the selected layers the canvas may move (nil: not known yet, all of them).
+    static func enabled(_ a: Action, count: Int, free: Int?) -> Bool { shows(count: count) && (free ?? count) >= a.min }
+    /// Why the whole row is off: every layer but one (or all) sits where auto layout puts it.
+    static func blockedNote(count: Int, free: Int?) -> String? {
+        guard let free, shows(count: count), free < 2 else { return nil }
+        return "Auto layout places these layers"
+    }
+}
+
 /// Export as PNG / SVG from the right-click menu: the choices and the file name the save panel suggests, the same
 /// names the server gives files exported into a folder (src/export.ts exportFileName).
 enum ExportNaming {

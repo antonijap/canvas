@@ -53,6 +53,7 @@ The same keys work in Canvas.app and the browser version. Settings > Shortcuts s
 | Option+W / A / S / D | Align top / left / bottom / right |
 | Option+H / V | Align horizontal / vertical centres |
 | Option+Shift+H / V | Distribute horizontal / vertical spacing |
+| Control+Option+T | Tidy up |
 | Shift+H / Shift+V | Flip horizontal / vertical |
 | Shift+Cmd+H | Show or hide |
 | Shift+Cmd+L | Lock or unlock |

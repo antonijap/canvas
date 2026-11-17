@@ -294,6 +294,26 @@ extension CanvasModel {
                     m.action("Copy link", key: "l", mods: .command) { self.run("{cmd:'copyLink'}") }
                 }
             }
+            // Several layers or boards, the click inside them: Align, distribute and tidy up (ArrangeActions).
+            if k == 3, let sel = selection, ArrangeActions.shows(count: sel.ids.count), sel.ids.contains(c.id) {
+                menu.submenu("Align") { m in
+                    for group in [ArrangeActions.align, ArrangeActions.spread] {
+                        for a in group {
+                            let key = ArrangeActions.menuKey(a)
+                            var mods: NSEvent.ModifierFlags = []
+                            for mod in key?.mods ?? [] {
+                                switch mod { case .command: mods.insert(.command); case .option: mods.insert(.option); case .shift: mods.insert(.shift); case .control: mods.insert(.control) }
+                            }
+                            m.action(a.title, enabled: ArrangeActions.enabled(a, count: sel.ids.count, free: sel.free), key: key?.key ?? "", mods: mods, symbol: a.symbol) {
+                                // Shift held on an align item: align to the parent frame, as the Arrange menu does.
+                                let toParent = a.op.hasPrefix("align-") && NSEvent.modifierFlags.contains(.shift)
+                                self.run("{cmd:'shortcut',op:'\(a.op)\(toParent ? ":parent" : "")'}")
+                            }
+                        }
+                        m.separator()
+                    }
+                }
+            }
             menu.separator()
         }
         // Export the layer, or the whole selection when the click was inside it (src/export.ts).

@@ -37,7 +37,7 @@ import { loadBox } from "./boardbox.ts";
 import { fitCam, keepLabels, overlayNode, pickPage, retryDelay, unionRect, wheelAction, zoomAt } from "./pagelogic.ts";
 import { handleHistoryRoute, historyState, nodeDiff, nodeLabel, onAgentEdit, onHistory, propsOf, record, type NodeOp } from "./history.ts";
 import { agentLabel, cursorActions } from "./agent-cursor.ts";
-import { GROUP_MERGE_MS, handleMoveRoute, isGroupMerge, moveNodes, MoveError } from "./move.ts";
+import { GROUP_MERGE_MS, handleMoveRoute, isGroupMerge, moveModeOf, moveNodes, MoveError } from "./move.ts";
 import { handleResizeRoute } from "./resize.ts";
 import { handleScaleRoute } from "./scale.ts";
 import { handleStructureRoute, isDeletedHolder, keepOnPage, runStructure } from "./structure.ts";
@@ -953,7 +953,10 @@ export function startServer(port = PORT()): Promise<http.Server> {
         const context = contextTarget(snap.doc, ctxId);
         // Instances: which props are overrides, what the instance draws (the inspector shows inherited values).
         const ov = overrideInfo(snap.doc, ctxId);
-        return json(res, { ...hit, tokens: nodeTokens(snap.doc, ctxId, ov.resolved ? { ...ov.resolved, ...hit.node } : hit.node), context: context ? { ...context, ...mediaSlot(snap.doc, context.id) } : null, overrides: ov.overrides, ...(ov.instance ? { instance: ov.instance } : {}), ...(ov.resolved ? { resolved: ov.resolved } : {}), revision: snap.revision });
+        // placed: an auto layout frame places this layer (align, distribute and tidy up leave it where it is).
+        let placed = false;
+        try { placed = moveModeOf(snap.doc as any, ctxId).mode === "auto"; } catch {}
+        return json(res, { ...hit, placed, tokens: nodeTokens(snap.doc, ctxId, ov.resolved ? { ...ov.resolved, ...hit.node } : hit.node), context: context ? { ...context, ...mediaSlot(snap.doc, context.id) } : null, overrides: ov.overrides, ...(ov.instance ? { instance: ov.instance } : {}), ...(ov.resolved ? { resolved: ov.resolved } : {}), revision: snap.revision });
       }
       if (url.pathname === "/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
@@ -1919,7 +1922,9 @@ async function showMulti(ids) {
   const shared = host.sharedProps ? host.sharedProps(nodes.map((n) => n && n.node).filter(Boolean)) : {};
   for (const [k, v] of Object.entries(shared)) if (k !== "id" && k !== "children" && (typeof v !== "object" || v === null)) { const r = kv(k, v); if (r) body.append(r); }
   const rs = multiWorld.filter(Boolean);
-  if (native) post({ selection: { id: sel.id, ids, count: ids.length, node: Object.assign({}, shared, { name: ids.length + " selected" }), parentId: null, path: ids.some((x) => x.includes("/")), w: selWorld ? selWorld.w : null, h: selWorld ? selWorld.h : null, cmp: false, ctx: null } });
+  // free: how many of these align, distribute and tidy up work with (not placed by auto layout, not inside an instance).
+  const stuck = new Set(layers.filter((id, i) => id.includes("/") || (nodes[i] && nodes[i].placed)));
+  if (native) post({ selection: { id: sel.id, ids, count: ids.length, free: ids.length - stuck.size, node: Object.assign({}, shared, { name: ids.length + " selected" }), parentId: null, path: ids.some((x) => x.includes("/")), w: selWorld ? selWorld.w : null, h: selWorld ? selWorld.h : null, cmp: false, ctx: null } });
 }
 function clearHover() { hovId = null; hovWorld = null; hovBox.style.display = "none"; }
 let hovFrame = 0;

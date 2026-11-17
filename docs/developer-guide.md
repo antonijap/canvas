@@ -192,6 +192,8 @@ Canvas shortcuts in the app and browser:
 | Delete a page (Pages list, right-click) | Deletes its boards, their layers and its cards with it: one undo step brings all of it back. A page with boards asks first |
 | Option+W / A / S / D, Option+H / V | Align top / left / bottom / right, horizontal / vertical centres |
 | Option+Shift+H / V | Distribute horizontal / vertical spacing |
+| Control+Option+T | Tidy up: the selection as an evenly spaced row, column or grid from its top-left, in the order it sits |
+| Inspector > Arrange, right-click > Align | With two or more selected: the six aligns, distribute both ways and tidy up, each one undo step (Shift+click an align button to align to the parent frame). Layers an auto layout frame places and ones inside an instance stay where they are and stay out of the box the rest align in (a locked layer stays put but the others still align to it); with fewer than two that can move (three to distribute) the buttons are off (`src/page/shortcuts-logic.js` arrangePlan, `apps/macos/ShellLogic.swift` ArrangeActions) |
 | Shift+H / Shift+V | Flip horizontal / vertical |
 | Shift+Cmd+H | Show or hide the selection |
 | Tab / Shift+Tab | Next / previous sibling |

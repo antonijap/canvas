@@ -19,10 +19,33 @@ struct ShellLogicTests {
         docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
-        powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo()
+        powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
         updateManifest(); updateVerdict(); updateInstall(); updateHelper()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    // Align, distribute and tidy up for several layers: the inspector's Arrange row and right-click > Align.
+    static func arrangeActions() {
+        typealias A = ArrangeActions
+        check(A.align.map(\.op) == ["align-left", "align-hcenter", "align-right", "align-top", "align-vcenter", "align-bottom"], "six aligns in menu order")
+        check(A.spread.map(\.op) == ["distribute-h", "distribute-v", "tidy"], "distribute both ways, then tidy up")
+        // Every action is an Arrange menu item, so the row, the submenu and the menu bar run one op with one key.
+        for a in A.all { check(MenuSpec.arrange.contains { $0?.command == a.op }, "\(a.op) is in the Arrange menu") }
+        check(A.shortcut(A.align[0]) == "\u{2325}A", "Align left shows Option+A")
+        check(A.shortcut(A.spread[0]) == "\u{2325}\u{21E7}H", "Distribute horizontal shows Option+Shift+H")
+        check(A.shortcut(A.spread[2]) == "\u{2303}\u{2325}T", "Tidy up shows Control+Option+T")
+        check(A.help(A.align[1]) == "Align horizontal centers  \u{2325}H", "the tooltip names the action and its key")
+        // The row shows for two or more; an action needs enough layers the canvas may move.
+        check(!A.shows(count: 1) && A.shows(count: 2), "the row needs two or more")
+        let left = A.align[0], dist = A.spread[0], tidy = A.spread[2]
+        check(A.enabled(left, count: 2, free: nil) && !A.enabled(dist, count: 2, free: nil) && A.enabled(dist, count: 3, free: nil), "align takes two, distribute three")
+        check(A.enabled(tidy, count: 2, free: 2), "tidy up takes two")
+        // Layers auto layout places do not count: all in one auto layout frame, nothing is on.
+        check(!A.enabled(left, count: 4, free: 0) && !A.enabled(tidy, count: 4, free: 1), "placed layers do not move")
+        check(A.enabled(left, count: 4, free: 2) && !A.enabled(dist, count: 4, free: 2), "two free of four: align yes, distribute no")
+        check(A.blockedNote(count: 3, free: 0) == "Auto layout places these layers", "the row says why it is off")
+        check(A.blockedNote(count: 3, free: 3) == nil && A.blockedNote(count: 3, free: nil) == nil, "nothing to say when they move")
     }
 
     // Canvas > About Canvas: the version with its commit, and when the build was made, in the reader's own format.
