@@ -28,6 +28,8 @@ const ICON = {
   bubble: svg('<path d="M7 1.8c3 0 5.2 2.1 5.2 4.7S10 11.2 7 11.2c-.7 0-1.3-.1-1.9-.3l-2.9 1.3.7-2.5C1.9 8.9 1.8 7.7 1.8 6.5 1.8 3.9 4 1.8 7 1.8z"/>'),
   layer: svg('<path d="M2 4.2V2.6A.6.6 0 012.6 2h1.6M9.8 2h1.6a.6.6 0 01.6.6v1.6M12 9.8v1.6a.6.6 0 01-.6.6H9.8M4.2 12H2.6a.6.6 0 01-.6-.6V9.8M5.4 5.4l3.9 1.6-1.6.7-.7 1.6z"/>', 12),
   ghost: svg('<path d="M2 4.2V2.6A.6.6 0 012.6 2h1.6M9.8 2h1.6a.6.6 0 01.6.6v1.6M12 9.8v1.6a.6.6 0 01-.6.6H9.8M4.2 12H2.6a.6.6 0 01-.6-.6V9.8"/>', 16),
+  clock: svg('<circle cx="7" cy="7" r="5.4"/><path d="M7 4v3.2l2 1.2"/>', 11),
+  alert: svg('<circle cx="7" cy="7" r="5.4"/><path d="M7 4.2v3.4M7 9.7v.1"/>', 11),
   sparkles: svg('<path d="M5.5 2l1 2.9 2.9 1-2.9 1-1 2.9-1-2.9-2.9-1 2.9-1zM10.8 8.6l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/>', 12),
 };
 const CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 30 30"><path d="M15 2A13 13 0 0 1 28 15A13 13 0 0 1 15 28H5A3 3 0 0 1 2 25V15A13 13 0 0 1 15 2Z" fill="#18181B" stroke="#fff" stroke-width="1.5"/><path d="M15 9v12M9 15h12" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>')}") 3 27, crosshair`;
@@ -114,6 +116,22 @@ function start(host) {
 .cm-hint b{font-weight:600}
 .cm-hint .cm-soft{color:#ffffffa6}
 .cm-hint .cm-key{background:#ffffff26;color:#ffffffcc}
+.cm-shared{position:absolute;right:12px;top:12px;display:none;align-items:center;gap:10px;height:36px;padding:0 12px 0 8px;border-radius:12px;background:color-mix(in srgb,var(--c-popover) 85%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);color:color-mix(in srgb,var(--c-fg) 75%,transparent);box-shadow:0 0 0 .5px #0000000f,0 8px 24px -6px #00000026;font:500 12px/100% var(--c-font-sans);white-space:nowrap}
+.cm-shared.on{display:flex}
+.cm-people{display:flex;align-items:center}
+.cm-people .cm-av{width:24px;height:24px;border-radius:12px;box-shadow:0 0 0 2px var(--c-popover)}
+.cm-people .cm-av+.cm-av{margin-left:-6px}
+.cm-people .cm-more{background:var(--cm-chip);color:var(--c-muted-fg);font-size:10px}
+.cm-server{display:flex;align-items:center;gap:6px}
+.cm-dot{flex:none;width:7px;height:7px;border-radius:50%;background:color-mix(in srgb,var(--c-muted-fg) 60%,transparent)}
+.cm-dot.ok{background:#16a34a}.cm-dot.warn{background:#d97706}
+.cm-state{display:inline-flex;align-items:center;gap:4px;min-width:0;color:var(--c-muted-fg);font-size:12px;line-height:100%}
+.cm-state svg{flex:none}
+.cm-fail{display:flex;align-items:flex-start;gap:8px;color:var(--c-danger);font-size:12px;line-height:16px}
+.cm-fail .cm-state{flex:1;align-items:flex-start;color:inherit;line-height:16px;white-space:normal;overflow-wrap:anywhere}
+.cm-fail .cm-state svg{margin-top:2.5px}
+.cm-fail .cm-btn{height:20px;min-width:20px;padding:0 7px;font-size:12px}
+.cm-failrow{padding:10px 14px 0}
 .cm-hov{position:absolute;left:0;top:0;display:none;border:1.5px solid var(--c-sel);pointer-events:none;border-radius:3px}
 #view.cm-mode,#view.cm-mode *{cursor:${CURSOR}!important}
 #view.cm-mode .cm-ui,#view.cm-mode .cm-ui *{cursor:default!important}
@@ -129,11 +147,12 @@ function start(host) {
   const pop = h("div", "cm-pop cm-ui"); pop.hidden = true; pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "Comment thread");
   const comp = h("div", "cm-comp cm-ui"); comp.hidden = true; comp.setAttribute("role", "dialog"); comp.setAttribute("aria-label", "New comment");
   const hint = h("div", "cm-hint");
+  const shared = h("div", "cm-shared cm-ui");
   const bar = h("div", "cm-bar cm-ui");
-  layer.append(hov, pop, comp, hint, bar);
+  layer.append(hov, pop, comp, hint, bar, shared);
 
   /** doc: the file's comment identity (null until the first comment); threads: every thread, tombstones too. repin: a thread waiting for a new layer. */
-  const st = { doc: null, threads: [], me: "", mode: false, open: null, draft: null, repin: null, menu: false };
+  const st = { doc: null, threads: [], sync: null, me: "", mode: false, open: null, draft: null, repin: null, menu: false };
   const pins = new Map(); // thread id (or "draft") -> {el, x, y, vis}
   const gone = new Map(); // node id -> {rev, at, gone} what the file said about a layer with no drawing now
   const asked = new Set();
@@ -148,7 +167,7 @@ function start(host) {
     });
   function apply(j) {
     if (j.doc !== undefined) st.doc = j.doc;
-    if (Array.isArray(j.threads)) st.threads = j.threads;
+    if (Array.isArray(j.threads)) { st.threads = j.threads; st.sync = j.sync || null; }
     if (typeof j.me === "string") st.me = j.me;
     render();
   }
@@ -283,6 +302,12 @@ function start(host) {
     }
     if (st.draft && at.has("draft") && !comp.hidden) { const o = L.popoverAt(at.get("draft"), size(comp, 320, 110), vw, vh); comp.style.transform = `translate(${o.x}px,${o.y}px)`; }
     bar.style.bottom = hint.style.bottom = bottomOf();
+    const ins = host.insets || {};
+    // In the app the shell's insets say what its islands cover; in the browser the bar sits under the page's own islands.
+    let below = ins.t || 0;
+    if (!host.native) { const vt = view.getBoundingClientRect().top; for (const e of document.querySelectorAll(".island")) below = Math.max(below, e.getBoundingClientRect().bottom - vt - 4); }
+    shared.style.top = below + 12 + "px";
+    shared.style.right = (ins.r || 0) + 12 + "px";
     if (st.mode && hovId) paintHover();
   }
   host.beforeFrame(() => { if (pins.size || st.draft || hovId) place(); });
@@ -325,6 +350,32 @@ function start(host) {
     setTimeout(() => { if (document.activeElement !== el && el.isConnected && !el.closest("[hidden]")) el.focus({ preventScroll: true }); }, 0);
   }
 
+  // ---------- a shared file: what waits, what the server refused ----------
+  const opsFor = (list, id) => (list || []).filter((o) => o.comment === id);
+  const syncCall = (what, opId) => fetch(`/api/comments/${what}?file=` + encodeURIComponent(file), { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ opId }) })
+    .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); apply(j); })).catch((e) => tell(e.message));
+  /** The clock and "Sends when you're back online" (or "Sending" while connected) that stands where the time would be. */
+  function pendingState() {
+    const s = h("span", "cm-state");
+    s.innerHTML = ICON.clock;
+    s.append(document.createTextNode(st.sync && st.sync.connected ? "Sending" : "Sends when you're back online"));
+    return s;
+  }
+  /** "Not sent: reason" with Retry and Discard. */
+  function failRow(r) {
+    const row = h("div", "cm-fail");
+    const s = h("span", "cm-state");
+    s.innerHTML = ICON.alert;
+    s.append(document.createTextNode(`Not sent: ${r.message || "the server refused it"}`));
+    const retry = h("button", "cm-btn txt", "Retry"), drop = h("button", "cm-btn txt dim", "Discard");
+    retry.type = drop.type = "button";
+    retry.onclick = () => syncCall("retry", r.opId);
+    drop.onclick = () => syncCall("discard", r.opId);
+    row.append(s, retry, drop);
+    return row;
+  }
+  const syncKey = () => (st.sync ? JSON.stringify([st.sync.connected, st.sync.pending.map((o) => o.opId), st.sync.rejected.map((o) => [o.opId, o.message])]) : "");
+
   // ---------- the thread card ----------
   const chip = (name, page) => { const c = h("span", "cm-chip"); c.innerHTML = ICON.layer; c.append(h("span", "", name)); c.title = page ? "On the canvas" : name; return c; };
   function layerLabel(t) {
@@ -343,7 +394,7 @@ function start(host) {
     }
     const lbl = layerLabel(t);
     const live = L.liveComments(t);
-    const key = JSON.stringify([t.id, t.resolvedAt || "", lbl, st.menu, live.map((c) => [c.id, c.body, c.editedAt || ""])]);
+    const key = JSON.stringify([t.id, t.resolvedAt || "", lbl, st.menu, live.map((c) => [c.id, c.body, c.editedAt || ""]), syncKey()]);
     pop.hidden = false;
     if (popFor === t.id && popKey === key) return;
     const keep = popFor === t.id ? pop.querySelector(".cm-field") : null;
@@ -397,9 +448,10 @@ function start(host) {
       const it = h("div", "cm-item");
       const body = h("div", "cm-body");
       const who = h("div", "cm-who");
+      const waiting = opsFor(st.sync && st.sync.pending, c.id).length > 0;
       const tm = h("time", "", L.ago(c.createdAt));
       tm.title = c.createdAt;
-      who.append(h("b", "", c.author && c.author.name ? c.author.name : "Someone"), tm);
+      who.append(h("b", "", c.author && c.author.name ? c.author.name : "Someone"), waiting ? pendingState() : tm);
       if (i > 0) {
         const x = btnEl("cm-btn", ICON.trash, "Delete comment");
         x.title = "Delete comment";
@@ -407,10 +459,13 @@ function start(host) {
         who.append(x);
       }
       body.append(who, h("div", "cm-text", c.body));
+      for (const r of opsFor(st.sync && st.sync.rejected, c.id)) body.append(failRow(r));
       it.append(avatar(c.author), body);
       lst.append(it);
     });
     pop.append(lst);
+    const own = (st.sync ? st.sync.rejected : []).filter((r) => r.thread === t.id && !r.comment);
+    if (own.length) { const box = h("div", "cm-failrow"); for (const r of own) box.append(failRow(r)); pop.append(box); }
     if (t.resolvedAt) pop.append(h("div", "cm-note", `Resolved by ${t.resolvedBy && t.resolvedBy.name ? t.resolvedBy.name : "someone"}`));
     pop.append(h("div", "cm-sep"));
     const row = h("div", "cm-row");
@@ -519,6 +574,7 @@ function start(host) {
 
   // ---------- the bars ----------
   function drawBars() {
+    drawShared();
     hint.classList.toggle("on", st.mode);
     hint.innerHTML = "";
     if (st.mode) {
@@ -541,6 +597,36 @@ function start(host) {
         bar.append(b);
       } else bar.style.paddingRight = "12px";
     }
+  }
+
+  /** The shared bar (design board 5): who commented, the server and whether it is reachable. Only for a shared file. */
+  const STATUS = { connected: ["ok", "Connected"], offline: ["", "Offline. Comments are kept and sent when the server is back"], signedOut: ["warn", "Signed out. Sign in in Settings > Cloud"], signInAgain: ["warn", "Sign in again in Settings > Cloud"], forbidden: ["warn", "No access to this team"], tooOld: ["warn", "The server is too old for this Canvas"], tooNew: ["warn", "The server is newer than this Canvas. Update Canvas"] };
+  function drawShared() {
+    const s = st.sync;
+    shared.classList.toggle("on", !!s);
+    shared.textContent = "";
+    if (!s) return;
+    const seen = new Map();
+    for (const t of st.threads) for (const c of t.comments) {
+      if (c.deletedAt || !c.author || L.isAgent(c.author)) continue;
+      const key = c.author.email || c.author.name;
+      if (key && !seen.has(key)) seen.set(key, c.author);
+    }
+    const people = [...seen.values()];
+    if (people.length) {
+      const g = h("div", "cm-people");
+      for (const a of people.slice(0, 4)) { const e = avatar(a); e.title = a.email || a.name; g.append(e); }
+      if (people.length > 4) { const m = h("span", "cm-av cm-more", "+" + (people.length - 4)); m.title = people.slice(4).map((a) => a.name).join(", "); g.append(m); }
+      shared.append(g);
+    }
+    const [tone, say] = STATUS[s.status] || STATUS.offline;
+    const srv = h("div", "cm-server");
+    const dot = h("span", "cm-dot" + (tone ? " " + tone : ""));
+    srv.append(dot, h("span", "", s.host));
+    srv.title = say;
+    shared.setAttribute("aria-label", `${s.host}: ${say}`);
+    shared.dataset.status = s.status;
+    shared.append(srv);
   }
 
   // ---------- comment mode ----------
@@ -620,6 +706,7 @@ function start(host) {
     get threads() { return st.threads; },
     get open() { return st.open; },
     get doc() { return st.doc; },
+    get sync() { return st.sync; },
     setMode,
     reload: load,
   };
