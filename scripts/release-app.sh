@@ -46,6 +46,8 @@ mkdir -p "$SRV/engine/src" "$SRV/demos"
 # What the server reads at run time (src/, mcp/, the vendored shader library, the engine build, the paper noise texture, the course file), nothing
 # else: no tests, QA, docs or sources it does not load.
 rsync -a --exclude '.*' src mcp vendor package.json pnpm-lock.yaml pnpm-workspace.yaml "$SRV/"
+# The comments protocol the server shares with a team's own Canvas server (src/comments.ts imports it).
+mkdir -p "$SRV/cloud" && cp cloud/protocol.ts "$SRV/cloud/"
 rsync -a --exclude '.*' engine/pkg "$SRV/engine/"
 cp engine/src/paper_noise.rgba "$SRV/engine/src/"
 rsync -a --exclude '.*' demos/learn.canvas "$SRV/demos/"
