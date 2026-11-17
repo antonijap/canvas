@@ -80,13 +80,13 @@ struct HomeLogicTests {
 
     static func cards() {
         let a = card("/a/Pricing page.canvas", opened: 100, server: "https://studio.workers.dev")
-        let b = card("/a/Vocabbie onboarding.canvas", opened: 300)
+        let b = card("/a/App onboarding.canvas", opened: 300)
         let c = card("/a/Brand refresh.canvas", opened: 200, modified: 500, server: "https://studio.workers.dev")
         let gone = card("/a/Gone.canvas", opened: 50, exists: false)
         let all = HomeLogic.ordered([a, b, c, gone])
-        check(all.map(\.name) == ["Brand refresh", "Vocabbie onboarding", "Pricing page", "Gone"], "newest first, an edit counts: \(all.map(\.name))")
+        check(all.map(\.name) == ["Brand refresh", "App onboarding", "Pricing page", "Gone"], "newest first, an edit counts: \(all.map(\.name))")
         check(HomeLogic.filter(all, .all).count == 4, "All")
-        check(HomeLogic.filter(all, .mac).map(\.name) == ["Vocabbie onboarding", "Gone"], "On this Mac: files not shared")
+        check(HomeLogic.filter(all, .mac).map(\.name) == ["App onboarding", "Gone"], "On this Mac: files not shared")
         check(HomeLogic.filter(all, .servers).map(\.name) == ["Brand refresh", "Pricing page"], "On team servers")
         check(HomeLogic.search(all, "PRIC").map(\.name) == ["Pricing page"], "search by part of the name, any case")
         check(HomeLogic.search(all, "  ").count == 4 && HomeLogic.search(all, "").count == 4, "an empty search shows everything")

@@ -53,7 +53,7 @@ test("the list of names: every one fits the contract, fewer than 60, unknown nam
   u.count("file.open");
   u.count("file.open");
   u.count("not.a.thing");
-  u.count("/Users/someone/Secret.canvas");
+  u.count("/Users/you/Secret.canvas");
   u.count("Export.PNG");
   assert.deepEqual(u.bodyFor("2026-11-17")!.events, { "app.open": 1, "file.open": 2 });
   u.stop();
