@@ -1,6 +1,6 @@
 {
   "name": "canvas",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "A lightweight local design canvas: boards, pan and zoom, click-to-inspect, components, variables and text styles. Agents design in it through Canvas MCP.",
   "type": "module",
