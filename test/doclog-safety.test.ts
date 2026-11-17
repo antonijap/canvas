@@ -781,4 +781,49 @@ describe("last cases", () => {
       await stop(s);
     }
   });
+
+  // Found by the two-server fuzz: a nudge on disk twice.
+  test("another Canvas folds the log into a whole write and dies before retiring it: the owner applies nothing twice", async () => {
+    // That other Canvas is killed right after its rename of document.json lands (before it removes the log).
+    fs.mkdirSync(dir, { recursive: true });
+    const pre = path.join(dir, "die-after-rename.mjs");
+    fs.writeFileSync(
+      pre,
+      `import fs from "node:fs";
+const rename = fs.promises.rename;
+fs.promises.rename = async function (a, b, ...rest) {
+  await rename.call(this, a, b, ...rest);
+  if (String(b).endsWith("/document.json") && String(a).endsWith(".tmp")) process.kill(process.pid, "SIGKILL");
+};
+`,
+    );
+    const p = pkg("foldcrash");
+    const S = await spawn(p.root);
+    try {
+      const s = client(S.base, p.pkg);
+      await s.open();
+      const x0 = nodeIn(alone(p.docPath), "B3N4").x;
+      assert.equal((await s.move("B3N4", 1)).status, 200);
+      assert.equal((await s.flush()).status, 200);
+      assert.ok(fs.existsSync(p.logPath), "the nudge is in S's log");
+      const N = await spawnEnv(p.root, { NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(pre).href}`.trim() });
+      spawned.delete(N);
+      const n = client(N.base, p.pkg);
+      await n.open();
+      assert.equal((await n.update("B9N9", { name: "N-EDIT" })).status, 200);
+      void n.flush().catch(() => {});
+      await new Promise<void>((r) => (N.proc.exitCode !== null || N.proc.signalCode ? r() : N.proc.once("exit", () => r())));
+      assert.equal(nodeIn(alone(p.docPath), "B9N9").name, "N-EDIT", "N's whole write landed");
+      assert.equal(nodeIn(alone(p.docPath), "B3N4").x, x0 + 1, "with S's nudge in it");
+      assert.ok(fs.existsSync(p.logPath), "and S's log is still there (N died before removing it)");
+      await sleep(800);
+      await s.flush();
+      assert.ok(await until(() => !fs.existsSync(p.logPath), 8000), "the log is settled");
+      assert.equal(nodeIn(withLog(p.docPath), "B3N4").x, x0 + 1, "the nudge is on disk once");
+      assert.equal(nodeIn(withLog(p.docPath), "B9N9").name, "N-EDIT");
+      assert.equal((await fetch(`${S.base}/api/node?file=${encodeURIComponent(p.pkg)}&id=B3N4&depth=0`).then((r) => r.json()) as any).node.x, x0 + 1, "and in S once");
+    } finally {
+      await stop(S);
+    }
+  });
 });
