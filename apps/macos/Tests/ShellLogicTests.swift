@@ -19,9 +19,22 @@ struct ShellLogicTests {
         docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
-        powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets()
+        powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    // Canvas > About Canvas: the version with its commit, and when the build was made, in the reader's own format.
+    static func aboutInfo() {
+        check(AboutInfo.versionLine(version: "0.1.0", commit: "aede106") == "Version 0.1.0 (aede106)", "version and commit")
+        check(AboutInfo.versionLine(version: "0.1.0", commit: nil) == "Version 0.1.0", "no commit, no brackets")
+        check(AboutInfo.versionLine(version: "0.1.0", commit: "") == "Version 0.1.0", "an empty commit, no brackets")
+        let us = Locale(identifier: "en_US"), utc = TimeZone(identifier: "UTC")!
+        check(AboutInfo.builtLine("2026-11-17T14:46:00Z", locale: us, timeZone: utc) == "Nov 17, 2026 at 2:46\u{202F}PM"
+              || AboutInfo.builtLine("2026-11-17T14:46:00Z", locale: us, timeZone: utc) == "Nov 17, 2026, 2:46\u{202F}PM"
+              || AboutInfo.builtLine("2026-11-17T14:46:00Z", locale: us, timeZone: utc) == "Nov 17, 2026, 2:46 PM",
+              "build date: \(AboutInfo.builtLine("2026-11-17T14:46:00Z", locale: us, timeZone: utc) ?? "nil")")
+        check(AboutInfo.builtLine(nil) == nil && AboutInfo.builtLine("yesterday") == nil, "no date, no line")
     }
 
     // Typography's Type details: Letter case (the cases, Small caps only for fonts with smcp), and the features a

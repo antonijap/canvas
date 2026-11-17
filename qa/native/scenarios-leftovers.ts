@@ -107,3 +107,12 @@ sc("inspector", "Typography: paragraph spacing and indent fields, and List style
   await t.click(at(0));
   await t.waitDisk(() => t.node("tx_long")?.lists === undefined, "no list");
 });
+
+sc("about", "About Canvas shows the version with its commit and when it was built", { covers: [] }, async (t: NT) => {
+  await t.cmd("qa.mainmenu", { title: "About Canvas", perform: true });
+  const v = await t.mark({ id: "about-version", window: "about" });
+  t.ok(/^Version \d+\.\d+\.\d+ \([0-9a-f]{7,}\)$/.test(v.label ?? ""), `the version line reads "${v.label}"`);
+  const b = await t.mark({ id: "about-built", window: "about" });
+  t.ok(/20\d\d/.test(b.label ?? ""), `the build date reads "${b.label}"`);
+  await t.shot(`${process.cwd()}/qa/out/native/about.png`, "about");
+});

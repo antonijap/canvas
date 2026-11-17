@@ -483,7 +483,31 @@ struct TrackingField: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Letter spacing").font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1).frame(height: 16).qaText("Letter spacing")
+            // Auto sits beside its caption, out of the field: the field keeps its room for the number.
+            HStack(spacing: 6) {
+                Text("Letter spacing").font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1).frame(height: 16).qaText("Letter spacing")
+                Spacer(minLength: 0)
+                Button {
+                    switch AutoTracking.click(on: auto, value: value, size: size, editable: enabled) {
+                    case .turnOff: onAuto(false)
+                    case .turnOn: onAuto(true)
+                    case .none: break
+                    }
+                } label: {
+                    Text("Auto").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(auto ? Palette.sel : Palette.mutedFg)
+                        .padding(.horizontal, 5).frame(height: 16)
+                        .background(Capsule().fill(auto ? Palette.sel.opacity(0.14) : .clear))
+                        .overlay(Capsule().stroke(auto ? .clear : Palette.stroke, lineWidth: 1))
+                        .contentShape(Capsule())
+                        .fixedSize()
+                }
+                .buttonStyle(.plain)
+                .disabled(!enabled || (!auto && !canTurnOn))
+                .accessibilityLabel("Auto letter spacing")
+                .accessibilityValue(auto ? "On" : "Off")
+                .accessibilityAddTraits(.isToggle)
+            }
             FieldBox(disabled: !enabled) {
                 ScrubHandle(enabled: enabled, begin: { scrub = ScrubSession(start: NumericInput.evaluate(text, current: value) ?? value ?? 0, min: nil, max: nil, write: onManual) },
                             move: { dx, step in if let s = scrub { text = NumberField.format(s.move(dx, step: step / 10)) } },
@@ -505,8 +529,8 @@ struct TrackingField: View {
                         return .handled
                     }
                     .onKeyPress(.escape) { sync(); focused = false; return .handled }
-                // The token button on hover takes its own place in the row, where "px" was, left of Auto: the number
-                // is never drawn under it and Auto keeps its width (the column is too narrow for both).
+                // The token button on hover takes its own place in the row, where "px" was: the number is never drawn
+                // under it.
                 if let model, let onBind, enabled && (hovering || picking || BindQA.shown(qaFlag)) {
                     TokenBindButton(model: model, kind: .number, open: $picking, inField: true, onPick: onBind)
                         .padding(.horizontal, -3)
@@ -514,26 +538,6 @@ struct TrackingField: View {
                 } else if !auto {
                     Text("px").font(Typography.micro).foregroundStyle(Palette.mutedFg)
                 }
-                Button {
-                    switch AutoTracking.click(on: auto, value: value, size: size, editable: enabled) {
-                    case .turnOff: onAuto(false)
-                    case .turnOn: onAuto(true)
-                    case .none: break
-                    }
-                } label: {
-                    Text("Auto").font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(auto ? Palette.sel : Palette.mutedFg)
-                        .padding(.horizontal, 5).frame(height: 16)
-                        .background(Capsule().fill(auto ? Palette.sel.opacity(0.14) : .clear))
-                        .overlay(Capsule().stroke(auto ? .clear : Palette.stroke, lineWidth: 1))
-                        .contentShape(Capsule())
-                        .fixedSize()
-                }
-                .buttonStyle(.plain)
-                .disabled(!enabled || (!auto && !canTurnOn))
-                .accessibilityLabel("Auto letter spacing")
-                .accessibilityValue(auto ? "On" : "Off")
-                .accessibilityAddTraits(.isToggle)
             }
             .help(helpText)
             .modifier(OptionalBind(model: model, enabled: enabled, hovering: $hovering, picking: $picking, onBind: onBind, inline: true))

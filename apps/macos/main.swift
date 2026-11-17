@@ -646,7 +646,10 @@ func endDragCommand() {
 }
 // The rest of the menu bar's commands: zoom, the panels, Rename, Settings, About, the window.
 final class MenuActions: NSObject, NSMenuItemValidation {
-  @objc func about(_ s: Any?) { NSApp.activate(ignoringOtherApps: true); NSApp.orderFrontStandardAboutPanel(nil) }
+  /// Canvas > About Canvas: version, commit and build date, the website and Report a Bug (Settings.swift AboutWindow).
+  @objc func about(_ s: Any?) {
+    MainActor.assumeIsolated { AboutWindow.shared.show(website: URL(string: ReleaseLinks.site)!, report: { [weak self] in self?.reportBug(nil) }) }
+  }
   /// Canvas > Settings: the settings window (Settings.swift).
   @objc func settings(_ s: Any?) { MainActor.assumeIsolated { SettingsWindow.shared.show(model) } }
   @objc func zoomIn(_ s: Any?) { model.zoomBy(1.25) }
