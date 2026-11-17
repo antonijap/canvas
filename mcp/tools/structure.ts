@@ -31,7 +31,7 @@ async function run(body: Record<string, unknown>) {
   const leftOut = cards.length ? { leftOut: cards, note: `${cards.length === 1 ? "1 card was" : `${cards.length} cards were`} left out: ${String(body.op)} works on layers and boards (cards have their own tools: remove_widget, update_widget)` } : {};
   try {
     const r = await api<any>("POST", "/api/structure", body);
-    return { done: r.label, select: r.select, revision: r.revision, ...leftOut, ...(Array.isArray(r.warnings) && r.warnings.length ? { warnings: r.warnings } : {}) };
+    return { done: r.label, select: r.select, revision: r.revision, ...leftOut, ...(Array.isArray(r.warnings) && r.warnings.length ? { warnings: r.warnings } : {}), ...(Array.isArray(r.placed) ? { placed: r.placed } : {}), ...(r.note ? { note: r.note } : {}) };
   } catch (e) {
     if (e instanceof ToolError && e.code === "stale_revision") throw new ToolError("stale_revision", e.message, "Read again (get_selection or inspect_node), then redo the change with the new revision.");
     throw e;
@@ -39,18 +39,32 @@ async function run(body: Record<string, unknown>) {
 }
 
 export function register(server: McpServer) {
-  tool(server, "add_nodes", "Add new layers or boards, written as Canvas node JSON with children (types: frame, group, rectangle, ellipse, polygon, path, text, note, icon, ref for a component instance). One undo step in Canvas's history, like a paste. parent: a frame or group id, or null/omitted for the canvas (new boards; they land on the page the open canvas shows unless page is given). index: where the first one goes among the parent's children (default: last, on top). In an auto layout parent they join the flow. An id you give is kept when it is free in the file, so you can reach the layers later; otherwise a fresh id is made. Returns the top-level ids in select. Frames lay out children with layout: vertical|horizontal|none, gap, padding, justifyContent, alignItems; sizes are numbers, 'fit_content' or 'fill_container'. Colors are #RRGGBB(AA) or $variable. Text needs content, fontFamily, fontSize, fontWeight (a string like \"600\") and fill. Read the file's variables and components first (get_document_summary) and reuse them. Look after: screenshot_view or render_node.", {
+  tool(server, "add_nodes", "Add new layers or boards, written as Canvas node JSON with children (types: frame, group, rectangle, ellipse, polygon, path, text, note, icon, ref for a component instance). One undo step in Canvas's history, like a paste. parent: a frame or group id, or null/omitted for the canvas (new boards; they land on the page the open canvas shows unless page is given). index: where the first one goes among the parent's children (default: last, on top). In an auto layout parent they join the flow. Placement: a new board without x/y goes right of everything on its page, 40 px away, level with the page's top board; a board whose x/y would overlap another board or card on the page moves right along its row until clear, and the answer says so (note, placed[].movedFrom). allowOverlap: true keeps an overlapping spot on purpose. placed lists where each new top-level layer landed (x, y, width, height; sizeEstimated when it hugs its content and Canvas has not drawn it yet). An id you give is kept when it is free in the file, so you can reach the layers later; otherwise a fresh id is made. Returns the top-level ids in select. Frames lay out children with layout: vertical|horizontal|none, gap, padding, justifyContent, alignItems; sizes are numbers, 'fit_content' or 'fill_container'. Colors are #RRGGBB(AA) or $variable. Text needs content, fontFamily, fontSize, fontWeight (a string like \"600\") and fill. Read the file's variables and components first (get_document_summary) and reuse them. Look after: screenshot_view or render_node.", {
     file: S.file,
     nodes: z.array(z.record(z.string(), z.any())).min(1).max(500).describe("The layers to add, in order, each with its children"),
     parent: z.string().min(1).max(200).nullable().optional().describe("Frame or group to add into; null or omitted: the canvas (top level)"),
     index: z.number().int().min(0).optional().describe("Index of the first new layer among the parent's children (default: last)"),
     page: z.string().min(1).max(200).optional().describe("New boards only: the page id they go on (default: the page the open canvas shows)"),
+    allowOverlap: z.boolean().optional().describe("New boards only: keep the x/y given even where it overlaps another board (default false: moved right until clear)"),
     expectedRevision: z.string().optional(),
   }, async (a) => {
     await ensureServer();
     const file = await resolveFile(a.file);
     const page = a.page ?? (a.parent ? undefined : (await activeFor(file).catch(() => null)) ?? undefined);
-    return run({ file, op: "add", nodes: a.nodes, place: { parent: a.parent ?? null, ...(a.index !== undefined ? { index: a.index } : {}) }, ...(page ? { page } : {}), expectedRevision: a.expectedRevision });
+    const r: any = await run({ file, op: "add", nodes: a.nodes, place: { parent: a.parent ?? null, ...(a.index !== undefined ? { index: a.index } : {}) }, ...(page ? { page } : {}), ...(a.allowOverlap ? { allowOverlap: true } : {}), expectedRevision: a.expectedRevision });
+    // A board that hugs its content was placed by an estimate of its size: once Canvas has drawn it, check its spot
+    // again with the drawn size (the move answers where it is; nothing changes, and no undo step, when it was clear).
+    if (!a.allowOverlap && Array.isArray(r.placed)) {
+      for (const p of r.placed.filter((x: any) => x.sizeEstimated).slice(0, 20)) {
+        try {
+          const m = await api<any>("POST", "/api/move", { file, id: p.id, x: p.x, y: p.y, round: false });
+          if (typeof m.width === "number") Object.assign(p, { x: m.x, y: m.y, width: m.width, height: m.height });
+          if (m.movedFrom) r.note = [r.note, m.note].filter(Boolean).join(" ");
+          if (m.revision) r.revision = m.revision;
+        } catch { /* the board was placed by its estimate; that stands */ }
+      }
+    }
+    return r;
   });
 
   tool(server, "delete_nodes", "Delete nodes or boards (Backspace in Canvas): one undo step. Layers inside a selected board go with it. Refuses (component_in_use) when a component in the selection still has instances elsewhere. Returns what Canvas selects next.", {
@@ -60,7 +74,7 @@ export function register(server: McpServer) {
     return run({ file: t.file, op: "delete", ids: t.ids, expectedRevision: a.expectedRevision });
   }, { destructiveHint: true });
 
-  tool(server, "duplicate_nodes", "Duplicate nodes (Cmd+D): boards land to the right with a 40 px gap clear of other boards, layers in auto layout right after themselves, other layers 10 px down and right. Fresh ids; returns them in select.", {
+  tool(server, "duplicate_nodes", "Duplicate nodes (Cmd+D): boards land to the right with a 40 px gap clear of other boards (boards that hug their content are measured on the page), layers in auto layout right after themselves, other layers 10 px down and right. Fresh ids; returns them in select.", {
     file: S.file, ids, expectedRevision: z.string().optional(),
   }, async (a) => {
     const t = await target(a);

@@ -485,6 +485,25 @@ describe("add_nodes", () => {
     assert.equal((await call("undo", { file })).json.undid, "Agent: Idea");
     assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), JSON.parse(before));
   });
+  test("a new board never lands on another: moved right until clear, the answer says where; allowOverlap keeps the spot", async () => {
+    await call("finish_work", { file, sound: false });
+    const before = fs.readFileSync(file, "utf8");
+    const first = JSON.parse(before).children.find((n: any) => n.enabled !== false && typeof n.width === "number");
+    const r = await call("add_nodes", { file, nodes: [{ type: "frame", id: "OnTop01", name: "On top", x: first.x, y: first.y, width: 100, height: 100, layout: "none", children: [] }] });
+    assert.equal(r.isError, false, r.text);
+    const [p] = r.json.placed;
+    assert.equal(p.id, "OnTop01");
+    assert.deepEqual(p.movedFrom, { x: first.x, y: first.y });
+    assert.ok(p.x >= first.x + first.width + 40, `landed at ${p.x}`);
+    assert.match(r.json.note, /would have overlapped .* moved right to/);
+    const kept = await call("add_nodes", { file, allowOverlap: true, nodes: [{ type: "frame", id: "OnTop02", x: first.x, y: first.y, width: 100, height: 100, layout: "none", children: [] }] });
+    assert.equal(kept.isError, false, kept.text);
+    assert.deepEqual([kept.json.placed[0].x, kept.json.placed[0].y], [first.x, first.y]);
+    assert.equal(kept.json.note, undefined);
+    await call("finish_work", { file, sound: false });
+    await call("undo", { file });
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), JSON.parse(before));
+  });
 });
 
 describe("auto layout", () => {

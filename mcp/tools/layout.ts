@@ -60,7 +60,7 @@ async function measure(file: string, list: string[]): Promise<Record<string, Rec
 async function run(body: Record<string, unknown>) {
   try {
     const r = await api<any>("POST", "/api/layout", body);
-    return { done: r.label, changed: r.changed, select: r.select, revision: r.revision };
+    return { done: r.label, changed: r.changed, select: r.select, revision: r.revision, ...(Array.isArray(r.placed) ? { placed: r.placed } : {}), ...(r.note ? { note: r.note } : {}) };
   } catch (e) {
     if (e instanceof ToolError && e.code === "stale_revision") throw new ToolError("stale_revision", e.message, "Read again (get_selection or inspect_node), then redo the change with the new revision.");
     if (e instanceof ToolError && e.code === "instance") throw new ToolError("instance", e.message, "Edit the component (or detach the instance) instead.");
@@ -125,18 +125,19 @@ export function register(server: McpServer) {
     return run({ file: t.file, op: "remove", ids: t.ids, deep: a.deep === true, rects, expectedRevision: a.expectedRevision });
   }, { destructiveHint: true });
 
-  tool(server, "place_nodes", "Move layers to a parent at an index: reorder inside an auto layout frame (drag reorder and arrow keys), move into a frame's flow, or out to a free spot. index is where the first layer ends up among the parent's other children (0 = first); several layers stay together in their order. In an auto layout parent the layers join the flow, unless absolute gives each one x/y in the parent's coordinates (Ignore auto layout, Ctrl+drag in). In a free parent (a board, group or layout none frame; null = the canvas) they keep their place on screen. Ids stay the same. One undo step.", {
+  tool(server, "place_nodes", "Move layers to a parent at an index: reorder inside an auto layout frame (drag reorder and arrow keys), move into a frame's flow, or out to a free spot. index is where the first layer ends up among the parent's other children (0 = first); several layers stay together in their order. In an auto layout parent the layers join the flow, unless absolute gives each one x/y in the parent's coordinates (Ignore auto layout, Ctrl+drag in). In a free parent (a board, group or layout none frame) they keep their place on screen. On the canvas (null) they keep their place unless that overlaps a board or card on the page: then they move right along their row until clear, and the answer says so (note, placed); allowOverlap: true keeps the spot. Ids stay the same. One undo step.", {
     file: S.file, ids: ids.describe("Node ids to move"),
     parent: z.string().min(1).max(200).nullable().describe("Frame or group id, or null for the canvas (top level)"),
     index: z.number().int().min(0).optional().describe("Final index of the first layer among the parent's other children in the file, hidden layers included (required unless before is given)"),
     before: z.string().min(1).max(200).nullable().optional().describe("Instead of index: the sibling the layers land right before (null: last). Counts the same with hidden layers"),
     absolute: z.array(z.object({ x: z.number(), y: z.number() }).nullable()).optional().describe("Per id: x/y in the parent's coordinates; places it absolutely (Ignore auto layout)"),
+    allowOverlap: z.boolean().optional().describe("parent null: keep the layers where they are even over a board (default false: moved right until clear)"),
     expectedRevision: z.string().optional(),
   }, async (a) => {
     await ensureServer();
     const file = await resolveFile(a.file);
     const rects = await measure(file, [...(await withParents(file, a.ids)), ...(a.parent ? [a.parent] : [])]);
     if (a.index === undefined && a.before === undefined) throw new ToolError("invalid", "index or before is required");
-    return run({ file, op: "place", ids: a.ids, parent: a.parent, ...(a.before !== undefined ? { before: a.before } : { index: a.index }), absolute: a.absolute, rects, expectedRevision: a.expectedRevision });
+    return run({ file, op: "place", ids: a.ids, parent: a.parent, ...(a.before !== undefined ? { before: a.before } : { index: a.index }), absolute: a.absolute, rects, ...(a.allowOverlap ? { allowOverlap: true } : {}), expectedRevision: a.expectedRevision });
   });
 }

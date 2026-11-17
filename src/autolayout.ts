@@ -64,6 +64,7 @@ import { placeOf, record, replayOps } from "./history.ts";
 import { GROUP_MERGE_MS, isGroupMerge, NUDGE_MERGE_MS } from "./move.ts";
 import { boxOf, duplicateNodes, keepOnPage, nextName, normalize, placesChildren, Recorder, StructureError, union, type OpResult, type Rect, type Who } from "./structure.ts";
 import { readBodyText } from "./body.ts";
+import { cardBoxes, pageMates, placeNew, placementNote, type Placed } from "./placement.ts";
 
 type Doc = { children: DocNode[]; variables?: unknown };
 export type { Rect };
@@ -90,12 +91,14 @@ export type LayoutBody = {
   before?: string | null;
   /** place: copies land there and the layers stay (Option-drag). */
   copy?: boolean;
+  /** place on the canvas by an agent: keep the spot even where it overlaps another board (default: moved right until clear). */
+  allowOverlap?: boolean;
   /** place: several destinations in one write and one undo step (a multi-selection dropped across frames); each
    * part is {ids, parent, before?, absolute?} and the top-level ids, parent, before and absolute are ignored. */
   parts?: PlacePart[];
 };
 export type PlacePart = { ids?: string[]; parent?: string | null; index?: number; before?: string | null; absolute?: ({ x: number; y: number } | null)[] };
-export type LayoutResult = { ok: true; op: LayoutOp; label: string; select: string[]; revision?: string; changed: boolean };
+export type LayoutResult = { ok: true; op: LayoutOp; label: string; select: string[]; revision?: string; changed: boolean; placed?: Placed[]; note?: string };
 
 /** The gap and padding for a new auto layout frame with nothing to infer from. */
 export const DEFAULT_GAP = 10;
@@ -841,12 +844,34 @@ export function runLayout(docFile: string, b: LayoutBody, who: Who): LayoutResul
   // The groups around the old and new parents fit their layers again (groupfit.ts), and an empty one goes.
   touches.push(...groupsAround(cur, touches));
   let out: OpResult | undefined;
+  // An agent's layers moved out onto the canvas land clear of the boards and cards on their page (src/placement.ts),
+  // not on top of the board they came out of.
+  const toCanvas = who.source === "mcp" && op === "place" && !parts && b.parent === null && b.allowOverlap !== true;
+  let mates: ReturnType<typeof pageMates> | null = null;
+  if (toCanvas) {
+    let board: string | undefined;
+    try { const f = findNode(cur as any, ids[0]); board = String((f.ancestors[0] ?? f.node).id); } catch { /* the op says so */ }
+    mates = pageMates(docFile, cur, { page: b.page, board });
+  }
+  const cards = mates ? cardBoxes(docFile, mates.page, mates.first) : [];
+  let placed: Placed[] | undefined;
   // Replayed on someone else's bytes, the edit applies the ops it made (a wrapping frame keeps its id).
   const replay = (doc: any) => replayOps(doc as Doc, out!.ops);
   let write;
   try {
     ({ write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches, deep: true, urgent: true, replay, recorded: () => out?.ops ?? [] }, (doc) => {
       out = apply(doc as unknown as Doc, b, rects);
+      if (mates) {
+        const d = doc as unknown as Doc;
+        const top = out.select.filter((id) => d.children.some((n) => String(n.id) === id));
+        const given = new Map(top.map((id) => {
+          const n = d.children.find((c) => String(c.id) === id)!;
+          return [id, { x: typeof n.x === "number" ? n.x : 0, y: typeof n.y === "number" ? n.y : 0 }] as const;
+        }));
+        const rec = new Recorder(d);
+        placed = placeNew(d, top, given, { mates: mates.boards, rects, cards }, (id, xy) => rec.props(id, xy));
+        out = { ...out, ops: [...out.ops, ...rec.ops] };
+      }
       if (!out.ops.length) throw new NoChange();
     }));
   } catch (e) {
@@ -865,7 +890,8 @@ export function runLayout(docFile: string, b: LayoutBody, who: Who): LayoutResul
   record(docFile, ops, { label: out!.label, source: who.source, session: who.session, mergeKey, ...(nudge ? { mergeMs: NUDGE_MERGE_MS } : group ? { mergeMs: GROUP_MERGE_MS } : {}), edit: write.edit, ...(selBefore.length ? { selBefore } : {}),
     // Undo of a move out of (or into) a group selects the layers that moved, not the group that refit around them.
     ...(op === "place" && b.copy !== true && ids.length ? { sel: ids } : {}) }, write.revision);
-  return { ok: true, op, label: out!.label, select, revision: write.revision, changed: true };
+  const note = placed ? placementNote(placed) : undefined;
+  return { ok: true, op, label: out!.label, select, revision: write.revision, changed: true, ...(placed ? { placed } : {}), ...(note ? { note } : {}) };
 }
 
 export type LayoutDeps = {

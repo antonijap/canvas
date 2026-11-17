@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { after, beforeEach, describe, test } from "node:test";
+import { after, before, beforeEach, describe, test } from "node:test";
 import { tmpDir } from "./helpers.ts";
 
 const dir = tmpDir("mcp-connect");
@@ -74,6 +74,7 @@ const calls = (): string[][] => (fs.existsSync(log) ? fs.readFileSync(log, "utf8
 const C = await import("../src/mcp-connect.ts");
 const { setupCommands } = await import("../src/onboarding.ts");
 const { MCP_SCRIPT } = await import("../src/onboarding.ts");
+const WORKTREE = "/Users/you/Code/canvas/.claude/worktrees/brave-tesla-1234/mcp/server.ts";
 const NODE = "/opt/node/24/bin/node";
 
 beforeEach(() => {
@@ -83,39 +84,43 @@ beforeEach(() => {
 });
 after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
+// The installed app's server for the unit tests: this checkout's own MCP_SCRIPT is a temporary worktree's when the
+// tests run from one, and Connect refuses that (below).
+const APP_SCRIPT = "/Applications/Canvas.app/Contents/Resources/server/mcp/server.ts";
+
 describe("connectAgent", () => {
   test("Claude Code: adds canvas at user scope with the absolute node and server paths", async () => {
     install("claude");
-    const r = await C.connectAgent("claude", { node: NODE, server: MCP_SCRIPT });
+    const r = await C.connectAgent("claude", { node: NODE, server: APP_SCRIPT });
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.deepEqual(r, { ok: true, agent: "claude", registered: true, message: "Added. Start a new Claude Code session." });
-    assert.deepEqual(calls(), [["claude", "mcp", "add", "canvas", "--scope", "user", "--", NODE, MCP_SCRIPT]]);
-    assert.deepEqual(JSON.parse(fs.readFileSync(claudeJson, "utf8")).mcpServers.canvas.args, [MCP_SCRIPT]);
+    assert.deepEqual(calls(), [["claude", "mcp", "add", "canvas", "--scope", "user", "--", NODE, APP_SCRIPT]]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(claudeJson, "utf8")).mcpServers.canvas.args, [APP_SCRIPT]);
   });
 
   test("Codex: adds canvas with the same paths", async () => {
     install("codex");
-    const r = await C.connectAgent("codex", { node: NODE, server: MCP_SCRIPT });
+    const r = await C.connectAgent("codex", { node: NODE, server: APP_SCRIPT });
     assert.deepEqual(r, { ok: true, agent: "codex", registered: true, message: "Added. Start a new Codex session." });
-    assert.deepEqual(calls(), [["codex", "mcp", "add", "canvas", "--", NODE, MCP_SCRIPT]]);
+    assert.deepEqual(calls(), [["codex", "mcp", "add", "canvas", "--", NODE, APP_SCRIPT]]);
   });
 
   test("a canvas entry already there (an old app path) is removed and added again", async () => {
     install("claude");
     fs.writeFileSync(claudeJson, JSON.stringify({ mcpServers: { canvas: { type: "stdio", command: "/old/node", args: ["/Old/Canvas.app/server.ts"] }, other: { command: "x" } } }));
-    const r = await C.connectAgent("claude", { node: NODE, server: MCP_SCRIPT });
+    const r = await C.connectAgent("claude", { node: NODE, server: APP_SCRIPT });
     assert.equal(r.ok, true, JSON.stringify(r));
     assert.deepEqual(calls().map((c) => c.slice(0, 3)), [["claude", "mcp", "add"], ["claude", "mcp", "remove"], ["claude", "mcp", "add"]]);
     assert.deepEqual(calls()[1], ["claude", "mcp", "remove", "canvas", "--scope", "user"]);
     const j = JSON.parse(fs.readFileSync(claudeJson, "utf8"));
-    assert.deepEqual(j.mcpServers.canvas.args, [MCP_SCRIPT], "the new path");
+    assert.deepEqual(j.mcpServers.canvas.args, [APP_SCRIPT], "the new path");
     assert.equal(j.mcpServers.canvas.command, NODE);
     assert.deepEqual(j.mcpServers.other, { command: "x" }, "other servers stay");
   });
 
   test("a binary someone else could have changed is refused and never run", async () => {
     install("claude", 0o777);
-    const r = await C.connectAgent("claude", { node: NODE, server: MCP_SCRIPT });
+    const r = await C.connectAgent("claude", { node: NODE, server: APP_SCRIPT });
     assert.equal(r.ok, false);
     assert.equal(!r.ok && r.code, "untrusted");
     assert.match(!r.ok ? r.error : "", /writable by others/);
@@ -123,8 +128,24 @@ describe("connectAgent", () => {
     assert.ok(!fs.existsSync(claudeJson));
   });
 
+  test("a server in a temporary worktree is never registered: the CLI does not run", async () => {
+    install("claude");
+    install("codex");
+    for (const agent of ["claude", "codex"] as const) {
+      const r = await C.connectAgent(agent, { node: NODE, server: WORKTREE });
+      assert.deepEqual(r, { ok: false, agent, code: "untrusted", error: "This Canvas runs from a temporary worktree; connect from the installed app or the main checkout." });
+    }
+    assert.deepEqual(calls(), [], "not run");
+    assert.ok(!fs.existsSync(claudeJson) && !fs.existsSync(codexToml));
+  });
+  test("temporaryServer: only a path inside .claude/worktrees/<name>/", () => {
+    assert.equal(C.temporaryServer(WORKTREE), true);
+    assert.equal(C.temporaryServer(WORKTREE, { CANVAS_CONNECT_TEMPORARY: "1" }), false, "QA's scratch configs may");
+    for (const p of [APP_SCRIPT, "/Users/you/Code/canvas/mcp/server.ts", "/Users/you/.claude/worktrees", "/Users/you/worktrees/x/mcp/server.ts", "/Users/you/.claude/other/x/mcp/server.ts"]) assert.equal(C.temporaryServer(p), false, p);
+  });
+
   test("no CLI installed: says where Canvas looked", async () => {
-    const r = await C.connectAgent("codex", { node: NODE, server: MCP_SCRIPT, dirs: [empty] });
+    const r = await C.connectAgent("codex", { node: NODE, server: APP_SCRIPT, dirs: [empty] });
     assert.equal(r.ok, false);
     assert.equal(!r.ok && r.code, "missing");
     assert.match(!r.ok ? r.error : "", /^Codex is not installed/);
@@ -133,7 +154,7 @@ describe("connectAgent", () => {
   test("a CLI error comes back trimmed", async () => {
     install("claude");
     fs.writeFileSync(failFile, "Invalid scope: user\n" + "x".repeat(2000));
-    const r = await C.connectAgent("claude", { node: NODE, server: MCP_SCRIPT });
+    const r = await C.connectAgent("claude", { node: NODE, server: APP_SCRIPT });
     assert.equal(r.ok, false);
     const e = !r.ok ? r.error : "";
     assert.ok(e.startsWith("Invalid scope: user"), e);
@@ -145,7 +166,7 @@ describe("connectAgent", () => {
     install("codex");
     fs.writeFileSync(sleepFile, "1");
     const t0 = Date.now();
-    const r = await C.connectAgent("codex", { node: NODE, server: MCP_SCRIPT, timeoutMs: 400 });
+    const r = await C.connectAgent("codex", { node: NODE, server: APP_SCRIPT, timeoutMs: 400 });
     assert.equal(r.ok, false);
     assert.match(!r.ok ? r.error : "", /did not answer/);
     assert.ok(Date.now() - t0 < 5000);
@@ -176,6 +197,10 @@ describe("POST /api/mcp/connect", async () => {
   const port = (server.address() as { port: number }).port;
   const base = `http://127.0.0.1:${port}`;
   after(() => new Promise((r) => server.close(r)));
+  // The route registers this checkout's server, a temporary worktree's when the tests run from one: the configs here
+  // are scratch ones (CLAUDE_CONFIG_DIR, CODEX_HOME), as in QA.
+  before(() => { process.env.CANVAS_CONNECT_TEMPORARY = "1"; });
+  after(() => { delete process.env.CANVAS_CONNECT_TEMPORARY; });
   const post = (body: unknown, headers: Record<string, string> = { "x-canvas": "1" }) =>
     fetch(`${base}/api/mcp/connect`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
 

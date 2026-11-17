@@ -40,6 +40,7 @@ import { GROUP_MERGE_MS, isGroupMerge } from "./move.ts";
 import { readBodyText } from "./body.ts";
 import { boardLacks, factsOf } from "./doc/boardindex.ts";
 import { addStepFiles, topSeq } from "./history.ts";
+import { cardBoxes, pageMates, placeNew, placementNote, topBox, unsizedOnPage, type Placed } from "./placement.ts";
 import "./pastefiles.ts"; // undo of a paste takes back the files it copied
 
 type Doc = { children: DocNode[]; variables?: unknown };
@@ -502,8 +503,17 @@ export function duplicateNodes(doc: Doc, ids: string[], rects: Record<string, Re
   const boards = list.filter((id) => placeOf(doc, id)!.parent === null);
   let shift = 0;
   if (boards.length && !off && !opts.exact) {
-    const u = union(boards.map((id) => boxOf(doc, id, rects)));
-    const others = doc.children.filter((n) => !boards.includes(String(n.id))).map((n) => boxOf(doc, String(n.id), rects));
+    // A board that hugs its content has no size in the file: the page's rect, else an estimate (a 0 wide board
+    // put its copy 40 px right, on top of itself).
+    const index = buildIndex(doc as any);
+    const sized = (id: string) => {
+      const b = boxOf(doc, id, rects);
+      if (b.w > 0 && b.h > 0) return b;
+      const e = topBox(placeOf(doc, id)!.node, rects[id], index);
+      return { ...b, w: b.w || e.w, h: b.h || e.h };
+    };
+    const u = union(boards.map(sized));
+    const others = doc.children.filter((n) => !boards.includes(String(n.id)) && n.enabled !== false).map((n) => sized(String(n.id)));
     shift = u.w + BOARD_GAP;
     // Move further right until the copies land on empty canvas (at most 50 tries).
     for (let i = 0; i < 50 && others.some((o) => overlaps({ ...u, x: u.x + shift }, o)); i++) shift += u.w + BOARD_GAP;
@@ -1252,6 +1262,8 @@ export type StructureBody = {
   offset?: { dx: number; dy: number };
   /** duplicate with offset: round the copies' x/y to whole pixels (pixel snapping). */
   round?: boolean;
+  /** add on the canvas: keep the x/y given even where it overlaps another board (default: moved right until clear). */
+  allowOverlap?: boolean;
 };
 export type Who = { source: "user" | "mcp"; session?: string };
 
@@ -1261,7 +1273,7 @@ export const serverClipboard = () => lastCopy;
 export const setServerClipboard = (p: ClipPayload | null) => void (lastCopy = p);
 
 /** Run one structure op on a document on disk: one write, one undo step. */
-export function runStructure(docFile: string, b: StructureBody, who: Who): { ok: true; op: StructureOp; label?: string; select: string[]; revision?: string; payload?: ClipPayload; warnings?: string[] } {
+export function runStructure(docFile: string, b: StructureBody, who: Who): { ok: true; op: StructureOp; label?: string; select: string[]; revision?: string; payload?: ClipPayload; warnings?: string[]; placed?: Placed[]; note?: string } {
   const op = b.op;
   const rects = b.rects && typeof b.rects === "object" ? b.rects : {};
   if (op === "copy") {
@@ -1280,6 +1292,12 @@ export function runStructure(docFile: string, b: StructureBody, who: Who): { ok:
   const assets = op === "paste" && payload && payload.source !== docFile ? planAssets(payload, docFile, created) : undefined;
   if (op === "add") payload = addPayload(b.nodes, docFile);
   let out: OpResult | undefined;
+  // New boards an agent adds land clear of the boards and cards on their page (src/placement.ts). The page's own adds
+  // (an image dropped over a board with Space held) go where the person put them.
+  const onCanvas = op === "add" && who.source === "mcp" && (b.place?.parent ?? null) === null;
+  const mates = onCanvas ? pageMates(docFile, currentDoc(docFile).doc as unknown as Doc, { page: b.page }) : null;
+  const cards = mates ? cardBoxes(docFile, mates.page, mates.first) : [];
+  let placed: Placed[] | undefined;
   // The boards a structure op can change: those of its layers, and of the parent a paste lands in (null: the document's list).
   const touches = [...(b.ids ?? []), op === "paste" || op === "add" ? (b.place?.parent ?? null) : null];
   if (op === "paste") {
@@ -1325,6 +1343,14 @@ export function runStructure(docFile: string, b: StructureBody, who: Who): { ok:
         for (const id of res.select) { const f = placeOf(d, id); if (f) walkIds(f.node); }
         const fit = new Recorder(d);
         fitAround(d, seeds, (id, p) => fit.props(id, p));
+        if (mates) {
+          // The x and y the agent wrote for each new top-level layer (select lists them in the order they came).
+          const given = new Map(res.select.map((id, i) => {
+            const src = payload!.nodes[i] as DocNode | undefined;
+            return [id, { x: num(src?.x), y: num(src?.y) }] as const;
+          }));
+          placed = placeNew(d, res.select, given, { mates: mates.boards, rects, cards, allowOverlap: b.allowOverlap === true }, (id, xy) => fit.props(id, xy));
+        }
         out = { ...res, ops: [...res.ops, ...fit.ops], label: payload!.nodes.length === 1 ? "Add layer" : "Add layers" };
         break;
       }
@@ -1349,7 +1375,8 @@ export function runStructure(docFile: string, b: StructureBody, who: Who): { ok:
   if (r.payload) lastCopy = r.payload;
   // Keys this version does not know (a copy from a newer Canvas, an agent's guess) went in as they were: say which.
   const warnings = (op === "add" || op === "paste") && payload ? payload.nodes.flatMap((n) => unknownKeys(n)).slice(0, 20) : [];
-  return { ok: true, op: op!, label: r.label, select: r.select, revision: write.revision, ...(r.payload ? { payload: r.payload } : {}), ...(warnings.length ? { warnings } : {}) };
+  const note = placed ? placementNote(placed) : undefined;
+  return { ok: true, op: op!, label: r.label, select: r.select, revision: write.revision, ...(r.payload ? { payload: r.payload } : {}), ...(warnings.length ? { warnings } : {}), ...(placed ? { placed } : {}), ...(note ? { note } : {}) };
 }
 
 const topIds = (docFile: string): string[] => ((currentDoc(docFile).doc.children ?? []) as DocNode[]).map((n) => String(n.id));
@@ -1483,6 +1510,8 @@ async function clipboardOp(docFile: string, b: StructureBody, who: Who, deps: St
 
 export type StructureDeps = {
   prime: (file: string) => Promise<void>;
+  /** World boxes of these nodes as the page showing the file draws them ({} without a page). */
+  measure?: (file: string, ids: string[]) => Promise<Record<string, Rect>>;
   docFileOf: (file: string) => string;
   written: (docFile: string, revision: string | undefined, by: "mcp" | "inspector", ids: string[], label: string) => void;
 };
@@ -1520,6 +1549,14 @@ export async function handleStructureRoute(req: http.IncomingMessage, res: http.
     const who: Who = { source: by === "mcp" ? "mcp" : "user", session };
     if (b.op === "copy" || b.op === "cut" || b.op === "paste") return reply(200, await clipboardOp(docFile, b, who, deps, by)), true;
     const before = topIds(docFile);
+    // An agent's new or duplicated board is placed clear of the others: boards that hug their content are measured
+    // on the page first (the file has no size for them).
+    if (by === "mcp" && deps.measure && ((b.op === "add" && (b.place?.parent ?? null) === null) || b.op === "duplicate")) {
+      const doc = currentDoc(docFile).doc as unknown as Doc;
+      const first = (b.ids ?? []).find((id) => typeof id === "string" && before.includes(id));
+      const ids = unsizedOnPage(docFile, doc, { page: b.page, board: first }).filter((id) => !(b.rects && b.rects[id]));
+      if (ids.length) b.rects = { ...(await deps.measure(docFile, ids).catch(() => ({}))), ...(b.rects ?? {}) };
+    }
     const r = runStructure(docFile, b, who);
     await keepOnPage(docFile, b, before);
     deps.written(docFile, r.revision, by, r.select, r.label ?? r.op);

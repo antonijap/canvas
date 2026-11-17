@@ -66,6 +66,8 @@ export class QaApp {
       CANVAS_AGENT_LOG: path.join(this.logs, "agent-runs.log"),
       CANVAS_WEB_FONTS: "0",
       CANVAS_MCP_NO_SPAWN: "1",
+      // The agents' config lives in this instance's scratch HOME: Connect may register a worktree's server here.
+      CANVAS_CONNECT_TEMPORARY: "1",
       CANVAS_SERVER: path.join(ROOT, "src/server.ts"),
       CANVAS_NODE: process.execPath,
       ...(process.env.CANVAS_ENGINE_PKG ? { CANVAS_ENGINE_PKG: process.env.CANVAS_ENGINE_PKG } : {}),

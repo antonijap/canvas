@@ -590,7 +590,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
       if (await handleHistoryRoute(req, res, url, (f) => resolveDocPath(f), { docWritten: (docFile, rev) => docChanged(docFile, rev, "inspector", { undo: true }) })) return;
       // Board drags, arrow-key nudges and the MCP's move_board (src/move.ts).
       if (await handleMoveRoute(req, res, url, {
-        prime, docFileOf: (f) => resolveDocPath(f), docOf: (docFile) => watched(docFile).doc, revisionOf: (docFile) => watched(docFile).revision,
+        measure: varCtx.measure, prime, docFileOf: (f) => resolveDocPath(f), docOf: (docFile) => watched(docFile).doc, revisionOf: (docFile) => watched(docFile).revision,
         written: (docFile, rev, by, id) => {
           if (rev) docChanged(docFile, rev, by, { id });
           if (by === "mcp") trackChange(docFile, id, bridgeCtx);
@@ -624,7 +624,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
       if (await handleCopyAsRoute(req, res, url, { prime, docFileOf: (f) => resolveDocPath(f), port: () => (server.address() as { port: number }).port })) return;
       // Delete, duplicate, copy/cut/paste, group, ungroup, reorder (src/structure.ts): one write, one undo step each.
       if (await handleStructureRoute(req, res, url, {
-        prime, docFileOf: (f) => resolveDocPath(f),
+        measure: varCtx.measure, prime, docFileOf: (f) => resolveDocPath(f),
         written: (docFile, rev, by, ids, label) => {
           if (rev) docChanged(docFile, rev, by, { id: ids[0] ?? null, structure: label });
           if (by === "mcp") for (const id of ids.slice(0, 20)) trackChange(docFile, id, bridgeCtx);
