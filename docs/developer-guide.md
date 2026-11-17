@@ -6,7 +6,7 @@ Start with the [README](../README.md) to open a file. This guide covers the buil
 
 | What | Version | Why |
 |---|---|---|
-| macOS | 13 or later (`LSMinimumSystemVersion`); developed on macOS 27 | The app shell. WebGPU in WKWebView is on by default on current macOS. On older systems the page falls back to the DOM renderer. |
+| macOS | 26 or later, Apple silicon (`LSMinimumSystemVersion`, also the `-target` apps/macos/build.sh compiles for); developed on macOS 27 | The app shell. macOS 26 is the floor: the window chrome uses its glass, and WKWebView has WebGPU on by default from 26. `pnpm release:app` fails if the binary's minimum and Info.plist disagree. |
 | Xcode Command Line Tools | current (`xcode-select --install`) | `swiftc` and `codesign` for `apps/macos/build.sh`. A full Xcode is not needed. |
 | Node | 24 (package.json says `>=22.18`) | The server and MCP run `.ts` files directly through Node's type stripping. No build step. |
 | mise | any | How this machine installs Node: `mise use -g node@24`. The app looks for Node at `~/.local/share/mise/installs/node/24/bin/node` among other places. |
