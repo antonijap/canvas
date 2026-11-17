@@ -238,15 +238,15 @@ export function saveDoc(loaded: LoadedDoc, doc: CanvasDoc): { hash: string; back
   // Without a way to keep them (no hard links on the volume: a clone checked against what was loaded), nothing is replaced.
   const prev = `${tmp}.prev`;
   let kind: "link" | "copy" | undefined;
-  // A save log beside the file (doclog.ts): no Canvas may append to it or fold it while this save swaps the file,
-  // it must still be the log this load applied, and once the swap is done it is retired (this save holds its edits).
+  // The save log's lock (doclog.ts), whether or not this load saw a log: another Canvas may have made one since, and
+  // may be folding it into a whole write right now (between its last look at the disk and its rename). Under the lock
+  // no Canvas appends to the log or folds it while this save swaps the file; the log must still be the one this load
+  // applied (or still none), and once the swap is done it is retired (this save holds its edits).
   let unlock: (() => void) | undefined;
   try {
-    if (loaded.logSeen) {
-      if (holdsLogLock(loaded.path)) throw new StaleFileError(`${loaded.path} is being saved by Canvas right now. Nothing was written. Read it again and redo the change.`);
-      unlock = lockLogSync(loaded.path);
-      if (logSigSync(loaded.path) !== loaded.logSeen) throw new StaleFileError(`${loaded.path} changed on disk after it was read (its save log). Nothing was written. Read it again and redo the change.`);
-    }
+    if (holdsLogLock(loaded.path)) throw new StaleFileError(`${loaded.path} is being saved by Canvas right now. Nothing was written. Read it again and redo the change.`);
+    unlock = lockLogSync(loaded.path);
+    if (logSigSync(loaded.path) !== (loaded.logSeen ?? "none")) throw new StaleFileError(`${loaded.path} changed on disk after it was read (its save log). Nothing was written. Read it again and redo the change.`);
     fs.chmodSync(tmp, loaded.mode || 0o644);
     assertUnchanged(); // last check right before the swap
     try {

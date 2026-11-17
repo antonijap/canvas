@@ -2407,9 +2407,10 @@ async function runWrites(st: FileState): Promise<void> {
       // The checks after the write before this one finish first: what they find (someone's save crossed it, the
       // bytes on disk are not what it wrote) changes what this write may replace.
       if (st.checking) await st.checking;
-      // A save log in play: the swap and the log's retirement happen under the lock, so no Canvas appends to it or
-      // folds it in between.
-      if (!st.unlock && (st.log || st.logSeen !== "none" || (await logSig(docFile)) !== "none")) await takeLock(st);
+      // The swap and the log's retirement happen under the lock, so no Canvas appends to the log or folds it in between.
+      // Always, not only when this state saw a log: another Canvas may have made one since and be folding it right now
+      // (between its last look at the disk and its rename); a rename of ours in there would be lost under its.
+      if (!st.unlock) await takeLock(st);
       // Last look before the swap: the disk must still be the bytes this write was based on, and nobody (an outside
       // reload) invalidated it meanwhile.
       const now = await statKey(docFile);
@@ -2566,8 +2567,26 @@ async function runWrites(st: FileState): Promise<void> {
 
 /** A small document: written now, the way store.ts saveDoc does, all synchronous. False when the async path must take it. */
 function writeSmall(st: FileState, format: Format, buf: Buffer, hash: string): boolean {
-  const docFile = st.docFile;
   if (st.log || st.logged.length || st.logSeen !== "none") return false; // a save log in play: the background path, under its lock
+  // The lock, as every whole write takes it (runWrites): another Canvas may have made a log since this state looked and
+  // be folding it. One try; when someone holds it, or a log is there now, the background path takes the write.
+  let unlock: (() => void) | null;
+  try {
+    unlock = tryLockLog(st.docFile);
+  } catch {
+    return false;
+  }
+  if (!unlock) return false;
+  try {
+    if (logSigSync(st.docFile) !== "none") return false;
+    return writeSmallLocked(st, format, buf, hash);
+  } finally {
+    unlock();
+  }
+}
+
+function writeSmallLocked(st: FileState, format: Format, buf: Buffer, hash: string): boolean {
+  const docFile = st.docFile;
   let base: string | null;
   try {
     base = keyOf(fs.statSync(docFile));
