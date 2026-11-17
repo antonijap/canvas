@@ -304,6 +304,9 @@ enum QA {
             if let m = openMenu { closeMenu(m) }
             if PaletteController.shared.isOpen { PaletteController.shared.close(refocus: false) }
             model.zoomFieldOpen = false
+            // A comment name a scenario typed (a placeholder) goes back to the default: the Mac's full name.
+            UserDefaults.standard.removeObject(forKey: AppSettings.prefix + "commentName")
+            model.prefs.commentName = NSFullUserName()
             model.batchRename = nil
             LayersStore.of(model).renaming = nil
             for w in NSApp.windows where w !== window && w.isVisible {
