@@ -245,6 +245,20 @@ enum BatchRename {
         }
     }
 
+    /// Whether Rename to has a number in it ($n or $N, not $$n): the sheet shows Start at only then.
+    static func counts(_ to: String) -> Bool {
+        let c = Array(to)
+        var i = 0
+        while i + 1 < c.count {
+            if c[i] == "$" {
+                if c[i + 1] == "$" { i += 2; continue }
+                if c[i + 1] == "n" || c[i + 1] == "N" { return true }
+            }
+            i += 1
+        }
+        return false
+    }
+
     /// The first `limit` names with what they become, for the sheet's preview.
     static func preview(_ current: [String], match: String, to: String, start: Int?, limit: Int = 6) -> [Change] {
         let next = names(current, match: match, to: to, start: start)
