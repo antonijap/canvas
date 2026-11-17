@@ -54,10 +54,8 @@ struct PaletteLogicTests {
         check(PaletteList.order([("a", 10), ("b", 30), ("c", 30)]) == ["b", "c", "a"], "best first, ties keep order")
     }
 
-    /// Recent asks (talk to the selection): where and when.
+    /// Recent asks (talk to the selection): when, on the right of the one-line row.
     static func asks() {
-        check(PaletteList.askWhere(layer: "Pricing card", page: "Final") == "Pricing card on Final", "layer on page")
-        check(PaletteList.askWhere(layer: "Hero", page: nil) == "Hero", "no page name")
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = TimeZone(identifier: "Europe/Helsinki")!
         let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 16, hour: 12, minute: 0))!

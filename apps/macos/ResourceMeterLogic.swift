@@ -123,6 +123,12 @@ enum MeterThresholds {
             : (sustained(readings, above: cpuElevated) >= sustain ? .elevated : .normal)
         return max(mem, cpu)
     }
+
+    /// The toolbar readout shows only when memory or CPU is in the warn state, or while its popover is open
+    /// (Quick actions > Resources opens it any time).
+    static func readoutShown(level: MeterLevel, popoverOpen: Bool) -> Bool {
+        level != .normal || popoverOpen
+    }
 }
 
 /// A fixed-size history for the sparklines: the newest `capacity` values, oldest first.

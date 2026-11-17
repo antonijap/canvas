@@ -60,6 +60,10 @@ struct ResourceMeterTests {
     }
 
     static func thresholds() {
+        check(!MeterThresholds.readoutShown(level: .normal, popoverOpen: false), "quiet: the readout hides")
+        check(MeterThresholds.readoutShown(level: .elevated, popoverOpen: false), "amber: the readout shows")
+        check(MeterThresholds.readoutShown(level: .high, popoverOpen: false), "red: the readout shows")
+        check(MeterThresholds.readoutShown(level: .normal, popoverOpen: true), "popover open from Quick actions: the readout anchors it")
         check(MeterThresholds.level(memory: gib, cpu: []) == .normal, "quiet")
         check(MeterThresholds.level(memory: 3 * gib, cpu: []) == .normal, "exactly 3 GB is fine")
         check(MeterThresholds.level(memory: 3 * gib + 1, cpu: []) == .elevated, "over 3 GB: amber")

@@ -16,7 +16,7 @@ struct ShellLogicTests {
     }
 
     static func main() {
-        docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); tipPlacement(); contextMenu()
+        docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
@@ -235,6 +235,16 @@ struct ShellLogicTests {
     }
 
     // Sweep S3: the fit must keep clear of the rail and panel, the inspector, the toolbar and the zoom pill.
+    static func emptyPage() {
+        check(EmptyPage.isEmpty(fileOpen: true, home: false, loaded: true, boards: 0, cards: 0), "a loaded page with nothing on it is empty")
+        check(!EmptyPage.isEmpty(fileOpen: true, home: false, loaded: true, boards: 1, cards: 0), "one board: not empty")
+        check(!EmptyPage.isEmpty(fileOpen: true, home: false, loaded: true, boards: 0, cards: 2), "cards only: not empty")
+        check(!EmptyPage.isEmpty(fileOpen: true, home: false, loaded: false, boards: 0, cards: 0), "still opening: no hint yet")
+        check(!EmptyPage.isEmpty(fileOpen: true, home: true, loaded: true, boards: 0, cards: 0), "Home shown: no hint")
+        check(!EmptyPage.isEmpty(fileOpen: false, home: false, loaded: true, boards: 0, cards: 0), "no file: no hint")
+        check(!EmptyPage.hint.contains("\u{2014}") && !EmptyPage.hint.contains("\u{00B7}"), "no em dash or middot in the hint")
+    }
+
     static func canvasInsets() {
         let a = CanvasInsets.compute(panel: 244, inspector: true, inset: 10, rail: 40, gap: 10, pill: 40, props: 284)
         check(a.l == 10 + 40 + 10 + 244 + 10 && a.r == 10 + 284 + 10 && a.t == 60 && a.b == 60, "panel and inspector open: \(a)")

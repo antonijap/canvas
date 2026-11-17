@@ -128,17 +128,6 @@ enum PaletteList {
         guard count > 0 else { return 0 }
         return ((cursor + d) % count + count) % count
     }
-    /// Group order by each group's best score, ties in the given order.
-    /// A Recent asks row, for the list's height: 8 padding, the prompt (13 pt, a 16 pt line), 4, "Layer on Page"
-    /// (12 pt, a 15 pt line), 8 padding.
-    static let askRowHeight: CGFloat = 8 + 16 + 4 + 15 + 8
-
-    /// "Pricing card on Final"; just the layer when the document has no page name for it.
-    static func askWhere(layer: String, page: String?) -> String {
-        guard let p = page, !p.isEmpty else { return layer }
-        return "\(layer) on \(p)"
-    }
-
     /// When an ask was, short (src/page/spark-logic.js relDay): "18:40" today, "Yesterday", "Mon" within the week, "12 Nov".
     static func relDay(_ at: Date, now: Date, calendar: Calendar = .current) -> String {
         let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: at), to: calendar.startOfDay(for: now)).day ?? 0
@@ -153,6 +142,7 @@ enum PaletteList {
         return f.string(from: at).replacingOccurrences(of: "Sept", with: "Sep")
     }
 
+    /// Group order by each group's best score, ties in the given order.
     static func order(_ groups: [(id: String, best: Double)]) -> [String] {
         groups.enumerated().sorted { a, b in a.element.best != b.element.best ? a.element.best > b.element.best : a.offset < b.offset }.map(\.element.id)
     }

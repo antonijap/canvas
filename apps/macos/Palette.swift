@@ -21,11 +21,9 @@ struct PaletteItem: Identifiable {
     var fuzzy = true
     /// Recents remember this key (commands and select-matching actions).
     var recentKey: String?
-    /// What Cmd+Return (or Tab) does, and the footer's word for it.
+    /// What Cmd+Return (or Tab) does, and the row's tooltip for it.
     var secondaryLabel: String?
     var secondary: (() -> Void)?
-    /// A two-line row (Recent asks): the line under the title, 4 pt below it.
-    var subtitle: String?
     /// Small text on the right (Recent asks: when).
     var trailing: String?
     let run: () -> Void
@@ -258,14 +256,13 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
         }
     }
 
-    /// A Recent ask: its prompt, "Layer on Page", when. Return flies to the layer (its page first) and reopens the thread.
+    /// A Recent ask, one line: a sparkle, its prompt, when. Return flies to the layer (its page first) and reopens the thread.
     private func askItem(_ a: [String: Any]) -> PaletteItem? {
         guard let model, let key = a["key"] as? String, let prompt = a["prompt"] as? String else { return nil }
         let ids = a["ids"] as? [String] ?? [key]
         let at = Date(timeIntervalSince1970: ((a["at"] as? NSNumber)?.doubleValue ?? 0) / 1000)
         let msg: [String: Any] = ["cmd": "askOpen", "key": key, "ids": ids, "board": a["board"] as? String ?? NSNull(), "page": a["page"] as? String ?? NSNull()]
-        let where_ = PaletteList.askWhere(layer: a["name"] as? String ?? key, page: a["pageName"] as? String)
-        return PaletteItem(id: "ask:\(key)", title: prompt, symbol: "sparkles.2", fuzzy: false, subtitle: where_, trailing: PaletteList.relDay(at, now: Date())) {
+        return PaletteItem(id: "ask:\(key)", title: prompt, symbol: "sparkles.2", fuzzy: false, trailing: PaletteList.relDay(at, now: Date())) {
             guard let data = try? JSONSerialization.data(withJSONObject: msg), let js = String(data: data, encoding: .utf8) else { return }
             model.run(js)
         }
@@ -519,6 +516,9 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
                 out.append(PaletteCommand(key: "page:" + p.id, title: "Go to Page: \(p.name)", symbol: "doc", keywords: "switch page", applies: { _ in true }, run: { $0.showPage(p.id) }))
             }
         }
+        // The resource popover (ResourceMeter.swift): the toolbar readout only shows in the warn state, this opens it any time.
+        out.append(PaletteCommand(key: "resources", title: "Resources", symbol: "memorychip", keywords: "memory cpu performance usage report slow",
+                                  applies: { _ in true }, run: { _ in MainActor.assumeIsolated { ResourceMeter.shared.popoverOpen = true } }))
         out.append(PaletteCommand(key: "panel", title: model.panelOpen ? "Hide Left Panel" : "Show Left Panel", symbol: "sidebar.left", keywords: "toggle sidebar layers", applies: { _ in true },
                                   run: { m in m.uiHidden = false; m.panelOpen.toggle() }))
         for s in RailSection.allCases {
@@ -579,12 +579,10 @@ private struct PalettePanel: View {
     @ObservedObject var palette: PaletteController
     @FocusState private var focused: Bool
 
-    /// The list's height: rows, headers and the gaps between them, up to a cap (then it scrolls).
+    /// The list's height: one-line rows and the gaps between them, up to a cap (then it scrolls). No group headers:
+    /// the groups only set the order.
     private var listHeight: CGFloat {
-        let rows = CGFloat(palette.groups.reduce(0) { $0 + $1.items.filter { $0.subtitle == nil }.count })
-        let tall = CGFloat(palette.groups.reduce(0) { $0 + $1.items.filter { $0.subtitle != nil }.count })
-        let heads = CGFloat(palette.groups.count)
-        return min(rows * (Metric.row + 2) + tall * (PaletteList.askRowHeight + 2) + heads * 31 + 4, 420)
+        min(CGFloat(palette.flat.count) * (Metric.row + 2) + 4, 420)
     }
 
     var body: some View {
@@ -604,7 +602,6 @@ private struct PalettePanel: View {
                 } else {
                     results
                 }
-                footer
             }
         }
         .frame(maxWidth: 600)
@@ -613,17 +610,12 @@ private struct PalettePanel: View {
     }
 
     private var results: some View {
-        var offsets: [Int] = [], n = 0
-        for g in palette.groups { offsets.append(n); n += g.items.count }
-        return ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(palette.groups.enumerated()), id: \.element.id) { gi, g in
-                        SectionHeader(title: g.title)
-                        ForEach(Array(g.items.enumerated()), id: \.element.id) { ii, item in
-                            PaletteRow(item: item, active: offsets[gi] + ii == palette.cursor) { palette.perform(item) }
-                                .id(item.id)
-                        }
+                    ForEach(Array(palette.flat.enumerated()), id: \.element.id) { i, item in
+                        PaletteRow(item: item, active: i == palette.cursor) { palette.perform(item) }
+                            .id(item.id)
                     }
                 }
             }
@@ -635,23 +627,6 @@ private struct PalettePanel: View {
         }
     }
 
-    private var footer: some View {
-        HStack(spacing: 14) {
-            hint("\u{2191}\u{2193}", "Move")
-            hint("\u{21A9}", "Open")
-            if let s = palette.current?.secondaryLabel { hint("\u{2318}\u{21A9}", s) }
-            Spacer(minLength: 8)
-            hint("esc", "Close")
-        }
-        .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 2)
-    }
-
-    private func hint(_ key: String, _ label: String) -> some View {
-        HStack(spacing: 4) {
-            Text(key).font(Typography.label).foregroundStyle(Palette.fg.opacity(0.7))
-            Text(label).font(Typography.micro).foregroundStyle(Palette.mutedFg)
-        }
-    }
 }
 
 /// ListRow's look (DesignSystem/Components.swift), with the matched letters in bold and a shortcut on the right.
@@ -669,38 +644,17 @@ private struct PaletteRow: View {
         return a
     }
 
+    /// Every row is one line: glyph (muted, the text colour when selected), title, then where, when or the shortcut.
+    /// A Recent ask is a sparkle, its prompt and when it was asked. The Cmd+Return action shows as the row's tooltip.
     var body: some View {
-        if item.subtitle != nil { askRow } else { plainRow }
-    }
-
-    /// Recent asks (the talk-to-selection design, board 7): sparkles.2, the prompt over "Layer on Page" 4 pt below it, when.
-    /// Selected: neutral grey, the icon in the text colour; secondary text stays muted grey (never grey on a tint).
-    private var askRow: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: item.symbol).font(.system(size: 14, weight: .medium)).foregroundStyle(active ? Palette.fg : Palette.mutedFg).frame(width: 18)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.title).font(.system(size: 13, weight: .medium)).foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.tail).fixedSize(horizontal: false, vertical: true)
-                    if let s = item.subtitle { Text(s).font(.system(size: 12)).foregroundStyle(Palette.mutedFg).lineLimit(1).truncationMode(.middle).fixedSize(horizontal: false, vertical: true) }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let t = item.trailing { Text(t).font(.system(size: 12)).monospacedDigit().foregroundStyle(Palette.mutedFg).lineLimit(1).fixedSize() }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(active ? Palette.rowSelected : hovering ? Palette.hover : .clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(active ? .isSelected : [])
-        .onHover { h in hovering = h }
-    }
-
-    private var plainRow: some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: item.symbol).railGlyph().foregroundStyle(item.tint ?? Palette.mutedFg).frame(width: 18)
+                Image(systemName: item.symbol).railGlyph().foregroundStyle(item.tint ?? (active ? Palette.fg : Palette.mutedFg)).frame(width: 18)
                 Text(title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 8)
+                if let t = item.trailing {
+                    Text(t).font(.system(size: 12)).monospacedDigit().foregroundStyle(Palette.mutedFg).lineLimit(1).fixedSize()
+                }
                 if let d = item.detail, !d.isEmpty {
                     // Where it is stays readable: the title gives way first, the place only past a third of the row.
                     Text(d).font(Typography.micro).monospacedDigit().foregroundStyle(Palette.mutedFg).lineLimit(1).truncationMode(.middle)
@@ -715,7 +669,9 @@ private struct PaletteRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(item.secondaryLabel.map { "\u{2318}\u{21A9}  \($0)" } ?? "")
         .accessibilityAddTraits(active ? .isSelected : [])
+        .accessibilityHint(item.secondaryLabel.map { "Command Return: \($0)" } ?? "")
         .onHover { h in hovering = h }
     }
 }
