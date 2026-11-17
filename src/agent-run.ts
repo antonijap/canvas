@@ -30,7 +30,7 @@ import { stateHome } from "./doc/docfile.ts";
 import { findNode, resolveDocPath, type CanvasDoc, type DocNode } from "./engine.ts";
 import { entries, finishAgent, undo, type Entry, type NodeOp } from "./history.ts";
 import { listPages } from "./pages.ts";
-import { agentSettings, runCapMs } from "./settings.ts";
+import { agentSettings, EFFORTS, runCapMs, type ModelChoice } from "./settings.ts";
 import { changeThreads, PROMPT_MAX, readThreads, recentAsks, threadsNow, withOutcome, withRun, type Harness, type Run, type Step, type Thread } from "./threads.ts";
 import { countUsage } from "./usage-counts.ts";
 
@@ -108,6 +108,8 @@ export const MOBBIN_TOOLS = ["search_screens", "search_flows", "search_sections"
 
 export type CommandOpts = {
   harness: HarnessInfo;
+  /** The model and reasoning level to ask for (Settings > Agents); empty: the agent's own default. */
+  choice?: ModelChoice;
   /** The MCP session id canvas-mcp sends with every edit. */
   mcpSession: string;
   /** Claude Code: the session id of a new run (we choose it), or the one to resume. Codex: the thread to resume. */
@@ -133,6 +135,30 @@ export function mcpServerSpec(o: Pick<CommandOpts, "node" | "mcpSession" | "port
   return { command: o.node, args: [MCP_SERVER], env: { CANVAS_MCP_SESSION: o.mcpSession, CANVAS_PORT: String(o.port), CANVAS_MCP_NO_SPAWN: "1", CANVAS_MCP_NO_APP: "1", CANVAS_MCP_WANT_VERSION: o.serverVersion } };
 }
 
+const CLAUDE_MODELS = [{ id: "opus", label: "Opus" }, { id: "sonnet", label: "Sonnet" }, { id: "haiku", label: "Haiku" }, { id: "fable", label: "Fable" }];
+/**
+ * The models Settings > Agents offers for an agent: Claude Code's aliases (always its latest of each), Codex's from
+ * the list it keeps in ~/.codex/models_cache.json (what this account can use), with the reasoning levels each takes.
+ */
+export function modelsOf(id: Harness, home = os.homedir()): { id: string; label: string; efforts?: string[] }[] {
+  if (id === "claude") return CLAUDE_MODELS;
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(home, ".codex", "models_cache.json"), "utf8"));
+    const list: unknown[] = Array.isArray(j) ? j : Array.isArray(j?.models) ? j.models : [];
+    return list.flatMap((m) => {
+      const o = m && typeof m === "object" ? (m as Record<string, unknown>) : {};
+      const slug = typeof o.slug === "string" ? o.slug : typeof o.id === "string" ? o.id : "";
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(slug)) return [];
+      const levels = Array.isArray(o.supported_reasoning_levels) ? o.supported_reasoning_levels : [];
+      const efforts = levels.map((e) => (typeof e === "string" ? e : e && typeof e === "object" ? (e as { effort?: unknown }).effort : null)).filter((e): e is string => typeof e === "string" && EFFORTS.codex.includes(e));
+      const name = typeof o.display_name === "string" && o.display_name.length <= 40 ? o.display_name : slug;
+      return [{ id: slug, label: name, efforts }];
+    }).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
 /** The exact command line. The prompt goes on stdin (never in argv, where `ps` would show it). */
 export function buildCommand(o: CommandOpts): { cmd: string; args: string[]; mcpConfig?: string } {
   if (o.harness.id === "claude") {
@@ -152,6 +178,8 @@ export function buildCommand(o: CommandOpts): { cmd: string; args: string[]; mcp
       "--permission-mode", "dontAsk", "--permission-prompts", "none",
       "--restricted", ...(w ? [] : ["--disable-slash-commands"]), "--no-chrome",
     ];
+    if (o.choice?.model) args.push("--model", o.choice.model);
+    if (o.choice?.effort) args.push("--effort", o.choice.effort);
     if (o.resume && o.session) args.push("--resume", o.session);
     else if (o.session) args.push("--session-id", o.session);
     return { cmd: o.harness.real, args, mcpConfig };
@@ -169,9 +197,10 @@ export function buildCommand(o: CommandOpts): { cmd: string; args: string[]; mcp
     `sandbox_mode="read-only"`,
     `approval_policy="never"`,
     `web_search=${o.wide ? `"live"` : `"disabled"`}`,
+    ...(o.choice?.effort ? [`model_reasoning_effort=${toml(o.choice.effort)}`] : []),
   ].flatMap((c) => ["-c", c]);
   const off = ["shell_tool", "unified_exec", "apps", "plugins", "multi_agent", "image_generation", "computer_use", "browser_use", "in_app_browser", "memories", "hooks"].flatMap((f) => ["--disable", f]);
-  const common = ["--json", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", ...conf, ...off, ...[o.image, ...(o.images ?? [])].filter((x): x is string => !!x).flatMap((x) => ["-i", x])];
+  const common = [...(o.choice?.model ? ["-m", o.choice.model] : []), "--json", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules", ...conf, ...off, ...[o.image, ...(o.images ?? [])].filter((x): x is string => !!x).flatMap((x) => ["-i", x])];
   const args = o.resume && o.session ? ["exec", "resume", o.session, ...common, "-"] : ["exec", "--sandbox", "read-only", ...common, "-"];
   return { cmd: o.harness.real, args };
 }
@@ -669,7 +698,7 @@ function launch(ctx: AgentCtx, a: Active) {
   const message = !resume && earlier ? `${a.view.prompt}\n\n(Earlier on this selection the person asked: "${earlier.prompt.split("\n")[0].slice(0, 300)}". ${earlier.summary ?? ""} ${earlier.detail ?? ""})`.trim() : a.view.prompt;
   const text = buildPrompt({ message, file: resolveDocPath(file), page, nodes, image: !!image && !resume, followUp: !!resume });
   const mcpConfigPath = path.join(a.dir, "mcp.json");
-  const c = buildCommand({ harness, mcpSession: a.mcpSession, session, resume: !!resume, mcpConfigPath, image: (!resume && image) || undefined, node: process.execPath, port: ctx.port(), serverVersion: ctx.version() });
+  const c = buildCommand({ harness, choice: agentSettings()[harness.id], mcpSession: a.mcpSession, session, resume: !!resume, mcpConfigPath, image: (!resume && image) || undefined, node: process.execPath, port: ctx.port(), serverVersion: ctx.version() });
   if (c.mcpConfig) fs.writeFileSync(mcpConfigPath, c.mcpConfig, { mode: 0o600 });
   const cwd = path.join(os.tmpdir(), "canvas-agent", "cwd");
   fs.mkdirSync(cwd, { recursive: true, mode: 0o700 });
@@ -944,18 +973,7 @@ export async function handleAgentRoute(req: http.IncomingMessage, res: http.Serv
       }
       return true;
     }
-    // The harness marks (template images: black on transparent), drawn by the page as masks in the text colour.
-    if (p === "/api/agent/logo/claude.png" || p === "/api/agent/logo/codex.png") {
-      try {
-        const b = fs.readFileSync(path.join(REPO, "apps", "macos", "Harness", `${p.endsWith("claude.png") ? "claude" : "codex"}-template.png`));
-        res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=3600" });
-        res.end(b);
-      } catch {
-        reply(404, { error: "not found" });
-      }
-      return true;
-    }
-    if (p === "/api/agent/harnesses") return reply(200, { harnesses: byPreference(detectHarnesses(), agentSettings().harness).map(({ id, label }) => ({ id, label })) }), true;
+    if (p === "/api/agent/harnesses") return reply(200, { harnesses: byPreference(detectHarnesses(), agentSettings().harness).map(({ id, label }) => ({ id, label, models: modelsOf(id), efforts: EFFORTS[id] })) }), true;
     const file = url.searchParams.get("file");
     if (req.method === "GET") {
       if (!file) return reply(400, { error: "file is required", code: "invalid" }), true;

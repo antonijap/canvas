@@ -24,7 +24,6 @@ if [ -n "${CANVAS_REPO:-}" ]; then
   plutil -insert CanvasRepo -string "$CANVAS_REPO" "$APP/Contents/Info.plist"
 fi
 cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-cp Harness/*.png "$APP/Contents/Resources/"
 swiftc "${SWIFT_OPT:--O}" ${QA_FLAGS[@]+"${QA_FLAGS[@]}"} main.swift Model.swift Shell.swift Fonts.swift Inspector.swift Widgets.swift Keychain.swift Bridge.swift Pages.swift Library.swift InspectorTokens.swift ShellLogic.swift PaperShaders.swift ResourceMeterLogic.swift ResourceMeter.swift LayoutLogic.swift InspectorLayout.swift PaintLogic.swift InspectorPaint.swift PaintEditor.swift InspectorExport.swift InspectorGuides.swift LayersLogic.swift Layers.swift PaletteLogic.swift Palette.swift Spark.swift SettingsLogic.swift Settings.swift ${QA_SRC[@]+"${QA_SRC[@]}"} DesignSystem/*.swift -o "$APP/Contents/MacOS/Canvas"
 if [ "${QA:-}" = "1" ]; then
   # Its own identity: own preferences and WebKit storage, never mistaken for the real app. No canvas:// scheme:

@@ -159,6 +159,8 @@ struct CanvasSettings: View {
 struct AgentSettings: View {
     @ObservedObject var model: CanvasModel
     @State private var installed: Set<String>?
+    /// Per installed agent: the models it offers (id, label, the reasoning levels each takes) and its levels.
+    @State private var offers: [String: AgentOffer] = [:]
 
     var body: some View {
         SettingsStack {
@@ -178,6 +180,33 @@ struct AgentSettings: View {
                     StepperField(value: model.prefs.runCapMin, range: SettingsLimits.runCap, step: 1, unit: "min", label: "Run time cap in minutes") { model.prefs.runCapMin = $0 }
                 }
             }
+            SettingsCard(title: "Model and reasoning") {
+                ForEach(Array(AgentHarness.allCases.enumerated()), id: \.element) { i, h in
+                    if i > 0 { SettingsDivider() }
+                    SettingsRow(h.title, detail: offers[h.rawValue] == nil ? "Not installed" : "For asks and variations") {
+                        HStack(spacing: 6) {
+                            MenuField(title: modelTitle(h)) {
+                                Button("Default") { model.prefs.setModel(h, "") }
+                                ForEach(offers[h.rawValue]?.models ?? [], id: \.id) { m in
+                                    Button(m.label) {
+                                        model.prefs.setModel(h, m.id)
+                                        if !efforts(h, model: m.id).contains(model.prefs.effort(h)) { model.prefs.setEffort(h, "") }
+                                    }
+                                }
+                            }
+                            .frame(width: 150).qaID("model-\(h.rawValue)")
+                            MenuField(title: model.prefs.effort(h).isEmpty ? "Default" : AgentOffer.effortTitle(model.prefs.effort(h))) {
+                                Button("Default") { model.prefs.setEffort(h, "") }
+                                ForEach(efforts(h, model: model.prefs.model(h)), id: \.self) { e in
+                                    Button(AgentOffer.effortTitle(e)) { model.prefs.setEffort(h, e) }
+                                }
+                            }
+                            .frame(width: 110).qaID("effort-\(h.rawValue)")
+                        }
+                        .disabled(offers[h.rawValue] == nil).opacity(offers[h.rawValue] == nil ? 0.5 : 1)
+                    }
+                }
+            }
             SettingsCard(title: "Agent cursor") {
                 SettingsRow("Show the agent\u{2019}s cursor", detail: "Follows each edit an agent makes on the canvas") { SettingsSwitch(isOn: $model.prefs.agentCursor) }
                 SettingsDivider()
@@ -190,6 +219,19 @@ struct AgentSettings: View {
         .task { await loadInstalled() }
     }
 
+    private func modelTitle(_ h: AgentHarness) -> String {
+        let id = model.prefs.model(h)
+        if id.isEmpty { return "Default" }
+        return offers[h.rawValue]?.models.first(where: { $0.id == id })?.label ?? id
+    }
+
+    /// The reasoning levels for an agent's chosen model (Codex lists them per model), else the agent's own.
+    private func efforts(_ h: AgentHarness, model id: String) -> [String] {
+        guard let o = offers[h.rawValue] else { return [] }
+        if let m = o.models.first(where: { $0.id == id }), !m.efforts.isEmpty { return m.efforts }
+        return o.efforts
+    }
+
     private func loadInstalled() async {
         var req = URLRequest(url: model.base.appendingPathComponent("api/agent/harnesses"))
         req.timeoutInterval = 5
@@ -197,6 +239,30 @@ struct AgentSettings: View {
               let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let list = j["harnesses"] as? [[String: Any]] else { installed = []; return }
         installed = Set(list.compactMap { $0["id"] as? String })
+        var o: [String: AgentOffer] = [:]
+        for h in list { if let id = h["id"] as? String { o[id] = AgentOffer(h) } }
+        offers = o
+    }
+}
+
+/// What an installed agent offers in Settings > Agents (GET /api/agent/harnesses).
+struct AgentOffer {
+    struct Model { let id: String; let label: String; let efforts: [String] }
+    var models: [Model]
+    var efforts: [String]
+    init(_ j: [String: Any]) {
+        models = (j["models"] as? [[String: Any]] ?? []).compactMap { m in
+            guard let id = m["id"] as? String, let label = m["label"] as? String else { return nil }
+            return Model(id: id, label: label, efforts: m["efforts"] as? [String] ?? [])
+        }
+        efforts = j["efforts"] as? [String] ?? []
+    }
+    /// "xhigh" reads as "Extra high"; the rest are capitalised.
+    static func effortTitle(_ e: String) -> String {
+        switch e {
+        case "xhigh": "Extra high"
+        default: e.prefix(1).uppercased() + e.dropFirst()
+        }
     }
 }
 

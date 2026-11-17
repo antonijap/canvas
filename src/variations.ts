@@ -758,7 +758,7 @@ function launch(ctx: VarCtx, a: Active) {
   const prompt = a.mobbin ? a.prompt.replace(/use web search to find 6 to 10[^\n]*/i, "Use the Mobbin tools (search_screens, search_flows) to find 6 to 10 real screens of shipped apps for this pattern. If Mobbin fails, use web search.") : a.prompt;
   const mcpConfigPath = path.join(a.dir, "mcp.json");
   const c = buildCommand({
-    harness: h, mcpSession: a.set.session, session: h.id === "claude" ? randomUUID() : undefined, resume: false, mcpConfigPath,
+    harness: h, choice: agentSettings()[h.id], mcpSession: a.set.session, session: h.id === "claude" ? randomUUID() : undefined, resume: false, mcpConfigPath,
     image: a.images[0], images: a.images.slice(1), node: process.execPath, port: ctx.port(), serverVersion: ctx.version(),
     wide: { deny: VARIATION_DENIED, ...(a.mobbin ? { mobbin: a.mobbin } : {}) },
   });

@@ -37,14 +37,13 @@ CANVAS_SIGN_IDENTITY=- CANVAS_APP_OUT="$ROOT/$APP" apps/macos/build.sh >/dev/nul
 
 echo "Adding the server, the engine and Node"
 SRV="$APP/Contents/Resources/server"
-mkdir -p "$SRV/engine/src" "$SRV/demos" "$SRV/apps/macos"
-# What the server reads at run time (src/, mcp/, the vendored shader library, the engine build, the paper noise texture, the course file, the agent
-# avatars), nothing else: no tests, QA, docs or sources it does not load.
+mkdir -p "$SRV/engine/src" "$SRV/demos"
+# What the server reads at run time (src/, mcp/, the vendored shader library, the engine build, the paper noise texture, the course file), nothing
+# else: no tests, QA, docs or sources it does not load.
 rsync -a --exclude '.*' src mcp vendor package.json pnpm-lock.yaml pnpm-workspace.yaml "$SRV/"
 rsync -a --exclude '.*' engine/pkg "$SRV/engine/"
 cp engine/src/paper_noise.rgba "$SRV/engine/src/"
 rsync -a --exclude '.*' demos/learn.canvas "$SRV/demos/"
-rsync -a apps/macos/Harness "$SRV/apps/macos/"
 cp LICENSE NOTICE THIRD_PARTY_NOTICES.md "$SRV/"
 # Production dependencies only, exactly the lockfile's, no install scripts, as plain folders (no symlinks to a store).
 (cd "$SRV" && pnpm install --prod --frozen-lockfile --ignore-scripts --config.node-linker=hoisted --reporter=silent)
