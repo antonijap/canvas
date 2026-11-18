@@ -5,6 +5,7 @@
 // (CANVAS_SAVE_LOG=1, documents of 2 MB).
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
@@ -226,13 +227,23 @@ describe("someone who does not know the log saves document.json", () => {
       await c.open();
       const x0 = nodeIn(alone(p.docPath), "B3N4").x;
       let stop = false, rewrites = 0, acked = 0;
-      // A sync client, cp or git checkout of an unchanged file: the same bytes, a new file.
+      // A sync client, cp or git checkout of an unchanged file: the same bytes, a new file. Only over the file it read:
+      // when Canvas replaced it meanwhile, that round is skipped (writing back older bytes is another case).
       const rewriter = (async () => {
         while (!stop) {
-          const bytes = fs.readFileSync(p.docPath);
+          const fd = fs.openSync(p.docPath, "r");
+          let ino: number, bytes: Buffer;
+          try {
+            ino = fs.fstatSync(fd).ino;
+            bytes = fs.readFileSync(fd);
+          } finally {
+            fs.closeSync(fd);
+          }
           fs.writeFileSync(p.docPath + ".sync", bytes);
-          fs.renameSync(p.docPath + ".sync", p.docPath);
-          rewrites++;
+          if (fs.statSync(p.docPath).ino === ino) {
+            fs.renameSync(p.docPath + ".sync", p.docPath);
+            rewrites++;
+          } else fs.rmSync(p.docPath + ".sync");
           await sleep(15);
         }
       })();
@@ -336,6 +347,138 @@ describe("in one server", () => {
     await pw.compactWrites(p.docPath);
   });
 
+  // An edit that comes in while a write pass looks at the disk (before its append) is saved by that pass, and leaves
+  // the writer dirty: the pass after it has nothing new to append. Found under load (12 of 64 same-bytes runs).
+  const records = (p: { logPath: string }) => {
+    const r = L.parseLog(fs.readFileSync(p.logPath), "", undefined, true);
+    return r && "info" in r ? r.info.records : -1;
+  };
+  const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
+  /** Someone puts the same bytes in place again (a sync client): a new file, nothing else changed. */
+  const sameBytesAgain = (docPath: string) => {
+    fs.writeFileSync(docPath + ".sync", fs.readFileSync(docPath));
+    fs.renameSync(docPath + ".sync", docPath);
+  };
+  /** FileHandle.prototype.sync patched to call `after(fh)` once each fsync is done; returns the restore. */
+  async function onSync(docPath: string, after: (fh: fs.promises.FileHandle) => void) {
+    const probe = await fs.promises.open(docPath, "r");
+    const FH = Object.getPrototypeOf(probe);
+    await probe.close();
+    const sync = FH.sync;
+    FH.sync = async function (this: fs.promises.FileHandle) {
+      await sync.call(this);
+      after(this);
+    };
+    return () => void (FH.sync = sync);
+  }
+  /** Whether a file handle is the log beside `logPath`. */
+  const isLog = (fh: fs.promises.FileHandle, logPath: string) => {
+    try {
+      return fs.fstatSync(fh.fd).ino === fs.statSync(logPath).ino;
+    } catch {
+      return false;
+    }
+  };
+  /**
+   * E1 flushed (the log holds one record), then E2 saved while E3 comes in during the write pass's first look at the
+   * disk. `afterLogSync(n)` runs right after the n-th fsync of the log from then on.
+   */
+  async function editInLookWindow(p: ReturnType<typeof pkg>, afterLogSync?: (n: number) => void) {
+    const c = at(p);
+    await c.open();
+    assert.equal((await c.update("B0N1", { name: "E1" })).status, 200);
+    assert.equal((await c.flush()).status, 200);
+    assert.equal(records(p), 1, "E1 is the log's first record");
+    const keepCompact = pw.writeConfig.compactAfterMs;
+    pw.writeConfig.compactAfterMs = 60_000; // no fold while the case runs
+    const stat = fs.promises.stat;
+    let armed = true, syncs = 0;
+    fs.promises.stat = async function (this: unknown, f: fs.PathLike, ...rest: unknown[]) {
+      const inPass = armed && String(f) === p.docPath && !!new Error().stack?.includes("runWrites");
+      const r = await (stat as (...a: unknown[]) => Promise<fs.Stats>).call(this, f, ...rest);
+      if (inPass && armed) {
+        armed = false;
+        assert.equal((await c.update("B0N3", { name: "E3" })).status, 200);
+      }
+      return r;
+    } as typeof stat;
+    const restore = await onSync(p.docPath, (fh) => {
+      if (isLog(fh, p.logPath)) afterLogSync?.(++syncs);
+    });
+    try {
+      assert.equal((await c.update("B0N2", { name: "E2" })).status, 200);
+      await c.flush();
+      assert.equal(armed, false, "E3 came in during the pass's look at the disk");
+      await until(() => !pw.hasPendingWrites(p.docPath));
+      await c.flush();
+    } finally {
+      fs.promises.stat = stat;
+      restore();
+      pw.writeConfig.compactAfterMs = keepCompact;
+    }
+  }
+
+  test("a write pass with nothing new appends no record", async () => {
+    const p = pkg("noempty");
+    await editInLookWindow(p);
+    assert.equal(records(p), 2, "E1, then E2 and E3 in one record; no empty one after it");
+    const d = withLog(p.docPath);
+    for (const [id, name] of [["B0N1", "E1"], ["B0N2", "E2"], ["B0N3", "E3"]]) assert.equal(nodeIn(d, id).name, name);
+    await pw.compactWrites(p.docPath);
+  });
+
+  test("the same bytes put in place during the pass after an edit came in: Canvas's own log is not taken for someone else's", async () => {
+    const p = pkg("noemptyrename");
+    await editInLookWindow(p, (n) => n === 2 && sameBytesAgain(p.docPath));
+    const d = withLog(p.docPath);
+    for (const [id, name] of [["B0N1", "E1"], ["B0N2", "E2"], ["B0N3", "E3"]]) assert.equal(nodeIn(d, id).name, name, `${id} on disk`);
+    assert.deepEqual(fs.readdirSync(p.pkg).filter((f) => f.startsWith("document.json.recovered-")), [], "no recovery copy: nothing was someone else's");
+    assert.equal(nodeIn(pw.currentDoc(p.docPath).doc, "B0N3").name, "E3", "and Canvas still shows E3");
+    await pw.compactWrites(p.docPath);
+  });
+
+  test("another server's log put in place of ours while an append retries is recovered, not taken as ours", async () => {
+    const p = pkg("foreignwindow");
+    const c = at(p);
+    await c.open();
+    assert.equal((await c.update("B0N1", { name: "E1" })).status, 200);
+    assert.equal((await c.flush()).status, 200);
+    assert.equal(records(p), 1);
+    let done = false;
+    const restore = await onSync(p.docPath, (fh) => {
+      if (done || !isLog(fh, p.logPath)) return;
+      done = true;
+      // Right after our record is durable: a log another (gone) server wrote for these bytes takes our log's place,
+      // and the same bytes are put in place again, so the append retries before its bookkeeping.
+      const bytes = fs.readFileSync(p.docPath);
+      const st0 = fs.statSync(p.docPath);
+      const tmp = p.logPath + ".other";
+      fs.writeFileSync(tmp, "-");
+      const ino = fs.statSync(tmp).ino;
+      const head = L.headerOf(sha(bytes), `${st0.ino}:${st0.mtimeMs}:${ino}:${st0.ctimeMs}`, "99999999.feed.1");
+      const rec = L.encodeRecord(1, [], undefined, undefined, [{ p: ["B7", "B7N7"], v: { ...nodeIn(JSON.parse(bytes.toString("utf8")), "B7N7"), name: "FOREIGN" } }]);
+      fs.writeFileSync(tmp, Buffer.concat([head, rec.bytes])); // in place: its tie names this very log file
+      fs.renameSync(tmp, p.logPath);
+      sameBytesAgain(p.docPath);
+    });
+    try {
+      assert.equal((await c.update("B1N1", { name: "E2" })).status, 200);
+      await c.flush();
+      assert.ok(done, "the other log came in during the append");
+      await until(() => !pw.hasPendingWrites(p.docPath));
+      await c.flush();
+    } finally {
+      restore();
+    }
+    const d = withLog(p.docPath);
+    assert.equal(nodeIn(d, "B0N1").name, "E1", "our logged edit is kept");
+    assert.equal(nodeIn(d, "B1N1").name, "E2", "and our pending one");
+    assert.notEqual(nodeIn(d, "B7N7").name, "FOREIGN", "the other server's record is not put on top as if it were ours");
+    const rec = fs.readdirSync(p.pkg).filter((f) => f.startsWith("document.json.recovered-"));
+    assert.equal(rec.length, 1, "it is kept as a recovery copy");
+    assert.equal(nodeIn(JSON.parse(fs.readFileSync(path.join(p.pkg, rec[0]), "utf8")), "B7N7").name, "FOREIGN");
+    await pw.compactWrites(p.docPath);
+  });
 });
 
 // ------------------------------------------------------------------------------------------------------------------

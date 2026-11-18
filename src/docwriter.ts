@@ -220,6 +220,11 @@ type FileState = {
   log?: { info: LogInfo; fh?: fs.promises.FileHandle; checked?: boolean; since?: number; /** This state appended every record in it (it made the log): `logged` holds all their edits. */ mine?: boolean };
   /** The log file as this state last saw it: inode:bytes, or "none". Any other is someone else's change. */
   logSeen: string;
+  /**
+   * The record this state last wrote to its log (the log file's inode, and the record's seq), from just before the
+   * write until a load or the append's bookkeeping takes it in: a record of ours even when the append then retried.
+   */
+  wrote?: { ino: string; seq: number };
   /** Edits saved in our log, not in document.json yet: they go on top of a save that does not know the log. */
   logged: Pending[];
   /** The log file is in this state (applied, ours, or one with nothing answered in it): a whole write of it retires it. */
@@ -1016,13 +1021,17 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
   // or opened at another path) is never taken as covered: its edits are nowhere in memory.
   const prevLog = st.log;
   const prevOurs = !!prevLog && prevLog.info.owner === OWNER;
-  // (No log held, but pending edits carry a seq: the log this state was creating when the disk moved under it.)
-  const creating = !prevLog && st.logSeen === "none" && st.pending.some((p) => p.seq !== undefined) && (l.log?.owner ?? l.logHead?.owner) === OWNER;
+  // A record this state wrote to the very log file the load found (an append that retried before its bookkeeping):
+  // held, also when no pending edit carries its seq.
+  const wrote = st.wrote && st.wrote.ino === inoOf(l.logSeen) ? st.wrote.seq : 0;
+  // (No log held, but pending edits carry a seq, or it wrote a record: the log this state was creating when the disk
+  // moved under it.)
+  const creating = !prevLog && st.logSeen === "none" && (st.pending.some((p) => p.seq !== undefined) || wrote > 0) && (l.log?.owner ?? l.logHead?.owner) === OWNER;
   const sameIno = prevOurs && inoOf(st.logSeen) !== undefined && inoOf(st.logSeen) === inoOf(l.logSeen);
   // Covered only when this state wrote every record of that file: a log of ours it loaded (written by this server at
   // another path, before a move) has records whose edits are in no Pending here, so it is never taken as covered.
   const sameFile = creating || (sameIno && !!prevLog!.mine);
-  const heldSeq = sameFile ? Math.max(prevLog?.info.seq ?? 0, ...st.pending.map((p) => p.seq ?? 0)) : -1;
+  const heldSeq = sameFile ? Math.max(prevLog?.info.seq ?? 0, wrote, ...st.pending.map((p) => p.seq ?? 0)) : -1;
   // A stale log that is ours, a copy, or one whose owner is gone is settled under the lock: no other Canvas is
   // folding it into a whole write at this moment (it would remove it right after), so whether it is still there says
   // whose it is. Without the lock it is never recovered or removed: the load waits for it (not on the main thread).
@@ -1057,6 +1066,7 @@ export function reconcileLoad(docFile: string, l: LoadedDoc, sig: string): { rev
     const since = st.log?.since;
     closeLog(st);
     st.log = undefined;
+    st.wrote = undefined;
     st.logged = [];
     st.logFold = false;
     st.logSeen = l.logSeen ?? "none";
@@ -1955,6 +1965,16 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
   await takeLock(st);
   if (st.epoch !== epoch || (await statKey(st.docFile)) !== base) return "retry";
   if ((await logSig(st.docFile)) !== st.logSeen) return "reload";
+  if (!d.boards.length && !d.nodes.length && !d.ids && !d.top && !st.pending.some((p) => p.version <= v)) {
+    // Nothing changed since the disk (document.json and the log) and no edit waits: nothing to append. An empty
+    // record would carry a seq no edit holds, and a load in its window would take our own log for someone else's.
+    st.diskVersion = v;
+    st.saved = Math.max(st.saved, v);
+    st.retries = 0;
+    st.lastError = undefined;
+    st.logDoc = snap.doc;
+    return "done";
+  }
   const file = logPathOf(st.docFile);
   const docHash = st.diskHash!;
   const saving = st.pending.filter((p) => p.version <= v);
@@ -1973,9 +1993,11 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
       // The tie: the document's inode:mtime, the log file's own inode (a copy of the package has another), and the
       // document's ctime (a restore in place can set the mtime back, never the ctime).
       const k = base!.split(":");
-      const tie = `${k[0]}:${k[2]}:${(await fresh.stat()).ino}:${k[3]}`;
+      const logIno = (await fresh.stat()).ino;
+      const tie = `${k[0]}:${k[2]}:${logIno}:${k[3]}`;
       const head = headerOf(docHash, tie, OWNER);
       for (const p of saving) p.seq = seq;
+      st.wrote = { ino: String(logIno), seq };
       await writeAt(fresh, Buffer.concat([head, rec.bytes]), 0);
       await fresh.sync();
       await syncDirAsync(path.dirname(file)); // the new name, before any edit in it counts as saved
@@ -2000,6 +2022,7 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
         lg.checked = true;
       }
       for (const p of saving) p.seq = seq;
+      st.wrote = { ino: inoOf(st.logSeen)!, seq };
       await writeAt(lg.fh, rec.bytes, lg.info.size);
       await lg.fh.sync();
       info = { ...lg.info, size: lg.info.size + rec.bytes.length, records: lg.info.records + 1, seq, chain: chainOf(lg.info.chain, rec.hash) };
@@ -2016,6 +2039,7 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
     else lg!.info = info;
     fresh = undefined;
     st.logSeen = `${ino}:${info.size}`;
+    st.wrote = undefined; // the log's seq says it now
     st.logFold = true;
     st.diskVersion = v;
     if (v > st.saved) countUsage("file.save"); // usage counts: the edits are on disk, in the save log
