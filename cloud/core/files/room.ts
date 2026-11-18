@@ -8,9 +8,9 @@
 
 import type { SqlStore } from "../sql.ts";
 import { initFileRoomSchema } from "./room-schema.ts";
-import { SqlTree } from "./tree-sql.ts";
+import { SqlTree, BOARD_BYTES_CAP } from "./tree-sql.ts";
 import { materialize, stateFromFiles, type FileState } from "./state.ts";
-import { transformSplice, textEditsOf, MAX_TEXT_EDITS, type TextEdit } from "./text.ts";
+import { transformTextOps, textEditsOf, MAX_TEXT_EDITS, type TextEdit } from "./text.ts";
 import { actionSha, CAN_EDIT, type ActionsMessage, type FileRejectCode, type FileServerMessage, type Hello, type Role, type Welcome } from "./messages.ts";
 import { applyAction as sharedApply, isReject, actionBytes, FILE_LIMITS, type Action, type AppliedAction, type ApplyFn, type Author, type FileOp, type Json, type Reject } from "./seam.ts";
 import type { ObjectStore } from "./objects.ts";
@@ -310,15 +310,17 @@ export class FileRoom {
     if (actionBytes(a) > ROOM_LIMITS.actionBytes) throw new Refusal("invalid", "an action holds at most 1 MB");
     if (this.leases && !this.leases.take(conn.author.id, "ops", Math.max(1, a.ops.length))) throw new Refusal("quota", "too many edits this minute; they wait and go on their own");
 
-    const ops: FileOp[] = a.ops.map((op) => {
+    const checked: FileOp[] = a.ops.map((op) => {
       if (!op || typeof op !== "object" || op.k !== "text") return op;
       if (typeof op.id !== "string" || !Number.isSafeInteger(op.baseSeq) || op.baseSeq < 0) throw new Refusal("invalid", "text: the op needs a layer and the seq it was typed on");
       if (op.baseSeq > m.seq) throw new Refusal("invalid", "text: the op names a seq the file has not reached");
       if (op.baseSeq < m.logFloor) throw new Refusal("conflict", "this text was typed on a version older than the Cloud keeps; your text is kept as a copy");
-      const t = transformSplice(op, this.textEditsSince(op.id, op.baseSeq));
-      if ("conflict" in t) throw new Refusal("conflict", t.conflict);
-      return { ...op, from: t.from, del: t.del };
+      return op;
     });
+    const moved = transformTextOps(checked, (node, since) => this.textEditsSince(node, since));
+    if ("conflict" in moved) throw new Refusal("conflict", moved.conflict);
+    if ("invalid" in moved) throw new Refusal("invalid", moved.invalid);
+    const ops: FileOp[] = moved;
 
     const first = m.seq + 1;
     const at = new Date(this.now()).toISOString();
@@ -328,6 +330,7 @@ export class FileRoom {
       this.store.transactionSync(() => {
         this.tree.seq = first;
         this.tree.bytesDelta = 0;
+        this.tree.boardDelta.clear();
         const r = this.apply(this.tree, { ...a, ops, at }, { by: conn.author, seq: first, limits: FILE_LIMITS, confine: true });
         if (isReject(r)) throw new Refusal(r.reject, (r as Reject).message);
         this.uploadsFor(ops);
@@ -345,6 +348,8 @@ export class FileRoom {
         const bytes = this.store.sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta WHERE id = 1").one().n + this.tree.bytesDelta;
         if (this.tree.bytesDelta > 0 && bytes > FILE_NODE_CAP) throw new Refusal("quota", `this file is full: it holds at most ${FILE_NODE_CAP / 1024 / 1024} MB of layers`);
         w("UPDATE file_meta SET seq = ?, node_bytes = ? WHERE id = 1", last, bytes);
+        const full = this.tree.flushBoardBytes(BOARD_BYTES_CAP);
+        if (full) throw new Refusal("invalid", `the board "${full}" is full: a board holds at most 32 MB of layers`);
         result = { ...r, first, last };
       });
     } catch (e) {

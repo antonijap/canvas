@@ -17,7 +17,9 @@ import { reserveUpload, putUpload, StorageLedger } from "../cloud/core/files/upl
 import { RoleCache } from "../cloud/core/files/access.ts";
 import { keptVersions } from "../cloud/core/files/versions.ts";
 import { openInPackage } from "../cloud/core/files/confine.ts";
-import { materialize } from "../cloud/core/files/state.ts";
+import { materialize, stateFromFiles } from "../cloud/core/files/state.ts";
+import { Replica } from "../cloud/core/files/replica.ts";
+import { MemoryObjects } from "../cloud/core/files/objects.ts";
 import { seedDocument, FILE } from "../qa/cloud-files-sim.ts";
 import type { Role } from "../cloud/core/files/messages.ts";
 import type { Action, FileOp, Json } from "../cloud/core/files/seam.ts";
@@ -186,4 +188,87 @@ test("decision 7: pinned versions also go after 30 days; the newest is always ke
   ];
   assert.deepEqual([...keptVersions(rows, now)].sort(), [2, 3]);
   void compact;
+});
+
+// The second review (Codex), six more.
+
+test("C1. two splices in one action move over a remote splice in the coordinates the first one left", () => {
+  const room = seeded();
+  assert.equal(send(room, [{ k: "set", id: "t1", props: { content: { v: "abcdefghij" } } }]).replies[0].type, "ack");
+  const base = room.meta().seq;
+  assert.equal(send(room, [{ k: "text", id: "t1", baseSeq: base, from: 8, del: 0, ins: "X" }]).replies[0].type, "ack");
+  const r = send(room, [{ k: "text", id: "t1", baseSeq: base, from: 0, del: 5, ins: "" }, { k: "text", id: "t1", baseSeq: base, from: 4, del: 1, ins: "" }]).replies[0];
+  assert.equal(r.type, "ack");
+  assert.equal(room.tree.node("t1")!.props.content, "fghXi");
+  // The Mac's view moves them the same way.
+  const s = seedDocument();
+  const mac = new Replica(anna.author, stateFromFiles(s.document, s.envelope), 0, 1);
+  mac.confirm(room.tail(0));
+  assert.equal(mac.tree.node("t1")!.props.content, "fghXi");
+  // Splices of one action on one layer share a base.
+  const m = room.meta().seq;
+  assert.equal((send(room, [{ k: "text", id: "t1", baseSeq: m, from: 0, del: 0, ins: "a" }, { k: "text", id: "t1", baseSeq: m - 1, from: 0, del: 0, ins: "b" }]).replies[0] as { code: string }).code, "invalid");
+});
+
+test("C2. undoing an insert refuses when someone changed the subtree inside since", () => {
+  const room = seeded();
+  const a = act(room, [{ k: "insert", parent: "b2", after: null, node: { id: "G", type: "group", children: [] } }]);
+  assert.equal(room.submit(anna, { type: "actions", epoch: 1, actions: [a] }).replies[0].type, "ack");
+  assert.equal(send(room, [{ k: "insert", parent: "G", after: null, node: { id: "X", type: "rectangle" } }], { author: { id: "ben@studio.test" }, role: "editor" }).replies[0].type, "ack");
+  const r = send(room, [{ k: "remove", id: "G", if: a.id }]).replies[0];
+  assert.equal((r as { code: string }).code, "conflict");
+  assert.ok(room.tree.node("X"), "Ben's layer stays");
+  // A move of G itself is not someone's work inside it: its own undo still goes.
+  const mv = act(room, [{ k: "move", id: "G", parent: "b1", after: null }]);
+  assert.equal(room.submit(anna, { type: "actions", epoch: 1, actions: [mv] }).replies[0].type, "ack");
+  assert.equal(send(room, [{ k: "move", id: "G", parent: "b2", after: null, if: mv.id }]).replies[0].type, "ack");
+});
+
+test("C3. a move cannot put an instance inside its own component", () => {
+  const room = seeded();
+  const r = send(room, [{ k: "move", id: "i1", parent: "c1", after: null }]).replies[0];
+  assert.equal((r as { code: string }).code, "invalid");
+  // Nor a component that holds an instance of another into that other.
+  assert.equal(send(room, [{ k: "insert", parent: "b2", after: null, node: { id: "c2", type: "frame", reusable: true, children: [{ id: "i9", type: "ref", ref: "c1" }] } }]).replies[0].type, "ack");
+  assert.equal((send(room, [{ k: "move", id: "c2", parent: "c1", after: null }]).replies[0] as { code: string }).code, "invalid");
+});
+
+test("C4. past the hello's window of 500, an action the room applied stops waiting when its ack comes", () => {
+  const s = seedDocument();
+  const mac = new Replica(anna.author, stateFromFiles(s.document, s.envelope), 0, 1);
+  for (let i = 0; i < 501; i++) mac.pending.push({ action: { id: `w${i}`, baseSeq: 0, epoch: 1, at: "", ops: [{ k: "set", id: "r1", props: { x: { v: i } } }] }, sha: "", sent: true });
+  // The Mac came back from a snapshot at seq 600 that holds all of them; the hello named the first 500 only.
+  mac.seq = 600;
+  mac.joined = true;
+  void mac.receive({ type: "ack", id: "w500", first: 501, last: 501 }, new MemoryObjects());
+  assert.equal(mac.pending.length, 501 - 1);
+  assert.ok(!mac.pending.some((p) => p.action.id === "w500"));
+});
+
+test("C5. the file's byte count is UTF-8 bytes, so text in other scripts cannot pass the 500 MB cap", () => {
+  const room = seeded();
+  const before = room.store.sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta").one().n;
+  assert.equal(send(room, [{ k: "insert", parent: "b2", after: null, node: { id: "wide", type: "text", content: "界".repeat(1000) } }]).replies[0].type, "ack");
+  const after = room.store.sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta").one().n;
+  const row = room.store.sql.exec<{ n: number }>("SELECT length(CAST(props AS BLOB)) AS n FROM nodes WHERE id = 'wide'").one().n;
+  assert.equal(after - before, row);
+  assert.ok(row > 3000);
+  const all = room.store.sql.exec<{ n: number }>("SELECT SUM(length(CAST(props AS BLOB))) AS n FROM nodes").one().n;
+  assert.equal(after, all, "seed and writes count the same way");
+});
+
+test("C6. a board holds at most 32 MB of layers", () => {
+  const room = seeded();
+  const big = "x".repeat(1_000_000);
+  let refused: string | null = null;
+  for (let i = 0; i < 40 && !refused; i++) {
+    const r = send(room, [{ k: "insert", parent: "b2", after: null, node: { id: `big${i}`, type: "text", content: big } }]).replies[0];
+    if (r.type === "reject") refused = (r as { message: string }).message;
+  }
+  assert.match(refused ?? "", /32 MB/);
+  // Another board still takes layers, and moving a big layer into the full board is refused too.
+  assert.equal(send(room, [{ k: "insert", parent: "b1", after: null, node: { id: "elsewhere", type: "text", content: big } }]).replies[0].type, "ack");
+  assert.equal(send(room, [{ k: "move", id: "elsewhere", parent: "b2", after: null }]).replies[0].type, "reject");
+  const sum = room.store.sql.exec<{ n: number }>("SELECT bytes AS n FROM board_bytes WHERE board = 'b2'").one().n;
+  assert.ok(sum <= 32 * 1024 * 1024);
 });
