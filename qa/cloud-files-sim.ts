@@ -7,7 +7,7 @@ import { FileRoom, type Conn, type FileRoomOptions } from "../cloud/core/files/r
 import { NodeSqlStore } from "../cloud/core/files/memory.ts";
 import { MemoryObjects } from "../cloud/core/files/objects.ts";
 import { Replica, type ReplicaDurable } from "../cloud/core/files/replica.ts";
-import { buildSnapshot, recoverSnapshots, treeFromManifest } from "../cloud/core/files/snapshots.ts";
+import { buildSnapshot, recoverSnapshots, restoreVersion, treeFromManifest } from "../cloud/core/files/snapshots.ts";
 import { materialize } from "../cloud/core/files/state.ts";
 import type { ActionsMessage, FileServerMessage, Hello, Role } from "../cloud/core/files/messages.ts";
 import type { AppliedAction, Author, FileOp, Json, Reject, Action } from "../cloud/core/files/seam.ts";
@@ -76,6 +76,8 @@ export class Sim {
   snapshotWelcomes = 0;
   /** Rows the room wrote for the actions it applied (its meter, across room restarts). */
   rowsWritten = 0;
+  /** Pending actions a Mac names in its hello (500 in the app; the fuzz makes it small so resends pass the window). */
+  helloWindow = 500;
   private readonly o: SimOptions;
   constructor(o: SimOptions = {}) {
     this.o = o;
@@ -97,6 +99,7 @@ export class Sim {
     const { tree, manifest } = await treeFromManifest(this.objects, row.manifest);
     let n = 0;
     const replica = new Replica(author, tree.state(), manifest.seq, manifest.epoch, { newId: () => `${author.id}-${this.clients.length}-${n++}-${Math.random().toString(36).slice(2, 8)}` });
+    replica.helloWindow = this.helloWindow;
     const c = new SimClient(replica, role);
     this.clients.push(c);
     return c;
@@ -158,12 +161,89 @@ export class Sim {
     return true;
   }
 
+  /**
+   * A message that skips the Mac's own checks (a hostile or broken client): the room's answer comes back here, and
+   * what it applied is broadcast like any other action.
+   */
+  raw(c: SimClient, actions: unknown[]): FileServerMessage[] {
+    const rows = this.room.rowsWrittenTotal;
+    let res;
+    try {
+      res = this.room.submit(c.conn, { type: "actions", epoch: this.room.meta().epoch, actions: actions as never });
+    } catch (e) {
+      if (!String((e as Error).message).startsWith("crash")) throw e;
+      this.crashServer();
+      return [];
+    }
+    this.rowsWritten += this.room.rowsWrittenTotal - rows;
+    if (res.applied.length) {
+      this.log.push(...res.applied);
+      for (const x of this.clients) if (x.socket?.joined) x.socket.down.push({ type: "applied", actions: res.applied });
+    }
+    return res.replies;
+  }
+
+  /** Restore a kept version in place, and send its reset to every open socket, as an adapter does. */
+  async restore(seq: number): Promise<void> {
+    const r = await restoreVersion(this.room, seq);
+    for (const x of this.clients) if (x.socket?.joined) x.socket.down.push(r.broadcast);
+  }
+
+  /** Rows that must agree with each other: the byte counters against the rows they count. Empty: they do. */
+  invariants(): string[] {
+    const sql = this.store.sql;
+    const out: string[] = [];
+    const counted = sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta WHERE id = 1").one().n;
+    const real = sql.exec<{ n: number }>("SELECT COALESCE(SUM(length(CAST(props AS BLOB))), 0) AS n FROM nodes").one().n;
+    if (counted !== real) out.push(`node_bytes says ${counted}, the rows hold ${real}`);
+    const boards = sql.exec<{ board: string; n: number }>(
+      `WITH RECURSIVE sub(id, board) AS (SELECT id, id FROM nodes WHERE parent = '' UNION ALL SELECT n.id, sub.board FROM nodes n JOIN sub ON n.parent = sub.id)
+       SELECT sub.board AS board, SUM(length(CAST(nodes.props AS BLOB))) AS n FROM sub JOIN nodes ON nodes.id = sub.id GROUP BY sub.board`,
+    ).toArray();
+    const have = new Map(sql.exec<{ board: string; bytes: number }>("SELECT board, bytes FROM board_bytes").toArray().map((r) => [r.board, r.bytes]));
+    for (const b of boards) if ((have.get(b.board) ?? 0) !== b.n) out.push(`board ${b.board}: board_bytes says ${have.get(b.board) ?? 0}, its rows hold ${b.n}`);
+    for (const [b, n] of have) if (!boards.some((x) => x.board === b)) out.push(`board_bytes has ${b} (${n}) with no rows`);
+    // No component holds an instance of itself, directly or through others.
+    type N = { id?: string; ref?: string; reusable?: boolean; descendants?: unknown; children?: N[] };
+    const uses = new Map<string, Set<string>>();
+    const refsIn = (v: unknown, acc: Set<string>) => {
+      if (Array.isArray(v)) for (const x of v) refsIn(x, acc);
+      else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) k === "ref" && typeof x === "string" ? acc.add(x) : refsIn(x, acc);
+    };
+    const walk = (n: N, comps: string[]) => {
+      const inside = n.reusable === true && n.id ? [...comps, n.id] : comps;
+      if (inside.length) {
+        const acc = new Set<string>();
+        if (typeof n.ref === "string") acc.add(n.ref);
+        refsIn(n.descendants, acc);
+        for (const c of inside) for (const r of acc) (uses.get(c) ?? uses.set(c, new Set()).get(c)!).add(r);
+      }
+      for (const c of n.children ?? []) walk(c, inside);
+    };
+    for (const b of (JSON.parse(this.room.materialize().document).children ?? []) as N[]) walk(b, []);
+    for (const start of uses.keys()) {
+      const seen = new Set<string>(), todo = [...uses.get(start)!];
+      while (todo.length) {
+        const c = todo.pop()!;
+        if (c === start) {
+          out.push(`component ${start} holds an instance of itself`);
+          break;
+        }
+        if (seen.has(c)) continue;
+        seen.add(c);
+        todo.push(...(uses.get(c) ?? []));
+      }
+    }
+    return out;
+  }
+
   /** `c` takes the next message from its socket, then commits (or crashes before the commit). */
   async clientStep(c: SimClient, crashBeforeCommit = false): Promise<boolean> {
     const msg = c.socket?.down.shift();
     if (!msg) return false;
     c.beforeReceive = c.durable;
     const r = await c.replica.receive(msg, this.objects);
+    if (process.env.CF_TRACE && c.replica.author.id.startsWith(process.env.CF_TRACE)) console.log(`  ${c.replica.author.id} got ${msg.type} ${msg.type === "welcome" ? `epoch=${msg.epoch} seq=${msg.seq} snap=${msg.snapshot?.seq} known=${msg.known.length}` : msg.type === "applied" ? msg.actions.map((a) => `${a.first}-${a.last}:${JSON.stringify(a.ops).slice(0, 80)}`).join(" ") : JSON.stringify(msg).slice(0, 100)} -> ${r} seq=${c.replica.seq} epoch=${c.replica.epoch} x=${c.replica.tree.node("b1")?.props.x}`);
     if (crashBeforeCommit) {
       this.crashClient(c, true);
       return true;
@@ -180,6 +260,7 @@ export class Sim {
   crashClient(c: SimClient, beforeCommit = false): void {
     const d = beforeCommit && c.beforeReceive ? c.beforeReceive : c.durable;
     c.replica = Replica.restore(c.replica.author, d, { newId: c.replica.newId });
+    c.replica.helloWindow = this.helloWindow;
     c.durable = c.replica.durable();
     c.socket = null;
   }

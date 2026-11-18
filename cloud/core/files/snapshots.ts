@@ -15,6 +15,7 @@ import { sha256Hex } from "./sha256.ts";
 import { boardKey, versKey, manifestKey, gzipText, gunzipText, utf8, fromUtf8 } from "./objects.ts";
 import { keptVersions } from "./versions.ts";
 import type { BlobRow, DocNode, Json, PageRow } from "./seam.ts";
+import type { FileServerMessage } from "./messages.ts";
 
 export interface Manifest {
   format: 1;
@@ -187,10 +188,10 @@ export async function manifestAt(room: FileRoom, seq: number): Promise<string | 
 
 /**
  * Restore a kept version in place: the rows become that version, the epoch goes up (every socket gets `reset` and
- * every action made before is refused), the log starts again at a new seq, and a snapshot of the restored
+ * every action made before is refused; the adapter sends `broadcast` to every socket), the log starts again at a new seq, and a snapshot of the restored
  * state is built so Macs can start from it.
  */
-export function restoreVersion(room: FileRoom, seq: number): Promise<{ epoch: number; seq: number }> {
+export function restoreVersion(room: FileRoom, seq: number): Promise<{ epoch: number; seq: number; broadcast: Extract<FileServerMessage, { type: "reset" }> }> {
   // One lock from reading the version to its new snapshot: collection cannot drop the version's objects in between.
   return room.exclusive(async () => {
     const row = room.store.sql.exec<{ manifest: string }>("SELECT manifest FROM snapshots WHERE seq = ? AND state = 'done'", seq).toArray()[0];
@@ -207,6 +208,6 @@ export function restoreVersion(room: FileRoom, seq: number): Promise<{ epoch: nu
     room.tree.forget();
     await buildLocked(room, { label: `Restored from ${seq}` });
     const m = room.meta();
-    return { epoch: m.epoch, seq: m.seq };
+    return { epoch: m.epoch, seq: m.seq, broadcast: { type: "reset", epoch: m.epoch, reason: "restored" } };
   });
 }
