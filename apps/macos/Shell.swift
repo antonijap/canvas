@@ -148,6 +148,26 @@ private struct TabWidthKey: PreferenceKey {
 struct TopBar: View {
     @ObservedObject var model: CanvasModel
     @State private var tabWidths: [String: CGFloat] = [:]
+    @State private var barWidth: CGFloat = 0
+    @State private var actionsWidth: CGFloat = 0
+
+    private var tabRoom: CGFloat {
+        max(0, barWidth - actionsWidth - 2 * Metric.islandGap - 2 * Metric.pillPad
+            - Metric.trafficLights - 2 * Metric.control - 2)
+    }
+    private var fittedWidths: [CGFloat] {
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        // Leading/trailing padding, document glyph, gap and close target, matching TabChip.
+        let chromeWidth: CGFloat = Metric.control + 29
+        let natural: [CGFloat] = model.openFiles.map { file in
+            let titleWidth = (model.name(of: file) as NSString).size(withAttributes: [.font: font]).width
+            return ceil(titleWidth) + chromeWidth
+        }
+        return TabSizing.widths(natural: natural, available: tabRoom, minimum: Metric.tabMin)
+    }
+    private var stripWidth: CGFloat {
+        min(tabRoom, fittedWidths.reduce(0, +) + CGFloat(max(0, model.openFiles.count - 1)) * 2)
+    }
     /// The file tab being dragged and how far it is from its place (clamped inside the strip).
     @State private var dragging: String?
     @State private var dragX: CGFloat = 0
@@ -205,7 +225,7 @@ struct TopBar: View {
         else if let d = dragging, let di = model.openFiles.firstIndex(of: d), let t = dragTarget {
             off = TabOrder.slide(i, dragged: di, target: t, width: tabWidths[d] ?? 0, gap: 2)
         }
-        return TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, missing: model.isMissing(f),
+        return TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, width: fittedWidths[i], missing: model.isMissing(f),
                        onClose: { model.close(f) }) { model.openTab(f) }
             .background(WindowControlArea())
             .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
@@ -256,6 +276,7 @@ struct TopBar: View {
                             draggableTab(f, index: i)
                         }
                     }
+                    .frame(width: stripWidth)
                     .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
                     Menu {
                         ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
@@ -284,8 +305,11 @@ struct TopBar: View {
                     }
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { actionsWidth = $0 }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
         // This bar sits in the window's titlebar strip, where AppKit shows no tooltips: its controls draw their own.
         .environment(\.titlebarTips, true)
     }

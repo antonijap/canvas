@@ -168,6 +168,7 @@ struct PillButton: View {
 struct TabChip: View {
     let title: String
     var active = false
+    var width: CGFloat? = nil
     /// The file is gone from disk: a warning glyph, a struck-through name, and "File not found" on hover.
     var missing = false
     let onClose: () -> Void
@@ -204,7 +205,7 @@ struct TabChip: View {
             .onHover { h in withAnimation(Motion.fast) { hoveringClose = h } }
             .padding(.trailing, 4)
         }
-        .frame(maxWidth: Metric.tabMax)
+        .frame(width: width)
         .background(Capsule().fill(active ? Palette.active : (hovering ? Palette.hover : .clear)))
         .onHover { h in withAnimation(Motion.fast) { hovering = h } }
     }
