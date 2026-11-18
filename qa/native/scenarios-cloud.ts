@@ -149,12 +149,12 @@ sc("settings", "Many Clouds: 36 Clouds sorted by name, Home's sidebar scrolls an
     t.ok(visible.length < 35, `the Clouds list scrolls inside the sidebar (${visible.length} of 35 in view)`);
     t.ok(list.y + list.h <= (await t.state()).window.height, "and stays in the window");
     await t.shot(`${process.cwd()}/qa/out/native/home-many-clouds.png`);
-    // Home's search finds Clouds by name.
+    // Each search word matches anywhere in the name: 3 also finds 13 and 23.
     await t.click(center(await t.mark({ id: "home-search" })));
     await t.type("client 3");
     await sleep(400);
     const found = (await t.marks({ id: "home-row" })).map((r) => r.label).filter((l) => l?.startsWith("Client") || l === "Acme");
-    t.eq(found.sort(), ["Client 03", "Client 30", "Client 31", "Client 32", "Client 33", "Client 34", "Client 35"], `search finds Clouds (${found})`);
+    t.eq(found.sort(), ["Client 03", "Client 13", "Client 23", "Client 30", "Client 31", "Client 32", "Client 33", "Client 34", "Client 35"], `search finds Clouds (${found})`);
     await t.key("a", ["cmd"]);
     await t.key("Delete");
     // Settings > Cloud: a filter past 8 Clouds, nine rows, and how many more.

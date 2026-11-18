@@ -289,6 +289,8 @@ extension SettingsTests {
         let named = [CloudEntry(url: "https://b.example.com", name: "birch", kind: .server), CloudEntry(url: "https://a.example.com", name: "Acme", kind: .server), CloudEntry(url: "https://c.example.com", name: "Cobalt labs", kind: .server)]
         check(CloudList.filtered(named, query: "", name: { $0.name }).map(\.name) == ["Acme", "birch", "Cobalt labs"], "by name, any case")
         check(CloudList.filtered(named, query: "LABS co", name: { $0.name }).map(\.name) == ["Cobalt labs"], "every word, any order")
+        let clients = (1...35).map { CloudEntry(url: "https://client\($0).example.com", name: String(format: "Client %02d", $0), kind: .server) }
+        check(CloudList.filtered(clients, query: "client 3", name: { $0.name }).map(\.name) == ["Client 03", "Client 13", "Client 23", "Client 30", "Client 31", "Client 32", "Client 33", "Client 34", "Client 35"], "each query word is a substring, including digits inside a name")
         // Sharing: only Clouds that are connected with an owner or editor role can take a file.
         let st: [String: (status: String, role: String?)] = ["https://b.example.com": ("connected", "editor"), "https://a.example.com": ("connected", "commenter"), "https://c.example.com": ("signedOut", nil)]
         check(CloudShare.candidates(named, status: st).map(\.name) == ["birch"], "who can take a file")
