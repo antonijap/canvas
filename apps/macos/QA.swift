@@ -34,6 +34,12 @@ typealias QAError = BridgeClient.BridgeError
 enum QA {
     static var model: CanvasModel!
     static var window: NSWindow!
+    static var tabRenameFile: () -> String? = { nil }
+    private static var tabRenameEvents: [[String: Any]] = []
+    static func recordTabRename(_ event: String, _ detail: String) {
+        tabRenameEvents.append(["event": event, "detail": detail, "time": Date.timeIntervalSinceReferenceDate])
+        if tabRenameEvents.count > 40 { tabRenameEvents.removeFirst(tabRenameEvents.count - 40) }
+    }
     private static var eventNumber = 1000
     /// The modifier keys "held" by the last key op, so mouse events carry them too.
     private static var heldMods: NSEvent.ModifierFlags = []
@@ -775,6 +781,7 @@ enum QA {
         }
         return [
             "file": m.currentFile ?? NSNull(), "openFiles": m.openFiles, "homeShown": m.homeShown, "recents": MainActor.assumeIsolated { HomeStore.shared.recents.map(\.path) }, "homeSection": MainActor.assumeIsolated { String(describing: HomeStore.shared.section) }, "stateDir": StateFolder.path, "revision": m.revision, "zoom": m.zoom,
+            "tabRename": ["file": tabRenameFile() as Any? ?? NSNull(), "events": tabRenameEvents],
             "section": m.section?.rawValue ?? NSNull(), "panelOpen": m.panelOpen, "sidebarWidth": Double(m.sidebarWidth), "homeSidebarWidth": Double(m.homeSidebarWidth), "inspectorOpen": m.inspectorOpen, "uiHidden": m.uiHidden,
             "pages": m.pages.map { ["id": $0.id, "name": $0.name, "count": $0.count] }, "activePage": m.activePage ?? NSNull(),
             "boards": m.boards.map(\.id), "selection": sel, "selectedWidget": m.selectedWidgetId ?? NSNull(),

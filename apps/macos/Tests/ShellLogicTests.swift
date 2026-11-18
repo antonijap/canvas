@@ -26,6 +26,15 @@ struct ShellLogicTests {
     }
 
     static func tabRenameFocus() {
+        var session = TabRenameSession()
+        check(!session.finish(attached: false, editing: false), "detaching a rename field must not commit its session")
+        check(!session.finish(attached: true, editing: true), "restored field focus must not commit a queued blur")
+        check(session.finish(attached: true, editing: false), "a live field commits on settled focus loss")
+        check(!session.finish(attached: true, editing: false), "rename finishes only once")
+        var retired = TabRenameSession()
+        retired.retire()
+        check(!retired.finish(attached: true, editing: false), "a replaced field must not finish the active rename")
+
         var rename = TabRename()
         let file = "/documents/tab-actions.canvas"
         let action = { rename.begin(file) }
@@ -51,6 +60,9 @@ struct ShellLogicTests {
         check(attempts == 2 && selections == 1, "retry focus and select the full name")
         attempt(attached: true, accepted: true)
         check(attempts == 2 && selections == 1, "updates must not reset the selection")
+        focus.detached()
+        attempt(attached: true, accepted: true)
+        check(attempts == 3 && selections == 2, "a reattached field must recover its editor after layout removes it")
     }
 
     static func tabPress() {

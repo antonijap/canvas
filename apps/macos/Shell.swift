@@ -186,10 +186,12 @@ struct TopBar: View {
 
     private func beginRename(_ file: String) {
         rename.begin(file)
+        traceTabRename("begin", file)
     }
 
     private func finishRename(_ save: Bool) {
         guard let file = rename.file else { return }
+        traceTabRename(save ? "commit" : "cancel", file)
         rename.file = nil
         if save { model.renameFile(file, to: rename.draft) }
     }
@@ -242,6 +244,8 @@ struct TopBar: View {
                         .frame(height: 20)
                         .padding(.leading, 10).padding(.trailing, 30)
                         .qaID("tab-rename", label: "Rename file")
+                        .onAppear { traceTabRename("overlay-appear", f) }
+                        .onDisappear { traceTabRename("overlay-disappear", f) }
                 } else {
                     TabPointer(onClick: { model.openTab(f) }, onRename: { beginRename(f) },
                                onMenu: { view, at in tabMenu(f, view: view, at: at) },
@@ -329,6 +333,11 @@ struct TopBar: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
         // This bar sits in the window's titlebar strip, where AppKit shows no tooltips: its controls draw their own.
         .environment(\.titlebarTips, true)
+        .onAppear {
+            #if CANVAS_QA
+            QA.tabRenameFile = { rename.file }
+            #endif
+        }
     }
 }
 
@@ -611,6 +620,12 @@ private struct TabPointer: NSViewRepresentable {
     }
 }
 
+@MainActor private func traceTabRename(_ event: String, _ detail: String = "") {
+    #if CANVAS_QA
+    QA.recordTabRename(event, detail)
+    #endif
+}
+
 /// The field editor commits on focus loss and Return; Escape leaves the package untouched.
 private struct TabNameField: NSViewRepresentable {
     @Binding var text: String
@@ -618,12 +633,13 @@ private struct TabNameField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> Field {
         let field = Field(string: text)
+        traceTabRename("create", String(describing: ObjectIdentifier(field)))
         field.delegate = context.coordinator
         context.coordinator.field = field
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak coordinator = context.coordinator] event in
             if let field = coordinator?.field, event.window === field.window,
                !field.bounds.contains(field.convert(event.locationInWindow, from: nil)) {
-                coordinator?.end(true)
+                coordinator?.end(true, reason: "outside-click")
             }
             return event
         }
@@ -637,43 +653,67 @@ private struct TabNameField: NSViewRepresentable {
         context.coordinator.owner = self
         field.requestFocus()
     }
+    static func dismantleNSView(_ field: Field, coordinator: Coordinator) {
+        // SwiftUI may replace the overlay during layout. Its old delegate and monitor no longer own the rename.
+        coordinator.retire()
+        field.retired = true
+        field.delegate = nil
+        traceTabRename("dismantle", String(describing: ObjectIdentifier(field)))
+    }
     final class Field: NSTextField {
         private var focus = TabRenameFocus()
+        var retired = false
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            traceTabRename(window == nil ? "detach" : "attach", String(describing: ObjectIdentifier(self)))
+            if window == nil { focus.detached() }
             requestFocus()
         }
 
         func requestFocus() {
             guard let window else { return }
             DispatchQueue.main.async { [weak self, weak window] in
-                guard let self, let window, self.window === window else { return }
+                guard let self, !self.retired, let window, self.window === window else { return }
                 self.focus.attempt(attached: true, makeFirstResponder: {
-                    window.makeFirstResponder(self)
+                    let accepted = window.makeFirstResponder(self)
+                    traceTabRename("focus", "\(ObjectIdentifier(self)) accepted=\(accepted)")
+                    return accepted
                 }, selectAll: { self.selectText(nil) })
             }
         }
     }
-    final class Coordinator: NSObject, NSTextFieldDelegate {
+    @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
         var owner: TabNameField
         weak var field: NSTextField?
         var monitor: Any?
         deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
-        private var finished = false
+        private var session = TabRenameSession()
         init(_ owner: TabNameField) { self.owner = owner }
-        func end(_ save: Bool) {
-            guard !finished else { return }
-            finished = true
+        func retire() {
+            session.retire()
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        }
+        func end(_ save: Bool, reason: String, onlyIfBlurred: Bool = false) {
+            let accepted = session.finish(attached: field?.window != nil,
+                                          editing: onlyIfBlurred && field?.currentEditor() != nil)
+            traceTabRename("finish-\(reason)", "accepted=\(accepted) attached=\(field?.window != nil) editing=\(field?.currentEditor() != nil)")
+            guard accepted else { return }
             owner.finish(save)
         }
         func controlTextDidChange(_ notification: Notification) {
             if let field = notification.object as? NSTextField { owner.text = field.stringValue }
         }
-        func controlTextDidEndEditing(_ notification: Notification) { end(true) }
+        func controlTextDidEndEditing(_ notification: Notification) {
+            let responder = (field?.window?.firstResponder).map { String(describing: type(of: $0)) } ?? "nil"
+            traceTabRename("end-editing", "responder=\(responder) info=\(notification.userInfo ?? [:])")
+            // Menu restoration and view removal also end editing. Commit only if this instance is still live
+            // and still blurred after AppKit and SwiftUI finish their responder and layout changes.
+            DispatchQueue.main.async { [weak self] in self?.end(true, reason: "focus-loss", onlyIfBlurred: true) }
+        }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            if selector == #selector(NSResponder.cancelOperation(_:)) { end(false); return true }
-            if selector == #selector(NSResponder.insertNewline(_:)) { end(true); return true }
+            if selector == #selector(NSResponder.cancelOperation(_:)) { end(false, reason: "escape"); return true }
+            if selector == #selector(NSResponder.insertNewline(_:)) { end(true, reason: "return"); return true }
             return false
         }
     }

@@ -5,9 +5,22 @@ import Foundation
 import CoreGraphics
 import CryptoKit
 
+/// One field instance may finish only its own live editing session.
+struct TabRenameSession {
+    private var finished = false
+    mutating func retire() { finished = true }
+    mutating func finish(attached: Bool, editing: Bool) -> Bool {
+        guard !finished, attached, !editing else { return false }
+        finished = true
+        return true
+    }
+}
+
 /// Initial rename focus waits for a window and a successful responder change.
 struct TabRenameFocus {
     private var pending = true
+
+    mutating func detached() { pending = true }
 
     mutating func attempt(attached: Bool, makeFirstResponder: () -> Bool, selectAll: () -> Void) {
         guard pending, attached, makeFirstResponder() else { return }
