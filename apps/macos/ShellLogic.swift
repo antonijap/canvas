@@ -706,6 +706,12 @@ enum TipPlacement {
 
 /// A visible package name typed into a file tab.
 enum TabRename {
+    /// Start from the picked action, after menu tracking restores the previous responder.
+    /// Held menus may deliver that action after pop has already returned.
+    static func afterMenu(_ begin: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: begin)
+    }
+
     static func name(_ raw: String) -> String? {
         let n = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty, !n.hasPrefix("."), !n.contains("/"), !n.contains("\0") else { return nil }

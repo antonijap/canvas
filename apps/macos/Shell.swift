@@ -198,13 +198,12 @@ struct TopBar: View {
 
     private func tabMenu(_ file: String, view: NSView, at: CGPoint) {
         let menu = ContextMenuBuilder(model: model, at: at)
-        var renameRequested = false
         for (i, group) in ContextMenuLayout.fileTab(cloud: CloudURL.clean(model.prefs.cloudUrl) != nil).enumerated() {
             if i > 0 { menu.separator() }
             for title in group {
                 menu.action(title) {
                     switch title {
-                    case "Rename...": renameRequested = true
+                    case "Rename...": TabRename.afterMenu { beginRename(file) }
                     case "Show in Finder": NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)])
                     case "Duplicate": model.duplicateFile(file)
                     case "Move to Cloud...": CloudAccount.shared.shareOpenFile(model, file: file)
@@ -219,8 +218,6 @@ struct TopBar: View {
             }
         }
         menu.pop(in: view)
-        // Menu tracking restores the previous responder when it closes.
-        if renameRequested { beginRename(file) }
     }
 
     private var widths: [CGFloat] { model.openFiles.map { tabWidths[$0] ?? 0 } }
