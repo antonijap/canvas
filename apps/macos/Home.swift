@@ -1,6 +1,7 @@
 // Home: the pinned first tab. A native screen shown in place of the canvas web view (the file tabs' pages stay alive
 // under it): the recent files as cards, the files on this Mac, the Cloud server and what is shared to it, and one
-// muted line where there are no files yet. The logic (recents, summaries, order, labels) is HomeLogic.swift.
+// muted line where there are no files yet. Each Cloud in Settings > Cloud has its own row and page (its files as the
+// same cards, under its name, a status pill and a gear for its settings); Add Cloud opens the sheet (CloudSettings.swift). The logic (recents, summaries, order, labels) is HomeLogic.swift.
 //
 // The recents list is the app's own, in UserDefaults ("canvas.recents": path and last opened time, at most 50). Each
 // card's open comment count and server come from the file's comments.json, read here. A card's picture is a snapshot
@@ -18,7 +19,20 @@ enum StateFolder {
     }
 }
 
-enum HomeSection: Hashable { case recents, mac, server }
+enum HomeSection: Hashable, CustomStringConvertible {
+    case recents, mac
+    /// One Cloud's page, by its entry id (AppSettings.clouds).
+    case cloud(String)
+    /// What QA reads (QA.swift state "homeSection"): recents, mac or cloud.
+    var description: String {
+        switch self {
+        case .recents: "recents"
+        case .mac: "mac"
+        case .cloud: "cloud"
+        }
+    }
+    var cloudId: String? { if case .cloud(let id) = self { id } else { nil } }
+}
 
 @MainActor
 final class HomeStore: ObservableObject {
@@ -207,9 +221,6 @@ struct HomeView: View {
     @ObservedObject private var store = HomeStore.shared
     @ObservedObject private var account = CloudAccount.shared
 
-    private var configured: Bool { CloudURL.clean(model.prefs.cloudUrl) != nil }
-    private var serverUrl: String { CloudURL.clean(model.prefs.cloudUrl) ?? "" }
-
     @State private var windowWidth: CGFloat = 0
 
     /// The sidebar's width in this window: the stored one, held between the minimum and what the window allows.
@@ -221,7 +232,7 @@ struct HomeView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             GlassIsland(radius: Metric.radiusIsland, padding: Metric.islandPad, dense: true) {
-                HomeSidebar(model: model, store: store, account: account, configured: configured, serverUrl: serverUrl)
+                HomeSidebar(model: model, store: store, account: account)
             }
             .frame(width: sidebarShown)
             .overlay(alignment: .trailing) {
@@ -233,7 +244,7 @@ struct HomeView: View {
             .padding(.top, Metric.inset + Metric.pill + Metric.islandGap)
             .padding(.bottom, Metric.inset)
 
-            HomeMain(model: model, store: store, account: account, configured: configured, serverUrl: serverUrl)
+            HomeMain(model: model, store: store, account: account)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.canvasBg.ignoresSafeArea())
@@ -242,10 +253,14 @@ struct HomeView: View {
         })
         .transaction { if model.resizingSidebar { $0.animation = nil } }
         .onAppear { store.reload() }
+        // A Cloud's page whose Cloud was removed (here, or in Settings) goes back to Recents.
+        .onChange(of: model.prefs.clouds.map(\.id)) { _, ids in
+            if let id = store.section.cloudId, !ids.contains(id) { store.section = .recents }
+        }
         .task {
-            // The server's status: asked now, then every 30 s while Home is up (a connected answer is reused for a
-            // minute, so the team's server hears from this Mac about once a minute at most), and again when Canvas
-            // comes to the front.
+            // Every Cloud's status: asked now, then every 30 s while Home is up (a connected answer is reused for a
+            // minute, so each Cloud hears from this Mac about once a minute at most), and again when Canvas comes to
+            // the front.
             var first = true
             while !Task.isCancelled {
                 await account.refresh(model, fresh: first)
@@ -266,18 +281,14 @@ private struct HomeSidebar: View {
     @ObservedObject var model: CanvasModel
     @ObservedObject var store: HomeStore
     @ObservedObject var account: CloudAccount
-    let configured: Bool
-    let serverUrl: String
-
-    private var dot: HomeLogic.Dot { HomeLogic.dot(status: account.state.status, configured: account.state.configured) }
 
     var body: some View {
         VStack(spacing: 2) {
             // Nothing to search before the first file: Recents is the first row, level with the main view's title.
-            if HomeLogic.showsSearch(files: store.recents.count, query: store.query) {
+            if HomeLogic.showsSearch(files: store.recents.count + model.prefs.clouds.count, query: store.query) {
                 FieldBox {
                     Image(systemName: "magnifyingglass").glyph(GlyphSize.field).foregroundStyle(Palette.mutedFg)
-                    TextField("Search files", text: $store.query).textFieldStyle(.plain).font(Typography.body)
+                    TextField(model.prefs.clouds.isEmpty ? "Search files" : "Search files and Clouds", text: $store.query).textFieldStyle(.plain).font(Typography.body)
                         .qaText("Search files")
                 }
                 .qaID("home-search", label: "Search files")
@@ -288,35 +299,45 @@ private struct HomeSidebar: View {
             HomeRow(symbol: "laptopcomputer", title: "On this Mac", selected: store.section == .mac) { store.section = .mac }
             HomeRow(symbol: "graduationcap", title: "Learn Canvas", selected: false) { model.openCourse() }
 
-            // No section label: a 12 pt gap (8 here and the stack's 2 on each side) sets the servers apart.
-            Color.clear.frame(height: 8)
-            if configured {
-                HomeRow(symbol: "cloud", title: ServerName.label(serverUrl, name: model.prefs.cloudName), selected: store.section == .server, dot: dot) { store.section = .server }
+            // The Clouds under one quiet label with a + for Add Cloud; sorted by name, filtered by the search, and
+            // scrolling when there are many (one per client is normal).
+            HStack(spacing: 6) {
+                Text("Clouds").font(Typography.section).foregroundStyle(Palette.mutedFg).lineLimit(1).qaText("Clouds")
+                Spacer(minLength: 8)
+                MiniButton(symbol: "plus", help: "Add Cloud") { AddCloudPanel.shared.show(model) }
+                    .qaID("home-add-cloud", label: "Add Cloud")
             }
-            HomeRow(symbol: "plus", title: "Add Cloud", selected: false, muted: true) {
-                SettingsWindow.shared.show(model, tab: .cloud)
+            .padding(.leading, 12).padding(.trailing, 6).frame(height: 24)
+            .padding(.top, 14)
+            ScrollView {
+                VStack(spacing: 2) {
+                    ForEach(CloudList.filtered(model.prefs.clouds, query: store.query, name: HomeLogic.cloudName)) { e in
+                        let s = account.state(e)
+                        let word = HomeLogic.word(status: s.known ? s.status : nil)
+                        HomeRow(symbol: HomeLogic.rowSymbol(kind: e.kind), title: HomeLogic.cloudName(e), selected: store.section == .cloud(e.id),
+                                word: word, muted: word?.tone == .muted) {
+                            store.section = .cloud(e.id)
+                        }
+                    }
+                }
             }
+            .scrollIndicators(.automatic)
+            .qaID("home-clouds")
         }
     }
 }
 
-/// A sidebar row: a glyph, a name, and for a server a dot. Selected is neutral grey with the glyph in the text colour.
+/// A sidebar row: a glyph, a name, and for a Cloud that needs the person a word ("Sign in", "Down"). Selected is
+/// neutral grey with the glyph in the text colour.
 private struct HomeRow: View {
     let symbol: String
     let title: String
     let selected: Bool
-    var dot: HomeLogic.Dot?
+    var word: (text: String, tone: HomeLogic.Tone)?
+    /// Dimmed: a Cloud that is down or offline.
     var muted = false
     let action: () -> Void
     @State private var hovering = false
-
-    private func dotColor(_ d: HomeLogic.Dot) -> Color {
-        switch d {
-        case .connected: Palette.ok
-        case .offline, .down: Palette.mutedFg.opacity(0.5)
-        case .attention: Palette.warn
-        }
-    }
 
     var body: some View {
         Button(action: action) {
@@ -328,9 +349,10 @@ private struct HomeRow: View {
                 Text(title).font(Typography.body).fontWeight(selected ? .medium : nil).lineLimit(1).capCentered(13)
                     .foregroundStyle(muted && !selected ? Palette.mutedFg : Palette.fg).qaText(title)
                 Spacer(minLength: 8)
-                if let dot {
-                    StatusDot(color: dotColor(dot), size: 7).help(HomeLogic.dotWords(dot))
-                        .qaID("home-server-dot", label: HomeLogic.dotWords(dot))
+                if let word {
+                    Text(word.text).font(Typography.micro).fontWeight(.medium).lineLimit(1).capCentered(11)
+                        .foregroundStyle(word.tone == .attention ? CloudInk.warn : Palette.mutedFg)
+                        .qaID("home-cloud-word", label: word.text)
                 }
             }
             .padding(.horizontal, 12).frame(height: Metric.row)
@@ -350,20 +372,21 @@ private struct HomeMain: View {
     @ObservedObject var model: CanvasModel
     @ObservedObject var store: HomeStore
     @ObservedObject var account: CloudAccount
-    let configured: Bool
-    let serverUrl: String
+
+    /// The Cloud whose page shows, if the section is one and it is still in the list.
+    private var cloud: CloudEntry? { account.entry(model, id: store.section.cloudId) }
 
     private var visible: [HomeCard] {
         let base: [HomeCard]
         switch store.section {
         case .recents: base = store.cards
         case .mac: base = HomeLogic.filter(store.cards, .mac)
-        case .server: base = HomeLogic.onServer(store.cards, serverUrl)
+        case .cloud: base = cloud.map { HomeLogic.onServer(store.cards, $0.url) } ?? []
         }
         return HomeLogic.search(base, store.query)
     }
 
-    private var onServer: Bool { store.section == .server && configured }
+    private var onServer: Bool { cloud != nil }
 
     /// The one muted line in place of the files, or nil when there are files to show. With no recents at all it
     /// shows at once; otherwise only after the first read, so a view with files does not flash it.
@@ -378,8 +401,8 @@ private struct HomeMain: View {
     private var topInset: CGFloat { Metric.inset + Metric.pill + Metric.islandGap + Metric.islandPad }
 
     @ViewBuilder private var top: some View {
-        if onServer {
-            HomeServerView(model: model, store: store, account: account, serverUrl: serverUrl, cards: visible, headerHeight: headerHeight)
+        if let cloud {
+            HomeCloudHeader(model: model, account: account, entry: cloud, height: headerHeight)
         } else {
             HomeHeader(model: model, title: store.section == .mac ? "On this Mac" : "Recents", height: headerHeight)
         }
@@ -400,11 +423,10 @@ private struct HomeMain: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     top
-                    if !onServer {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: HomeMetric.cardMin, maximum: HomeMetric.cardMax), spacing: HomeMetric.gap, alignment: .top)],
-                                  alignment: .leading, spacing: 24) {
-                            ForEach(visible) { c in HomeCardView(model: model, store: store, card: c) }
-                        }
+                    // A Cloud's page is the same cards as Recents, without the cloud before each time (all are there).
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: HomeMetric.cardMin, maximum: HomeMetric.cardMax), spacing: HomeMetric.gap, alignment: .top)],
+                              alignment: .leading, spacing: 24) {
+                        ForEach(visible) { c in HomeCardView(model: model, store: store, card: c, showWhere: !onServer) }
                     }
                 }
                 .padding(.horizontal, HomeMetric.gutter)
@@ -451,10 +473,12 @@ private struct HomeCardView: View {
     @ObservedObject var model: CanvasModel
     @ObservedObject var store: HomeStore
     let card: HomeCard
+    /// A shared file's cloud before its time (off on a Cloud's own page, where every file is that Cloud's).
+    var showWhere = true
     @State private var hovering = false
 
     var body: some View {
-        let where_ = HomeLogic.whereLabel(server: card.server, current: model.prefs.cloudUrl, name: model.prefs.cloudName)
+        let where_ = HomeLogic.whereLabel(server: card.server, clouds: model.prefs.clouds)
         VStack(alignment: .leading, spacing: 10) {
             Button { if card.exists, NSApp.currentEvent?.type != .rightMouseUp { model.open(card.path) } } label: {
                 HomeThumbnail(store: store, card: card)
@@ -476,7 +500,7 @@ private struct HomeCardView: View {
                     HStack(spacing: 8) {
                         // The time alone; a file on a Cloud server gets a cloud before it, and names the server in its tooltip.
                         HStack(spacing: 4) {
-                            if card.shared {
+                            if card.shared && showWhere {
                                 Image(systemName: where_.symbol).glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg).qaID("home-card-where-glyph", label: where_.text)
                             }
                             Text(when).font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg).lineLimit(1).qaText(when)
@@ -533,111 +557,68 @@ private struct HomeThumbnail: View {
     }
 }
 
-// MARK: Team server
+// MARK: A Cloud's page
 
-private struct HomeServerView: View {
+/// A Cloud's name, a pill for where it stands (Live, Down, Sign in) and a gear for its settings, level with the
+/// sidebar's first control. Email and host stay in Settings.
+private struct HomeCloudHeader: View {
     @ObservedObject var model: CanvasModel
-    @ObservedObject var store: HomeStore
     @ObservedObject var account: CloudAccount
-    let serverUrl: String
-    let cards: [HomeCard]
-    let headerHeight: CGFloat
-
-    private var dot: HomeLogic.Dot { HomeLogic.dot(status: account.state.status, configured: account.state.configured) }
-    private var connected: String? {
-        account.state.status == "connected" ? HomeLogic.connectedLine(email: account.state.email, role: account.state.role) : nil
-    }
+    let entry: CloudEntry
+    let height: CGFloat
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text(ServerName.label(serverUrl, name: model.prefs.cloudName)).font(Typography.display).lineLimit(1).foregroundStyle(Palette.fg).qaText(ServerName.label(serverUrl, name: model.prefs.cloudName))
+        let name = HomeLogic.cloudName(entry)
+        let s = account.state(entry)
+        let word = HomeLogic.word(status: s.known ? s.status : nil)
+        HStack(spacing: 10) {
+            Text(name).font(Typography.display).lineLimit(1).foregroundStyle(Palette.fg).qaText(name)
+            // A pill only when the Cloud needs the person (Sign in, Down): a Cloud that works says nothing.
+            if let word {
+                CloudPill(text: word.text, tone: word.tone) {
+                    if s.status == "signedOut" || s.status == "signInAgain", entry.kind == .server { account.signIn(model, entry) }
+                }
+                .help(CloudStatusText.detail(s.status, name: name) ?? CloudStatusText.line(s.status, configured: true))
+            }
             Spacer(minLength: 8)
-            FieldButton(title: "Cloud settings", symbol: "gearshape") { SettingsWindow.shared.show(model, tab: .cloud) }.qaID("home-cloud-settings", label: "Cloud settings")
-        }
-        .frame(height: headerHeight)
-
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            // On the status line's capitals, not between the two lines.
-            Circle().fill(dot == .connected ? Palette.ok : dot == .attention ? Palette.warn : Palette.mutedFg.opacity(0.5)).frame(width: 7, height: 7)
-                .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + HomeMetric.bodyCapHeight / 2 }
-                .qaID("home-status-dot")
-            VStack(alignment: .leading, spacing: 7) {
-                Text(connected ?? CloudStatusText.line(account.state.status, configured: account.state.configured))
-                    .font(Typography.body).fontWeight(.medium).foregroundStyle(Palette.fg).lineLimit(1).qaText(connected ?? "Server status")
-                // A hosted Cloud has no host to show: the plain line for its state instead ("Studio Cloud isn't open right now").
-                Text(CloudURL.isHosted(serverUrl) ? (CloudStatusText.detail(account.state.status, name: ServerName.label(serverUrl, name: model.prefs.cloudName)) ?? "Hosted on a Mac") : ServerName.host(serverUrl))
-                    .font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg).lineLimit(1)
+            MiniButton(symbol: "gearshape", help: "Cloud settings", inRow: true) {
+                account.selected = entry.id
+                SettingsWindow.shared.show(model, tab: .cloud)
             }
-            Spacer(minLength: 0)
-            if account.state.status == "signInAgain" || account.state.status == "signedOut" {
-                FieldButton(title: "Sign in", symbol: nil) { account.signIn(model) }
-            }
+            .qaID("home-cloud-settings", label: "Cloud settings")
         }
-        .padding(.horizontal, 16).padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: HomeMetric.radiusCard, style: .continuous).fill(Palette.popover))
-        .cardShadow()
-        .qaID("home-server-card")
-
-        // No files: HomeMain draws its one line under this view.
-        if !cards.isEmpty {
-            VStack(spacing: 0) {
-                HStack(spacing: 12) {
-                    Text("Name").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("Comments").frame(width: 90, alignment: .leading)
-                    Text("Edited").frame(width: 120, alignment: .leading)
-                }
-                .font(Typography.label).fontWeight(.medium).foregroundStyle(Palette.mutedFg).lineLimit(1)
-                .padding(.horizontal, 16).frame(height: 34)
-                ForEach(cards) { c in
-                    Rectangle().fill(Palette.line).frame(height: 1).frame(maxWidth: .infinity)
-                    HomeServerRow(model: model, store: store, card: c)
-                }
-            }
-            .background(RoundedRectangle(cornerRadius: HomeMetric.radiusCard, style: .continuous).fill(Palette.popover))
-            .clipShape(RoundedRectangle(cornerRadius: HomeMetric.radiusCard, style: .continuous))
-            .cardShadow()
-        }
+        .frame(height: height)
     }
 }
 
-private struct HomeServerRow: View {
-    @ObservedObject var model: CanvasModel
-    @ObservedObject var store: HomeStore
-    let card: HomeCard
-    @State private var hovering = false
+/// The darker shades of the status hues, for text on their own tint (and the amber "Sign in" word).
+enum CloudInk {
+    static let live = Color(light: 0x15803D, dark: 0x86EFAC)
+    static let warn = Color(light: 0xB45309, dark: 0xFCD34D)
+}
+
+/// Live, Down or Sign in: a small capsule tinted by its tone, its text a darker shade of the same hue.
+struct CloudPill: View {
+    let text: String
+    let tone: HomeLogic.Tone
+    var action: () -> Void = {}
 
     var body: some View {
-        Button { if card.exists, NSApp.currentEvent?.type != .rightMouseUp { model.open(card.path) } } label: {
-            HStack(spacing: 12) {
-                HStack(spacing: 12) {
-                    HomeThumbnail(store: store, card: card).frame(width: 52, height: 34)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    Text(card.name).font(Typography.body).fontWeight(.medium).foregroundStyle(Palette.fg).lineLimit(1).qaText(card.name)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 4) {
-                    Image(systemName: "bubble.left").glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg)
-                    Text(card.exists ? HomeLogic.commentsLine(card.openComments) : "Moved or deleted").font(Typography.label).fontWeight(.regular)
-                        .foregroundStyle(card.openComments > 0 ? Palette.fg.opacity(0.8) : Palette.mutedFg).lineLimit(1)
-                }
-                .frame(width: 90, alignment: .leading)
-                Text(HomeLogic.ago(max(card.opened, card.modified ?? 0), now: Date().timeIntervalSince1970))
-                    .font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg).lineLimit(1)
-                    .frame(width: 120, alignment: .leading)
+        let (fill, ink): (Color, Color) = switch tone {
+        case .live: (Palette.ok.opacity(0.16), CloudInk.live)
+        case .attention: (Palette.warn.opacity(0.18), CloudInk.warn)
+        case .muted: (Palette.active, Palette.mutedFg)
+        }
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if tone != .muted { Circle().fill(tone == .live ? Palette.ok : Palette.warn).frame(width: 6, height: 6) }
+                Text(text).font(Typography.label).foregroundStyle(ink).lineLimit(1)
             }
-            .padding(.horizontal, 16).frame(height: 56)
-            .background(hovering ? Palette.hover : .clear)
-            .contentShape(Rectangle())
+            .padding(.horizontal, 8).frame(height: 22)
+            .background(Capsule().fill(fill))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .qaID("home-server-file", label: card.name)
-        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
-        .contextMenu {
-            Button("Open") { model.open(card.path) }.disabled(!card.exists)
-            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: card.path)]) }.disabled(!card.exists)
-            Divider()
-            Button("Remove from recents") { store.remove(card.path) }
-        }
+        .qaID("home-cloud-pill", label: text)
     }
 }

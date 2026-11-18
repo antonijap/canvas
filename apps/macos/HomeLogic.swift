@@ -1,6 +1,6 @@
 // The Home tab's logic, without any view: the recents list, what a file's comments.json says (open comments and the
 // team server it is shared to), the cards' order, filter and search, the labels, and where a thumbnail is kept.
-// Tests/HomeLogicTests.swift runs all of it. Home.swift draws it.
+// Tests/HomeLogicTests.swift runs all of it (built with SettingsLogic.swift, for the Cloud addresses). Home.swift draws it.
 
 import CryptoKit
 import Foundation
@@ -148,24 +148,50 @@ enum HomeLogic {
     /// shared yet, no files at all (a first launch), or a view whose files are all elsewhere.
     static func emptyLine(query: String, onServer: Bool, files: Int) -> String {
         if !query.isEmpty { return "No files match \u{201C}\(query)\u{201D}" }
-        if onServer { return "No files shared to this server yet" }
+        if onServer { return "No files shared to this Cloud yet" }
         return files == 0 ? "Files you open show up here" : "Nothing here yet"
     }
 
     /// The sidebar's search field: hidden while there is nothing to search, unless words are still typed in it.
     static func showsSearch(files: Int, query: String) -> Bool { files > 0 || !query.isEmpty }
 
-    /// The cards of one server (by host).
+    /// The cards of one Cloud: the files whose comments name exactly its address (canonical origin, port included;
+    /// the same rule as the server's), never another Cloud on the same host.
     static func onServer(_ cards: [HomeCard], _ url: String) -> [HomeCard] {
-        cards.filter { $0.server.map { ServerName.same($0, url) } ?? false }
+        guard let want = CloudURL.clean(url) else { return [] }
+        return cards.filter { $0.server.flatMap(CloudURL.clean) == want }
     }
 
-    /// The place a card names: "This Mac", or the server it is shared to.
-    /// A file on the server set in Settings > Cloud (`current`) takes the name given to it there.
-    static func whereLabel(server: String?, current: String = "", name: String = "") -> (text: String, symbol: String) {
+    /// The place a card names: "This Mac", or the Cloud it is shared to, by the name given to it in Settings > Cloud.
+    static func whereLabel(server: String?, clouds: [CloudEntry] = []) -> (text: String, symbol: String) {
         guard let server, !server.isEmpty else { return ("This Mac", "laptopcomputer") }
-        return (ServerName.same(server, current) ? ServerName.label(server, name: name) : ServerName.display(server), "cloud")
+        let clean = CloudURL.clean(server)
+        if let e = clouds.first(where: { $0.url == clean }) { return (cloudName(e), "cloud") }
+        return (ServerName.display(server), "cloud")
     }
+
+    /// A Cloud's name on screen: the name given to it, else its host (ServerName.label).
+    static func cloudName(_ e: CloudEntry) -> String { ServerName.label(e.url, name: e.name) }
+
+    /// The word a Cloud's row (and its page) shows only when it needs the person: "Sign in" in amber, "Down" or
+    /// "Offline" in grey with the row dimmed. Nil when it is fine, or not asked yet: no green dots.
+    enum Tone: Equatable { case live, muted, attention }
+    static func word(status: String?) -> (text: String, tone: Tone)? {
+        switch status {
+        case "signedOut", "signInAgain": return ("Sign in", .attention)
+        case "removed": return ("Removed", .attention)
+        case "forbidden": return ("No access", .attention)
+        case "tooOld", "tooNew": return ("Update needed", .attention)
+        case "unavailable": return ("Unavailable", .attention)
+        case "down": return ("Down", .muted)
+        case "offline": return ("Offline", .muted)
+        default: return nil
+        }
+    }
+
+    /// The row's glyph says where a Cloud lives: a laptop for a Cloud on a Mac (hosted here or joined), a cloud for a
+    /// server.
+    static func rowSymbol(kind: CloudKind) -> String { kind == .server ? "cloud" : "laptopcomputer" }
 
     /// "Edited 5 min ago" or "Opened yesterday": an edit after the last open wins, by more than a few seconds
     /// (opening a file saves nothing, but a change the app makes on load should not read as an edit).
