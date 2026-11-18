@@ -1929,6 +1929,25 @@ function nodeDiff(a: DocNode, b: DocNode, path: string[], out: { p: string[]; v:
   for (let i = 0; i < bc.length; i++) if (bc[i] !== ac![i]) nodeDiff(ac![i], bc[i], [...path, bc[i].id as string], out);
 }
 
+/** The journal names an edit that is not pending any more: saved by an append whose bookkeeping did not run. */
+function journalHoldsSaved(st: FileState): boolean {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(journalPath(st.docFile), "utf8");
+  } catch {
+    return false;
+  }
+  const pending = new Set(st.pending.map((p) => p.edit));
+  return raw.split("\n").slice(1).some((line) => {
+    try {
+      const e = JSON.parse(line)?.edit;
+      return typeof e === "string" && !pending.has(e);
+    } catch {
+      return false;
+    }
+  });
+}
+
 /** pwrite until every byte is written at `at`. */
 async function writeAt(fh: fs.promises.FileHandle, buf: Buffer, at: number): Promise<void> {
   for (let off = 0; off < buf.length; ) {
@@ -1968,11 +1987,27 @@ async function appendLog(st: FileState, snap: Snapshot, format: Format, v: numbe
   if (!d.boards.length && !d.nodes.length && !d.ids && !d.top && !st.pending.some((p) => p.version <= v)) {
     // Nothing changed since the disk (document.json and the log) and no edit waits: nothing to append. An empty
     // record would carry a seq no edit holds, and a load in its window would take our own log for someone else's.
+    // Edits a load found in a record of ours whose append failed after writing it are saved now (in `logged`), but
+    // still in the journal, and that record may not be durable yet: made durable first, then the journal lets go of
+    // them and compaction is due, as after an append.
+    if (st.logSeen !== "none" && journalHoldsSaved(st)) {
+      const fh = await fs.promises.open(logPathOf(st.docFile), "r");
+      try {
+        await fh.sync();
+      } finally {
+        await fh.close();
+      }
+      await syncDirAsync(path.dirname(st.docFile));
+      if (st.epoch !== epoch) return "retry";
+      if ((await logSig(st.docFile)) !== st.logSeen) return "reload";
+      rewriteJournal(st, st.diskHash);
+    }
     st.diskVersion = v;
     st.saved = Math.max(st.saved, v);
     st.retries = 0;
     st.lastError = undefined;
     st.logDoc = snap.doc;
+    if (st.log?.info.records) scheduleCompact(st);
     return "done";
   }
   const file = logPathOf(st.docFile);

@@ -437,6 +437,39 @@ describe("in one server", () => {
     await pw.compactWrites(p.docPath);
   });
 
+  test("an append that fails right after the log's fsync: once a retry finds its record, the journal lets go of the edit and the log is folded on time", async () => {
+    const p = pkg("syncfail");
+    const c = at(p);
+    await c.open();
+    const x0 = nodeIn(alone(p.docPath), "B3N4").x;
+    const keep = pw.writeConfig.compactAfterMs;
+    pw.writeConfig.compactAfterMs = 2000;
+    let failed = false;
+    const restore = await onSync(p.docPath, (fh) => {
+      if (failed || !isLog(fh, p.logPath)) return;
+      failed = true;
+      throw new Error("injected: an error right after the log's fsync");
+    });
+    try {
+      assert.equal((await c.move("B3N4", 5)).status, 200);
+      assert.equal((await c.flush()).status, 200);
+      assert.ok(failed, "the append failed after its record was durable");
+      await until(() => !pw.hasPendingWrites(p.docPath));
+      const journals = fs.readdirSync(p.pkg).filter((f) => f.startsWith(".document.json.canvas-journal-") && !f.includes("-kept"));
+      for (const f of journals) {
+        const lines = fs.readFileSync(path.join(p.pkg, f), "utf8").split("\n").filter(Boolean).slice(1);
+        assert.deepEqual(lines.filter((l) => "edit" in JSON.parse(l)), [], `${f} no longer holds the saved edit`);
+      }
+      assert.equal(nodeIn(withLog(p.docPath), "B3N4").x, x0 + 5, "the nudge is on disk, in the log");
+      assert.ok(await until(() => !fs.existsSync(p.logPath), 6000), "the log is folded once edits pause");
+      assert.equal(nodeIn(alone(p.docPath), "B3N4").x, x0 + 5, "document.json alone holds the nudge, once");
+    } finally {
+      restore();
+      pw.writeConfig.compactAfterMs = keep;
+      await pw.compactWrites(p.docPath);
+    }
+  });
+
   test("another server's log put in place of ours while an append retries is recovered, not taken as ours", async () => {
     const p = pkg("foreignwindow");
     const c = at(p);
