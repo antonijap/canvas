@@ -182,18 +182,16 @@ struct TopBar: View {
     @State private var dragging: String?
     @State private var dragX: CGFloat = 0
 
-    @State private var renaming: String?
-    @State private var renameDraft = ""
+    @State private var rename = TabRename()
 
     private func beginRename(_ file: String) {
-        renaming = file
-        renameDraft = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+        rename.begin(file)
     }
 
     private func finishRename(_ save: Bool) {
-        guard let file = renaming else { return }
-        renaming = nil
-        if save { model.renameFile(file, to: renameDraft) }
+        guard let file = rename.file else { return }
+        rename.file = nil
+        if save { model.renameFile(file, to: rename.draft) }
     }
 
     private func tabMenu(_ file: String, view: NSView, at: CGPoint) {
@@ -203,7 +201,7 @@ struct TopBar: View {
             for title in group {
                 menu.action(title) {
                     switch title {
-                    case "Rename...": TabRename.afterMenu { beginRename(file) }
+                    case "Rename...": beginRename(file)
                     case "Show in Finder": NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)])
                     case "Duplicate": model.duplicateFile(file)
                     case "Move to Cloud...": CloudAccount.shared.shareOpenFile(model, file: file)
@@ -239,8 +237,8 @@ struct TopBar: View {
                        onClose: { model.close(f) }) { model.openTab(f) }
             .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
             .overlay {
-                if renaming == f {
-                    TabNameField(text: $renameDraft, finish: finishRename)
+                if rename.file == f {
+                    TabNameField(text: $rename.draft, finish: finishRename)
                         .frame(height: 20)
                         .padding(.leading, 10).padding(.trailing, 30)
                         .qaID("tab-rename", label: "Rename file")

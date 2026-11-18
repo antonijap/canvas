@@ -26,17 +26,13 @@ struct ShellLogicTests {
     }
 
     static func tabRenameFocus() {
-        var starts = 0
-        let action = { TabRename.afterMenu { starts += 1 } }
-        // A held menu can invoke its action after pop has already returned.
-        check(starts == 0, "presenting a menu does not start rename")
+        var rename = TabRename()
+        let file = "/documents/tab-actions.canvas"
+        let action = { rename.begin(file) }
+        check(rename.file == nil, "presenting a menu does not start rename")
         action()
-        check(starts == 0, "rename waits until the menu action returns")
-        let deadline = Date().addingTimeInterval(1)
-        while starts == 0 && Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
-        }
-        check(starts == 1, "a late menu action starts rename once on the main queue")
+        check(rename.file == file, "menu action sets the rename overlay state without a mouse event or run loop")
+        check(rename.draft == "tab-actions", "menu action prepares the selected tab name immediately")
 
         var focus = TabRenameFocus()
         var attempts = 0
