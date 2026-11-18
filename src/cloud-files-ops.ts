@@ -12,7 +12,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { applyAction, isReject, nextProps, opRunner, orderLike } from "../cloud/core/files/apply.ts";
+import { applyAction, isReject, nextProps, opRunner } from "../cloud/core/files/apply.ts";
 import { DESCENDANTS_PREFIX, type DocNode, type Json } from "../cloud/core/schema.ts";
 import { actionBytes, blobTypeOf, checkBlobPath, FILE_LIMITS, META_KEYS, type Action, type BlobPath, type FileOp, type MetaKey, type Val } from "../cloud/protocol-files.ts";
 import { DocTree, type DocLike, type Envelope } from "./cloud-files-tree.ts";
@@ -58,21 +58,37 @@ export const wantActions = () => actionChecks.enabled || listeners.size > 0;
 
 // ---------- one action per step ----------
 
-type Scope = { docFile: string; ops: FileOp[]; agent?: string };
+type Scope = { closed?: boolean; docFile: string; ops: FileOp[]; agent?: string; before?: DocLike; after?: DocLike; envelopeBefore?: Envelope; envelopeAfter?: Envelope };
 const scopes = new AsyncLocalStorage<Scope>();
+const activeScope = () => {
+  const scope = scopes.getStore();
+  return scope?.closed ? undefined : scope;
+};
 
 /**
  * Run `fn` as one step: the document and sidecar writes it makes (an undo of layers and cards, a structure op and
  * the page list that follows it) become one action, emitted when it ends. Writes outside any step are each one.
  */
 export async function asOneAction<T>(docFile: string, fn: () => Promise<T> | T, agent?: string): Promise<T> {
-  if (!wantActions() || scopes.getStore()?.docFile === docFile) return fn();
+  if (!wantActions() || activeScope()?.docFile === docFile) return fn();
   const scope: Scope = { docFile, ops: [], agent };
+  let result: T;
   try {
-    return await scopes.run(scope, fn);
+    result = await scopes.run(scope, fn);
   } finally {
-    if (scope.ops.length) emit(docFile, makeAction(scope.ops, agent));
+    scope.closed = true;
   }
+  if (scope.ops.length) {
+    const action = makeAction(scope.ops, agent);
+    if (actionChecks.enabled) {
+      const tree = new DocTree(scope.before ?? { children: [] }, scope.envelopeBefore);
+      const r = applyAction(tree, action, { limits: null });
+      const difference = isReject(r) ? r.message : firstDifference(tree.doc, scope.after ?? tree.doc) ?? firstDifference(tree.envelope, scope.envelopeAfter ?? tree.envelope);
+      if (difference) throw new ActionCheckError(`The combined action is incomplete: ${difference}`);
+    }
+    emit(docFile, action);
+  }
+  return result;
 }
 
 function emit(docFile: string, action: Action) {
@@ -92,7 +108,7 @@ function emit(docFile: string, action: Action) {
 /** Hand the ops of one write to the step it is part of, or emit them as their own action. */
 function deliver(docFile: string, ops: FileOp[]) {
   if (!ops.length) return;
-  const scope = scopes.getStore();
+  const scope = activeScope();
   if (scope && scope.docFile === docFile) scope.ops.push(...ops);
   else emit(docFile, makeAction(ops));
 }
@@ -127,7 +143,9 @@ const anchorOf = (list: readonly string[], index: number): string | null => (ind
 
 /** Per-path override ops for an instance's `descendants`, when they give exactly `after` (else the whole key). */
 function overridePaths(before: Json | undefined, after: Json | undefined): Record<string, Val> | null {
-  if (!isObj(before) || !isObj(after)) return null;
+  if ((before !== undefined && !isObj(before)) || !isObj(after)) return null;
+  if (before === undefined && !Object.keys(after).length) return null;
+  before ??= {};
   const set: Record<string, Val> = {};
   for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
     const a = after[k] === undefined ? null : { v: after[k] };
@@ -174,9 +192,8 @@ export function docFileOps(before: DocLike, ops: Op[]): FileOp[] {
         props[k] = d.a === null ? null : { v: clone(d.a.v) };
       }
       if (!Object.keys(props).length) continue;
-      // The key order the edit left, when the plain rule (existing keys stay, new ones last) would not give it.
-      const plain = Object.keys(nextProps(n.props, Object.fromEntries(Object.entries(op.props).map(([k, d]) => [k, d.a]))));
-      const order = op.keys?.a && orderLike(plain, op.keys.a).join("\n") !== plain.join("\n") ? op.keys.a.slice() : undefined;
+      // Whole keys apply before per-path overrides. Keep the recorded order when both add new keys.
+      const order = op.keys?.a.slice();
       push({ k: "set", id: op.id, props, ...(order ? { order } : {}) });
     } else if (op.t === "tree") {
       if (op.kind === "insert") {
@@ -244,7 +261,7 @@ export function placements(cur: readonly string[], target: readonly string[]): {
   return out;
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** A page list in the shape page ops describe: {id, name, boards} each, ids unique, every board on one page. */
 export function pagesInShape(v: unknown): v is { id: string; name: string; boards: string[] }[] {
@@ -323,15 +340,26 @@ export function blobPathOf(docFile: string, abs: string): string | null {
 
 /** The blob op for a file just added to a document's package (null: not a package file a blob can name). */
 export function blobOpOf(docFile: string, abs: string): FileOp | null {
-  const p = blobPathOf(docFile, abs);
-  if (!p || checkBlobPath(p)) {
-    // Media a Cloud file could not name as it is (a paste's assets/ or linked/ copy, a video name with spaces):
-    // counted, and left to the Cloud import to rename.
+  let p = blobPathOf(docFile, abs);
+  const rel = path.relative(path.dirname(docFile), abs);
+  if (path.isAbsolute(rel) || !rel || rel === ".." || rel.startsWith(".." + path.sep)) {
     if (actionChecks.enabled) actionChecks.blobPathRefused++;
     return null;
   }
+  // Older local packages keep media in other folders and allow spaces. Their blob identity is content addressed;
+  // local references and disk names stay as written. Cloud import must rewrite those references before confinement.
   const bytes = fs.readFileSync(abs);
-  return { k: "blob", path: p as BlobPath, sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length, type: blobTypeOf(p as BlobPath) };
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (!p || checkBlobPath(p)) {
+    const ext = path.extname(abs).slice(1).toLowerCase();
+    const canonical = ext === "wgsl" ? `shaders/legacy-${sha256}.wgsl` : `media/legacy-${sha256}.${ext}`;
+    if (checkBlobPath(canonical)) {
+      if (actionChecks.enabled) actionChecks.blobPathRefused++;
+      return null;
+    }
+    p = canonical;
+  }
+  return { k: "blob", path: p as BlobPath, sha256, bytes: bytes.length, type: blobTypeOf(p as BlobPath) };
 }
 
 /**
@@ -433,6 +461,11 @@ export function docEditAction(docFile: string, before: DocLike, after: DocLike, 
     countInserts(fileOps);
     actionChecks.checked.doc++;
   }
+  const scope = activeScope();
+  if (scope?.docFile === docFile) {
+    scope.before ??= before;
+    scope.after = after;
+  }
   deliver(docFile, fileOps);
 }
 
@@ -465,7 +498,12 @@ export function envelopeEditAction(before: Envelope, after: Envelope, bytes: str
 }
 
 /** A write's ops, once it landed: to the step it is part of, or as an action of its own. */
-export function deliverOps(docFile: string, ops: FileOp[] | null): void {
+export function deliverOps(docFile: string, ops: FileOp[] | null, before?: Envelope, after?: Envelope): void {
+  const scope = activeScope();
+  if (scope?.docFile === docFile && before && after) {
+    scope.envelopeBefore ??= before;
+    scope.envelopeAfter = after;
+  }
   if (ops) deliver(docFile, ops);
 }
 

@@ -230,3 +230,62 @@ describe("cards", () => {
     assert.equal((await op(A, { op: "paste", payload: { kind: "canvas/nodes", v: 1, nodes: [], detached: [] }, place: { parent: null } })).status, 400);
   });
 });
+
+test("local paste, media creation and history emit one complete action each", async () => {
+  const { onAction } = await import("../src/cloud-files-ops.ts");
+  const { DocTree } = await import("../src/cloud-files-tree.ts");
+  const { applyAction, isReject } = await import("../cloud/core/files/apply.ts");
+  const target = pkg("actions", { version: "2.21", children: [] });
+  const emitted: import("../cloud/protocol-files.ts").Action[] = [];
+  const off = onAction((file, action) => { if (file === path.join(target, "document.json")) emitted.push(action); });
+  const env = () => {
+    const { widgets, version: _version, ...extra } = JSON.parse(fs.readFileSync(path.join(target, "widgets.json"), "utf8"));
+    return { widgets, extra };
+  };
+  const check = async (change: () => Promise<any>) => {
+    const before = doc(target), side = env();
+    emitted.length = 0;
+    const r = await change();
+    assert.ok(r.status === 200 || r.status === 201, JSON.stringify(r.body));
+    await flush(target);
+    assert.equal(emitted.length, 1);
+    const tree = new DocTree(before, side);
+    const applied = applyAction(tree, emitted[0]);
+    assert.ok(!isReject(applied), JSON.stringify(applied));
+    assert.equal(JSON.stringify(tree.doc), JSON.stringify(doc(target)));
+    assert.equal(JSON.stringify(tree.envelope), JSON.stringify(env()));
+    return emitted[0];
+  };
+  try {
+    const copied = await op(A, { op: "copy", ids: ["Tok"] });
+    await check(() => op(target, { op: "paste", payload: copied.body.payload, place: { parent: null } }));
+    await check(() => call("POST", `/api/history/undo${q(target)}`));
+    await check(() => call("POST", `/api/history/redo${q(target)}`));
+    const action = await check(() => call("POST", `/api/shaders${q(target)}`, { source: "fn shade(p: vec2<f32>) -> vec4<f32> { return vec4<f32>(1.0); }" }));
+    assert.ok(action.ops.some((o) => o.k === "blob"));
+    assert.ok(action.ops.some((o) => o.k === "widget"));
+    const video = await check(() => call("POST", `/api/videos${q(target)}`, { path: clip }));
+    assert.ok(video.ops.some((o) => o.k === "blob"));
+    assert.ok(video.ops.some((o) => o.k === "widget"));
+  } finally { off(); }
+});
+
+test("legacy local media adds still carry a confined blob op", async () => {
+  const { onAction } = await import("../src/cloud-files-ops.ts");
+  const { checkBlobPath } = await import("../cloud/protocol-files.ts");
+  const target = pkg("legacy-actions", { version: "2.21", children: [] });
+  const source = path.join(dir, "outside", "clip with spaces.mp4");
+  fs.copyFileSync(clip, source);
+  const actions: import("../cloud/protocol-files.ts").Action[] = [];
+  const off = onAction((file, a) => { if (file === path.join(target, "document.json")) actions.push(a); });
+  try {
+    const r = await call("POST", `/api/videos${q(target)}`, { path: source });
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    assert.equal(actions.length, 1);
+    const blobs = actions[0].ops.filter((o) => o.k === "blob");
+    assert.equal(blobs.length, 1);
+    assert.equal(checkBlobPath(blobs[0].path), null);
+    assert.equal(r.body.widget.config.src, "media/clip with spaces.mp4");
+    assert.equal(fs.readFileSync(path.join(target, r.body.widget.config.src)).length, 5000);
+  } finally { off(); }
+});

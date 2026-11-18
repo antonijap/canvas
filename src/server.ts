@@ -4,6 +4,7 @@
 // redraws the changed boards in place. Pan by drag or scroll, zoom by pinch or Cmd+scroll,
 // click a node to see its properties, left rail lists boards, components, text styles and variables.
 
+import { asOneAction } from "./cloud-files-ops.ts";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -516,8 +517,11 @@ export function startServer(port = PORT()): Promise<http.Server> {
       await prime(file);
       const docFile = resolveDocPath(file);
       const before = currentDoc(docFile).doc.children.map((n) => String(n.id));
-      const r = runStructure(docFile, b, who);
-      await keepOnPage(docFile, b, before);
+      const r = await asOneAction(docFile, async () => {
+        const result = runStructure(docFile, b, who);
+        await keepOnPage(docFile, b, before);
+        return result;
+      });
       const by = who.source === "mcp" ? "mcp" : "inspector";
       if (r.revision) docChanged(docFile, r.revision, by, { id: r.select[0] ?? null, structure: r.label ?? r.op });
       if (by === "mcp") for (const id of r.select.slice(0, 20)) trackChange(docFile, id, bridgeCtx);

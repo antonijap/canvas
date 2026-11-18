@@ -24,6 +24,7 @@
 // copy. The server also keeps the last payload (one slot, in memory), so a tab or file in the same server can
 // paste even when the system clipboard only holds the marker (see src/page/structure.js).
 
+import { asOneAction } from "./cloud-files-ops.ts";
 import { fitAround, groupsAround, turnedBox } from "./groupfit.ts";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
@@ -1450,6 +1451,10 @@ function cardPage(docFile: string, page: string | undefined): string | undefined
  * joins the layers' step). The answer of a paste lists the new cards (`widgets`) so the page can show them at once.
  */
 async function clipboardOp(docFile: string, b: StructureBody, who: Who, deps: StructureDeps, by: "mcp" | "inspector") {
+  return asOneAction(docFile, () => clipboardOpNow(docFile, b, who, deps, by));
+}
+
+async function clipboardOpNow(docFile: string, b: StructureBody, who: Who, deps: StructureDeps, by: "mcp" | "inspector") {
   const rects = b.rects && typeof b.rects === "object" ? b.rects : {};
   const ids = (b.ids ?? []).filter((x): x is string => typeof x === "string");
   const step = () => ({ label: b.op === "cut" ? "Cut" : "Paste", source: who.source, session: who.session, mergeKey: `structure:${Date.now()}:${Math.random()}` });
@@ -1557,8 +1562,11 @@ export async function handleStructureRoute(req: http.IncomingMessage, res: http.
       const ids = unsizedOnPage(docFile, doc, { page: b.page, board: first }).filter((id) => !(b.rects && b.rects[id]));
       if (ids.length) b.rects = { ...(await deps.measure(docFile, ids).catch(() => ({}))), ...(b.rects ?? {}) };
     }
-    const r = runStructure(docFile, b, who);
-    await keepOnPage(docFile, b, before);
+    const r = await asOneAction(docFile, async () => {
+      const result = runStructure(docFile, b, who);
+      await keepOnPage(docFile, b, before);
+      return result;
+    });
     deps.written(docFile, r.revision, by, r.select, r.label ?? r.op);
     return reply(200, r), true;
   } catch (e) {

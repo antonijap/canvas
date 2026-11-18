@@ -56,6 +56,7 @@
 // fallbacks are written beside them: gapMode "evenly" writes justifyContent "space_around", baseline writes
 // alignItems "end". Canvas keeps metadata's `type` and anyone else's keys, and removes metadata when nothing is left.
 
+import { asOneAction } from "./cloud-files-ops.ts";
 import { fitAround, groupsAround } from "./groupfit.ts";
 import type http from "node:http";
 import { allIds, findNode, newId, StaleFileError, ValidationError, type Json, type DocNode } from "./engine.ts";
@@ -925,9 +926,12 @@ export async function handleLayoutRoute(req: http.IncomingMessage, res: http.Ser
     const canvasIds: string[] = (b.op !== "place" ? [] : parts ? parts.filter((p) => p.parent === null).flatMap((p) => (Array.isArray(p.ids) ? p.ids : [])) : b.parent === null ? (b.ids ?? []) : []).filter((x) => typeof x === "string");
     const toCanvas = canvasIds.length > 0;
     const from = toCanvas ? canvasIds.map((id) => { try { const f = findNode(cur as any, id); return String((f.ancestors[0] ?? f.node).id); } catch { return null; } }).filter((x): x is string => !!x) : [];
-    const r = runLayout(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
+    const r = await asOneAction(docFile, async () => {
+      const result = runLayout(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
+      if (result.changed && (b.op === "add" || toCanvas)) await keepOnPage(docFile, { op: "group", ids: [...from, ...(toCanvas ? canvasIds : (b.ids ?? []))], page: b.page }, before);
+      return result;
+    });
     if (r.changed) {
-      if (b.op === "add" || toCanvas) await keepOnPage(docFile, { op: "group", ids: [...from, ...(toCanvas ? canvasIds : (b.ids ?? []))], page: b.page }, before);
       deps.written(docFile, r.revision, by, r.select, r.label);
     }
     return reply(200, r), true;
