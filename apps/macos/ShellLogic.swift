@@ -1832,3 +1832,26 @@ enum AppUpdate {
         """
     }
 }
+
+/// File tab widths, before the strip falls back to scrolling.
+enum TabSizing {
+    static func widths(natural: [CGFloat], available: CGFloat, minimum: CGFloat, gap: CGFloat = 2) -> [CGFloat] {
+        guard !natural.isEmpty else { return [] }
+        let floor = max(0, minimum)
+        var result = natural.map { max(floor, $0) }
+        let budget = max(CGFloat(result.count) * floor, available - CGFloat(result.count - 1) * max(0, gap))
+        var deficit = result.reduce(0, +) - budget
+        // Remove the same amount from every tab until one reaches the minimum, then share the rest.
+        while deficit > 0.001 {
+            let flexible = result.indices.filter { result[$0] > floor + 0.001 }
+            guard !flexible.isEmpty else { break }
+            let share = deficit / CGFloat(flexible.count)
+            for i in flexible {
+                let removed = min(share, result[i] - floor)
+                result[i] -= removed
+                deficit -= removed
+            }
+        }
+        return result
+    }
+}
