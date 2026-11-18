@@ -161,7 +161,14 @@ sc("components", "right-click an overridden Fill, Opacity or text field on an in
   await t.a.flush();
   await t.selectIds(["inst_fill"]);
   // Opacity: right-click the Appearance section by its opacity field's icon.
-  const op = await t.waitFor(async () => (await t.fields()).find((f) => f.value === "50") ?? null, "an opacity field reading 50", 8000);
+  // A person scrolls the tall instance inspector until the field shows whole.
+  const stw = await t.state();
+  let op = await t.waitFor(async () => (await t.fields()).find((f) => f.value === "50") ?? null, "an opacity field reading 50", 8000);
+  for (let i = 0; i < 24 && op.y + op.h > stw.window.height - 120; i++) {
+    await t.scroll({ x: stw.window.width - 150, y: stw.window.height / 2 }, 0, -150);
+    await sleep(250);
+    op = (await t.fields()).find((f) => f.value === "50") ?? op;
+  }
   await t.click({ x: op.x - 10, y: op.y + op.h / 2 }, { right: true });
   const m2 = await t.waitState((s) => s.menu, "the Appearance menu");
   t.ok(m2.menu.items.includes("Reset opacity"), `Reset opacity: ${m2.menu.items.join(", ")}`);
