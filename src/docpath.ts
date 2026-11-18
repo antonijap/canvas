@@ -432,3 +432,18 @@ function copyCardFiles(src: DocRef, pkgTmp: string, warnings: string[]): void {
   const indent = raw.match(/^[{[]\r?\n([ \t]+)/)?.[1] ?? (raw.includes("\n") ? 2 : undefined);
   fs.writeFileSync(wPath, JSON.stringify(env, null, indent) + (raw.endsWith("\n") ? "\n" : ""));
 }
+
+/** Rename only a package beside its current path. Never replace an existing entry. */
+export function renameCanvas(file: string, raw: unknown): string {
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!name || name.startsWith(".") || name.includes("/") || name.includes("\0")) throw new DocError(400, "Choose a name without slashes or a leading dot");
+  const source = plain(file);
+  if (!source.endsWith(PACKAGE_EXT) || !fs.lstatSync(source, { throwIfNoEntry: false })?.isDirectory()) throw new DocError(400, "Choose a Canvas package");
+  const target = path.join(path.dirname(source), name.endsWith(PACKAGE_EXT) ? name : name + PACKAGE_EXT);
+  if (path.dirname(target) !== path.dirname(source)) throw new DocError(400, "The file must stay in the same folder");
+  if (target === source) return source;
+  if (fs.lstatSync(target, { throwIfNoEntry: false })) throw new DocError(409, "A file with that name already exists");
+  fs.renameSync(source, target);
+  probes.clear();
+  return fs.realpathSync(target);
+}

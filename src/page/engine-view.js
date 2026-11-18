@@ -253,11 +253,15 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
       if (!gone || !toldGone.has(url)) console.warn("[canvas] image", url, e && e.message);
       if (gone) toldGone.add(url);
       if (dead) return;
-      if (e && e.status >= 400 && e.status < 500) { m.gone = true; return; }
+      // Not there (yet): an agent or a script often writes the picture a moment after the layer that uses it. It does
+      // not hold up "fully drawn" (gone), and it is asked for again with the same backoff while a board still uses it.
+      if (gone) m.gone = true;
       const wait = imageRetryDelay(++m.fails);
       m.retryAt = performance.now() + wait;
       setTimeout(() => {
-        if (dead || images.get(url) !== m || !m.boards.size || !mayDecode(m)) return;
+        if (dead || images.get(url) !== m || !m.boards.size) return;
+        m.gone = false;
+        if (!mayDecode(m)) return;
         applyImagePlan(new Set([url]));
       }, wait + 10);
     });
@@ -1096,7 +1100,10 @@ export function decodeScale(w, h, cap) {
   return Math.min(1, cap / Math.max(w, h), cap > MAX_IMAGE_SIDE ? Math.sqrt(FULL_IMAGE_PX / (w * h)) : 1);
 }
 
-/** Bounded backoff for an image decode that failed for a reason that may pass: 1 s, 2 s, 4 s ... at most 30 s. */
+/**
+ * Bounded backoff for an image that could not be drawn: 1 s, 2 s, 4 s ... at most 30 s. That covers a missing file
+ * too, because it may be written after the layer that uses it.
+ */
 export function imageRetryDelay(n) {
   return Math.min(30000, 1000 * Math.pow(2, Math.max(0, n - 1)));
 }

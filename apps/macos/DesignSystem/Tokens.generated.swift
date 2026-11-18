@@ -61,6 +61,6 @@ enum Metric {
     static let field: CGFloat = 28
     static let radiusField: CGFloat = 8
     static let railWidth: CGFloat = 40
-    static let tabMax: CGFloat = 180
+    static let tabMin: CGFloat = 96
     static let trafficLights: CGFloat = 78
 }
