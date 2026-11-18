@@ -101,6 +101,33 @@ test("Connected turns on when an MCP client connects, not for Canvas's own runs,
   assert.equal((await setup()).client, "Claude");
   const s = O.mcpStatus(Date.now() + O.OFF_AFTER_MS + 1);
   assert.equal(s.connected, false, "off after OFF_AFTER_MS of silence");
+  assert.equal((await setup()).outdated, false, "an MCP of this version is not older");
+});
+
+test("an MCP from before an update counts as Connected, older version (GitHub issue 9)", async () => {
+  O.resetMcpSeen();
+  // An older MCP sends no hello and no read header: only x-canvas-source on its writes, and no version.
+  // The server notes every request before routing it, so any write path will do.
+  const write = (headers: Record<string, string>) => fetch(`${base}/api/no-such-route`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", ...headers }, body: "{}" }).then((r) => r.body?.cancel());
+  await write({ "x-canvas-source": "mcp" });
+  let s = await setup();
+  assert.equal(s.connected, true, "any request from an MCP counts");
+  assert.equal(s.outdated, true, "it says which: an older version");
+  // A newer MCP of other code (the app updated under it) is older too.
+  O.resetMcpSeen();
+  await write({ "x-canvas-source": "mcp", "x-canvas-session": "s-old", "x-canvas-mcp-version": "000000000000" });
+  assert.equal((await setup()).outdated, true, "another version's MCP");
+  // A current MCP talking as well: plain Connected.
+  const c = await connect({}, "claude-code");
+  assert.ok(await until(async () => (await setup()).outdated === false), "a current MCP wins");
+  s = await setup();
+  assert.equal(s.connected, true);
+  assert.equal(s.client, "Claude");
+  await c.close();
+  // Canvas's own runs never count, old or new.
+  O.resetMcpSeen();
+  await write({ "x-canvas-source": "mcp", "x-canvas-session": "run-abc" });
+  assert.equal((await setup()).connected, false, "a Canvas run does not count");
 });
 
 test("the Welcome file is a copy of the course with the welcome card, made once", async () => {

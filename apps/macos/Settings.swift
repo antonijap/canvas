@@ -217,6 +217,13 @@ struct AgentSettings: View {
                     StepperField(value: model.prefs.runCapMin, range: SettingsLimits.runCap, step: 1, unit: "min", label: "Run time cap in minutes") { model.prefs.runCapMin = $0 }
                 }
             }
+            // Only an MCP from before an update talks to Canvas: the agent session running it must restart.
+            if setup["outdated"] as? Bool == true {
+                Text(ConnectCopy.outdated).font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .qaID("connect-outdated", label: ConnectCopy.outdated)
+            }
             Button { NSWorkspace.shared.open(ConnectCopy.otherAppsURL) } label: {
                 Text(ConnectCopy.otherApps).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1)
                     .qaID("connect-other-apps", label: ConnectCopy.otherApps)

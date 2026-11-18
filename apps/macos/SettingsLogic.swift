@@ -195,7 +195,10 @@ enum ConnectCopy {
     /// The line under the Agents card: where to read about connecting any other app.
     static let otherApps = "Other apps: getcanvas.cc/download#connect"
     static let otherAppsURL = URL(string: "https://getcanvas.cc/download#connect")!
-    static func added(_ agent: String) -> String { "Added. Start a new \(agent) session." }
+    /// Connect worked. Sessions already open keep the MCP they started with until they restart (src/mcp-connect.ts addedMessage).
+    static func added(_ agent: String) -> String { "Added. New \(agent) sessions use it; restart any that are open." }
+    /// An MCP from before an update is talking to Canvas (GET /api/mcp/setup `outdated`): its agent session must restart.
+    static let outdated = "Connected (older version, restart your agent session)"
     /// The button's title; "Added" reads as Connected in Settings; nil hides it (the agent's CLI is not installed:
     /// Copy command in the row's menu is all there is).
     static func button(installed: Bool, registered: Bool, busy: Bool) -> String? {

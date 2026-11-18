@@ -187,7 +187,9 @@ struct SettingsTests {
         check(ConnectCopy.button(installed: false, registered: false, busy: false) == nil, "not installed: no button, Copy only")
         check(ConnectCopy.otherApps == "Other apps: getcanvas.cc/download#connect", "the line under the Agents card")
         check(ConnectCopy.otherAppsURL.absoluteString == "https://getcanvas.cc/download#connect", "the download page's connect section")
-        check(ConnectCopy.added("Codex") == "Added. Start a new Codex session.", "the next step")
+        check(ConnectCopy.added("Codex") == "Added. New Codex sessions use it; restart any that are open.", "the next step, and that sessions already open must restart")
+        check(ConnectCopy.outdated == "Connected (older version, restart your agent session)", "an MCP from before an update")
+        check(!ConnectCopy.outdated.contains("\u{2014}") && !ConnectCopy.added("Codex").contains("\u{2014}"), "no em dash")
     }
 }
 
