@@ -3,6 +3,7 @@
 
 import Foundation
 import CoreGraphics
+import CryptoKit
 
 /// Page URLs the shell loads. Paths go in as query values, so `&`, `=`, `+` and `#` in a file name are encoded
 /// (URLComponents leaves `+` alone, and the server reads `+` as a space).
@@ -545,6 +546,85 @@ enum EmptyPage {
 
     static func isEmpty(fileOpen: Bool, home: Bool, loaded: Bool, boards: Int, cards: Int) -> Bool {
         fileOpen && !home && loaded && boards == 0 && cards == 0
+    }
+}
+
+/// Which server code is which, the way src/version.ts says it: a running server answers /health with its `version`
+/// (a hash of every file under its src folder) and its `root` (a hash of that folder's path). A server left running
+/// by an older Canvas (a quit that did not stop it, an update installed by hand) still answers on the port; the app
+/// must not attach to it and run old code, so at launch it compares that answer with its own server's code.
+enum ServerCode {
+    enum Choice: Equatable {
+        /// Nothing answers: start ours.
+        case start
+        /// It runs our code: use it.
+        case reuse
+        /// It runs other code: stop it (POST /quit, it saves first) and start ours.
+        case replace
+    }
+
+    /// What to do with whatever answers on the port. `running`: its /health answer, nil when nothing answers.
+    /// `own`: our server's version and root, nil when they could not be read (then a running server is kept: we
+    /// cannot tell it is old).
+    static func choice(running: (version: String?, root: String?)?, own: (version: String, root: String)?) -> Choice {
+        guard let running else { return .start }
+        guard let own else { return .reuse }
+        guard let v = running.version, v == own.version else { return .replace }
+        // A server from before `root` was in /health: the same code, so keep it.
+        if let r = running.root, r != own.root { return .replace }
+        return .reuse
+    }
+
+    /// The /health answer's version and root, when it is Canvas's.
+    static func health(_ data: Data) -> (version: String?, root: String?)? {
+        guard let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], j["ok"] as? Bool == true else { return nil }
+        return (j["version"] as? String, j["root"] as? String)
+    }
+
+    /// codeRootId: the first 12 hex digits of the SHA-1 of the src folder's real path (Node runs a module from its
+    /// real path, symlinks resolved).
+    static func rootId(srcDir: String) -> String {
+        hex(Insecure.SHA1.hash(data: Data(realPath(srcDir).utf8)))
+    }
+
+    private static func hex(_ d: Insecure.SHA1.Digest) -> String { String(d.map { String(format: "%02x", $0) }.joined().prefix(12)) }
+
+    /// version(): the first 12 hex digits of the SHA-1 over every regular file under the src folder, in the order
+    /// JavaScript sorts their paths, each as its relative path then its bytes. Like Node's recursive readdir: hidden
+    /// files count, a symlink to a file does not, a symlink to a folder is walked into. nil when the folder cannot be read.
+    static func version(srcDir: String) -> String? {
+        let root = realPath(srcDir)
+        let fm = FileManager.default
+        var files = [String]()
+        func walk(_ rel: String, depth: Int) {
+            guard depth < 40, let names = try? fm.contentsOfDirectory(atPath: rel.isEmpty ? root : root + "/" + rel) else { return }
+            for name in names {
+                let r = rel.isEmpty ? name : rel + "/" + name
+                let type = (try? fm.attributesOfItem(atPath: root + "/" + r))?[.type] as? FileAttributeType
+                if type == .typeRegular { files.append(r) }
+                else if type == .typeDirectory { walk(r, depth: depth + 1) }
+                else if type == .typeSymbolicLink {
+                    var isDir: ObjCBool = false
+                    if fm.fileExists(atPath: root + "/" + r, isDirectory: &isDir), isDir.boolValue { walk(r, depth: depth + 1) }
+                }
+            }
+        }
+        walk("", depth: 0)
+        if files.isEmpty { return nil }
+        files.sort { $0.utf16.lexicographicallyPrecedes($1.utf16) }
+        var sha = Insecure.SHA1()
+        for rel in files {
+            guard let bytes = FileManager.default.contents(atPath: root + "/" + rel) else { continue } // gone since the listing
+            sha.update(data: Data(rel.utf8))
+            sha.update(data: bytes)
+        }
+        return hex(sha.finalize())
+    }
+
+    static func realPath(_ p: String) -> String {
+        guard let r = realpath(p, nil) else { return (p as NSString).standardizingPath }
+        defer { free(r) }
+        return String(cString: r)
     }
 }
 
