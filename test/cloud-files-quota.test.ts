@@ -6,7 +6,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { memoryRoom, NodeSqlStore } from "../cloud/core/files/memory.ts";
-import { FileRoom, type Conn } from "../cloud/core/files/room.ts";
+import { FileRoom, FILE_NODE_CAP, type Conn } from "../cloud/core/files/room.ts";
+import { BOARD_CAP } from "../cloud/core/files/tree-sql.ts";
+import { Replica, PENDING_CAP } from "../cloud/core/files/replica.ts";
+import { stateFromFiles } from "../cloud/core/files/state.ts";
 import { reserveUpload, putUpload, StorageLedger, UploadError, UPLOAD_LIMITS, sniffType } from "../cloud/core/files/uploads.ts";
 import { LeaseBank, RoomLeases, LEASE_LIMITS } from "../cloud/core/files/leases.ts";
 import { RoleCache, ROLE_FRESH_MS } from "../cloud/core/files/access.ts";
@@ -120,4 +123,37 @@ test("a removal push that never arrived: the room asks the Team again after 60 s
   assert.equal(room.submit(ben, { type: "actions", epoch: 1, actions: [set(room, 4)] }).replies[0].type, "ack");
   cache.push(ben.author.id, "viewer");
   assert.equal(room.submit(ben, { type: "actions", epoch: 1, actions: [set(room, 5)] }).replies[0].type, "reject");
+});
+
+test("caps on the room's rows: a layer row stays under 2 MB, a file under 20,000 boards and 500 MB of layers", () => {
+  const room = seeded();
+  const send = (ops: Action["ops"]) => room.submit(anna, { type: "actions", epoch: 1, actions: [{ id: `cap-${++n}`, baseSeq: room.meta().seq, epoch: 1, at: "", ops }] }).replies[0];
+  // Overrides grow one path at a time; the third 900 KB one would pass the row cap.
+  const big = "x".repeat(900 * 1024);
+  assert.equal(send([{ k: "set", id: "i1", props: { "descendants/a": { v: { name: big } } } }]).type, "ack");
+  assert.equal(send([{ k: "set", id: "i1", props: { "descendants/b": { v: { name: big } } } }]).type, "ack");
+  const r = send([{ k: "set", id: "i1", props: { "descendants/c": { v: { name: big } } } }]);
+  assert.equal(r.type, "reject");
+  assert.match((r as { message: string }).message, /at most 2 MB/);
+  // The file's layer bytes are counted with every write; near the cap, growth is refused and shrinking is not.
+  const used = room.store.sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta").one().n;
+  assert.ok(used > 2 * 900 * 1024, `${used} bytes counted`);
+  room.store.sql.exec("UPDATE file_meta SET node_bytes = ? WHERE id = 1", FILE_NODE_CAP - 10);
+  const full = send([{ k: "insert", parent: "b2", after: null, node: { id: "more", type: "rectangle", name: "More" } }]);
+  assert.equal((full as { code: string }).code, "quota");
+  assert.equal(send([{ k: "set", id: "i1", props: { "descendants/a": null } }]).type, "ack", "a write that frees bytes goes through");
+  // Boards.
+  const many = memoryRoom(FILE);
+  many.seed({ children: Array.from({ length: BOARD_CAP }, (_, i) => ({ id: `b${i}`, type: "frame" })) });
+  const r2 = many.submit(anna, { type: "actions", epoch: 1, actions: [{ id: "one-more", baseSeq: 0, epoch: 1, at: "", ops: [{ k: "insert", parent: null, after: null, node: { id: "extra", type: "frame" } }] }] }).replies[0];
+  assert.match((r2 as { message: string }).message, /at most 20000 boards/);
+});
+
+test("a Mac keeps at most 50,000 ops waiting, then asks for a copy instead of queueing more", () => {
+  const s = seedDocument();
+  const r = new Replica(anna.author, stateFromFiles(s.document, s.envelope), 0, 1);
+  const ops: Action["ops"] = Array.from({ length: 100 }, () => ({ k: "set", id: "r1", props: { x: { v: 1 } } }));
+  for (let i = 0; i < PENDING_CAP.ops / 100; i++) r.pending.push({ action: { id: `p${i}`, baseSeq: 0, epoch: 1, at: "", ops }, sha: "", sent: false });
+  const out = r.propose([{ k: "set", id: "r1", props: { x: { v: 2 } } }]);
+  assert.ok("reject" in out && out.reject === "quota");
 });
