@@ -6,6 +6,18 @@
 - When a delta run finds a bug, rerun only the failing scenario after the fix, not the area.
 - Hand Codex and subagents the exact scenario words to run, so they don't fall back to a full suite.
 
+## Speed and token budget
+
+The Anthropic plan is the scarce resource. Codex is the coder; Claude plans, briefs, checks results and talks to the maintainer.
+
+- One session per job. Start it with a short brief that names the files and what done looks like, finish the job, archive the session. No session runs all day, and no session exists only to pass messages between other sessions.
+- Codex writes all code and runs its own delta QA, including native scenarios, in its own worktree (`codex exec -s workspace-write`), and reviews in `-s read-only`. Claude reads the report and the diff, not the whole job.
+- Launch long Codex jobs so they outlive the shell: `nohup codex exec ... > report.log 2>&1 &`, with the job writing its report file last. Check for the report file once when you expect it; never poll on a short timer.
+- Models: Opus for planning, design and hard review; Sonnet or Haiku for watching jobs, merging, building and installing.
+- Batch UI changes. Collect every tweak for an area in the design file first, then hand Codex one job for all of them, with one install and one QA pass.
+- Keep planning files short. `task_plan.md` stays under about 20 lines: open tasks only, done tasks move to `progress.md`.
+- A second reviewer only for risky code (Cloud, sync, file storage, security). Small UI changes get one Codex review.
+
 ## Releases
 
 - Before every release build, ask the maintainer whether to bump the version, and to what. Never bump it, or keep it, on your own.

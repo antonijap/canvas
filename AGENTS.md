@@ -21,6 +21,14 @@ Test the change, not the whole app. Full runs take hours and find nothing a targ
 4. Name what you ran and what passed in your report or commit message.
 
 Never run the full `pnpm qa`, the full `pnpm qa:native`, `qa:matrix` or `qa:swarm` unless the maintainer asks for that run by name. The pre-push scrub (`node qa/release.ts --quick --only scrub`) always runs: it is a privacy check, not a test.
+
+## Working fast
+
+- Test first, then fix. For a bug in the macOS app, write or extend the native scenario that shows it, run it and watch it fail, then fix until it passes. Run that scenario yourself before you hand back: a fix that passes only headless checks is not done.
+- Finish in one pass. Do the fix, the test, the delta QA and the commit in the same job. Hand back only when it passes, or with the exact failure and what you tried.
+- End every job with a short report: what changed (files), what you ran and its result, what is left. No logs pasted in; quote only the failing lines.
+- Read only what you need: `git diff`, the files you change and their tests. Find code with `grep` or `rg` before opening whole files.
+- Keep command output small: pipe long runs through `tail -40` or filter for `FAIL` and `error`.
 - Do not name other design tools or their companies in code, comments, docs, test names or UI text. Describe the behaviour instead.
 - Never commit secrets, personal paths, real people's names or binaries. The app is built from source, not committed.
 
