@@ -1,6 +1,7 @@
 // First run (src/onboarding.ts) and toasts you can act on, in the browser page: the hint that points at the app, the
 // welcome card's commands and Connected dot, and Undo on a board delete's toast.
 import fs from "node:fs";
+import { codeRootId, mcpCodeVersion } from "../src/version.ts";
 import { sc, type Rect, type T } from "./harness.ts";
 
 const rectOf = (t: T, sel: string) => t.ev<Rect>(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return { x: b.left, y: b.top, w: b.width, h: b.height }; })()`);
@@ -56,10 +57,9 @@ sc("first-run", "the welcome card has a row per agent, its menu copies the canva
   t.ok(/^codex mcp add canvas -- \S+ \S+\/mcp\/server\.ts$/.test(codex), `the Codex command: ${codex}`);
   const after = t.widgets().widgets.find((x: any) => x.id === w.id);
   t.eq([after.x, after.y], [w.x, w.y], "the menu clicks do not drag the card");
-  // An agent connects: canvas-mcp's hello, as mcp/client.ts sends it, with its code version (the server's: current).
+  // An agent connects: canvas-mcp's hello, as mcp/client.ts sends it, with its code version and copy (this copy, the code on disk: current).
   // Its row shows the green dot and Connected.
-  const version = (await (await fetch(`${t.srv.base}/health`)).json()).version;
-  await fetch(`${t.srv.base}/api/mcp/hello`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": "mcp-qa-1", "x-canvas-agent": "claude-code", "x-canvas-mcp-version": version }, body: "{}" });
+  await fetch(`${t.srv.base}/api/mcp/hello`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": "mcp-qa-1", "x-canvas-agent": "claude-code", "x-canvas-mcp-version": mcpCodeVersion(), "x-canvas-mcp-root": codeRootId() }, body: "{}" });
   await t.waitFor(`document.querySelector('${row("claude")} .wc-on').hidden === false`, "Connected", 6000);
   t.eq(await t.ev(`document.querySelector('${row("claude")} .wc-on').textContent`), "Connected", "the Claude Code row says Connected");
   t.eq(await t.ev(`document.querySelector('${row("claude")} .wc-btn').hidden`), true, "and has no button");
