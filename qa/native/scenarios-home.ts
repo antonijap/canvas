@@ -468,7 +468,7 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   copyDir(PLAYGROUND, original);
   await t.app.cmd({ op: "open", args: { file: original } });
   await t.waitState((s) => s.file === original, "the action tab to open");
-  const tab = (name: string) => t.mark({ id: "file-tab", label: name });
+  const tab = (name: string) => t.mark({ id: "file-tab", label: name, exact: true });
   const point = (r: { x: number; y: number; w: number; h: number }) => ({ x: r.x + r.w * 0.4, y: r.y + r.h / 2 });
   const order = [...(await t.state()).openFiles];
   const prefs = (await t.state()).prefs;
@@ -485,11 +485,19 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   await t.cmd("qa.cloud", { url: prefs.cloudUrl, devEmail: prefs.cloudDevEmail, name: prefs.cloudName });
   t.eq((await t.state()).openFiles, order, "right click leaves the tab order alone");
   await t.pickMenu("Rename...");
-  await t.mark({ id: "tab-rename" });
+  const menuEdit = await t.mark({ id: "tab-rename" });
+  const menuField = (await t.views()).find((v) => v.kind === "text" && v.editing && v.y < menuEdit.y + menuEdit.h && v.y + v.h > menuEdit.y);
+  t.ok(menuField, "menu rename focuses the field");
+  t.eq(menuField?.value, "tab-actions", "menu rename edits the intended tab");
+  t.eq(menuField?.selection, { location: 0, length: "tab-actions".length }, "menu rename selects the whole name");
   await t.type("tab-menu-renamed");
   await t.key("return");
   const renamed = path.join(t.app.docs, "tab-menu-renamed.canvas");
-  await t.waitState((s) => s.file === renamed, "menu rename to update the current file");
+  await t.waitState((s) => s.file === renamed, "menu rename to update the current file", 6000, async () => ({
+    tabs: await t.marks({ id: "file-tab" }),
+    editors: (await t.views()).filter((v) => v.kind === "text" && v.y < 70),
+    originalExists: fs.existsSync(original), renamedExists: fs.existsSync(renamed),
+  }));
   t.ok(fs.existsSync(renamed) && !fs.existsSync(original), "menu rename moved the package on disk");
   t.ok((await t.state()).recents.includes(renamed) && !(await t.state()).recents.includes(original), "Home recents follow the renamed file");
   // Start on an inactive tab too: the first click must switch without losing the second press.
