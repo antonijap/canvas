@@ -115,6 +115,8 @@ export class CloudHost {
   private readonly conns = new Set<Socket>();
   private readonly http = new Set<Socket>();
   private sockets = 0;
+  /** Room sockets open now (tests). */
+  openSockets(): number { return this.sockets; }
   private readonly failures = { start: 0, count: 0 };
   /** Called after people change (enrolment, removal, revocation), so the tunnel's key list can follow. */
   onPeopleChanged: () => void = () => {};
@@ -545,16 +547,21 @@ export class CloudHost {
       let all = 0;
       for (const r of this.rooms.values()) for (const s of r.sockets.values()) if (s.me.device === me.device) all++;
       if (all >= SOCKETS_PER_DEVICE) return refuse(429, "Too Many Requests");
-      const ws = upgrade(req, socket, head, { maxMessage: 8 * 1024 * 1024, maxFragments: 1024, pingMs: this.opts.pingMs });
-      if (!ws) return;
-      // An upgraded connection counts as a socket now, no longer as one of the plain HTTP connections.
-      this.http.delete(socket as Socket);
-      this.sockets++;
-      ws.on("close", () => { this.sockets--; });
-      const session: Session = { doc, me, ready: false, opened: Date.now(), window: Date.now(), messages: 0 };
-      room.sockets.set(ws, session);
-      ws.on("message", (text: string) => this.onMessage(room, ws, text));
-      ws.on("close", () => room.sockets.delete(ws));
+      // Registered before any byte that came with the upgrade is read (upgrade's `register`): a frame there that closes
+      // the socket at once still finds it counted and its close handled. The count goes back once, on whichever
+      // close comes first (the WebSocket's or the TCP connection's).
+      upgrade(req, socket, head, { maxMessage: 8 * 1024 * 1024, maxFragments: 1024, pingMs: this.opts.pingMs }, (ws) => {
+        // An upgraded connection counts as a socket now, no longer as one of the plain HTTP connections.
+        this.http.delete(socket as Socket);
+        this.sockets++;
+        let counted = true;
+        const release = () => { if (!counted) return; counted = false; this.sockets--; room.sockets.delete(ws); };
+        ws.on("close", release);
+        socket.once("close", release);
+        const session: Session = { doc, me, ready: false, opened: Date.now(), window: Date.now(), messages: 0 };
+        room.sockets.set(ws, session);
+        ws.on("message", (text: string) => this.onMessage(room, ws, text));
+      });
     } catch (e) {
       if (e instanceof HostError && e.status === 429) return refuse(429, "Too Many Requests");
       refuse(500, "Internal Server Error");
