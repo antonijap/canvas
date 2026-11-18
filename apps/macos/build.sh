@@ -12,7 +12,7 @@ QA_FLAGS=()
 QA_SRC=()
 if [ "${QA:-}" = "1" ]; then
   QA_FLAGS=(-D CANVAS_QA)
-  QA_SRC=(QA.swift)
+  QA_SRC=(QA.swift QAKey.swift)
 fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

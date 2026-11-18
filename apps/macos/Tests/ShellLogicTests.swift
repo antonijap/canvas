@@ -20,9 +20,67 @@ struct ShellLogicTests {
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
-        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress(); tabRenameFocus()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func tabRenameFocus() {
+        var session = TabRenameSession()
+        check(!session.finish(attached: false, editing: false), "detaching a rename field must not commit its session")
+        check(!session.finish(attached: true, editing: true), "restored field focus must not commit a queued blur")
+        check(session.finish(attached: true, editing: false), "a live field commits on settled focus loss")
+        check(!session.finish(attached: true, editing: false), "rename finishes only once")
+        var retired = TabRenameSession()
+        retired.retire()
+        check(!retired.finish(attached: true, editing: false), "a replaced field must not finish the active rename")
+
+        var rename = TabRename()
+        let file = "/documents/tab-actions.canvas"
+        let action = { rename.begin(file) }
+        check(rename.file == nil, "presenting a menu does not start rename")
+        action()
+        check(rename.file == file, "menu action sets the rename overlay state without a mouse event or run loop")
+        check(rename.draft == "tab-actions", "menu action prepares the selected tab name immediately")
+
+        var focus = TabRenameFocus()
+        var attempts = 0
+        var selections = 0
+        func attempt(attached: Bool, accepted: Bool) {
+            focus.attempt(attached: attached, makeFirstResponder: {
+                attempts += 1
+                return accepted
+            }, selectAll: { selections += 1 })
+        }
+        attempt(attached: false, accepted: true)
+        check(attempts == 0 && selections == 0, "rename waits for window attachment")
+        attempt(attached: true, accepted: false)
+        check(attempts == 1 && selections == 0, "rejected focus must not select text")
+        attempt(attached: true, accepted: true)
+        check(attempts == 2 && selections == 1, "retry focus and select the full name")
+        attempt(attached: true, accepted: true)
+        check(attempts == 2 && selections == 1, "updates must not reset the selection")
+        focus.detached()
+        attempt(attached: true, accepted: true)
+        check(attempts == 3 && selections == 2, "a reattached field must recover its editor after layout removes it")
+    }
+
+    static func tabPress() {
+        var press = TabPress()
+        check(press.down(button: 0, clicks: 1) == .none, "first press keeps its view alive")
+        check(press.up() == .click, "single click switches immediately on release")
+        check(press.down(button: 0, clicks: 2) == .none, "second press must not insert the editor under a held mouse")
+        check(!press.drag(20), "second click cannot start reorder")
+        check(press.up() == .rename, "rename after the second release, ready to select all")
+        check(press.up() == .none, "a release is handled only once")
+        _ = press.down(button: 0, clicks: 1)
+        check(!press.drag(3), "small movement stays a click")
+        check(press.drag(12), "single press drags past threshold")
+        check(press.up() == .drop, "drag drops instead of opening or renaming")
+        _ = press.down(button: 0, clicks: 1)
+        press.cancel()
+        check(press.up() == .none, "context menu cancels the press")
+        check(press.down(button: 1, clicks: 2) == .none && press.up() == .none, "secondary double click never renames")
     }
 
     static func tabSizing() {

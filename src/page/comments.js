@@ -154,6 +154,9 @@ function start(host) {
 .cm-bar svg{color:var(--c-muted-fg)}
 .cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
 .cm-hint{height:36px;padding:0 12px 0 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
+.native .cm-hint{left:auto;translate:none;bottom:var(--cm-hint-bottom,var(--c-inset));right:var(--cm-hint-right,var(--c-inset));max-width:calc(100% - var(--c-inset) - var(--cm-hint-right,var(--c-inset)));box-sizing:border-box}
+.native .cm-hint .cm-soft{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.native .cm-hint>b,.native .cm-hint>.cm-key,.native .cm-hint>span:first-child{flex-shrink:0}
 .cm-hint b{font-weight:600}
 .cm-hint .cm-soft{color:#ffffffa6}
 .cm-hint .cm-key{background:#ffffff26;color:#ffffffcc}
@@ -425,7 +428,8 @@ function start(host) {
       else pop.style.transform = "translate(-9999px,0)";
     }
     if (st.draft && at.has("draft") && !comp.hidden) { const o = L.popoverAt(at.get("draft"), size(comp, 320, 110), vw, vh); comp.style.transform = `translate(${o.x}px,${o.y}px)`; }
-    bar.style.bottom = hint.style.bottom = bottomOf();
+    bar.style.bottom = bottomOf();
+    if (!host.native) hint.style.bottom = bottomOf();
     const ins = host.insets || {};
     // In the app the shell's insets say what its islands cover; in the browser the bar sits under the page's own islands.
     let below = ins.t || 0;
@@ -438,7 +442,10 @@ function start(host) {
   host.on("render", schedule);
   host.on("visible", schedule);
   host.on("page", () => { st.open = null; closeDraft(); render(); });
-  host.on("cmd", (c) => { if (c && c.cmd === "insets") schedule(); if (c && c.cmd === "comment") setMode(!st.mode); });
+  host.on("cmd", (c) => {
+    if (c && c.cmd === "insets") schedule();
+    if (c && c.cmd === "comment") setMode(!st.mode);
+  });
   host.on("resync", () => load());
   if (host.es) host.es.addEventListener("comments", () => load());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });

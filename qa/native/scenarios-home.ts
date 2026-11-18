@@ -370,6 +370,12 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   t.ok(Math.abs(home1.x - home0.x) < 0.5 && home1.x + home1.w <= tb[0].x, "Home did not move and is still before the first file tab");
   t.near(tb[0].h, 32, 0.6, "tabs keep the control height");
 
+  // The whole control row shares a hover lock, including the boundaries between Home, tabs and +.
+  const controls = await t.mark({ id: "tab-controls" });
+  const open = await t.mark({ id: "tab-open" });
+  t.ok(controls.x <= home1.x && controls.x + controls.w >= open.x + open.w,
+    "one hover region covers Home, file tabs and +");
+
   // Home is not draggable: pulling it right changes nothing.
   const l1 = await last();
   await t.systemDrag(center(home1), { x: l1.x + l1.w, y: center(home1).y }, { steps: 4 });
@@ -416,12 +422,53 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   await t.waitState((s) => s.file === c, "Shift+Cmd+[ to the tab before");
 });
 
+sc("comments", "Comment hint shares the zoom island bottom edge and gap", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
+  const initial = await t.state();
+  await t.settle();
+  await t.key("c");
+  await t.waitJs("document.querySelector('.cm-hint')?.classList.contains('on')", "comment hint");
+  try {
+    for (const theme of ["light", "dark"]) {
+      await t.cmd("qa.theme", { theme });
+      for (const [width, height] of [[720, 420], [1280, 800], [2000, 1256]]) {
+        await t.cmd("qa.window", { width, height });
+        const zoom = await t.mark({ id: "zoom-island" });
+        await t.waitJs(`Math.abs(document.querySelector('.cm-hint').getBoundingClientRect().right + parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) - ${zoom.x}) <= 1`, "hint beside zoom", 8000, async () => {
+          const state = await t.state();
+          return {
+            theme, width, height, zoom, currentZoom: await t.mark({ id: "zoom-island" }),
+            window: state.window, webFrame: state.webFrame,
+            page: await t.js("const s = getComputedStyle(document.documentElement); return {hint:document.querySelector('.cm-hint').getBoundingClientRect().toJSON(),gap:s.getPropertyValue('--c-island-gap'),right:s.getPropertyValue('--cm-hint-right'),bottom:s.getPropertyValue('--cm-hint-bottom'),innerWidth,innerHeight,devicePixelRatio}"),
+          };
+        });
+        const hint = await t.js<{ bottom: number; right: number }>("const r = document.querySelector('.cm-hint').getBoundingClientRect(); return {bottom:r.bottom,right:r.right}");
+        t.near(hint.bottom, zoom.y + zoom.h, 1, `${theme} ${width}: bottom edges align`);
+        const state = await t.state();
+        const viewport = await t.js<{ w: number; h: number }>("return {w:innerWidth,h:innerHeight}");
+        t.near(state.webFrame.x, 0, 1, `${theme} ${width}: webview starts at window left`);
+        t.near(state.webFrame.y, 0, 1, `${theme} ${width}: webview starts at window top`);
+        t.near(viewport.w, state.window.width, 1, `${theme} ${width}: page fills window width`);
+        t.near(viewport.h, state.window.height, 1, `${theme} ${width}: page fills window height`);
+      }
+      await t.settle();
+      await shot(t, `comments-island-${theme}`);
+    }
+  } catch (error) {
+    await shot(t, "comments-island-failure");
+    throw error;
+  } finally {
+    await t.key("escape");
+    await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });
+    await t.cmd("qa.theme", { theme: initial.theme });
+  }
+});
+
 sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["tabs:context-menu", "tabs:rename-menu", "tabs:rename-double-click", "tabs:close-others", "tabs:drag-after-rename"] }, async (t: NT) => {
   const original = path.join(t.app.docs, "tab-actions.canvas");
   copyDir(PLAYGROUND, original);
   await t.app.cmd({ op: "open", args: { file: original } });
   await t.waitState((s) => s.file === original, "the action tab to open");
-  const tab = (name: string) => t.mark({ id: "file-tab", label: name });
+  const tab = (name: string) => t.mark({ id: "file-tab", label: name, exact: true });
   const point = (r: { x: number; y: number; w: number; h: number }) => ({ x: r.x + r.w * 0.4, y: r.y + r.h / 2 });
   const order = [...(await t.state()).openFiles];
   const prefs = (await t.state()).prefs;
@@ -438,26 +485,45 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   await t.cmd("qa.cloud", { url: prefs.cloudUrl, devEmail: prefs.cloudDevEmail, name: prefs.cloudName });
   t.eq((await t.state()).openFiles, order, "right click leaves the tab order alone");
   await t.pickMenu("Rename...");
-  await t.mark({ id: "tab-rename" });
+  const menuEdit = await t.mark({ id: "tab-rename" }).catch(async (error) => {
+    throw new Error(`${error}; tabRename=${JSON.stringify((await t.state()).tabRename)}; editors=${JSON.stringify((await t.views()).filter((v) => v.kind === "text" && v.y < 70))}`);
+  });
+  const menuField = (await t.views()).find((v) => v.kind === "text" && v.editing && v.y < menuEdit.y + menuEdit.h && v.y + v.h > menuEdit.y);
+  t.ok(menuField, "menu rename focuses the field");
+  t.eq(menuField?.value, "tab-actions", "menu rename edits the intended tab");
+  t.eq(menuField?.selection, { location: 0, length: "tab-actions".length }, "menu rename selects the whole name");
   await t.type("tab-menu-renamed");
   await t.key("return");
   const renamed = path.join(t.app.docs, "tab-menu-renamed.canvas");
-  await t.waitState((s) => s.file === renamed, "menu rename to update the current file");
+  await t.waitState((s) => s.file === renamed, "menu rename to update the current file", 6000, async () => ({
+    tabs: await t.marks({ id: "file-tab" }),
+    editors: (await t.views()).filter((v) => v.kind === "text" && v.y < 70),
+    originalExists: fs.existsSync(original), renamedExists: fs.existsSync(renamed),
+  }));
   t.ok(fs.existsSync(renamed) && !fs.existsSync(original), "menu rename moved the package on disk");
   t.ok((await t.state()).recents.includes(renamed) && !(await t.state()).recents.includes(original), "Home recents follow the renamed file");
-  await t.doubleClick(point(await tab("tab-menu-renamed")));
-  await t.mark({ id: "tab-rename" });
+  // Start on an inactive tab too: the first click must switch without losing the second press.
+  await t.systemClick(point(await tab(baseName(t.file))));
+  await t.waitState((s) => s.file === t.file && !s.homeShown, "real single click switches file tabs");
+  await t.systemClick(point(await tab("tab-menu-renamed")), { count: 2 });
+  const edit = await t.mark({ id: "tab-rename" });
+  const field = (await t.views()).find((v) => v.kind === "text" && v.editing && v.y < edit.y + edit.h && v.y + v.h > edit.y);
+  t.ok(field, "real double click focuses the rename field");
+  t.eq(field?.selection, { location: 0, length: "tab-menu-renamed".length }, "the whole name is selected");
   await t.type("tab-double-renamed");
   await t.key("return");
   const final = path.join(t.app.docs, "tab-double-renamed.canvas");
   await t.waitState((s) => s.file === final, "double click rename");
   t.ok(fs.existsSync(final) && !fs.existsSync(renamed), "double click rename moved the package on disk");
+  await tab("tab-double-renamed");
   t.eq((await t.state()).openFiles, order.map((f: string) => f === original ? final : f), "double click never reorders");
-  await t.doubleClick(point(await tab("tab-double-renamed")));
+  await t.systemClick(point(await tab("tab-double-renamed")), { count: 2 });
   await t.mark({ id: "tab-rename" });
   await t.type("cancelled-name");
   await t.key("escape");
   t.ok(fs.existsSync(final), "Escape cancels rename");
+  t.ok(!fs.existsSync(path.join(t.app.docs, "cancelled-name.canvas")), "Escape creates no renamed file");
+  t.eq((await t.marks({ id: "tab-rename" })).length, 0, "Escape closes the rename field");
   await t.doubleClick(point(await tab("tab-double-renamed")));
   await t.mark({ id: "tab-rename" });
   await t.type("tab-away-renamed");
@@ -467,7 +533,7 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   t.ok(fs.existsSync(away) && !fs.existsSync(final), "click away moved the package");
   const before = (await t.state()).openFiles as string[];
   const first = (await t.marks({ id: "file-tab" })).sort((a, b) => a.x - b.x)[0];
-  await t.drag(point(await tab("tab-away-renamed")), { x: first.x + 6, y: first.y + first.h / 2 }, { steps: 24 });
+  await t.systemDrag(point(await tab("tab-away-renamed")), { x: first.x + 6, y: first.y + first.h / 2 }, { steps: 24 });
   await sleep(500);
   t.eq((await t.state()).openFiles, [away, ...before.filter((f) => f !== away)], "drag reorder still works after renaming");
   await t.click(point(await tab("tab-away-renamed")), { right: true });

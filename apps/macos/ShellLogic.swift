@@ -5,6 +5,30 @@ import Foundation
 import CoreGraphics
 import CryptoKit
 
+/// One field instance may finish only its own live editing session.
+struct TabRenameSession {
+    private var finished = false
+    mutating func retire() { finished = true }
+    mutating func finish(attached: Bool, editing: Bool) -> Bool {
+        guard !finished, attached, !editing else { return false }
+        finished = true
+        return true
+    }
+}
+
+/// Initial rename focus waits for a window and a successful responder change.
+struct TabRenameFocus {
+    private var pending = true
+
+    mutating func detached() { pending = true }
+
+    mutating func attempt(attached: Bool, makeFirstResponder: () -> Bool, selectAll: () -> Void) {
+        guard pending, attached, makeFirstResponder() else { return }
+        pending = false
+        selectAll()
+    }
+}
+
 /// Page URLs the shell loads. Paths go in as query values, so `&`, `=`, `+` and `#` in a file name are encoded
 /// (URLComponents leaves `+` alone, and the server reads `+` as a space).
 enum DocURL {
@@ -129,9 +153,36 @@ enum TabList {
     }
 }
 
-/// Reordering the open file tabs by dragging. Home is pinned outside this list: it is never in `files`, never moves,
-/// and a tab never lands before it. Positions are in the tab strip's own space: tab i starts after the widths before
-/// it plus `gap` between neighbours.
+/// A tab keeps its pointer view through both halves of a click before replacing it with an editor.
+struct TabPress {
+    enum Action { case none, click, rename, drop }
+    private var clicks = 0
+    private(set) var moved = false
+    private var allowed = false
+    mutating func down(button: Int, clicks: Int) -> Action {
+        self.clicks = button == 0 ? clicks : 0
+        moved = false
+        allowed = TabOrder.canDrag(button: button, clicks: clicks, editing: false)
+        return .none
+    }
+    mutating func drag(_ dx: CGFloat) -> Bool {
+        guard allowed else { return false }
+        moved = moved || TabOrder.isDrag(dx)
+        return moved
+    }
+    mutating func up() -> Action {
+        // Inserting the editor on mouse-down lets the same click's release disturb its focus and selection.
+        let rename = clicks == 2
+        clicks = 0
+        if rename { allowed = false; return .rename }
+        guard allowed else { return .none }
+        allowed = false
+        return moved ? .drop : .click
+    }
+    mutating func cancel() { allowed = false; clicks = 0; moved = false }
+}
+
+/// Reordering file tabs. Home stays outside this list. Positions use the strip's widths and gaps.
 enum TabOrder {
     /// A press that moves less than this (points) is a click, never a drag.
     static let dragThreshold: CGFloat = 4
@@ -667,7 +718,16 @@ enum TipPlacement {
 }
 
 /// A visible package name typed into a file tab.
-enum TabRename {
+struct TabRename {
+    var file: String?
+    var draft = ""
+
+    /// Menu actions set the overlay state immediately; only field focus waits for attachment.
+    mutating func begin(_ file: String) {
+        draft = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+        self.file = file
+    }
+
     static func name(_ raw: String) -> String? {
         let n = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !n.isEmpty, !n.hasPrefix("."), !n.contains("/"), !n.contains("\0") else { return nil }
