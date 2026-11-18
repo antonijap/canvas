@@ -58,8 +58,12 @@ export async function deleteSecret(account: string): Promise<void> {
   await new Promise<void>((resolve) => execFile(bin(), ["delete-generic-password", "-s", SERVICE(), "-a", account], { timeout: 5000 }, () => resolve()));
 }
 
-/** A joined Cloud's secrets: the device token, the member tunnel address and this Mac's tunnel key. */
-export interface JoinedSecrets { token: string; addr: string; key: unknown }
+/**
+ * A joined Cloud's secrets: the device token, the member tunnel address and this Mac's tunnel key, with the public
+ * keys of the Cloud's two tunnels pinned at join time (hostKey: the enrolment tunnel the Cloud's id comes from;
+ * memberKey: the tunnel used from then on).
+ */
+export interface JoinedSecrets { token: string; addr: string; key: unknown; hostKey?: string; memberKey?: string }
 
 export async function readJoined(hostId: string): Promise<JoinedSecrets | null> {
   const raw = await readSecret(`hosted:${hostId}`);

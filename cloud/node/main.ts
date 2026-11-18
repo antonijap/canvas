@@ -30,12 +30,17 @@ async function handle(m: Record<string, unknown>): Promise<unknown> {
   const label = typeof m.label === "string" ? m.label : "";
   switch (m.op) {
     case "start": {
+      if (typeof m.hostId === "string") host.useHostId(m.hostId);
       const p = await host.start();
       return { port: p, hostId: host.hostId(), ownerToken: host.ownerDevice(label) };
     }
-    case "invite": return host.invite(label, (typeof m.role === "string" ? m.role : "editor") as Role);
+    case "invite": return host.invite(label, typeof m.role === "string" && m.role ? (m.role as Role) : undefined);
     case "people": return { people: host.people(), keys: host.deviceKeys(), pending: host.pendingInvites() };
-    case "config": { host.memberAddr = typeof m.memberAddr === "string" ? m.memberAddr : null; return { ok: true }; }
+    case "config": {
+      host.memberAddr = typeof m.memberAddr === "string" ? m.memberAddr : null;
+      host.memberKey = typeof m.memberKey === "string" ? m.memberKey : null;
+      return { ok: true };
+    }
     case "remove": return { removed: host.remove(String(m.personId ?? "")) };
     case "stop": {
       // Stop hosting: every token revoked, then the process ends.

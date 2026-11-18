@@ -1,9 +1,14 @@
 // The server side of a WebSocket (RFC 6455) on node:http's upgrade event, written out so the Cloud hosted on a Mac
 // needs no dependency: the handshake, masked client frames, text messages (fragments joined, UTF-8 checked), ping and
-// pong, close. Binary messages are refused (the Cloud speaks JSON text). A ping every 30 s finds a peer that went
-// away without closing (a laptop lid shut); no pong by the next ping and the socket is dropped.
+// pong, close. Binary messages are refused (the Cloud speaks JSON text). A ping every 30 s, with a random payload,
+// finds a peer that went away without closing (a laptop lid shut): only a pong carrying that payload counts, and with
+// none by the next ping the socket is dropped.
+//
+// Bounded on both sides: incoming bytes are kept as a list of chunks and joined once a whole frame is there (never
+// rejoined per chunk); outgoing bytes waiting for a slow peer have a budget, past which the socket is dropped; control
+// frames (pings) are limited to 20 in any 10 s.
 
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type http from "node:http";
 import type { Duplex } from "node:stream";
@@ -18,7 +23,12 @@ export interface WebSocketOptions {
   maxFragments?: number;
   /** How often the server pings; a peer that has not answered the previous ping by then is dropped. */
   pingMs?: number;
+  /** The most output bytes that may wait for a slow peer. More: the socket is dropped. */
+  maxQueued?: number;
 }
+
+/** Control frames a peer may send in any 10 s before the socket is closed. */
+export const CONTROL_FRAMES_PER_10S = 20;
 
 /** The handshake answer for a key, or null when the request is not a valid version 13 upgrade. */
 export function acceptKey(req: http.IncomingMessage): string | null {
@@ -47,11 +57,17 @@ export class ServerSocket extends EventEmitter {
   static readonly CLOSING = 2;
   static readonly CLOSED = 3;
   readyState = ServerSocket.OPEN;
-  private buffer: Buffer = Buffer.alloc(0);
+  private chunks: Buffer[] = [];
+  private queued = 0;
+  /** Bytes needed before the next frame can be read (a header, then the whole frame). */
+  private need = 2;
   private parts: Buffer[] = [];
   private partsSize = 0;
   private fragmented = false;
-  private awaitingPong = false;
+  private awaitingPong: Buffer | null = null;
+  private controlWindow = 0;
+  private controlCount = 0;
+  private readonly maxQueued: number;
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly max: number;
   private readonly maxParts: number;
@@ -62,6 +78,7 @@ export class ServerSocket extends EventEmitter {
     this.socket = socket;
     this.max = opts.maxMessage ?? 8 * 1024 * 1024;
     this.maxParts = opts.maxFragments ?? 1024;
+    this.maxQueued = opts.maxQueued ?? 32 * 1024 * 1024;
     socket.on("data", (chunk: Buffer) => this.feed(chunk));
     socket.on("close", () => this.finish(1006, ""));
     socket.on("error", () => this.finish(1006, ""));
@@ -69,8 +86,8 @@ export class ServerSocket extends EventEmitter {
     this.timer = setInterval(() => {
       if (this.readyState !== ServerSocket.OPEN) return;
       if (this.awaitingPong) { this.socket.destroy(); this.finish(1006, "No pong"); return; }
-      this.awaitingPong = true;
-      this.write(frame(0x9, Buffer.alloc(0)));
+      this.awaitingPong = randomBytes(8);
+      this.write(frame(0x9, this.awaitingPong));
     }, opts.pingMs ?? 30_000);
     this.timer.unref?.();
   }
@@ -100,9 +117,15 @@ export class ServerSocket extends EventEmitter {
     this.finish(1006, "");
   }
 
+  /** Writes, unless the peer is not reading: past the output budget the socket is dropped. */
   private write(b: Buffer): void {
-    if (!this.socket.destroyed && this.socket.writable) this.socket.write(b);
+    if (this.socket.destroyed || !this.socket.writable) return;
+    if (this.socket.writableLength + b.length > this.maxQueued) { this.terminate(); return; }
+    this.socket.write(b);
   }
+
+  /** Bytes waiting to go to the peer (tests). */
+  get waiting(): number { return this.socket.writableLength; }
 
   private finish(code: number, reason: string): void {
     if (this.readyState === ServerSocket.CLOSED) return;
@@ -113,24 +136,28 @@ export class ServerSocket extends EventEmitter {
 
   private fail(code: number, reason: string): void {
     this.close(code, reason);
-    this.buffer = Buffer.alloc(0);
+    this.chunks = []; this.queued = 0;
   }
 
   /** Bytes from the peer: the socket's data, and whatever arrived with the upgrade request. */
   feed(chunk: Buffer): void {
     if (this.readyState !== ServerSocket.OPEN) return;
-    this.buffer = this.buffer.length ? Buffer.concat([this.buffer, chunk]) : chunk;
+    this.chunks.push(chunk);
+    this.queued += chunk.length;
+    if (this.queued < this.need) return;
+    // Joined once now that the bytes needed are there, not on every chunk of a large frame.
+    let b = this.chunks.length === 1 ? this.chunks[0] : Buffer.concat(this.chunks, this.queued);
+    const keep = (rest: Buffer, need: number) => { this.chunks = rest.length ? [rest] : []; this.queued = rest.length; this.need = need; };
     while (this.readyState === ServerSocket.OPEN) {
-      const b = this.buffer;
-      if (b.length < 2) return;
+      if (b.length < 2) return keep(b, 2);
       const fin = (b[0] & 0x80) !== 0, rsv = b[0] & 0x70, opcode = b[0] & 0x0f;
       const masked = (b[1] & 0x80) !== 0;
       let len = b[1] & 0x7f, at = 2;
       if (rsv) return this.fail(1002, "Reserved bits set");
       if (!masked) return this.fail(1002, "Client frames must be masked");
-      if (len === 126) { if (b.length < 4) return; len = b.readUInt16BE(2); at = 4; }
+      if (len === 126) { if (b.length < 4) return keep(b, 4); len = b.readUInt16BE(2); at = 4; }
       else if (len === 127) {
-        if (b.length < 10) return;
+        if (b.length < 10) return keep(b, 10);
         const big = b.readBigUInt64BE(2);
         if (big > BigInt(this.max)) return this.fail(1009, "Message too big");
         len = Number(big); at = 10;
@@ -138,18 +165,25 @@ export class ServerSocket extends EventEmitter {
       const control = opcode >= 0x8;
       if (control && (len > 125 || !fin)) return this.fail(1002, "Bad control frame");
       if (!control && this.partsSize + len > this.max) return this.fail(1009, "Message too big");
-      if (b.length < at + 4 + len) return;
+      if (b.length < at + 4 + len) return keep(b, at + 4 + len);
       const mask = b.subarray(at, at + 4);
       const payload = Buffer.from(b.subarray(at + 4, at + 4 + len));
       for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
-      this.buffer = b.subarray(at + 4 + len);
+      b = b.subarray(at + 4 + len);
+      keep(b, 2);
+      if (control) {
+        const now = Date.now();
+        if (now - this.controlWindow >= 10_000) { this.controlWindow = now; this.controlCount = 0; }
+        if (++this.controlCount > CONTROL_FRAMES_PER_10S) return this.fail(1008, "Too many control frames");
+      }
       if (opcode === 0x8) {
         const code = payload.length >= 2 ? payload.readUInt16BE(0) : 1005;
         this.close(code === 1005 || code === 1006 ? 1000 : code, "");
         return;
       }
       if (opcode === 0x9) { this.write(frame(0xa, payload)); continue; }
-      if (opcode === 0xa) { this.awaitingPong = false; continue; }
+      // Only the answer to our own ping shows the peer is there; an unsolicited pong counts for nothing.
+      if (opcode === 0xa) { if (this.awaitingPong && payload.equals(this.awaitingPong)) this.awaitingPong = null; continue; }
       if (opcode === 0x2) return this.fail(1003, "Text messages only");
       if (opcode === 0x1) {
         if (this.fragmented) return this.fail(1002, "Expected a continuation");
@@ -164,7 +198,6 @@ export class ServerSocket extends EventEmitter {
         this.parts = []; this.partsSize = 0;
         let text: string;
         try { text = utf8.decode(whole); } catch { return this.fail(1007, "Invalid UTF-8"); }
-        this.awaitingPong = false; // any message shows the peer is there
         this.emit("message", text);
       }
     }

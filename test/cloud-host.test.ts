@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { CloudHost, INVITE_MS, newSecret, parseSecret } from "../cloud/node/host.ts";
-import { acceptKey } from "../cloud/node/websocket.ts";
+import { acceptKey, ServerSocket } from "../cloud/node/websocket.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const dirs: string[] = [];
@@ -241,11 +241,100 @@ test("storage: folder 0700, databases 0600, no token or code in clear; Stop revo
   assert.ok(!fs.existsSync(dir));
 });
 
-test("failed sign-ins are slowed: 30 a minute, then 429 for everyone (tunnel peers all arrive as 127.0.0.1)", async () => {
-  const { h, base } = await host();
+test("failed sign-ins are slowed: past 30 a minute a failing attempt gets 429, but a valid token always gets in", async () => {
+  const { h, base, port } = await host();
   const t = h.ownerDevice("Anna");
-  for (let i = 0; i < 30; i++) await fetch(`${base}/v1/info`, { headers: bearer(newSecret("ccd")) });
-  assert.equal((await fetch(`${base}/v1/info`, { headers: bearer(t) })).status, 429);
+  const doc = crypto.randomUUID();
+  h.team.register(doc, "x");
+  for (let i = 0; i < 40; i++) await fetch(`${base}/v1/info`, { headers: bearer(newSecret("ccd")) });
+  assert.equal((await fetch(`${base}/v1/info`, { headers: bearer(newSecret("ccd")) })).status, 429, "failing callers are throttled");
+  assert.equal((await post(base, "/v1/join", { token: newSecret("ccd") }, bearer(newSecret("ccj")))).status, 429, "join attempts too");
+  assert.equal((await fetch(`${base}/v1/info`, { headers: bearer(t) })).status, 200, "a valid device is never locked out");
+  const s = await rawSocket(port, t, doc);
+  assert.match(s.head(), /^HTTP\/1\.1 101/, "nor is its socket");
+  s.c.destroy();
+});
+
+test("re-inviting someone keeps their role unless the host picks one", async () => {
+  const { h } = await host();
+  h.invite("ben@studio.test", "commenter");
+  h.invite("ben@studio.test");
+  assert.equal(h.people().find((p) => p.label === "ben@studio.test")!.role, "commenter");
+  h.invite("ben@studio.test", "viewer");
+  assert.equal(h.people().find((p) => p.label === "ben@studio.test")!.role, "viewer");
+  h.invite("cy@studio.test");
+  assert.equal(h.people().find((p) => p.label === "cy@studio.test")!.role, "editor", "someone new is an editor");
+});
+
+/** A raw HTTP request whose body is held back: headers now, body when told. */
+async function slowPost(port: number, p: string, token: string, body: string) {
+  const c = net.connect(port, "127.0.0.1");
+  let out = "", closed = false;
+  c.on("data", (d) => (out += d)); c.on("close", () => { closed = true; }); c.on("error", () => {});
+  await new Promise<void>((r) => c.on("connect", () => r()));
+  c.write(`POST ${p} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer ${token}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n`);
+  c.write(body.slice(0, 5));
+  return { rest: () => c.write(body.slice(5)), out: () => out, closed: () => closed, c };
+}
+
+test("a removed device's request still sending its body is cut off and changes nothing", async () => {
+  const { h, base, port } = await host();
+  const owner = h.ownerDevice("Anna");
+  const ben = await join(base, h.invite("ben@studio.test").code);
+  const doc = crypto.randomUUID();
+  await post(base, "/v1/docs", { doc }, bearer(owner));
+  const thread = crypto.randomUUID();
+  const ops = JSON.stringify({ ops: [{ opId: crypto.randomUUID(), doc, at: new Date().toISOString(), op: { kind: "thread.create", thread, comment: crypto.randomUUID(), anchor: { x: 0, y: 0 }, body: "Late" } }] });
+  const pending = await slowPost(port, `/v1/docs/${doc}/ops`, ben.token, ops);
+  const reg = await slowPost(port, "/v1/docs", ben.token, JSON.stringify({ doc: crypto.randomUUID() }));
+  await sleep(100);
+  h.remove(ben.body.me.id);
+  pending.rest(); reg.rest();
+  await until(() => (pending.closed() || /^HTTP/.test(pending.out())) && (reg.closed() || /^HTTP/.test(reg.out())), 3000);
+  assert.ok(!/^HTTP\/1\.1 200/.test(pending.out()) && !/^HTTP\/1\.1 200/.test(reg.out()), "neither write was taken");
+  const read = await (await fetch(`${base}/v1/docs/${doc}/threads`, { headers: bearer(owner) })).json() as any;
+  assert.equal(read.threads.length, 0, "no comment from the removed device");
+  // And without the cut-off: a role lowered while the body arrives is checked again before the write.
+  const cy = await join(base, h.invite("cy@studio.test").code);
+  const late = await slowPost(port, "/v1/docs", cy.token, JSON.stringify({ doc: crypto.randomUUID() }));
+  await sleep(100);
+  h.invite("cy@studio.test", "viewer");
+  late.rest();
+  await until(() => /^HTTP/.test(late.out()) || late.closed(), 3000);
+  assert.match(late.out(), /^HTTP\/1\.1 403/, "demoted while sending: refused");
+});
+
+test("a join's body is never read before its code checks out, and it is small", async () => {
+  const { h, port, base } = await host();
+  const big = JSON.stringify({ token: newSecret("ccd"), device: "x".repeat(20_000) });
+  // A wrong code: answered at once, with nothing read and the connection closed.
+  const wrong = await slowPost(port, "/v1/join", newSecret("ccj"), big);
+  await until(() => /^HTTP/.test(wrong.out()), 2000);
+  assert.match(wrong.out(), /^HTTP\/1\.1 401/);
+  await until(() => wrong.closed(), 2000);
+  // A right code with a body over 4 KiB: refused, and the code is still there for a proper join.
+  const { code } = h.invite("ben@studio.test");
+  const r = await post(base, "/v1/join", JSON.parse(big), bearer(code));
+  assert.equal(r.status, 413);
+  assert.equal((await join(base, code)).status, 200, "the code was not used up by the refused body");
+});
+
+test("idle plain connections have their own cap and cannot take the room sockets' places", async () => {
+  const { h, port } = await host();
+  const t = h.ownerDevice("Anna");
+  const doc = crypto.randomUUID();
+  h.team.register(doc, "x");
+  const s = await rawSocket(port, t, doc);
+  const idle: net.Socket[] = [];
+  for (let i = 0; i < 80; i++) { const c = net.connect(port, "127.0.0.1"); c.on("error", () => {}); idle.push(c); }
+  await sleep(300);
+  const alive = idle.filter((c) => !c.destroyed).length;
+  assert.ok(alive <= 64, `at most 64 plain connections stay (${alive})`);
+  // The open room socket still works.
+  s.c.write(masked(0x1, Buffer.from(JSON.stringify({ type: "hello", protocol: 1, doc, since: 0 }))));
+  await until(() => s.body().toString("latin1").includes('"welcome"'), 2000);
+  for (const c of idle) c.destroy();
+  s.c.destroy();
 });
 
 // ---------- framing ----------
@@ -261,12 +350,14 @@ async function rawSocket(port: number, token: string, doc: string) {
   c.write([`GET /v1/docs/${doc}/socket HTTP/1.1`, "Host: 127.0.0.1", "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Version: 13", `Sec-WebSocket-Key: ${Buffer.alloc(16, 2).toString("base64")}`, `Authorization: Bearer ${token}`, "", ""].join("\r\n"));
   await until(() => Buffer.concat(chunks).includes("\r\n\r\n"));
   const body = () => { const all = Buffer.concat(chunks); return all.subarray(all.indexOf("\r\n\r\n") + 4); };
-  return { c, body, ended: () => ended };
+  const head = () => { const all = Buffer.concat(chunks); return all.subarray(0, all.indexOf("\r\n\r\n")).toString("latin1"); };
+  return { c, body, head, ended: () => ended };
 }
 const masked = (opcode: number, payload: Buffer, fin = true, rsv = 0) => {
   const mask = Buffer.from([1, 2, 3, 4]);
   const body = Buffer.from(payload.map((b, i) => b ^ mask[i & 3]));
-  const len = payload.length < 126 ? Buffer.from([0x80 | payload.length]) : Buffer.from([0x80 | 126, payload.length >> 8, payload.length & 255]);
+  const n = payload.length;
+  const len = n < 126 ? Buffer.from([0x80 | n]) : n < 65536 ? Buffer.from([0x80 | 126, n >> 8, n & 255]) : (() => { const b = Buffer.alloc(9); b[0] = 0x80 | 127; b.writeBigUInt64BE(BigInt(n), 1); return b; })();
   return Buffer.concat([Buffer.from([(fin ? 0x80 : 0) | rsv | opcode]), len, mask, body]);
 };
 const closeCode = (b: Buffer) => { const i = b.indexOf(0x88); return i >= 0 ? b.readUInt16BE(i + 2) : -1; };
@@ -320,6 +411,48 @@ test("framing: too many fragments close the socket; a peer that stops answering 
   s = await rawSocket(port, t, doc);
   s.c.write(masked(0x1, Buffer.from("hello")).subarray(0, 4));
   await until(() => s.ended(), 2000);
+});
+
+test("framing: a ping flood is closed, pongs never pile up for a peer that does not read, and unsolicited pongs are not liveness", async () => {
+  // A transport that never drains: whatever is written stays queued, as with a peer that stopped reading.
+  const { Duplex } = await import("node:stream");
+  const stalled = () => {
+    const d = new Duplex({ read() {}, write(_c, _e, _cb) { /* never acknowledged */ }, highWaterMark: 1 });
+    return d;
+  };
+  const ping = masked(0x9, Buffer.from("xx"));
+  let d = stalled();
+  let ws = new ServerSocket(d, { pingMs: 60_000 });
+  for (let i = 0; i < 100_000 && ws.readyState === ServerSocket.OPEN; i++) ws.feed(ping);
+  assert.notEqual(ws.readyState, ServerSocket.OPEN, "a flood of pings closes the socket");
+  assert.ok(ws.waiting < 1024, `and leaves almost nothing queued (${ws.waiting} bytes)`);
+  // Output past the budget for a peer that does not read: dropped, not queued without end.
+  d = stalled();
+  ws = new ServerSocket(d, { pingMs: 60_000, maxQueued: 64 * 1024 });
+  for (let i = 0; i < 100 && ws.readyState === ServerSocket.OPEN; i++) ws.send("x".repeat(4096));
+  assert.equal(ws.readyState, ServerSocket.CLOSED, "a slow consumer is dropped");
+  // Liveness: only the pong carrying our ping's payload counts.
+  d = stalled();
+  ws = new ServerSocket(d, { pingMs: 80 });
+  const t = setInterval(() => ws.feed(masked(0xa, Buffer.alloc(0))), 20);
+  await until(() => ws.readyState === ServerSocket.CLOSED, 2000);
+  clearInterval(t);
+});
+
+test("framing: a frame arriving in many small chunks is joined once, not once per chunk", async () => {
+  const d = new (await import("node:stream")).PassThrough();
+  const ws = new ServerSocket(d, { pingMs: 60_000 });
+  const got: string[] = [];
+  ws.on("message", (m: string) => got.push(m));
+  const text = "y".repeat(2 * 1024 * 1024);
+  const bytes = masked(0x1, Buffer.from(text));
+  const t0 = performance.now();
+  for (let i = 0; i < bytes.length; i += 64) ws.feed(bytes.subarray(i, i + 64));
+  const ms = performance.now() - t0;
+  assert.equal(got[0]?.length, text.length);
+  // Joined once: a few tens of ms. Rejoined per chunk (quadratic) it took most of a second here.
+  assert.ok(ms < 250, `2 MiB in 64-byte chunks takes ${ms.toFixed(0)} ms`);
+  ws.terminate();
 });
 
 test("acceptKey: the RFC 6455 example; anything but a version 13 upgrade is null", () => {

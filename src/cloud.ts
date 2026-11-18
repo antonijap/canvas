@@ -26,7 +26,7 @@ import { readBodyText } from "./body.ts";
 import { cloudConfig, hostedId, hostedUrl, hostOf, isLocalDev, parseInvite, setJoined } from "./cloud-config.ts";
 import { hostStatus, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
 import { deleteJoined, readJoined, writeJoined, type JoinedSecrets } from "./cloud-secrets.ts";
-import { forward, genkey, helperPath, type Helper } from "./cloud-tunnel.ts";
+import { forward, genkey, helperPath, hostIdFor, type Helper } from "./cloud-tunnel.ts";
 import { newSecret } from "../cloud/node/host.ts";
 import { acknowledge, confirm, discard, hooks, isShared, opsForShare, pendingStates, reject, retry, shareLocal, snapshot, viewOf, type SyncFile } from "./cloud-sync.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
@@ -53,7 +53,11 @@ async function tunnelOrigin(id: string, s: JoinedSecrets): Promise<string> {
   if (known instanceof Promise) return (await known).origin;
   const bin = helperPath();
   if (!bin) throw Object.assign(new Error("no helper"), { status: "unavailable" });
-  const p = forward(bin, s.key, s.addr);
+  const p = forward(bin, s.key, s.addr).then((f) => {
+    // The tunnel must reach the member key pinned when this Mac joined; anything else gets no token.
+    if (s.memberKey && f.server !== s.memberKey) { f.helper.stop(); throw Object.assign(new Error("The Cloud's key changed"), { status: "down" }); }
+    return f;
+  });
   forwards.set(id, p);
   try {
     const f = await p;
@@ -612,7 +616,7 @@ async function hostRoute(p: string, body: Record<string, unknown>): Promise<[num
         await wipeHosting();
         return [200, await hostStatus()];
       case "/api/cloud/host/invite":
-        return [200, { link: await invite(text(body.label, 120), text(body.role, 20) || "editor") }];
+        return [200, { link: await invite(text(body.label, 120), text(body.role, 20) || undefined) }];
       case "/api/cloud/host/remove":
         await removePerson(text(body.personId, 64));
         return [200, await hostStatus()];
@@ -646,9 +650,14 @@ export async function join(link: unknown, device: string): Promise<{ url: string
   const bin = helperPath();
   if (!bin) throw new CloudError(400, "invalid", WHY.unavailable);
   const key = await genkey(bin, "client");
-  let f: { helper: Helper; origin: string } | null = null;
+  let f: { helper: Helper; origin: string; server: string } | null = null;
   try {
     f = await forward(bin, key.key, inv.addr);
+    // The Cloud's id comes from the public key its tunnel reached, not from anything the other side says: an invite
+    // that names one Cloud and leads to another (a member passing his own Cloud off as the host's) stops here.
+    if (hostIdFor(f.server) !== inv.hostId) throw new CloudError(409, "conflict", "This invite leads to a different Cloud than the one it names. Ask the host for a new one.");
+    const existing = await readJoined(inv.hostId);
+    if (existing?.hostKey && existing.hostKey !== f.server) throw new CloudError(409, "conflict", "This Mac already joined a Cloud with that id and another key. Leave it first.");
     const token = newSecret("ccd");
     let res: Response;
     try {
@@ -664,8 +673,8 @@ export async function join(link: unknown, device: string): Promise<{ url: string
     const j = await res.json().catch(() => null) as any;
     if (res.status === 401) throw new CloudError(401, "unauthenticated", "This invite was already used or has expired. Ask for a new one.");
     if (!res.ok || !j) throw new CloudError(502, "server", "The Cloud refused the invite.");
-    if (j.hostId !== inv.hostId || typeof j.member !== "string") throw new CloudError(409, "conflict", "The Cloud that answered is not the one in the invite.");
-    if (!(await writeJoined(inv.hostId, { token, addr: j.member, key: key.key }))) throw new CloudError(500, "server", "Could not save the invite to the Keychain.");
+    if (j.hostId !== inv.hostId || typeof j.member !== "string" || typeof j.memberKey !== "string" || !/^nodekey:[0-9a-f]{64}$/.test(j.memberKey)) throw new CloudError(409, "conflict", "The Cloud that answered is not the one in the invite.");
+    if (!(await writeJoined(inv.hostId, { token, addr: j.member, key: key.key, hostKey: f.server, memberKey: j.memberKey }))) throw new CloudError(500, "server", "Could not save the invite to the Keychain.");
     joinedCache.delete(inv.hostId);
     const url = hostedUrl(inv.hostId);
     setJoined(url);

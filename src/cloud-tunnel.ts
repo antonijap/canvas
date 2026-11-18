@@ -15,6 +15,7 @@
 // to it: the listening socket must belong to the helper Canvas started (ownsPort), not to some other program.
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { HOST_PORT } from "../cloud/node/host.ts";
@@ -129,14 +130,27 @@ export async function serve(bin: string, key: unknown, allow: string[] | null, p
 }
 
 /** Forwards a local port on 127.0.0.1 to a Cloud's tunnel address. Checked: the port is the helper's own. */
-export async function forward(bin: string, key: unknown, addr: string, port = HOST_PORT): Promise<{ helper: Helper; origin: string }> {
+export async function forward(bin: string, key: unknown, addr: string, port = HOST_PORT): Promise<{ helper: Helper; origin: string; server: string }> {
   if (!isTunnelAddr(addr)) throw new Error("That is not a tunnel address");
   const h = run(bin, { op: "forward", key, addr, port });
   const e = await h.next();
   const local = Number(e.port);
   if (e.event !== "ready" || !Number.isInteger(local) || local < 1024 || local > 65535) { h.stop(); throw new Error(String(e.message ?? "The tunnel did not start")); }
+  // The public key the address names: WireGuard only completes with the holder of its private key.
+  if (typeof e.server !== "string" || !NODEKEY.test(e.server)) { h.stop(); throw new Error("The tunnel did not say whom it reaches"); }
   if (!(await ownsPort(h.child.pid!, local))) { h.stop(); throw new Error("Another program answered on the tunnel's port"); }
-  return { helper: h, origin: `http://127.0.0.1:${local}` };
+  return { helper: h, origin: `http://127.0.0.1:${local}`, server: e.server };
+}
+
+const NODEKEY = /^nodekey:[0-9a-f]{64}$/;
+
+/**
+ * A hosted Cloud's id, derived from the public key of its enrolment tunnel: a joining Mac checks that the Cloud an
+ * invite names is the one its tunnel reached, so no member can pass his own Cloud off as another.
+ */
+export function hostIdFor(nodekey: string): string {
+  const h = createHash("sha256").update(`canvas-cloud-host:${nodekey}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
 
 /** Whether `pid` is the process listening on 127.0.0.1:`port` (lsof; false when it cannot tell). */

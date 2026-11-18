@@ -104,6 +104,31 @@ async function main() {
   const secrets = fs.readFileSync(path.join(tmp, "Ben-secrets.json"), "utf8");
   line(secrets.length > 0, "and it is there");
 
+  // 3b. Cy hosts a Cloud of his own and passes it off as Anna's: his Cloud says it has her id, and his invite names it.
+  // Ben's Mac checks the id against the key its tunnel reached, refuses, and keeps Anna's Cloud as it was.
+  if (!REAL) { // the real tunnel serves 127.0.0.1:5190 only, so one Mac hosts one Cloud
+    const dirC = path.join(tmp, "cy");
+    fs.mkdirSync(dirC);
+    const sc = await startServer(dirC, env("Cy"));
+    scratch.push(sc);
+    const startedC = await call(sc, "/api/cloud/host/start", { name: "Studio Cloud", label: "Cy" });
+    const fake = await call(sc, "/api/cloud/host/invite", { label: "ben@studio.test" });
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(dirC, ".canvas-state", "cloud-host", "team.sqlite"));
+    db.exec("PRAGMA busy_timeout = 2000");
+    db.prepare("UPDATE host SET host_id = ? WHERE id = 1").run(started.j.hostId);
+    db.close();
+    const forged = new URL(fake.j.link);
+    forged.searchParams.set("host", started.j.hostId);
+    const beforeB = fs.readFileSync(path.join(tmp, "Ben-secrets.json"), "utf8");
+    const hijack = await call(sb, "/api/cloud/join", { link: forged.toString(), device: "Ben's MacBook" });
+    line(startedC.status === 200 && hijack.status !== 200 && /different Cloud/.test(hijack.j.error), `an invite to another Cloud under Anna's id is refused (${hijack.status}: ${hijack.j.error})`);
+    line(fs.readFileSync(path.join(tmp, "Ben-secrets.json"), "utf8") === beforeB, "Ben's saved Cloud is untouched");
+    await call(sc, "/api/cloud/host/stop");
+    await sc.stop();
+    scratch.splice(scratch.indexOf(sc), 1);
+  }
+
   // 4. Share and sync.
   const t1 = crypto.randomUUID(), c1 = crypto.randomUUID();
   await postOps(sa, pkgA, [op({ kind: "thread.create", thread: t1, anchor, comment: c1, body: "First, before sharing" })]);

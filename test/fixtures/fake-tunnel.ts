@@ -11,7 +11,9 @@ import path from "node:path";
 const dir = process.env.CANVAS_FAKE_TUNNEL_DIR ?? "";
 const out = (e: unknown) => process.stdout.write(JSON.stringify(e) + "\n");
 const pub = (key: any) => `nodekey:${createHash("sha256").update(String(key?.fake)).digest("hex")}`;
-const addrOf = (key: any) => `tc${createHash("sha256").update(`addr:${key?.fake}`).digest("base64url")}`;
+// An address carries its server's public key, as a real one does: "tc" and the key's hex.
+const addrOf = (key: any) => `tc${pub(key).slice("nodekey:".length)}`;
+const serverOf = (addr: string) => `nodekey:${addr.slice(2)}`;
 let cleanup = () => {};
 let first = true;
 let input = "";
@@ -54,7 +56,7 @@ function handle(o: any) {
       const end = () => { c.destroy(); up.destroy(); };
       c.on("error", end); up.on("error", end); c.on("close", end); up.on("close", end);
     });
-    server.listen(0, "127.0.0.1", () => out({ event: "ready", port: (server.address() as net.AddressInfo).port }));
+    server.listen(0, "127.0.0.1", () => out({ event: "ready", port: (server.address() as net.AddressInfo).port, server: serverOf(String(o.addr)) }));
     return;
   }
   out({ event: "error", message: "unknown op" });
