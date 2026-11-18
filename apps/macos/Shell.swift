@@ -130,7 +130,9 @@ struct RootView: View {
             // Quick actions (Cmd+K, Cmd+/): Palette.swift.
             CommandPaletteLayer(model: model)
         }
+        .coordinateSpace(name: "canvas")
         .frame(minWidth: 720, minHeight: 420)
+        .ignoresSafeArea()
         .onChange(of: model.revealBoardId) { _, board in if board != nil { model.panelOpen = true } }
         .onChange(of: insets) { _, v in model.setInsets(l: v[0], t: v[1], r: v[2], b: v[3]) }
         .onAppear { model.setInsets(l: insets[0], t: insets[1], r: insets[2], b: insets[3]) }
@@ -180,18 +182,18 @@ struct TopBar: View {
     @State private var dragging: String?
     @State private var dragX: CGFloat = 0
 
-    @State private var renaming: String?
-    @State private var renameDraft = ""
+    @State private var rename = TabRename()
 
     private func beginRename(_ file: String) {
-        renaming = file
-        renameDraft = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+        rename.begin(file)
+        traceTabRename("begin", file)
     }
 
     private func finishRename(_ save: Bool) {
-        guard let file = renaming else { return }
-        renaming = nil
-        if save { model.renameFile(file, to: renameDraft) }
+        guard let file = rename.file else { return }
+        traceTabRename(save ? "commit" : "cancel", file)
+        rename.file = nil
+        if save { model.renameFile(file, to: rename.draft) }
     }
 
     private func tabMenu(_ file: String, view: NSView, at: CGPoint) {
@@ -237,11 +239,13 @@ struct TopBar: View {
                        onClose: { model.close(f) }) { model.openTab(f) }
             .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
             .overlay {
-                if renaming == f {
-                    TabNameField(text: $renameDraft, finish: finishRename)
+                if rename.file == f {
+                    TabNameField(text: $rename.draft, finish: finishRename)
                         .frame(height: 20)
                         .padding(.leading, 10).padding(.trailing, 30)
                         .qaID("tab-rename", label: "Rename file")
+                        .onAppear { traceTabRename("overlay-appear", f) }
+                        .onDisappear { traceTabRename("overlay-disappear", f) }
                 } else {
                     TabPointer(onClick: { model.openTab(f) }, onRename: { beginRename(f) },
                                onMenu: { view, at in tabMenu(f, view: view, at: at) },
@@ -266,37 +270,40 @@ struct TopBar: View {
             .id(f)
     }
 
-    var body: some View {
+    private var bar: some View {
         HStack(alignment: .top, spacing: Metric.islandGap) {
             GlassPill {
                 HStack(spacing: 0) {
                     Color.clear.frame(width: Metric.trafficLights, height: Metric.control) // the traffic lights live here
-                    // Home: always first, never closed. Its name shows while no file is open; the glyph alone after.
-                    PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
-                              help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
-                        .keepsWindowStill()
-                        .qaID("home-tab", label: "Home")
-                        .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
-                        .animation(Motion.island, value: model.openFiles.isEmpty)
-                    FadingScroller(scrollTo: model.currentFile) {
-                        ForEach(Array(model.openFiles.enumerated()), id: \.element) { i, f in
-                            draggableTab(f, index: i)
+                    // One hover region: crossing between controls must not unlock the window.
+                    HStack(spacing: 0) {
+                        // Home: always first, never closed. Its name shows while no file is open; the glyph alone after.
+                        PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
+                                  help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
+                            .qaID("home-tab", label: "Home")
+                            .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
+                            .animation(Motion.island, value: model.openFiles.isEmpty)
+                        FadingScroller(scrollTo: model.currentFile) {
+                            ForEach(Array(model.openFiles.enumerated()), id: \.element) { i, f in
+                                draggableTab(f, index: i)
+                            }
                         }
+                        .frame(width: stripWidth)
+                        .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
+                        Menu {
+                            ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
+                        } label: {
+                            Image(systemName: "plus").symbolRenderingMode(.hierarchical)
+                                .symbolEffect(.bounce, value: model.openFiles.count)
+                                .font(.system(size: Metric.icon, weight: .medium)).foregroundStyle(Palette.mutedFg)
+                                .frame(width: Metric.control, height: Metric.control).contentShape(Circle())
+                        }
+                        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().chromeHelp("Open a canvas")
+                            .qaID("tab-open", label: "Open a canvas")
                     }
-                    .frame(width: stripWidth)
+                    .contentShape(Rectangle())
                     .keepsWindowStill()
-                    .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
-                    Menu {
-                        ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
-                    } label: {
-                        Image(systemName: "plus").symbolRenderingMode(.hierarchical)
-                            .symbolEffect(.bounce, value: model.openFiles.count)
-                            .font(.system(size: Metric.icon, weight: .medium)).foregroundStyle(Palette.mutedFg)
-                            .frame(width: Metric.control, height: Metric.control).contentShape(Circle())
-                    }
-                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().chromeHelp("Open a canvas")
-                    .keepsWindowStill()
-                        .qaID("tab-open", label: "Open a canvas")
+                    .qaID("tab-controls")
                 }
             }
             .background(WindowDragArea())
@@ -317,9 +324,20 @@ struct TopBar: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { actionsWidth = $0 }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    var body: some View {
+        // Measure the available width independently of the tab strip's previous fixed width.
+        GeometryReader { _ in bar }
+        .frame(height: Metric.pill)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
         // This bar sits in the window's titlebar strip, where AppKit shows no tooltips: its controls draw their own.
         .environment(\.titlebarTips, true)
+        .onAppear {
+            #if CANVAS_QA
+            QA.tabRenameFile = { rename.file }
+            #endif
+        }
     }
 }
 
@@ -538,6 +556,9 @@ struct ZoomCorner: View {
         ZoomPill(percent: model.zoom, zoomOut: { model.zoomBy(0.8) }, zoomIn: { model.zoomBy(1.25) },
                  reset: { model.zoomReset() }, fitPage: { model.fitPage() }, fitSelection: { model.fit() },
                  zoomTo: { model.zoomTo($0); model.focusCanvas() }, open: $model.zoomFieldOpen)
+            .qaID("zoom-island")
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("canvas")) } action: { model.setZoomCorner(frame: $0) }
+            .onDisappear { model.setZoomCorner(frame: .zero) }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     }
 }
@@ -561,8 +582,7 @@ private struct TabPointer: NSViewRepresentable {
         var menuAction: (NSView, CGPoint) -> Void = { _, _ in }
         var drag: (CGFloat) -> Void = { _ in }
         private var start: CGFloat = 0
-        private var allowed = false
-        private var moved = false
+        private var press = TabPress()
         override var mouseDownCanMoveWindow: Bool { false }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func hitTest(_ point: NSPoint) -> NSView? {
@@ -575,25 +595,35 @@ private struct TabPointer: NSViewRepresentable {
         }
         override func mouseDown(with event: NSEvent) {
             if event.modifierFlags.contains(.control) { rightMouseDown(with: event); return }
-            start = event.locationInWindow.x; moved = false
-            allowed = TabOrder.canDrag(button: event.buttonNumber, clicks: event.clickCount, editing: false)
-            if event.clickCount == 2 { rename() }
+            start = event.locationInWindow.x
+            perform(press.down(button: event.buttonNumber, clicks: event.clickCount))
         }
         override func mouseDragged(with event: NSEvent) {
-            guard allowed else { return }
             let dx = event.locationInWindow.x - start
-            if moved || TabOrder.isDrag(dx) { moved = true; drag(dx) }
+            if press.drag(dx) { drag(dx) }
         }
         override func mouseUp(with event: NSEvent) {
-            guard allowed else { return }
-            allowed = false
-            if moved { drop() } else { click() }
+            perform(press.up())
+        }
+        private func perform(_ action: TabPress.Action) {
+            switch action {
+            case .none: break
+            case .click: click()
+            case .rename: rename()
+            case .drop: drop()
+            }
         }
         override func rightMouseDown(with event: NSEvent) {
-            allowed = false; moved = false
+            press.cancel()
             menuAction(self, convert(event.locationInWindow, from: nil))
         }
     }
+}
+
+@MainActor private func traceTabRename(_ event: String, _ detail: String = "") {
+    #if CANVAS_QA
+    QA.recordTabRename(event, detail)
+    #endif
 }
 
 /// The field editor commits on focus loss and Return; Escape leaves the package untouched.
@@ -601,14 +631,15 @@ private struct TabNameField: NSViewRepresentable {
     @Binding var text: String
     let finish: (Bool) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(string: text)
+    func makeNSView(context: Context) -> Field {
+        let field = Field(string: text)
+        traceTabRename("create", String(describing: ObjectIdentifier(field)))
         field.delegate = context.coordinator
         context.coordinator.field = field
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak coordinator = context.coordinator] event in
             if let field = coordinator?.field, event.window === field.window,
                !field.bounds.contains(field.convert(event.locationInWindow, from: nil)) {
-                coordinator?.end(true)
+                coordinator?.end(true, reason: "outside-click")
             }
             return event
         }
@@ -616,29 +647,73 @@ private struct TabNameField: NSViewRepresentable {
         field.drawsBackground = true
         field.isBordered = false
         field.focusRingType = .default
-        DispatchQueue.main.async { field.window?.makeFirstResponder(field); field.selectText(nil) }
         return field
     }
-    func updateNSView(_ field: NSTextField, context: Context) { context.coordinator.owner = self }
-    final class Coordinator: NSObject, NSTextFieldDelegate {
+    func updateNSView(_ field: Field, context: Context) {
+        context.coordinator.owner = self
+        field.requestFocus()
+    }
+    static func dismantleNSView(_ field: Field, coordinator: Coordinator) {
+        // SwiftUI may replace the overlay during layout. Its old delegate and monitor no longer own the rename.
+        coordinator.retire()
+        field.retired = true
+        field.delegate = nil
+        traceTabRename("dismantle", String(describing: ObjectIdentifier(field)))
+    }
+    final class Field: NSTextField {
+        private var focus = TabRenameFocus()
+        var retired = false
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            traceTabRename(window == nil ? "detach" : "attach", String(describing: ObjectIdentifier(self)))
+            if window == nil { focus.detached() }
+            requestFocus()
+        }
+
+        func requestFocus() {
+            guard let window else { return }
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, !self.retired, let window, self.window === window else { return }
+                self.focus.attempt(attached: true, makeFirstResponder: {
+                    let accepted = window.makeFirstResponder(self)
+                    traceTabRename("focus", "\(ObjectIdentifier(self)) accepted=\(accepted)")
+                    return accepted
+                }, selectAll: { self.selectText(nil) })
+            }
+        }
+    }
+    @MainActor final class Coordinator: NSObject, NSTextFieldDelegate {
         var owner: TabNameField
         weak var field: NSTextField?
         var monitor: Any?
         deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
-        private var finished = false
+        private var session = TabRenameSession()
         init(_ owner: TabNameField) { self.owner = owner }
-        func end(_ save: Bool) {
-            guard !finished else { return }
-            finished = true
+        func retire() {
+            session.retire()
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        }
+        func end(_ save: Bool, reason: String, onlyIfBlurred: Bool = false) {
+            let accepted = session.finish(attached: field?.window != nil,
+                                          editing: onlyIfBlurred && field?.currentEditor() != nil)
+            traceTabRename("finish-\(reason)", "accepted=\(accepted) attached=\(field?.window != nil) editing=\(field?.currentEditor() != nil)")
+            guard accepted else { return }
             owner.finish(save)
         }
         func controlTextDidChange(_ notification: Notification) {
             if let field = notification.object as? NSTextField { owner.text = field.stringValue }
         }
-        func controlTextDidEndEditing(_ notification: Notification) { end(true) }
+        func controlTextDidEndEditing(_ notification: Notification) {
+            let responder = (field?.window?.firstResponder).map { String(describing: type(of: $0)) } ?? "nil"
+            traceTabRename("end-editing", "responder=\(responder) info=\(notification.userInfo ?? [:])")
+            // Menu restoration and view removal also end editing. Commit only if this instance is still live
+            // and still blurred after AppKit and SwiftUI finish their responder and layout changes.
+            DispatchQueue.main.async { [weak self] in self?.end(true, reason: "focus-loss", onlyIfBlurred: true) }
+        }
         func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            if selector == #selector(NSResponder.cancelOperation(_:)) { end(false); return true }
-            if selector == #selector(NSResponder.insertNewline(_:)) { end(true); return true }
+            if selector == #selector(NSResponder.cancelOperation(_:)) { end(false, reason: "escape"); return true }
+            if selector == #selector(NSResponder.insertNewline(_:)) { end(true, reason: "return"); return true }
             return false
         }
     }

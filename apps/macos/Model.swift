@@ -1113,11 +1113,19 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// The free rectangle last sent, so a freshly loaded page (tab switch, reload) gets it again: SwiftUI only
     /// sends insets when they change, and a new page starts with none.
     private var lastInsets: (CGFloat, CGFloat, CGFloat, CGFloat)?
+    private var zoomCornerFrame: CGRect = .zero
+    func setZoomCorner(frame: CGRect) {
+        zoomCornerFrame = frame
+        run("{cmd:'zoomCorner',left:\(frame.minX),bottom:\(frame.maxY)}")
+    }
     func setInsets(l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
         lastInsets = (l, t, r, b)
         run("{cmd:'insets',l:\(l),t:\(t),r:\(r),b:\(b)}")
     }
-    func resendInsets() { if let i = lastInsets { setInsets(l: i.0, t: i.1, r: i.2, b: i.3) } }
+    func resendInsets() {
+        if let i = lastInsets { setInsets(l: i.0, t: i.1, r: i.2, b: i.3) }
+        setZoomCorner(frame: zoomCornerFrame)
+    }
 
     /// Shows a toast. `durationMs` 0 keeps it until `clearToast()` (the bridge's wait prompts). A path or an error copies
     /// on click; an error gets Ask agent when an agent is installed; `actions` come from the page (Undo). A toast you
