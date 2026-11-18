@@ -271,32 +271,35 @@ struct TopBar: View {
             GlassPill {
                 HStack(spacing: 0) {
                     Color.clear.frame(width: Metric.trafficLights, height: Metric.control) // the traffic lights live here
-                    // Home: always first, never closed. Its name shows while no file is open; the glyph alone after.
-                    PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
-                              help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
-                        .keepsWindowStill()
-                        .qaID("home-tab", label: "Home")
-                        .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
-                        .animation(Motion.island, value: model.openFiles.isEmpty)
-                    FadingScroller(scrollTo: model.currentFile) {
-                        ForEach(Array(model.openFiles.enumerated()), id: \.element) { i, f in
-                            draggableTab(f, index: i)
+                    // One hover region: crossing between controls must not unlock the window.
+                    HStack(spacing: 0) {
+                        // Home: always first, never closed. Its name shows while no file is open; the glyph alone after.
+                        PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
+                                  help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
+                            .qaID("home-tab", label: "Home")
+                            .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
+                            .animation(Motion.island, value: model.openFiles.isEmpty)
+                        FadingScroller(scrollTo: model.currentFile) {
+                            ForEach(Array(model.openFiles.enumerated()), id: \.element) { i, f in
+                                draggableTab(f, index: i)
+                            }
                         }
+                        .frame(width: stripWidth)
+                        .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
+                        Menu {
+                            ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
+                        } label: {
+                            Image(systemName: "plus").symbolRenderingMode(.hierarchical)
+                                .symbolEffect(.bounce, value: model.openFiles.count)
+                                .font(.system(size: Metric.icon, weight: .medium)).foregroundStyle(Palette.mutedFg)
+                                .frame(width: Metric.control, height: Metric.control).contentShape(Circle())
+                        }
+                        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().chromeHelp("Open a canvas")
+                            .qaID("tab-open", label: "Open a canvas")
                     }
-                    .frame(width: stripWidth)
+                    .contentShape(Rectangle())
                     .keepsWindowStill()
-                    .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
-                    Menu {
-                        ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
-                    } label: {
-                        Image(systemName: "plus").symbolRenderingMode(.hierarchical)
-                            .symbolEffect(.bounce, value: model.openFiles.count)
-                            .font(.system(size: Metric.icon, weight: .medium)).foregroundStyle(Palette.mutedFg)
-                            .frame(width: Metric.control, height: Metric.control).contentShape(Circle())
-                    }
-                    .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().chromeHelp("Open a canvas")
-                    .keepsWindowStill()
-                        .qaID("tab-open", label: "Open a canvas")
+                    .qaID("tab-controls")
                 }
             }
             .background(WindowDragArea())
