@@ -759,12 +759,12 @@ features:
     name: Settings tabs (General, Canvas, Agents, Sounds, Performance, Privacy, Shortcuts)
     area: chrome
     driven: [native]
-    cases: [$themes, privacy, agents-model, updates, comment-name, cloud, cloud-name, cloud-host, alignment]
+    cases: [$themes, privacy, agents-model, updates, comment-name, cloud, cloud-name, cloud-host, cloud-many, add-cloud, cloud-join, cloud-remove, cloud-share-pick, alignment]
   - id: home
     name: Home, the pinned first tab (recents, files on this Mac, a team server, first launch)
     area: chrome
     driven: [native]
-    cases: [pinned, shortcut, recents, card-open, remove, first-launch, server, server-name, thumbnail, alignment, $themes]
+    cases: [pinned, shortcut, recents, card-open, remove, first-launch, server, server-name, clouds, thumbnail, alignment, $themes]
   - id: tabs
     name: File tabs drag left and right to reorder (a short move is a click, Home stays first), the order is kept, and Shift+Cmd+[ and ] follow it
     area: chrome

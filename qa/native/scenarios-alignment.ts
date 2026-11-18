@@ -83,21 +83,21 @@ sc("settings", "alignment: General, Cloud (with and without a server) and Agents
   const url = `http://127.0.0.1:${(team.address() as { port: number }).port}`;
   const bad: string[] = [];
   try {
-    // Cloud with no server: the address field and Sign in share one line.
-    await t.cmd("qa.cloud", { url: "", devEmail: "", name: "" });
+    // Cloud with no Cloud yet: "No Clouds yet" and Add Cloud share one line.
+    await t.cmd("qa.cloud", { clouds: [], select: null });
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
       await openSettings(t, "Cloud");
-      await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000);
+      await t.mark({ id: "cloud-add", window: "settings" }, 4000);
       const s = await grab(t, "settings");
       const k = new AlignChecker("native-settings", theme, s.img, s.k);
-      await fieldButton(t, k, s, "Sign in", "cloud-setup-sign-in");
-      const field = await one(t, "settings", "cloud-url"), signIn = await one(t, "settings", "field-button", "Sign in");
-      k.near("cloud setup: the placeholder's cap middle on the field's centre line", line(s, field, 13, "https://your-team.workers.dev")?.cap, cy(box(field)));
-      k.near("cloud setup: Sign in on the field's centre line", cy(box(signIn)), cy(box(field)));
+      await fieldButton(t, k, s, "Add Cloud", "cloud-list-add");
+      const add = await one(t, "settings", "cloud-add"), none = (await marks(t, "settings", "text", "No Clouds yet"))[0] ?? null;
+      k.near("cloud list: the empty line's cap middle on Add Cloud's centre line", line(s, none, 13, "No Clouds yet")?.cap, cy(box(add)));
       bad.push(...k.bad);
     }
     await t.cmd("qa.cloud", { url, devEmail: "anna@studio.test" });
+    await t.cmd("qa.cloud", { select: (await t.cmd("qa.cloud", {})).clouds[0].id });
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
       // General: Check for Updates, the comment name's field.
@@ -117,16 +117,14 @@ sc("settings", "alignment: General, Cloud (with and without a server) and Agents
       const name = await one(t, "settings", "comment-name");
       k.near("comment name: the text's cap middle on the field's centre line", line(s, name, 13, "Anna Lee")?.cap, cy(box(name)));
       bad.push(...k.bad);
-      // Cloud: Sign out, Share Comments, the status dot.
+      // Cloud: the Cloud's page, Sign out and Remove, the name field.
       await openSettings(t, "Cloud");
       await t.waitFor(async () => (await marks(t, "settings", "cloud-status")).some((m) => m.label === "Connected"), "the cloud status to say Connected", 15_000);
       s = await grab(t, "settings");
       k = new AlignChecker("native-settings", theme, s.img, s.k);
       await fieldButton(t, k, s, "Sign out", "cloud-sign-out");
-      await fieldButton(t, k, s, "Share Comments", "cloud-share");
-      await dotOnText(t, k, s, "status-dot", await one(t, "settings", "cloud-status"), 13, "cloud-status");
-      const urlField = await one(t, "settings", "cloud-url");
-      k.near("server address: the text's cap middle on the field's centre line", line(s, urlField, 13, "http://127.0.0.1:1")?.cap, cy(box(urlField)));
+      const nameField = await one(t, "settings", "cloud-name");
+      k.near("Cloud name: the placeholder's cap middle on the field's centre line", line(s, nameField, 13, "127.0.0.1:1")?.cap, cy(box(nameField)));
       bad.push(...k.bad);
       // Agents: each row's Connect and status dot (Copy and the model menus moved into the row's … menu), and that menu.
       await t.cmd("qa.agents", { added: ["claude"] });
@@ -256,18 +254,17 @@ sc("home", "alignment: Home's tab, header buttons, sidebar rows, card lines and 
   fs.writeFileSync(path.join(t.file, "comments.json"), JSON.stringify({ format: 1, doc, seq: 0, server: { url }, threads: [thread(), thread()], outbox: [] }));
   const bad: string[] = [];
   try {
-    // Cloud with no server: the address field and Sign in share one line.
-    await t.cmd("qa.cloud", { url: "", devEmail: "", name: "" });
+    // Cloud with no Cloud yet: "No Clouds yet" and Add Cloud share one line.
+    await t.cmd("qa.cloud", { clouds: [], select: null });
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
       await openSettings(t, "Cloud");
-      await t.mark({ id: "cloud-sign-in", window: "settings" }, 4000);
+      await t.mark({ id: "cloud-add", window: "settings" }, 4000);
       const s = await grab(t, "settings");
       const k = new AlignChecker("native-settings", theme, s.img, s.k);
-      await fieldButton(t, k, s, "Sign in", "cloud-setup-sign-in");
-      const field = await one(t, "settings", "cloud-url"), signIn = await one(t, "settings", "field-button", "Sign in");
-      k.near("cloud setup: the placeholder's cap middle on the field's centre line", line(s, field, 13, "https://your-team.workers.dev")?.cap, cy(box(field)));
-      k.near("cloud setup: Sign in on the field's centre line", cy(box(signIn)), cy(box(field)));
+      await fieldButton(t, k, s, "Add Cloud", "cloud-list-add");
+      const add = await one(t, "settings", "cloud-add"), none = (await marks(t, "settings", "text", "No Clouds yet"))[0] ?? null;
+      k.near("cloud list: the empty line's cap middle on Add Cloud's centre line", line(s, none, 13, "No Clouds yet")?.cap, cy(box(add)));
       bad.push(...k.bad);
     }
     await t.cmd("qa.cloud", { url, devEmail: "anna@studio.test" });
@@ -284,7 +281,7 @@ sc("home", "alignment: Home's tab, header buttons, sidebar rows, card lines and 
       await t.click(center(tab!));
       await t.waitState((s) => s.homeShown, "Home");
       await t.mark({ id: "home-row", label: "Recents" });
-      await t.waitFor(async () => (await t.marks({ id: "home-server-dot" }))[0]?.label === "Connected", "the server's dot to say Connected", 20_000);
+      await t.mark({ id: "home-add-cloud" }, 6000);
       s = await grab(t);
       k = new AlignChecker("native-home", theme, s.img, s.k);
       for (const [label, name] of [["Open", "home-open"], ["New file", "home-new"]]) await fieldButton(t, k, s, label, name);
@@ -298,7 +295,9 @@ sc("home", "alignment: Home's tab, header buttons, sidebar rows, card lines and 
         k.near(`sidebar row ${row.label}: the name's cap middle on the row's centre line`, line(s, txt, 13, row.label ?? "")?.cap, cy(box(row)));
       }
       const srvRow = (await marks(t, "main", "home-row")).find((r) => r.label && /127\.0\.0\.1/.test(r.label)) ?? null;
-      await dotOnText(t, k, s, "home-server-dot", inside((await t.marks({ id: "text", label: srvRow?.label ?? "" })) as Mark[], srvRow), 13, "home-server-row");
+      // The Clouds label's + on the label's cap middle.
+      const plus = await one(t, "main", "home-add-cloud"), cloudsLabel = (await marks(t, "main", "text", "Clouds"))[0] ?? null;
+      k.near("sidebar: the Clouds label's + on its cap middle", midY(k.ink("home-add-cloud", bare(box(plus)), { inset: 0 })), line(s, cloudsLabel, 11, "Clouds")?.cap);
       // A card's line under its name: the cloud of a shared file on its time, the bubble on the count.
       const card = (await marks(t, "main", "home-card", path.basename(t.file).replace(/\.canvas$/, "")))[0] ?? null;
       const below = card ? { x: card.x, y: card.y + card.h, w: card.w, h: 60 } : null;
@@ -309,15 +308,16 @@ sc("home", "alignment: Home's tab, header buttons, sidebar rows, card lines and 
       const bubble = count ? (await marks(t, "main", "home-card-comments-glyph")).find((g) => Math.abs(g.y + g.h / 2 - (count.y + count.h / 2)) < 6 && g.x < count.x) ?? null : null;
       k.near("card: the bubble's middle on the count's cap middle", midY(k.ink("home-card-bubble", bare(box(bubble)), { inset: 0 })), line(s, count, 12)?.cap);
       bad.push(...k.bad);
-      // The server view: its status dot on the status line.
+      // The Cloud's page: its gear level with the sidebar's search field, the gear centred in its button.
       await t.click(center(srvRow!));
-      await t.waitState((st) => st.homeSection === "server", "the server view");
-      await t.mark({ id: "home-server-card" }, 8000);
-      await t.waitFor(async () => (await t.marks({ id: "text", label: "Connected as" })).length > 0, "Connected as", 15_000);
+      await t.waitState((st) => st.homeSection === "cloud", "the Cloud's page");
+      await t.mark({ id: "home-cloud-settings" }, 8000);
       s = await grab(t);
       k = new AlignChecker("native-home", theme, s.img, s.k);
-      await dotOnText(t, k, s, "home-status-dot", (await t.marks({ id: "text", label: "Connected as" }))[0] as Mark, 13, "home-server-status");
-      await fieldButton(t, k, s, "Cloud settings", "home-cloud-settings");
+      const gear = await one(t, "main", "home-cloud-settings"), search2 = await one(t, "main", "home-search");
+      k.near("Cloud page: the gear's middle on the search field's middle", cy(box(gear)), cy(box(search2)));
+      const gi = k.ink("home-cloud-gear", bare(box(gear)), { inset: 0 });
+      k.near("Cloud page: the gear centred across its button", midX(gi), cx(box(gear)));
       bad.push(...k.bad);
       await t.click(center(await t.mark({ id: "home-row", label: "Recents" })));
       await t.waitState((st) => st.homeSection === "recents", "Recents");

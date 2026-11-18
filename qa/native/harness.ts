@@ -9,7 +9,8 @@ import type { QaApp } from "./app.ts";
 export { Fail, Skip, find };
 export type Pt = { x: number; y: number };
 export type Mods = ("cmd" | "shift" | "alt" | "ctrl")[];
-type Win = "main" | "settings" | "key" | "modal" | "menu" | "popover" | "about";
+// "Add Cloud": the Add Cloud sheet (CloudSettings.swift AddCloudPanel), found by its title.
+type Win = "main" | "settings" | "key" | "modal" | "menu" | "popover" | "about" | "Add Cloud";
 
 export const center = (r: Rect): Pt => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
 

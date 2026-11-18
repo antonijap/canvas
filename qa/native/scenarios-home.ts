@@ -164,6 +164,9 @@ sc("home", "Home: recents newest first, comment count and a cloud on a shared ca
     t.eq((await t.marks({ id: "home-filter" })).length + (await t.marks({ id: "home-segment" })).length, 0, "no filter segments over the cards: the sidebar picks");
     const rows = await t.marks({ id: "home-row" });
     sameHeight(t, "sidebar rows", rows);
+    // The Clouds sit under a quiet label with a + (Add Cloud), not as a row of their own.
+    await t.mark({ id: "home-add-cloud", label: "Add Cloud" });
+    t.eq((await t.marks({ id: "home-row", label: "Add Cloud" })).length, 0, "no Add Cloud row: the label's + adds one");
     t.ok(rows.every((r) => Math.abs(r.x - rows[0].x) < 0.6 && Math.abs(r.w - rows[0].w) < 0.6), "sidebar rows share one left edge and width");
     t.near(search.x, rows[0].x, 0.6, "the search field and the rows share their left edge");
     t.near(search.w, rows[0].w, 0.6, "and their width");
@@ -207,22 +210,25 @@ sc("home", "Home: recents newest first, comment count and a cloud on a shared ca
     t.eq(menu, ["Open", "Show in Finder", "Remove from recents"], "the card's menu");
     await t.pickMenu("Remove from recents");
     await t.waitState((s) => !s.recents.includes(c), "home-c to leave the recents");
-    // The server row and the server view.
-    const dot = await t.mark({ id: "home-server-dot" }, 15_000);
-    await t.waitFor(async () => (await t.marks({ id: "home-server-dot" }))[0]?.label === "Connected", "the server's dot to say Connected", 20_000);
-    const dotNow = (await t.marks({ id: "home-server-dot" }))[0] ?? dot;
-    const row = (await t.marks({ id: "home-row" })).find((r) => Math.abs(midY(r) - midY(dotNow)) < 1);
-    t.ok(row, "the dot sits on its server row's centre line");
-    await t.click(center(row!));
-    await t.waitState((s) => s.homeSection === "server", "the server view");
-    await t.waitText("Connected as anna@studio.test, owner", undefined, 15_000);
-    t.ok((await t.marks({ id: "home-server-file", label: "home-b" })).length === 1, "the server view lists the file shared to it");
-    t.ok((await t.marks({ id: "home-server-file", label: "home-c" })).length === 0, "and not a file that is not shared");
-    await t.findText("3 open");
-    await shot(t, "home-server-light");
+    // The Cloud's row and its page: no dot while it works (a row speaks only when it needs the person), the same cards
+    // as Recents under its name, a gear for its settings, and no status card or table.
+    const row = await t.mark({ id: "home-row", label: host }, 15_000);
+    await sleep(1500);
+    t.eq((await t.marks({ id: "home-cloud-word" })).length, 0, "a Cloud that works shows no word and no dot");
+    t.eq((await t.marks({ id: "home-server-dot" })).length, 0, "no green dots");
+    await t.click(center(row));
+    await t.waitState((s) => s.homeSection === "cloud", "the Cloud's page");
+    t.ok((await t.marks({ id: "home-card", label: "home-b" })).length === 1, "the Cloud's page shows the file shared to it as a card");
+    t.ok((await t.marks({ id: "home-card", label: "home-c" })).length === 0, "and not a file that is not shared");
+    t.eq((await t.marks({ id: "home-server-card" })).length + (await t.marks({ id: "home-server-file" })).length, 0, "no status card, no table");
+    t.eq((await t.marks({ id: "home-card-where-glyph" })).length, 0, "no cloud before each time: every card here is on this Cloud");
+    t.eq((await t.marks({ id: "home-cloud-pill" })).length, 0, "no pill while the Cloud works");
+    await t.mark({ id: "home-cloud-settings", label: "Cloud settings" });
+    await t.findText("3");
+    await shot(t, "home-cloud-light");
     await t.cmd("qa.theme", { theme: "dark" });
     await sleep(500);
-    await shot(t, "home-server-dark");
+    await shot(t, "home-cloud-dark");
     await t.cmd("qa.theme", { theme: "light" });
     await sleep(300);
     // A card opens its file in a tab, or shows the tab it is already in.
@@ -300,9 +306,11 @@ sc("home", "Both sidebars drag from their right edge, stop at a minimum and a ma
   t.eq(start, 232, "the Home sidebar starts at its default");
   t.near(await dragEdge(t, "homeSidebarWidth", 60), 292, 1.5, "dragging right 60 pt widens by 60");
   t.eq(await dragEdge(t, "homeSidebarWidth", -900), 200, "dragging far left stops at the minimum");
-  const row = await t.mark({ id: "home-row", label: "Add Cloud" });
-  const label = await t.mark({ id: "text", label: "Add Cloud" });
+  const row = await t.mark({ id: "home-row", label: "Learn Canvas" });
+  const label = await t.mark({ id: "text", label: "Learn Canvas" });
   t.ok(label.x + label.w <= row.x + row.w - 8, "at the minimum the longest label still fits its row");
+  const plus = await t.mark({ id: "home-add-cloud" });
+  t.ok(plus.x + plus.w <= row.x + row.w + 0.6, "and the Clouds label's + stays inside the sidebar");
   await shot(t, "home-sidebar-min");
   const max = await dragEdge(t, "homeSidebarWidth", 900);
   t.ok(max <= 360 && max >= 280, `dragging far right stops at the maximum (${max})`);

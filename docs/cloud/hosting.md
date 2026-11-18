@@ -4,10 +4,10 @@ A Cloud keeps a file's comments in sync between people. You can host one on your
 
 ## Start hosting
 
-1. Open Settings > Cloud and turn on **Host a Cloud**.
-2. Under **Add person**, type the person's name or email and click **Copy Invite**. The invite link is now on your clipboard. Canvas never shows it on screen.
+1. In Home, click **+** next to **Clouds** (or **Add Cloud** in Settings > Cloud), choose **Host on this Mac**, give the Cloud a name and click **Start hosting**. You can host several Clouds at once, one per team: each has its own people and invites.
+2. Open the Cloud's settings (the gear on its page in Home). Type the person's name or email and click **Copy Invite**. The invite link is now on your clipboard. Canvas never shows it on screen.
 3. Send it to them the way you like (a message, an email). It works once, within 48 hours.
-4. They open the link (or paste it into Settings > Cloud on their Mac). Canvas asks them first and shows the Cloud's name and a short **fingerprint**. Read yours from Settings > Cloud: they should match.
+4. They open the link (or choose **Join with an invite** in Add Cloud and paste it). Canvas shows them the Cloud's name, a short **fingerprint** and what joining means before they click Join. Read yours from the Cloud's settings: they should match.
 
 Their Mac then appears under your Cloud's people as "Joined from" its name. To remove someone, click **Remove**: their Macs lose access at once and any invite still waiting for them stops working.
 
@@ -23,12 +23,12 @@ Canvas never sends comments over plain, unencrypted network connections. The Clo
 - Deleting a comment empties it, but its text stays in the Cloud's history, and each person keeps their own copy of the comments they already have.
 - Removing someone stops their access from then on. It cannot take back what they already have on their Mac.
 - While you host, your Mac does not go to sleep on its own. Closing the lid still sleeps it, and then the Cloud is down.
-- The Cloud's data is on your Mac in `~/Library/Application Support/Canvas/cloud-host` (only your user can read it). Time Machine backs it up like your other files.
+- Each Cloud's data is on your Mac in `~/Library/Application Support/Canvas/cloud-host` (the first) and `cloud-hosts` (the others); only your user can read it. Time Machine backs it up like your other files.
 - Tokens and tunnel keys are kept in the macOS Keychain, where apps running as you can read them.
 
 ## Stop hosting, delete the data
 
-Turning **Host a Cloud** off stops the Cloud and the tunnel, and ends everyone's access: if you host again, they need a new invite. The comments stay on your Mac until you click **Delete** next to **Hosted data**, which removes them, the people and the history. Copies other people keep, and your backups, are not touched.
+**Stop hosting** on a Cloud's settings stops that Cloud and its tunnel, and ends everyone's access to it: if you host it again, they need a new invite. Your other Clouds keep running. The comments stay on your Mac until you click **Delete Cloud**, which removes them, the people and the history. Copies other people keep, and your backups, are not touched.
 
 ## Leave a Cloud you joined
 
@@ -36,9 +36,9 @@ Settings > Cloud > **Leave** forgets the invite on this Mac and stops its tunnel
 
 ## For developers
 
-- The Cloud on a Mac is its own process (`cloud/node/main.ts`) with only the Cloud API, on `127.0.0.1:5190`. Canvas's editor server (`127.0.0.1:5189`) starts it, talks to it over the process's IPC channel and nothing else, and it stops when Canvas quits. The room and team logic is `cloud/core`, the same code the Cloudflare Worker runs.
+- Each Cloud on a Mac is its own process (`cloud/node/main.ts`) with only the Cloud API, on its own port on 127.0.0.1 (5190 to 5289). Canvas's editor server (`127.0.0.1:5189`) starts it, talks to it over the process's IPC channel and nothing else, and it stops when Canvas quits. The room and team logic is `cloud/core`, the same code the Cloudflare Worker runs.
 - The tunnel helper is `canvas-tunnel` (`cloud/tunnel`, Go, the tailcat library pinned in `go.mod` and `go.sum`). `apps/macos/build.sh` builds it when Go is installed; without Go, Host a Cloud is off in that build. A release build fails without it. Orders go to the helper on stdin, never on its command line (`src/cloud-tunnel.ts`).
-- Two tunnels serve port 5190: the member tunnel lets in only the tunnel keys of Macs that joined, and the enrolment tunnel runs only while an invite is waiting. Both keys are made once and kept in the Keychain, so their addresses survive restarts.
+- Two tunnels serve each Cloud's port, and the helper serves no port outside 5190 to 5289: the member tunnel lets in only the tunnel keys of Macs that joined, and the enrolment tunnel runs only while an invite is waiting. Both keys are made once and kept in the Keychain, so their addresses survive restarts.
 - People and devices: a person has a random id (who they are) and a label (shown, never trusted). An invite is a single-use join code; the joining Mac makes its own device token and its own tunnel key and sends them once with the code. Tokens and codes are stored as hashes and compared in constant time.
 - A shared file names a hosted Cloud by its id (`canvas-cloud://<id>` in `comments.json`), never by an address.
 - Tests: `test/cloud-host.test.ts` (the Cloud process, enrolment, removal, screening, framing), `test/cloud-hosted.test.ts` (address rules, invites, the helper's life), `node qa/cloud-hosted-e2e.ts` (two Canvas servers through the fake helper, `test/fixtures/fake-tunnel.ts`).
