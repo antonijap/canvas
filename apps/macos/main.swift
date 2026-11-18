@@ -286,10 +286,11 @@ var quitAnyway = false
 var pendingLink: CanvasLink?
 /// An invite link (canvas://cloud/join) waiting for the server, opened from Finder or a browser before it was up.
 var pendingInvite: CloudInvite?
-/// Settings > Cloud, then the question: joining never happens without the person saying Join.
+/// Home, and the Add Cloud sheet at its Join step with the invite's name, fingerprint and what joining means: joining
+/// never happens without the person saying Join there.
 @MainActor func openInvite(_ invite: CloudInvite) {
-  SettingsWindow.shared.show(model, tab: .cloud)
-  CloudAccount.shared.confirmJoin(model, invite)
+  model.showHome()
+  AddCloudPanel.shared.show(model, on: window, step: .join(invite))
 }
 
 func openCanvasLink(_ url: URL) {
@@ -324,7 +325,8 @@ class FileActions: NSObject, NSMenuItemValidation {
   @objc func newCanvas(_ s: Any?) { model.newCanvas() }
   @objc func openDocument(_ s: Any?) { model.openDocument() }
   @objc func saveAsCanvas(_ s: Any?) { model.saveAsCanvas() }
-  /// File > Share Comments to Server...: the open file's comments go to the team server set in Settings > Cloud.
+  /// File > Share Comments...: the open file's comments go to one of the Clouds in Settings > Cloud (asked which when
+  /// more than one can take it).
   @objc func shareComments(_ s: Any?) { MainActor.assumeIsolated { CloudAccount.shared.shareOpenFile(model) } }
   /// File > Export (Shift+Cmd+E): the selection, else every layer on the page with export settings (Library.swift).
   @objc func exportSettings(_ s: Any?) { model.exportSelectionWithSettings() }

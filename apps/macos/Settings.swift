@@ -34,17 +34,25 @@ final class SettingsWindow {
         if window == nil { window = make(model) }
         guard let window else { return }
         if let tab, let tabs = window.contentViewController as? SettingsTabs, let i = Tab.allCases.firstIndex(of: tab) { tabs.selectedTabViewItemIndex = i }
-        if !window.isVisible { window.center() }
+        if !window.isVisible {
+            // The pane reports its height on its first layout: size the window to it before it shows.
+            window.layoutIfNeeded()
+            (window.contentViewController as? SettingsTabs)?.fit(animated: false)
+            window.center()
+        }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     func close() { window?.orderOut(nil) }
 
-    /// A pane whose height changed while it shows (Settings > Cloud once an address is saved): the window follows.
-    func refit() {
-        DispatchQueue.main.async { [weak self] in (self?.window?.contentViewController as? SettingsTabs)?.fit(animated: true) }
-    }
+    #if CANVAS_QA
+    /// Discard pane-local state, including the Cloud filter, between scenarios.
+    func resetForQA() { window?.close(); window = nil }
+    #endif
+
+    /// The window while it shows (a sheet opened from Settings > Cloud attaches to it).
+    var nsWindow: NSWindow? { window?.isVisible == true ? window : nil }
 
     private func make(_ model: CanvasModel) -> NSWindow {
         // Read first: adding the first tab selects it, which saves it as the last tab.
@@ -52,8 +60,9 @@ final class SettingsWindow {
         let tabs = SettingsTabs()
         tabs.tabStyle = .toolbar
         for t in Tab.allCases {
-            let host = NSHostingController(rootView: SettingsPane(model: model, tab: t))
-            host.sizingOptions = [.preferredContentSize]
+            let host = ControlHostingController(rootView: SettingsPane(model: model, tab: t) { [weak tabs] h in tabs?.paneHeight(t.rawValue, h) })
+            // The window follows the pane's reported height (SettingsTabs), nothing else sizes it.
+            host.sizingOptions = []
             host.title = t.title
             let item = NSTabViewItem(viewController: host)
             item.label = t.title
@@ -72,22 +81,46 @@ final class SettingsWindow {
     }
 }
 
-/// Toolbar tabs whose window takes each pane's own height, top edge kept, like the system's settings windows.
+/// Toolbar tabs whose window takes the selected pane's own height, top edge kept, like the system's settings windows.
+/// The one sizing path: every pane reports its content height (SettingsPane), on every change, and the window follows
+/// the selected one's. Panes never resize the window themselves.
 final class SettingsTabs: NSTabViewController {
+    private var heights: [String: CGFloat] = [:]
+    private var pending = false
+
     override func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
         super.tabView(tabView, didSelect: item)
         if let id = item?.identifier as? String { UserDefaults.standard.set(id, forKey: "canvas.settings.tab") }
+        // Lay the new pane out now, so its height is reported before the window moves (one resize, not two).
+        item?.viewController?.view.layoutSubtreeIfNeeded()
         fit(animated: view.window?.isVisible ?? false)
     }
 
+    /// A pane's content height changed. Applied on the next turn of the run loop, outside SwiftUI's layout pass.
+    func paneHeight(_ id: String, _ height: CGFloat) {
+        guard height > 0, heights[id] != height else { return }
+        heights[id] = height
+        guard id == selectedID, !pending else { return }
+        pending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pending = false
+            // Only a tab switch animates. A height that arrives later (a pane's first layout, a status line) is applied
+            // at once, so the window never moves under the pointer after the pane has drawn.
+            self.fit(animated: false)
+        }
+    }
+
+    private var selectedID: String? { tabViewItems[safe: selectedTabViewItemIndex]?.identifier as? String }
+
     func fit(animated: Bool) {
-        guard let vc = tabViewItems[safe: selectedTabViewItemIndex]?.viewController else { return }
-        let size = vc.view.fittingSize
-        guard let w = view.window ?? NSApp.windows.first(where: { $0.contentViewController === self }), size.height > 0 else { return }
-        let content = NSRect(origin: .zero, size: NSSize(width: SettingsPane.width, height: size.height))
-        var frame = w.frameRect(forContentRect: content)
-        frame.origin = NSPoint(x: w.frame.minX, y: w.frame.maxY - frame.height)
-        w.setFrame(frame, display: true, animate: animated)
+        guard let id = selectedID, let content = heights[id],
+              let w = view.window ?? NSApp.windows.first(where: { $0.contentViewController === self }) else { return }
+        let inner = w.contentRect(forFrameRect: w.frame)
+        let frame = SettingsWindowFit.frame(current: w.frame, chrome: w.frame.height - inner.height, content: content,
+                                            width: SettingsPane.width + w.frame.width - inner.width, visible: (w.screen ?? NSScreen.main)?.visibleFrame)
+        guard frame != w.frame else { return }
+        w.setFrame(frame, display: true, animate: animated && w.isVisible)
     }
 }
 
@@ -101,8 +134,29 @@ struct SettingsPane: View {
     static let width: CGFloat = 560
     @ObservedObject var model: CanvasModel
     let tab: SettingsWindow.Tab
+    /// The pane's content height, on its first layout and on every change after: the window follows it.
+    var onHeight: (CGFloat) -> Void = { _ in }
+    @State private var contentHeight: CGFloat = 0
+
+    /// Taller than this, the screen caps the window and the pane scrolls (the title bar and toolbar take the rest).
+    private var capped: Bool { contentHeight > (NSScreen.main?.visibleFrame.height ?? 800) - 100 }
 
     var body: some View {
+        // The content keeps its own height; the window takes it, up to the screen, and the pane scrolls past that.
+        // The scroller shows only then: while the window catches up with a taller pane, a scroller would take width
+        // and shift every control sideways for a moment.
+        ScrollView(.vertical) {
+            content
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0; onHeight($0) }
+        }
+        .scrollIndicators(capped ? .automatic : .never)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(width: SettingsPane.width)
+        .background(Palette.canvasBg)
+    }
+
+    private var content: some View {
         Group {
             switch tab {
             case .general: GeneralSettings(model: model)
@@ -631,7 +685,7 @@ struct SettingsRow<Control: View>: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1).qaText(title)
-                if let detail { Text(detail).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1) }
+                if let detail { Text(detail).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1).qaText(detail) }
             }
             Spacer(minLength: 12)
             control()

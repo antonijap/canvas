@@ -222,10 +222,13 @@ describe("sharing a file", () => {
 });
 
 describe("whom the sign-in goes to", () => {
-  test("the dev email goes only to http://localhost and http://127.0.0.1, never a token with it, never to another host", async () => {
-    Cfg.setCloudConfig({ cloudUrl: "https://team.example.com", cloudDevEmail: "anna@studio.test" });
+  test("the dev email goes only to the exact http://localhost or http://127.0.0.1 address it was given for, never a token with it, never to another host", async () => {
+    Cfg.setCloudConfig({ clouds: [{ url: "https://team.example.com", devEmail: "anna@studio.test" }, { url: "http://localhost:8787", devEmail: "anna@studio.test" }, { url: "http://127.0.0.1:8787", devEmail: "ben@studio.test" }] });
     assert.deepEqual(await Cl.authHeaders("http://localhost:8787"), { "x-canvas-dev-email": "anna@studio.test" });
-    assert.deepEqual(await Cl.authHeaders("http://127.0.0.1:8787"), { "x-canvas-dev-email": "anna@studio.test" });
+    assert.deepEqual(await Cl.authHeaders("http://127.0.0.1:8787"), { "x-canvas-dev-email": "ben@studio.test" }, "each address its own email");
+    assert.equal(await Cl.authHeaders("http://127.0.0.1:8788"), null, "another port on this Mac is another service: no email");
+    assert.equal(await Cl.authHeaders("http://localhost"), null);
+    assert.equal(Cfg.devEmailFor("https://team.example.com"), "", "an https Cloud never keeps a dev email");
     assert.equal(await Cl.authHeaders("https://team.example.com"), null, "an https host with no token is signed out, whatever the dev email");
     assert.equal(await Cl.authHeaders("http://team.example.com"), null);
     assert.equal(await Cl.authHeaders("https://localhost.evil.example"), null);
@@ -273,7 +276,7 @@ describe("the 401 rules", () => {
     });
     try {
       const origin = `http://127.0.0.1:${fake.port}`;
-      Cfg.setCloudConfig({ cloudUrl: origin, cloudDevEmail: "anna@studio.test" });
+      Cfg.setCloudConfig({ clouds: [{ url: origin, devEmail: "anna@studio.test" }] });
       assert.equal((await Cl.checkServer(origin, true)).status, "signInAgain");
       mode = "ok";
       const ok = await Cl.checkServer(origin, true);
@@ -294,7 +297,7 @@ describe("the 401 rules", () => {
     const saved = { ...Cl.STATUS_REUSE_MS };
     try {
       const origin = `http://127.0.0.1:${fake.port}`;
-      Cfg.setCloudConfig({ cloudUrl: origin, cloudDevEmail: "anna@studio.test" });
+      Cfg.setCloudConfig({ clouds: [{ url: origin, devEmail: "anna@studio.test" }] });
       assert.equal((await Cl.checkServer(origin, true)).status, "connected");
       assert.equal(fake.hits.length, 2, "info and me");
       // Within the minute: no request, plain or fresh (fresh waits for 3 s).
@@ -315,7 +318,7 @@ describe("the 401 rules", () => {
       assert.equal(fake.hits.length, 6, "asked after the connected window");
       // Another development email is another person: asked at once.
       Cl.STATUS_REUSE_MS.connected = 60_000;
-      Cfg.setCloudConfig({ cloudUrl: origin, cloudDevEmail: "ben@studio.test" });
+      Cfg.setCloudConfig({ clouds: [{ url: origin, devEmail: "ben@studio.test" }] });
       await Cl.checkServer(origin);
       assert.equal(fake.hits.length, 8, "a new email asks again");
       assert.equal(fake.hits[7].headers["x-canvas-dev-email"], "ben@studio.test");
@@ -330,7 +333,7 @@ describe("the 401 rules", () => {
     const saved = { ...Cl.STATUS_REUSE_MS };
     try {
       const origin = `http://127.0.0.1:${fake.port}`;
-      Cfg.setCloudConfig({ cloudUrl: origin, cloudDevEmail: "anna@studio.test" });
+      Cfg.setCloudConfig({ clouds: [{ url: origin, devEmail: "anna@studio.test" }] });
       assert.equal((await Cl.checkServer(origin, true)).status, "offline");
       await Cl.checkServer(origin);
       assert.equal(fake.hits.length, 1, "reused within 3 s");
@@ -348,7 +351,7 @@ describe("the 401 rules", () => {
     const fake = await fakeServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ protocol: 0, server: "0.0.1", capabilities: [] })); });
     try {
       const origin = `http://127.0.0.1:${fake.port}`;
-      Cfg.setCloudConfig({ cloudUrl: origin, cloudDevEmail: "anna@studio.test" });
+      Cfg.setCloudConfig({ clouds: [{ url: origin, devEmail: "anna@studio.test" }] });
       assert.equal((await Cl.checkServer(origin, true)).status, "tooOld");
     } finally {
       await fake.close();
@@ -371,7 +374,7 @@ describe("through the local server", () => {
   };
 
   test("a file linked to an unreachable server keeps every comment in the outbox and shows it pending", async () => {
-    Cfg.setCloudConfig({ cloudUrl: "http://127.0.0.1:9", cloudDevEmail: "anna@studio.test" });
+    Cfg.setCloudConfig({ clouds: [{ url: "http://127.0.0.1:9", devEmail: "anna@studio.test" }] });
     const f: CommentsFile = { format: 1, doc: DOC, server: { url: "http://127.0.0.1:9" }, seq: 0, threads: [], outbox: [] };
     fs.writeFileSync(path.join(pkg, "comments.json"), JSON.stringify(f));
     const c = create("Offline comment");
@@ -398,7 +401,7 @@ describe("through the local server", () => {
   });
 
   test("Retry and Discard on a refused comment, through the routes", async () => {
-    Cfg.setCloudConfig({ cloudUrl: "http://127.0.0.1:9", cloudDevEmail: "anna@studio.test" });
+    Cfg.setCloudConfig({ clouds: [{ url: "http://127.0.0.1:9", devEmail: "anna@studio.test" }] });
     const a = create("refused one"), b = create("refused two");
     const f: SyncFile = { format: 1, doc: DOC, server: { url: "http://127.0.0.1:9" }, seq: 0, threads: [], outbox: [], me: ME,
       rejected: [{ envelope: a.e, code: "forbidden", message: "This role cannot apply the op" }, { envelope: b.e, code: "quota", message: "Too big" }] };
@@ -420,7 +423,7 @@ describe("through the local server", () => {
 
   test("the token is kept in memory: no file under the state or the package has it", async () => {
     const origin = "https://team.example.com";
-    Cfg.setCloudConfig({ cloudUrl: origin });
+    Cfg.setCloudConfig({ clouds: [{ url: origin }] });
     const token = "tok_" + "A1b2C3d4E5f6".repeat(6);
     const r = await post("/api/cloud/token", { url: origin, token });
     assert.equal(r.status, 200);

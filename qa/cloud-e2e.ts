@@ -119,7 +119,7 @@ async function main() {
   line(diskA().threads.length === 3 && !diskA().server, "anna's file has 3 local threads, including tombstones, and no server");
 
   // 4. anna signs in (dev header) and shares the file
-  const st = await (await fetch(`${sa.base}/api/cloud/status`)).json() as any;
+  const st = (await (await fetch(`${sa.base}/api/cloud/status?url=${encodeURIComponent(annaUrl)}`)).json()) as any;
   line(st.status === "connected" && st.email === "anna@studio.test" && st.role === "owner", `status says connected as ${st.email}, ${st.role}`);
   const shared = await post(sa, "/api/cloud/share", {}, fileA);
   line(shared.status === 200 && shared.j.ops === 9, `share sent ${shared.j.ops} ops, including the deleted reply and thread`);
@@ -152,6 +152,10 @@ async function main() {
   await get(sb, pkgB); // opening the file's comments connects it
   await until("ben connected", async () => (await get(sb, pkgB)).sync?.status === "connected");
   line(true, "ben's copy connected to the same document");
+  // A copy arrives with ops waiting: none goes out as Ben until he says so (src/cloud.ts vouch). Retry sends them.
+  const held = (diskB().rejected ?? []).filter((r: any) => /arrived with it waiting/.test(r.message));
+  line(held.length > 0 && diskB().outbox.length === 0, `the ops the copy arrived with are held back (${held.length}), not sent as Ben`);
+  for (const r of held) await post(sb, "/api/comments/retry", { opId: r.envelope.opId }, pkgB);
   await until("the old copy's outbox to empty", () => diskB().outbox.length === 0);
   line(tombstones(diskB()) && tombstones(diskA()), "syncing an old comments.json cannot resurrect the deleted reply or thread");
   line(diskB().rejected?.some((r: any) => r.code === "conflict" && r.envelope.op.comment === c4)

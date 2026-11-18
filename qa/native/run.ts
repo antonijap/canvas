@@ -21,7 +21,7 @@ import path from "node:path";
 import { ROOT, copyDir, sleep } from "../lib.ts";
 import { PLAYGROUND } from "../playground.ts";
 import { QaApp, buildQaApp } from "./app.ts";
-import { Fail, NT, Skip, nativeSlug, scenarios, type NativeScenario } from "./harness.ts";
+import { Fail, NT, Skip, nativeSlug, nativeFileStem, scenarios, type NativeScenario } from "./harness.ts";
 import "./scenarios.ts";
 
 const OUT = path.join(ROOT, "qa", "out", "native");
@@ -61,7 +61,7 @@ type Result = { slug: string; name: string; area: string; status: "PASS" | "FAIL
 
 
 async function runOne(app: QaApp, s: NativeScenario, k: number): Promise<Result> {
-  const file = path.join(app.docs, `${String(k).padStart(2, "0")}-${nativeSlug(s).replace(/^native-/, "")}.canvas`);
+  const file = path.join(app.docs, `${String(k).padStart(2, "0")}-${nativeFileStem(s)}.canvas`);
   copyDir(PLAYGROUND, file);
   const t = new NT(app, file);
   const t0 = Date.now();
@@ -80,9 +80,9 @@ async function runOne(app: QaApp, s: NativeScenario, k: number): Promise<Result>
     else { status = "FAIL"; msg = (e as Error).message + (e instanceof Fail ? "" : `\n${(e as Error).stack?.split("\n").slice(1, 4).join("\n")}`); }
   }
   try {
-    const png = path.join(OUT, `${nativeSlug(s).replace(/^native-/, "")}.png`);
+    const png = path.join(OUT, `${nativeFileStem(s)}.png`);
     await t.shot(png);
-    if (status === "FAIL") msg += `\n  shot: qa/out/native/${nativeSlug(s).replace(/^native-/, "")}.png`;
+    if (status === "FAIL") msg += `\n  shot: qa/out/native/${nativeFileStem(s)}.png`;
   } catch (e) { msg += `\n  no screenshot: ${(e as Error).message}`; }
   if (t.notes.length) msg += (msg ? "\n  " : "") + t.notes.join("; ");
   // Leave the instance clean for the next scenario: no menu, palette, popover or Settings window left open.

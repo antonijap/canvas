@@ -34,6 +34,12 @@ typealias QAError = BridgeClient.BridgeError
 enum QA {
     static var model: CanvasModel!
     static var window: NSWindow!
+    static var tabRenameFile: () -> String? = { nil }
+    private static var tabRenameEvents: [[String: Any]] = []
+    static func recordTabRename(_ event: String, _ detail: String) {
+        tabRenameEvents.append(["event": event, "detail": detail, "time": Date.timeIntervalSinceReferenceDate])
+        if tabRenameEvents.count > 40 { tabRenameEvents.removeFirst(tabRenameEvents.count - 40) }
+    }
     private static var eventNumber = 1000
     /// The modifier keys "held" by the last key op, so mouse events carry them too.
     private static var heldMods: NSEvent.ModifierFlags = []
@@ -70,6 +76,8 @@ enum QA {
         // The window of a QA instance is never key (it never activates), and WKWebView takes a first click in a window
         // that is not key as the click that focuses it: the page never saw the canvas's own presses and drags.
         swizzle(WKWebView.self, #selector(NSView.acceptsFirstMouse(for:)), #selector(NSView.qa_acceptsFirstMouse(for:)))
+        // Native fields must use this instance's clipboard too, including invite links pasted into a sheet.
+        swizzle(NSTextView.self, #selector(NSText.paste(_:)), #selector(NSTextView.qa_paste(_:)))
         // SwiftUI's .onDrag goes straight to the drag manager (gesture-driven), not through NSView: that entry
         // point, on every manager class that has it, starts the virtual session too.
         typealias Begin = @convention(block) (AnyObject, NSArray, NSWindow?, NSRect, NSEvent?, AnyObject?, AnyObject) -> AnyObject
@@ -281,14 +289,30 @@ enum QA {
             AgentsQA.added = Set((a["added"] as? [String] ?? []).filter { $0 == "claude" || $0 == "codex" })
             return ["added": AgentsQA.added.sorted()]
         case "qa.cloud":
-            // {url, devEmail, name}: the team server address, development email and name, as Settings > Cloud types them.
-            if let u = a["url"] as? String { model.prefs.cloudUrl = u }
-            if let e = a["devEmail"] as? String { model.prefs.cloudDevEmail = e }
-            if let n = a["name"] as? String { model.prefs.cloudName = n }
-            if let h = a["hosting"] as? Bool { model.prefs.cloudHosting = h }
+            // The Clouds, as Add Cloud and Settings > Cloud leave them:
+            //   {clouds: [{url, name?, devEmail?, kind?}]}  the whole list ([] for none)
+            //   {url, devEmail?, name?}                     one server Cloud as the only one ("" for none)
+            //   {hosting}, {commentName}                    Host on this Mac's switch, the host's name (a placeholder)
+            //   {select: id | null}                        the Cloud Settings > Cloud shows; {home: id} Home's page for it
+            if let list = a["clouds"] as? [[String: Any]] {
+                model.prefs.clouds = CloudList.clean(list.compactMap { c in
+                    guard let u = c["url"] as? String else { return nil }
+                    return CloudEntry(id: c["id"] as? String ?? UUID().uuidString, url: u, name: c["name"] as? String ?? "", devEmail: c["devEmail"] as? String ?? "",
+                                      kind: (c["kind"] as? String).flatMap(CloudKind.init(rawValue:)) ?? .server, hosting: c["hosting"] as? Bool ?? false)
+                })
+            } else if let u = a["url"] as? String {
+                model.prefs.clouds = u.isEmpty ? [] : CloudList.clean([CloudEntry(url: u, name: a["name"] as? String ?? "", devEmail: a["devEmail"] as? String ?? "", kind: .server)])
+            } else if let n = a["name"] as? String, !model.prefs.clouds.isEmpty {
+                model.prefs.clouds[0].name = n
+            }
+            if let h = a["hosting"] as? Bool { for i in model.prefs.clouds.indices where model.prefs.clouds[i].kind == .hosted { model.prefs.clouds[i].hosting = h } }
             // The name the host is shown by: a placeholder in QA, never the Mac's user name.
             if let c = a["commentName"] as? String { model.prefs.commentName = c }
-            return ["url": model.prefs.cloudUrl, "devEmail": model.prefs.cloudDevEmail, "name": model.prefs.cloudName]
+            if a.keys.contains("select") { let id = a["select"] as? String; await MainActor.run { CloudAccount.shared.selected = id } }
+            if let h = a["home"] as? String { await MainActor.run { HomeStore.shared.section = .cloud(h) } }
+            let clouds = model.prefs.clouds.map { ["id": $0.id, "url": $0.url, "name": $0.name, "devEmail": $0.devEmail, "kind": $0.kind.rawValue] }
+            return ["clouds": clouds, "url": model.prefs.clouds.first?.url ?? "", "rev": model.prefs.cloudsRev,
+                    "states": await MainActor.run { CloudAccount.shared.states.mapValues { ["status": $0.status, "email": $0.email ?? ""] } }]
         case "qa.exportdir":
             // Shift+Cmd+E's folder: a QA instance never shows the open panel (it would be modal), it exports here.
             exportFolder = a["dir"] as? String
@@ -314,6 +338,7 @@ enum QA {
             if let m = openMenu { closeMenu(m) }
             if PaletteController.shared.isOpen { PaletteController.shared.close(refocus: false) }
             model.zoomFieldOpen = false
+            await MainActor.run { AddCloudPanel.shared.close() }
             // A comment name a scenario typed (a placeholder) goes back to the default: the Mac's full name.
             UserDefaults.standard.removeObject(forKey: AppSettings.prefix + "commentName")
             model.prefs.commentName = NSFullUserName()
@@ -321,6 +346,9 @@ enum QA {
             LayersStore.of(model).renaming = nil
             // A sign-in opens Home on the team server; the next scenario starts on Recents again.
             HomeStore.shared.section = .recents
+            HomeStore.shared.query = ""
+            CloudAccount.shared.selected = nil
+            SettingsWindow.shared.resetForQA()
             for w in NSApp.windows where w !== window && w.isVisible {
                 if w.contentViewController is SettingsTabs || w.isSheet || w is NSPanel || w.title == "About Canvas" { w.orderOut(nil) }
             }
@@ -637,49 +665,6 @@ enum QA {
 
     // MARK: keys
 
-    /// Virtual key codes for named keys (US layout); letters and digits come from the layout table below.
-    private static let named: [String: (UInt16, String)] = [
-        "Return": (36, "\r"), "Enter": (36, "\r"), "Tab": (48, "\t"), "Space": (49, " "), "Delete": (51, "\u{7F}"),
-        "Backspace": (51, "\u{7F}"), "Escape": (53, "\u{1B}"), "ForwardDelete": (117, "\u{F728}"),
-        "Left": (123, "\u{F702}"), "Right": (124, "\u{F703}"), "Down": (125, "\u{F701}"), "Up": (126, "\u{F700}"),
-        "ArrowLeft": (123, "\u{F702}"), "ArrowRight": (124, "\u{F703}"), "ArrowDown": (125, "\u{F701}"), "ArrowUp": (126, "\u{F700}"),
-        "Home": (115, "\u{F729}"), "End": (119, "\u{F72B}"), "PageUp": (116, "\u{F72C}"), "PageDown": (121, "\u{F72D}"),
-    ]
-    private static let layout: [Character: UInt16] = [
-        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12, "w": 13, "e": 14,
-        "r": 15, "y": 16, "t": 17, "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "=": 24, "9": 25, "7": 26, "-": 27,
-        "8": 28, "0": 29, "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35, "l": 37, "j": 38, "'": 39, "k": 40, ";": 41,
-        "\\": 42, ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "`": 50, " ": 49,
-    ]
-    private static let shifted: [Character: Character] = [
-        "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0", "_": "-", "+": "=",
-        "{": "[", "}": "]", "|": "\\", ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/", "~": "`",
-    ]
-
-    private static func keyEvents(_ name: String, _ f: NSEvent.ModifierFlags, _ w: NSWindow) -> [NSEvent] {
-        var code: UInt16 = 0, chars = name, plain = name, f = f
-        if let (c, s) = named[name] { code = c; chars = s; plain = s }
-        else if let ch = name.first, name.count == 1 {
-            var base = Character(ch.lowercased())
-            if let s = shifted[ch] { base = s; f.insert(.shift) } else if ch.isUppercase { f.insert(.shift) }
-            code = layout[base] ?? 0
-            // As the hardware does: Shift still shapes the characters under Command (Shift+Cmd+L reads "L"), so the menus
-            // match a Shift chord the way they do for a person.
-            plain = f.contains(.shift) && base.isLetter ? base.uppercased() : String(base)
-            // Shift+[ and Shift+] read "{" and "}" on the hardware, so they never match Cmd+[ and Cmd+] (Bring Forward).
-            if f.contains(.shift), base == "[" || base == "]" { plain = base == "[" ? "{" : "}" }
-            chars = f.contains(.command) || f.contains(.control) ? plain : String(ch)
-        }
-        if [123, 124, 125, 126].contains(code) { f.insert([.numericPad, .function]) }
-        if [115, 116, 117, 119, 121].contains(code) { f.insert(.function) }
-        let t = ProcessInfo.processInfo.systemUptime
-        let make = { (type: NSEvent.EventType) in
-            NSEvent.keyEvent(with: type, location: last, modifierFlags: f, timestamp: t, windowNumber: w.windowNumber, context: nil,
-                             characters: chars, charactersIgnoringModifiers: plain, isARepeat: false, keyCode: code)
-        }
-        return [make(.keyDown), make(.keyUp)].compactMap { $0 }
-    }
-
     /// Modifier key changes, so code that reads NSEvent.modifierFlags from flagsChanged sees them.
     private static func flagsChanged(_ f: NSEvent.ModifierFlags, _ w: NSWindow) -> NSEvent? {
         let code: UInt16 = f.contains(.command) ? 55 : f.contains(.option) ? 58 : f.contains(.shift) ? 56 : f.contains(.control) ? 59 : 55
@@ -710,7 +695,7 @@ enum QA {
         guard let k = a["key"] as? String, !k.isEmpty else { throw QAError(code: "invalid", message: "key needs key") }
         let repeatN = max(1, (a["repeat"] as? NSNumber)?.intValue ?? 1)
         for _ in 0..<repeatN {
-            let evs = keyEvents(k, f, w)
+            let evs = QAKey.events(k, f, windowNumber: w.windowNumber, location: last)
             if !f.isEmpty { post(flagsChanged(f, w)) }
             post(evs.first)
             try await sleep(20)
@@ -727,8 +712,8 @@ enum QA {
         let w = try target(a)
         guard let text = a["text"] as? String else { throw QAError(code: "invalid", message: "type needs text") }
         for ch in text {
-            let evs = keyEvents(ch == "\n" ? "Return" : String(ch), heldMods, w)
-            if evs.isEmpty || (layout[Character(ch.lowercased())] == nil && shifted[ch] == nil && ch != "\n") {
+            let evs = QAKey.events(ch == "\n" ? "Return" : String(ch), heldMods, windowNumber: w.windowNumber, location: last)
+            if evs.isEmpty || (QAKey.layout[Character(ch.lowercased())] == nil && QAKey.shifted[ch] == nil && ch != "\n") {
                 // Outside the US layout table: a key event that carries the character itself.
                 let t = ProcessInfo.processInfo.systemUptime
                 for type in [NSEvent.EventType.keyDown, .keyUp] {
@@ -774,7 +759,8 @@ enum QA {
              "x": $0.frame.minX, "y": $0.frame.minY, "alpha": $0.alphaValue, "onScreen": $0.isOnActiveSpace]
         }
         return [
-            "file": m.currentFile ?? NSNull(), "openFiles": m.openFiles, "homeShown": m.homeShown, "recents": MainActor.assumeIsolated { HomeStore.shared.recents.map(\.path) }, "homeSection": MainActor.assumeIsolated { String(describing: HomeStore.shared.section) }, "stateDir": StateFolder.path, "revision": m.revision, "zoom": m.zoom,
+            "file": m.currentFile ?? NSNull(), "openFiles": m.openFiles, "homeShown": m.homeShown, "recents": MainActor.assumeIsolated { HomeStore.shared.recents.map(\.path) }, "homeSection": MainActor.assumeIsolated { String(describing: HomeStore.shared.section) }, "homeCloud": MainActor.assumeIsolated { HomeStore.shared.section.cloudId ?? "" }, "addCloud": MainActor.assumeIsolated { AddCloudPanel.shared.isOpen }, "stateDir": StateFolder.path, "revision": m.revision, "zoom": m.zoom,
+            "tabRename": ["file": tabRenameFile() as Any? ?? NSNull(), "events": tabRenameEvents],
             "section": m.section?.rawValue ?? NSNull(), "panelOpen": m.panelOpen, "sidebarWidth": Double(m.sidebarWidth), "homeSidebarWidth": Double(m.homeSidebarWidth), "inspectorOpen": m.inspectorOpen, "uiHidden": m.uiHidden,
             "pages": m.pages.map { ["id": $0.id, "name": $0.name, "count": $0.count] }, "activePage": m.activePage ?? NSNull(),
             "boards": m.boards.map(\.id), "selection": sel, "selectedWidget": m.selectedWidgetId ?? NSNull(),
@@ -826,6 +812,10 @@ enum QA {
                 keep = true
                 n["kind"] = "text"; n["value"] = f.stringValue; n["placeholder"] = f.placeholderString ?? ""
                 n["editable"] = f.isEditable; n["editing"] = f.currentEditor() != nil
+                if let editor = f.currentEditor() as? NSTextView {
+                    let range = editor.selectedRange()
+                    n["selection"] = ["location": range.location, "length": range.length]
+                }
             } else if let s = v as? NSSegmentedControl {
                 keep = true
                 n["kind"] = "segmented"; n["selected"] = s.selectedSegment
@@ -884,6 +874,7 @@ enum QA {
                     var n: [String: Any] = ["x": r.minX, "y": w.frame.height - r.maxY, "w": r.width, "h": r.height, "full": rectTL(m, in: w)]
                     n["id"] = m.qaID
                     n["label"] = m.qaLabel ?? NSNull()
+                    n["windowFrame"] = ["x": w.frame.minX, "y": w.frame.minY, "w": w.frame.width, "h": w.frame.height]
                     out.append(n)
                 }
             }
@@ -1379,6 +1370,12 @@ extension NSView {
             return v
         }
         return MainActor.assumeIsolated { v.session }
+    }
+}
+
+extension NSTextView {
+    @objc func qa_paste(_ sender: Any?) {
+        if let text = canvasPasteboard.string(forType: .string) { insertText(text, replacementRange: selectedRange()) }
     }
 }
 

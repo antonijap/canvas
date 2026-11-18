@@ -164,6 +164,9 @@ sc("home", "Home: recents newest first, comment count and a cloud on a shared ca
     t.eq((await t.marks({ id: "home-filter" })).length + (await t.marks({ id: "home-segment" })).length, 0, "no filter segments over the cards: the sidebar picks");
     const rows = await t.marks({ id: "home-row" });
     sameHeight(t, "sidebar rows", rows);
+    // The Clouds sit under a quiet label with a + (Add Cloud), not as a row of their own.
+    await t.mark({ id: "home-add-cloud", label: "Add Cloud" });
+    t.eq((await t.marks({ id: "home-row", label: "Add Cloud" })).length, 0, "no Add Cloud row: the label's + adds one");
     t.ok(rows.every((r) => Math.abs(r.x - rows[0].x) < 0.6 && Math.abs(r.w - rows[0].w) < 0.6), "sidebar rows share one left edge and width");
     t.near(search.x, rows[0].x, 0.6, "the search field and the rows share their left edge");
     t.near(search.w, rows[0].w, 0.6, "and their width");
@@ -207,22 +210,25 @@ sc("home", "Home: recents newest first, comment count and a cloud on a shared ca
     t.eq(menu, ["Open", "Show in Finder", "Remove from recents"], "the card's menu");
     await t.pickMenu("Remove from recents");
     await t.waitState((s) => !s.recents.includes(c), "home-c to leave the recents");
-    // The server row and the server view.
-    const dot = await t.mark({ id: "home-server-dot" }, 15_000);
-    await t.waitFor(async () => (await t.marks({ id: "home-server-dot" }))[0]?.label === "Connected", "the server's dot to say Connected", 20_000);
-    const dotNow = (await t.marks({ id: "home-server-dot" }))[0] ?? dot;
-    const row = (await t.marks({ id: "home-row" })).find((r) => Math.abs(midY(r) - midY(dotNow)) < 1);
-    t.ok(row, "the dot sits on its server row's centre line");
-    await t.click(center(row!));
-    await t.waitState((s) => s.homeSection === "server", "the server view");
-    await t.waitText("Connected as anna@studio.test, owner", undefined, 15_000);
-    t.ok((await t.marks({ id: "home-server-file", label: "home-b" })).length === 1, "the server view lists the file shared to it");
-    t.ok((await t.marks({ id: "home-server-file", label: "home-c" })).length === 0, "and not a file that is not shared");
-    await t.findText("3 open");
-    await shot(t, "home-server-light");
+    // The Cloud's row and its page: no dot while it works (a row speaks only when it needs the person), the same cards
+    // as Recents under its name, a gear for its settings, and no status card or table.
+    const row = await t.mark({ id: "home-row", label: host }, 15_000);
+    await sleep(1500);
+    t.eq((await t.marks({ id: "home-cloud-word" })).length, 0, "a Cloud that works shows no word and no dot");
+    t.eq((await t.marks({ id: "home-server-dot" })).length, 0, "no green dots");
+    await t.click(center(row));
+    await t.waitState((s) => s.homeSection === "cloud", "the Cloud's page");
+    t.ok((await t.marks({ id: "home-card", label: "home-b" })).length === 1, "the Cloud's page shows the file shared to it as a card");
+    t.ok((await t.marks({ id: "home-card", label: "home-c" })).length === 0, "and not a file that is not shared");
+    t.eq((await t.marks({ id: "home-server-card" })).length + (await t.marks({ id: "home-server-file" })).length, 0, "no status card, no table");
+    t.eq((await t.marks({ id: "home-card-where-glyph" })).length, 0, "no cloud before each time: every card here is on this Cloud");
+    t.eq((await t.marks({ id: "home-cloud-pill" })).length, 0, "no pill while the Cloud works");
+    await t.mark({ id: "home-cloud-settings", label: "Cloud settings" });
+    await t.findText("3");
+    await shot(t, "home-cloud-light");
     await t.cmd("qa.theme", { theme: "dark" });
     await sleep(500);
-    await shot(t, "home-server-dark");
+    await shot(t, "home-cloud-dark");
     await t.cmd("qa.theme", { theme: "light" });
     await sleep(300);
     // A card opens its file in a tab, or shows the tab it is already in.
@@ -300,9 +306,11 @@ sc("home", "Both sidebars drag from their right edge, stop at a minimum and a ma
   t.eq(start, 232, "the Home sidebar starts at its default");
   t.near(await dragEdge(t, "homeSidebarWidth", 60), 292, 1.5, "dragging right 60 pt widens by 60");
   t.eq(await dragEdge(t, "homeSidebarWidth", -900), 200, "dragging far left stops at the minimum");
-  const row = await t.mark({ id: "home-row", label: "Add Cloud" });
-  const label = await t.mark({ id: "text", label: "Add Cloud" });
+  const row = await t.mark({ id: "home-row", label: "Learn Canvas" });
+  const label = await t.mark({ id: "text", label: "Learn Canvas" });
   t.ok(label.x + label.w <= row.x + row.w - 8, "at the minimum the longest label still fits its row");
+  const plus = await t.mark({ id: "home-add-cloud" });
+  t.ok(plus.x + plus.w <= row.x + row.w + 0.6, "and the Clouds label's + stays inside the sidebar");
   await shot(t, "home-sidebar-min");
   const max = await dragEdge(t, "homeSidebarWidth", 900);
   t.ok(max <= 360 && max >= 280, `dragging far right stops at the maximum (${max})`);
@@ -370,6 +378,12 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   t.ok(Math.abs(home1.x - home0.x) < 0.5 && home1.x + home1.w <= tb[0].x, "Home did not move and is still before the first file tab");
   t.near(tb[0].h, 32, 0.6, "tabs keep the control height");
 
+  // The whole control row shares a hover lock, including the boundaries between Home, tabs and +.
+  const controls = await t.mark({ id: "tab-controls" });
+  const open = await t.mark({ id: "tab-open" });
+  t.ok(controls.x <= home1.x && controls.x + controls.w >= open.x + open.w,
+    "one hover region covers Home, file tabs and +");
+
   // Home is not draggable: pulling it right changes nothing.
   const l1 = await last();
   await t.systemDrag(center(home1), { x: l1.x + l1.w, y: center(home1).y }, { steps: 4 });
@@ -416,12 +430,53 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   await t.waitState((s) => s.file === c, "Shift+Cmd+[ to the tab before");
 });
 
+sc("comments", "Comment hint shares the zoom island bottom edge and gap", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
+  const initial = await t.state();
+  await t.settle();
+  await t.key("c");
+  await t.waitJs("document.querySelector('.cm-hint')?.classList.contains('on')", "comment hint");
+  try {
+    for (const theme of ["light", "dark"]) {
+      await t.cmd("qa.theme", { theme });
+      for (const [width, height] of [[720, 420], [1280, 800], [2000, 1256]]) {
+        await t.cmd("qa.window", { width, height });
+        const zoom = await t.mark({ id: "zoom-island" });
+        await t.waitJs(`Math.abs(document.querySelector('.cm-hint').getBoundingClientRect().right + parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) - ${zoom.x}) <= 1`, "hint beside zoom", 8000, async () => {
+          const state = await t.state();
+          return {
+            theme, width, height, zoom, currentZoom: await t.mark({ id: "zoom-island" }),
+            window: state.window, webFrame: state.webFrame,
+            page: await t.js("const s = getComputedStyle(document.documentElement); return {hint:document.querySelector('.cm-hint').getBoundingClientRect().toJSON(),gap:s.getPropertyValue('--c-island-gap'),right:s.getPropertyValue('--cm-hint-right'),bottom:s.getPropertyValue('--cm-hint-bottom'),innerWidth,innerHeight,devicePixelRatio}"),
+          };
+        });
+        const hint = await t.js<{ bottom: number; right: number }>("const r = document.querySelector('.cm-hint').getBoundingClientRect(); return {bottom:r.bottom,right:r.right}");
+        t.near(hint.bottom, zoom.y + zoom.h, 1, `${theme} ${width}: bottom edges align`);
+        const state = await t.state();
+        const viewport = await t.js<{ w: number; h: number }>("return {w:innerWidth,h:innerHeight}");
+        t.near(state.webFrame.x, 0, 1, `${theme} ${width}: webview starts at window left`);
+        t.near(state.webFrame.y, 0, 1, `${theme} ${width}: webview starts at window top`);
+        t.near(viewport.w, state.window.width, 1, `${theme} ${width}: page fills window width`);
+        t.near(viewport.h, state.window.height, 1, `${theme} ${width}: page fills window height`);
+      }
+      await t.settle();
+      await shot(t, `comments-island-${theme}`);
+    }
+  } catch (error) {
+    await shot(t, "comments-island-failure");
+    throw error;
+  } finally {
+    await t.key("escape");
+    await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });
+    await t.cmd("qa.theme", { theme: initial.theme });
+  }
+});
+
 sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["tabs:context-menu", "tabs:rename-menu", "tabs:rename-double-click", "tabs:close-others", "tabs:drag-after-rename"] }, async (t: NT) => {
   const original = path.join(t.app.docs, "tab-actions.canvas");
   copyDir(PLAYGROUND, original);
   await t.app.cmd({ op: "open", args: { file: original } });
   await t.waitState((s) => s.file === original, "the action tab to open");
-  const tab = (name: string) => t.mark({ id: "file-tab", label: name });
+  const tab = (name: string) => t.mark({ id: "file-tab", label: name, exact: true });
   const point = (r: { x: number; y: number; w: number; h: number }) => ({ x: r.x + r.w * 0.4, y: r.y + r.h / 2 });
   const order = [...(await t.state()).openFiles];
   const prefs = (await t.state()).prefs;
@@ -438,26 +493,45 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   await t.cmd("qa.cloud", { url: prefs.cloudUrl, devEmail: prefs.cloudDevEmail, name: prefs.cloudName });
   t.eq((await t.state()).openFiles, order, "right click leaves the tab order alone");
   await t.pickMenu("Rename...");
-  await t.mark({ id: "tab-rename" });
+  const menuEdit = await t.mark({ id: "tab-rename" }).catch(async (error) => {
+    throw new Error(`${error}; tabRename=${JSON.stringify((await t.state()).tabRename)}; editors=${JSON.stringify((await t.views()).filter((v) => v.kind === "text" && v.y < 70))}`);
+  });
+  const menuField = (await t.views()).find((v) => v.kind === "text" && v.editing && v.y < menuEdit.y + menuEdit.h && v.y + v.h > menuEdit.y);
+  t.ok(menuField, "menu rename focuses the field");
+  t.eq(menuField?.value, "tab-actions", "menu rename edits the intended tab");
+  t.eq(menuField?.selection, { location: 0, length: "tab-actions".length }, "menu rename selects the whole name");
   await t.type("tab-menu-renamed");
   await t.key("return");
   const renamed = path.join(t.app.docs, "tab-menu-renamed.canvas");
-  await t.waitState((s) => s.file === renamed, "menu rename to update the current file");
+  await t.waitState((s) => s.file === renamed, "menu rename to update the current file", 6000, async () => ({
+    tabs: await t.marks({ id: "file-tab" }),
+    editors: (await t.views()).filter((v) => v.kind === "text" && v.y < 70),
+    originalExists: fs.existsSync(original), renamedExists: fs.existsSync(renamed),
+  }));
   t.ok(fs.existsSync(renamed) && !fs.existsSync(original), "menu rename moved the package on disk");
   t.ok((await t.state()).recents.includes(renamed) && !(await t.state()).recents.includes(original), "Home recents follow the renamed file");
-  await t.doubleClick(point(await tab("tab-menu-renamed")));
-  await t.mark({ id: "tab-rename" });
+  // Start on an inactive tab too: the first click must switch without losing the second press.
+  await t.systemClick(point(await tab(baseName(t.file))));
+  await t.waitState((s) => s.file === t.file && !s.homeShown, "real single click switches file tabs");
+  await t.systemClick(point(await tab("tab-menu-renamed")), { count: 2 });
+  const edit = await t.mark({ id: "tab-rename" });
+  const field = (await t.views()).find((v) => v.kind === "text" && v.editing && v.y < edit.y + edit.h && v.y + v.h > edit.y);
+  t.ok(field, "real double click focuses the rename field");
+  t.eq(field?.selection, { location: 0, length: "tab-menu-renamed".length }, "the whole name is selected");
   await t.type("tab-double-renamed");
   await t.key("return");
   const final = path.join(t.app.docs, "tab-double-renamed.canvas");
   await t.waitState((s) => s.file === final, "double click rename");
   t.ok(fs.existsSync(final) && !fs.existsSync(renamed), "double click rename moved the package on disk");
+  await tab("tab-double-renamed");
   t.eq((await t.state()).openFiles, order.map((f: string) => f === original ? final : f), "double click never reorders");
-  await t.doubleClick(point(await tab("tab-double-renamed")));
+  await t.systemClick(point(await tab("tab-double-renamed")), { count: 2 });
   await t.mark({ id: "tab-rename" });
   await t.type("cancelled-name");
   await t.key("escape");
   t.ok(fs.existsSync(final), "Escape cancels rename");
+  t.ok(!fs.existsSync(path.join(t.app.docs, "cancelled-name.canvas")), "Escape creates no renamed file");
+  t.eq((await t.marks({ id: "tab-rename" })).length, 0, "Escape closes the rename field");
   await t.doubleClick(point(await tab("tab-double-renamed")));
   await t.mark({ id: "tab-rename" });
   await t.type("tab-away-renamed");
@@ -467,7 +541,7 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   t.ok(fs.existsSync(away) && !fs.existsSync(final), "click away moved the package");
   const before = (await t.state()).openFiles as string[];
   const first = (await t.marks({ id: "file-tab" })).sort((a, b) => a.x - b.x)[0];
-  await t.drag(point(await tab("tab-away-renamed")), { x: first.x + 6, y: first.y + first.h / 2 }, { steps: 24 });
+  await t.systemDrag(point(await tab("tab-away-renamed")), { x: first.x + 6, y: first.y + first.h / 2 }, { steps: 24 });
   await sleep(500);
   t.eq((await t.state()).openFiles, [away, ...before.filter((f) => f !== away)], "drag reorder still works after renaming");
   await t.click(point(await tab("tab-away-renamed")), { right: true });
