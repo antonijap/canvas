@@ -343,6 +343,10 @@ process.stdin.on("data",c=>s+=c).on("end",async()=>{
     assert.equal(history.entries(file).undo.at(-1)!.label, "Discard Variations");
     await undo();
     assert.deepEqual(set.copies.map((c: any) => has(c.id)), [true, true, true]);
+    // Undo also queues the sidecar status update. Let it land before the scratch directory is removed.
+    await wait(() => {
+      try { return V.cleanSets(JSON.parse(fs.readFileSync(sidecar(), "utf8")).variations).find((x) => x.id === set.id)?.status === "review"; } catch { return false; }
+    }, 3000);
   });
 
   const sidecar = () => path.join(dir, "app.widgets.json");

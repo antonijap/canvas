@@ -33,6 +33,7 @@ export async function startServer(dir: string, extraEnv: Record<string, string> 
     env: {
       ...process.env,
       CANVAS_PORT: String(port),
+      CANVAS_CHECK_ACTIONS: "1",
       CANVAS_ROOTS: dir,
       CANVAS_WEB_FONTS: "0",
       CANVAS_TRUST_FILE: path.join(dir, ".trust.json"),

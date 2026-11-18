@@ -15,6 +15,7 @@
 import type http from "node:http";
 import { allIds, buildIndex, findNode, loadDoc, revisionOf, stateHashOf, StaleFileError, updateNode, type Json, type DocNode } from "./engine.ts";
 import { currentDoc, editDoc, pendingEdits, writerHooks } from "./docwriter.ts";
+import { asOneAction } from "./cloud-files-ops.ts";
 import { envelopeHook, storeForAsync, type EnvelopeState } from "./widgets/store.ts";
 import type { Widget } from "./widgets/types.ts";
 import { countUsage } from "./usage-counts.ts";
@@ -1166,7 +1167,7 @@ async function step(docFile: string, dir: Dir, hooks: ApplyHooks, opts: { skip?:
     }
     let revision: string | undefined;
     try {
-      revision = await apply(docFile, e, dir, hooks);
+      revision = await asOneAction(docFile, () => apply(docFile, e, dir, hooks));
     } catch (err) {
       if (!(err instanceof HistoryError) || err.code !== "conflict") throw err;
       // The second press on the same blocked step drops it, so the one before is reachable; nothing is written.

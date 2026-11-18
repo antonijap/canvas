@@ -13,7 +13,7 @@ import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { mediaAdded } from "./cloud-files-ops.ts";
+import { asOneAction, mediaAdded } from "./cloud-files-ops.ts";
 import { inPackage, resolveDoc } from "./docpath.ts";
 import { htmlSnippet, listPresets, packUniforms, PaperError, paperShader, presetsOf, reactSnippet, resolveParams, type PaperConfig } from "./paper.ts";
 import { addWidget, getWidget, listWidgets, docFileFor, updateWidget, WidgetError } from "./widgets.ts";
@@ -229,6 +229,10 @@ export function paperCard(preset: string, variant: string | undefined, params: R
 
 /** A new shader card: its source file first, then the widget that points at it. */
 export async function createShader(file: string, input: ShaderInput, who: Who = {}) {
+  return asOneAction(docFileFor(file), () => createShaderNow(file, input, who));
+}
+
+async function createShaderNow(file: string, input: ShaderInput, who: Who = {}) {
   const docFile = docFileFor(file);
   // A copy (Option-drag) takes the original card's source and settings; the new id has no source file of its own yet.
   let from: { source: string; config: Record<string, unknown>; name?: string } | undefined;
@@ -258,6 +262,10 @@ export async function createShader(file: string, input: ShaderInput, who: Who = 
 
 /** Change a shader card: the new source file (if any) first, then the widget; the old source comes back if the widget write fails. */
 export async function updateShader(file: string, id: string, patch: ShaderPatch, who: Who = {}) {
+  return asOneAction(docFileFor(file), () => updateShaderNow(file, id, patch, who));
+}
+
+async function updateShaderNow(file: string, id: string, patch: ShaderPatch, who: Who = {}) {
   const docFile = docFileFor(file);
   if (!ID_RE.test(id)) throw new WidgetError(404, "no-widget", `No widget "${id}"`);
   const kindOf = () => {

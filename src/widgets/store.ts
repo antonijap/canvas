@@ -256,7 +256,7 @@ export class Store {
         // Another writer slipped in since refresh(): start over on top of it.
         if (base === undefined || (await this.fileHash()) !== base) continue;
         if (!(await this.commit(bytes, base))) continue;
-        deliverOps(this.docFile, fileOps);
+        deliverOps(this.docFile, fileOps, { widgets: before, extra: beforeExtra }, { widgets: next, extra });
         this.seen = sha(bytes);
         this.state = { rev: this.seen, widgets: next, invalid: false, extra };
         if (opts.record && envelopeHook.fn) {

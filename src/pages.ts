@@ -7,6 +7,7 @@
 // `pages` has one implicit page holding every board. Which page a viewer looks at is theirs (with the
 // camera, in the page's localStorage), never stored here.
 
+import { asOneAction } from "./cloud-files-ops.ts";
 import { randomBytes } from "node:crypto";
 import type http from "node:http";
 import { relabelTop } from "./history.ts";
@@ -205,7 +206,7 @@ export const PAGE_DELETE_MERGE_MS = 3000;
 export function deletePage(file: string, id: string, boardIds: BoardIds, opts: Opts = {}, deleteBoards?: DeleteBoards) {
   // One delete at a time per file: the last-page rule and the boards that go are read after the one before finished.
   const docFile = docFileFor(file);
-  const run = (deleteChains.get(docFile) ?? Promise.resolve()).then(() => deletePageNow(file, id, boardIds, opts, deleteBoards));
+  const run = (deleteChains.get(docFile) ?? Promise.resolve()).then(() => asOneAction(docFile, () => deletePageNow(file, id, boardIds, opts, deleteBoards)));
   const tail = run.catch(() => {});
   deleteChains.set(docFile, tail);
   void tail.then(() => { if (deleteChains.get(docFile) === tail) deleteChains.delete(docFile); });
