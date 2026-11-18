@@ -32,12 +32,20 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
-/// Control backing excludes these rectangles from the titlebar's native drag region.
-struct WindowControlArea: NSViewRepresentable {
-    final class ControlView: NSView { override var mouseDownCanMoveWindow: Bool { false } }
-    func makeNSView(context: Context) -> NSView { ControlView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+/// The top bar sits where the hidden titlebar is, so on mouse down the window server starts a window drag before any
+/// SwiftUI gesture sees the press (a background NSView cannot change that: SwiftUI hit-tests its own content). While the
+/// pointer is over a control that drags or clicks (the tabs, Home, +), the window it is in does not move; empty glass
+/// and the gap between the pills still drag the window.
+struct KeepsWindowStill: ViewModifier {
+    func body(content: Content) -> some View {
+        content.onHover { inside in
+            let at = NSEvent.mouseLocation
+            guard let w = NSApp.windows.first(where: { $0.isVisible && $0.frame.contains(at) }) ?? NSApp.mainWindow else { return }
+            w.isMovable = !inside
+        }
+    }
 }
+extension View { func keepsWindowStill() -> some View { modifier(KeepsWindowStill()) } }
 
 /// SwiftUI controls in the hidden titlebar must not inherit window dragging.
 final class ControlHostingView<Content: View>: NSHostingView<Content> {
@@ -227,7 +235,6 @@ struct TopBar: View {
         }
         return TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, width: fittedWidths[i], missing: model.isMissing(f),
                        onClose: { model.close(f) }) { model.openTab(f) }
-            .background(WindowControlArea())
             .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
             .overlay {
                 if renaming == f {
@@ -267,7 +274,7 @@ struct TopBar: View {
                     // Home: always first, never closed. Its name shows while no file is open; the glyph alone after.
                     PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
                               help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
-                        .background(WindowControlArea())
+                        .keepsWindowStill()
                         .qaID("home-tab", label: "Home")
                         .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
                         .animation(Motion.island, value: model.openFiles.isEmpty)
@@ -277,6 +284,7 @@ struct TopBar: View {
                         }
                     }
                     .frame(width: stripWidth)
+                    .keepsWindowStill()
                     .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
                     Menu {
                         ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
@@ -287,7 +295,7 @@ struct TopBar: View {
                             .frame(width: Metric.control, height: Metric.control).contentShape(Circle())
                     }
                     .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().chromeHelp("Open a canvas")
-                    .background(WindowControlArea())
+                    .keepsWindowStill()
                         .qaID("tab-open", label: "Open a canvas")
                 }
             }
