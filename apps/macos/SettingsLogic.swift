@@ -642,3 +642,19 @@ enum CloudDisclosure {
         "Invite tokens are kept in the macOS Keychain, where apps running as you can read them.",
     ]
 }
+
+/// The Settings window's frame for its pane's height: the top edge stays where it is, the window never grows past the
+/// screen's visible area (the pane scrolls past that), and it stays on that screen.
+enum SettingsWindowFit {
+    /// `chrome`: the window's frame height minus its content height (title bar and toolbar).
+    /// `width`: the window's frame width for the pane's width.
+    static func frame(current: CGRect, chrome: CGFloat, content: CGFloat, width: CGFloat? = nil, visible: CGRect?) -> CGRect {
+        var height = max(1, content) + max(0, chrome)
+        if let visible { height = min(height, visible.height) }
+        var top = current.maxY
+        if let visible { top = min(top, visible.maxY) }
+        var y = top - height
+        if let visible, y < visible.minY { y = visible.minY }
+        return CGRect(x: current.minX, y: y, width: width ?? current.width, height: height)
+    }
+}

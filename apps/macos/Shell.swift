@@ -189,7 +189,7 @@ struct TopBar: View {
     private var fittedWidths: [CGFloat] {
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
         // Leading/trailing padding, document glyph, gap and close target, matching TabChip.
-        let chromeWidth: CGFloat = Metric.control + 29
+        let chromeWidth: CGFloat = Metric.control + 33
         let natural: [CGFloat] = model.openFiles.map { file in
             let titleWidth = (model.name(of: file) as NSString).size(withAttributes: [.font: font]).width
             return ceil(titleWidth) + chromeWidth

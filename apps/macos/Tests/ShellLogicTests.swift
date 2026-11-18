@@ -86,8 +86,9 @@ struct ShellLogicTests {
     static func tabSizing() {
         let full: [CGFloat] = [340, 200, 120]
         check(TabSizing.widths(natural: full, available: 664, minimum: 96) == full, "full names when there is room, including names over 180 pt")
-        check(TabSizing.widths(natural: [240, 200, 160], available: 484, minimum: 96) == [200, 160, 120], "all tabs lose the same width when crowded")
-        check(TabSizing.widths(natural: [300, 120, 100], available: 354, minimum: 96) == [158, 96, 96], "short tabs stop at the minimum and the rest share the remaining deficit")
+        check(TabSizing.widths(natural: [240, 200, 160], available: 484, minimum: 96) == [160, 160, 160], "crowded: the longest names shrink first, short names stay whole")
+        check(TabSizing.widths(natural: [300, 120, 100], available: 354, minimum: 96) == [130, 120, 100], "a long name gives up its width before a short one is cut")
+        check(TabSizing.widths(natural: [150, 260, 170, 300, 150], available: 838, minimum: 96) == [150, 180, 170, 180, 150], "short file names stay whole next to long ones")
         check(TabSizing.widths(natural: full, available: 100, minimum: 96) == [96, 96, 96], "scroll when even minimum widths do not fit, including the active tab")
         check(TabSizing.widths(natural: [], available: 100, minimum: 96).isEmpty, "no tabs")
         check(TabSizing.widths(natural: [40, 200], available: 500, minimum: 96) == [96, 200], "short names still keep room for controls")

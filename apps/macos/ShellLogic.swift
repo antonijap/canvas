@@ -2001,18 +2001,18 @@ enum TabSizing {
         let floor = max(0, minimum)
         var result = natural.map { max(floor, $0) }
         let budget = max(CGFloat(result.count) * floor, available - CGFloat(result.count - 1) * max(0, gap))
-        var deficit = result.reduce(0, +) - budget
-        // Remove the same amount from every tab until one reaches the minimum, then share the rest.
-        while deficit > 0.001 {
-            let flexible = result.indices.filter { result[$0] > floor + 0.001 }
-            guard !flexible.isEmpty else { break }
-            let share = deficit / CGFloat(flexible.count)
-            for i in flexible {
-                let removed = min(share, result[i] - floor)
-                result[i] -= removed
-                deficit -= removed
-            }
+        guard result.reduce(0, +) > budget + 0.001 else { return result }
+        // Crowded: the widest tabs shrink first, to one shared cap, so a short name stays whole while a long one has
+        // room to give. The cap never goes below the minimum (the strip scrolls past that).
+        let sorted = result.sorted()
+        var cap = floor, before: CGFloat = 0
+        for (k, w) in sorted.enumerated() {
+            let rest = CGFloat(sorted.count - k)
+            let c = (budget - before) / rest
+            if c <= w { cap = max(floor, c); break }
+            before += w
         }
+        result = result.map { min($0, cap) }
         return result
     }
 }

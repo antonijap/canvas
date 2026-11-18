@@ -23,9 +23,25 @@ struct SettingsTests {
     }
 
     static func main() {
-        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration(); reviewFixes(); adapters()
+        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration(); reviewFixes(); adapters(); windowFit()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func windowFit() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 875)
+        let w = CGRect(x: 400, y: 300, width: 560, height: 400)
+        let grown = SettingsWindowFit.frame(current: w, chrome: 80, content: 500, visible: screen)
+        check(grown.height == 580 && grown.maxY == w.maxY && grown.minX == w.minX, "a taller pane grows the window down, top edge kept")
+        let shrunk = SettingsWindowFit.frame(current: w, chrome: 80, content: 200, visible: screen)
+        check(shrunk.height == 280 && shrunk.maxY == w.maxY, "a shorter pane shrinks it, top edge kept")
+        let tall = SettingsWindowFit.frame(current: w, chrome: 80, content: 3000, visible: screen)
+        check(tall.height == 875 && tall.minY == 0 && tall.maxY == 875, "never taller than the screen: the pane scrolls")
+        let low = SettingsWindowFit.frame(current: CGRect(x: 0, y: 50, width: 560, height: 200), chrome: 80, content: 500, visible: screen)
+        check(low.minY == 0 && low.height == 580, "near the bottom it moves up to stay on screen")
+        check(SettingsWindowFit.frame(current: w, chrome: 80, content: 500, visible: nil).height == 580, "no screen: no cap")
+        let narrow = CGRect(x: 400, y: 300, width: 500, height: 400)
+        check(SettingsWindowFit.frame(current: narrow, chrome: 80, content: 500, width: 560, visible: screen).width == 560, "the window takes the pane's width, whatever width it had")
     }
 
     static func adapters() {

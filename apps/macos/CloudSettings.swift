@@ -401,7 +401,6 @@ final class CloudAccount: ObservableObject {
             busy.remove(e.url)
             if selected == e.id { selected = nil }
             if HomeStore.shared.section == .cloud(e.id) { HomeStore.shared.section = .recents }
-            SettingsWindow.shared.refit()
             await refreshHost(model)
             model.flash(e.kind == .hosted ? "\(name) deleted" : "\(name) removed", level: "success")
         }
@@ -641,10 +640,6 @@ struct CloudSettings: View {
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
             }
         }
-        // The window takes the pane's height: it follows the list and the Cloud open.
-        .onChange(of: model.prefs.clouds.count) { SettingsWindow.shared.refit() }
-        .onChange(of: account.selected) { SettingsWindow.shared.refit() }
-        .onChange(of: filter) { SettingsWindow.shared.refit() }
     }
 
     private var list: some View {
@@ -821,8 +816,6 @@ struct CloudPage: View {
                 .qaID("cloud-disclosure")
             }
         }
-        .onChange(of: h.hosting) { SettingsWindow.shared.refit() }
-        .onChange(of: h.people.count) { SettingsWindow.shared.refit() }
     }
 
     private func pill(_ e: CloudEntry, _ s: CloudState) -> (text: String, tone: HomeLogic.Tone) {
