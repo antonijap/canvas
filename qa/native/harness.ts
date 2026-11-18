@@ -372,7 +372,8 @@ export class NT {
 
   // ------------------------------------------------ asserts
   ok(cond: unknown, msg: string): asserts cond { if (!cond) throw new Fail(msg); }
-  eq(a: unknown, b: unknown, msg: string) { if (JSON.stringify(a) !== JSON.stringify(b)) throw new Fail(`${msg}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); }
+  /** Equal values; object keys in any order (the app's JSON does not keep them). */
+  eq(a: unknown, b: unknown, msg: string) { if (stable(a) !== stable(b)) throw new Fail(`${msg}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); }
   near(a: number, b: number, tol: number, msg: string) { if (!(Math.abs(a - b) <= tol)) throw new Fail(`${msg}: got ${a}, want ${b} (±${tol})`); }
   skip(why: string): never { throw new Skip(why); }
   note(s: string) { this.notes.push(s); }
@@ -389,4 +390,9 @@ export const nativeSlug = (s: { area: string; name: string }) => `native-${s.are
 export function nativeFileStem(s: { area: string; name: string }): string {
   const slug = nativeSlug(s).replace(/^native-/, "");
   return slug.length <= 160 ? slug : `${slug.slice(0, 147)}-${createHash("sha256").update(slug).digest("hex").slice(0, 12)}`;
+}
+
+/** JSON with every object's keys sorted, so two equal values compare equal whatever order their keys came in. */
+function stable(v: unknown): string {
+  return JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x).sort(([p], [q]) => (p < q ? -1 : p > q ? 1 : 0))) : x));
 }
