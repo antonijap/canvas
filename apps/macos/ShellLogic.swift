@@ -136,6 +136,10 @@ enum TabOrder {
     /// A press that moves less than this (points) is a click, never a drag.
     static let dragThreshold: CGFloat = 4
 
+    static func canDrag(button: Int, clicks: Int, editing: Bool) -> Bool {
+        button == 0 && clicks == 1 && !editing
+    }
+
     static func isDrag(_ dx: CGFloat) -> Bool { dx.isFinite && abs(dx) >= dragThreshold }
 
     /// `files` with the tab at `from` taken out and put at index `to` (both clamped to the list).
@@ -662,10 +666,24 @@ enum TipPlacement {
     }
 }
 
+/// A visible package name typed into a file tab.
+enum TabRename {
+    static func name(_ raw: String) -> String? {
+        let n = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, !n.hasPrefix("."), !n.contains("/"), !n.contains("\0") else { return nil }
+        return n.hasSuffix(".canvas") ? n : n + ".canvas"
+    }
+}
+
 /// The right-click menu's edit commands, in order, with shortcuts. Each names a selector of the Edit menu's
 /// target (StructureActions in main.swift), so the two menus run the same code; test/context-menu.test.ts
 /// checks every selector exists there and that the Edit menu shows the same keys.
 enum ContextMenuLayout {
+    static func fileTab(cloud: Bool) -> [[String]] {
+        [["Rename...", "Show in Finder", "Duplicate"] + (cloud ? ["Move to Cloud..."] : []) + ["Copy Link"],
+         ["Close", "Close Other Tabs"]]
+    }
+
     struct Entry: Equatable {
         let title: String
         let selector: String
@@ -1913,5 +1931,28 @@ enum AppUpdate {
         exit 0
 
         """
+    }
+}
+
+/// File tab widths, before the strip falls back to scrolling.
+enum TabSizing {
+    static func widths(natural: [CGFloat], available: CGFloat, minimum: CGFloat, gap: CGFloat = 2) -> [CGFloat] {
+        guard !natural.isEmpty else { return [] }
+        let floor = max(0, minimum)
+        var result = natural.map { max(floor, $0) }
+        let budget = max(CGFloat(result.count) * floor, available - CGFloat(result.count - 1) * max(0, gap))
+        var deficit = result.reduce(0, +) - budget
+        // Remove the same amount from every tab until one reaches the minimum, then share the rest.
+        while deficit > 0.001 {
+            let flexible = result.indices.filter { result[$0] > floor + 0.001 }
+            guard !flexible.isEmpty else { break }
+            let share = deficit / CGFloat(flexible.count)
+            for i in flexible {
+                let removed = min(share, result[i] - floor)
+                result[i] -= removed
+                deficit -= removed
+            }
+        }
+        return result
     }
 }

@@ -112,7 +112,7 @@ export const METRICS = {
   field: 28,
   radiusField: 8,
   railWidth: 40,
-  tabMax: 180,
+  tabMin: 96,
   trafficLights: 78,
 };
 

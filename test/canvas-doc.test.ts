@@ -212,3 +212,28 @@ describe("save-as and new", () => {
     assert.throws(() => saveAsCanvas(path.join(dir, "missing.canvas.json"), path.join(dir, "Z.canvas")), (e: any) => e.status === 404);
   });
 });
+
+
+describe("package rename", () => {
+  test("rename keeps saved edits and sidecars, refuses unsafe names and collisions", async () => {
+    const file = newCanvas(path.join(dir, "Before.canvas"));
+    fs.writeFileSync(path.join(file, "comments.json"), '{"threads":[]}');
+    for (const name of ["", ".hidden", "../Outside", "a/b", "a\0b", ".canvas"]) {
+      assert.equal((await post("/api/canvas/rename", { file, name })).status, 400);
+    }
+    assert.equal((await post("/api/canvas/rename", { file, name: "After" }, {})).status, 403);
+    newCanvas(path.join(dir, "Taken.canvas"));
+    assert.equal((await post("/api/canvas/rename", { file, name: "Taken" })).status, 409);
+    fs.writeFileSync(path.join(file, "document.json"), JSON.stringify(FIXTURE_DOC));
+    assert.equal((await post("/api/update", { file, id: "Scr01", props: { opacity: 0.25 } })).status, 200);
+    const r = await post("/api/canvas/rename", { file, name: "After" });
+    assert.equal(r.status, 200, await r.clone().text());
+    const renamed = (await r.json() as { file: string }).file;
+    assert.equal(renamed, path.join(fs.realpathSync(dir), "After.canvas"));
+    assert.ok(!fs.existsSync(file));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(renamed, "document.json"), "utf8")).children[0].opacity, 0.25);
+    assert.ok(fs.existsSync(path.join(renamed, "comments.json")));
+    assert.equal((await fetch(`${base}/api/summary?file=${encodeURIComponent(renamed)}`)).status, 200);
+    fs.unwatchFile(path.join(renamed, "document.json"));
+  });
+});

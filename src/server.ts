@@ -15,7 +15,7 @@ import { SnapshotCache } from "./snapcache.ts";
 import { compactWrites, currentDoc, editDoc, writeSettled, finishWrites, flushWrites, hasPendingWrites, journalSynced, persistedRevision, reconcileLoad, restoreSuspected, resumeWrites, setDocHost, writerHooks } from "./docwriter.ts";
 import { PAGE_BRIDGE_JS } from "./bridge-page.ts";
 import { dispatch, docChanged, finishWork, trackChange, handleBridge, originOk, handleDocRoute, noteDoc, emit as bridgeEmit, type BridgeCtx } from "./bridge.ts";
-import { DESIGN_FILE, DocError, displayPath, newCanvas, primeDoc, saveAsCanvas } from "./docpath.ts";
+import { DESIGN_FILE, DocError, displayPath, newCanvas, primeDoc, renameCanvas, saveAsCanvas } from "./docpath.ts";
 import { storeForAsync } from "./widgets/store.ts";
 import { enginePkgDir, handleEngineRoute, sceneEnv, streamFile } from "./scene.ts";
 import { keyedAnswer } from "./keyed.ts";
@@ -857,6 +857,25 @@ export function startServer(port = PORT()): Promise<http.Server> {
           if (e instanceof OverrideError) return json(res, { error: e.message, code: e.code }, e.status);
           if (e instanceof StaleFileError) return json(res, { error: (e as Error).message, code: "stale_revision" }, 409);
           return json(res, { error: (e as Error).message }, 422);
+        }
+      }
+      if (url.pathname === "/api/canvas/rename" && req.method === "POST") {
+        if (req.headers["x-canvas"] !== "1") return json(res, { error: "forbidden" }, 403);
+        const raw = await readBodyText(req, 100_000);
+        if (raw === null) return json(res, { error: "too large" }, 413);
+        try {
+          const b = JSON.parse(raw || "{}") as { file: string; name: unknown };
+          if (typeof b.file !== "string" || !b.file) throw new DocError(400, "file is required");
+          const src = resolveDocPath(b.file);
+          await flushWrites(src);
+          await compactWrites(src);
+          await settleShaderSources(b.file);
+          const file = renameCanvas(b.file, b.name);
+          fileList = [];
+          scanStartedAt = 0;
+          return json(res, { ok: true, file });
+        } catch (e) {
+          return json(res, { error: (e as Error).message }, e instanceof DocError ? e.status : 400);
         }
       }
       if ((url.pathname === "/api/canvas/new" || url.pathname === "/api/canvas/save-as") && req.method === "POST") {

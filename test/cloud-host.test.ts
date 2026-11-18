@@ -471,13 +471,20 @@ test("framing: a frame arriving in many small chunks is joined once, not once pe
   ws.on("message", (m: string) => got.push(m));
   const text = "y".repeat(2 * 1024 * 1024);
   const bytes = masked(0x1, Buffer.from(text));
-  const t0 = performance.now();
-  for (let i = 0; i < bytes.length; i += 64) ws.feed(bytes.subarray(i, i + 64));
-  const ms = performance.now() - t0;
-  assert.equal(got[0]?.length, text.length);
-  // Joined once: a few tens of ms. Rejoined per chunk (quadratic) it took most of a second here.
-  assert.ok(ms < 250, `2 MiB in 64-byte chunks takes ${ms.toFixed(0)} ms`);
-  ws.terminate();
+  const concat = Buffer.concat;
+  let joined = 0;
+  Buffer.concat = (chunks, length) => {
+    joined += length ?? chunks.reduce((n, chunk) => n + chunk.length, 0);
+    return concat(chunks, length);
+  };
+  try {
+    for (let i = 0; i < bytes.length; i += 64) ws.feed(bytes.subarray(i, i + 64));
+    assert.equal(got[0], text);
+    assert.ok(joined <= bytes.length * 2, `joining copied ${joined} bytes for a ${bytes.length}-byte frame`);
+  } finally {
+    Buffer.concat = concat;
+    ws.terminate();
+  }
 });
 
 test("acceptKey: the RFC 6455 example; anything but a version 13 upgrade is null", () => {
