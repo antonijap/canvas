@@ -274,8 +274,9 @@ describe("page: sender", () => {
     clock.advance(20);
     s.update({ cursor: { x: 2, y: 2 } });
     s.setHidden(true);
-    assert.equal(clock.pending, 0, "the waiting send is dropped");
-    assert.deepEqual(sent, [{ cursor: { x: 1, y: 1 }, sel: ["a"] }, { cursor: null }]);
+    assert.equal(clock.pending, 1, "the waiting send is replaced by the hide, which waits for the cool-down");
+    clock.advance(200);
+    assert.deepEqual(sent, [{ cursor: { x: 1, y: 1 }, sel: ["a"] }, { cursor: null }], "the move that was waiting is dropped");
     s.update({ cursor: { x: 3, y: 3 } });
     clock.advance(5000);
     assert.equal(sent.length, 2);
@@ -364,5 +365,126 @@ describe("page: peers", () => {
     for (const hex of ["#E9590C", "#2563EB", "#CA8A04", "#FFFFFF", "#000000"]) assert.match(C.inkOn(hex), /^#(FFFFFF|18181B)$/);
     assert.equal(C.inkOn("#FFFFFF"), "#18181B");
     assert.equal(C.inkOn("#000000"), "#FFFFFF");
+  });
+});
+
+describe("review fixes", () => {
+  test("a __proto__ key is an unknown key, at the top and inside", () => {
+    for (const raw of [
+      '{"type":"presence","p":{"cursor":null,"__proto__":1}}',
+      '{"type":"presence","p":{"cursor":null,"__proto__":{"x":1}}}',
+      '{"type":"presence","p":{"cursor":{"x":1,"y":2,"__proto__":{}}}}',
+      '{"type":"presence","p":{"preview":{"kind":"move","ids":["a"],"__proto__":{}}}}',
+      '{"type":"presence","__proto__":{},"p":{"cursor":null}}',
+    ]) assert.equal(refused(receivePresence(raw, anna, {}, ctx())), "invalid", raw);
+  });
+
+  test("hiding right after a burst stays within the room's budget, so the pointer really hides", () => {
+    const clock = fakeClock();
+    const limiter = new PresenceLimiter();
+    let kept: KeptPresence = {};
+    const outcomes: string[] = [];
+    const s = C.createPresenceSender({
+      send: (p: unknown) => {
+        const out = receivePresence(frame(p), anna, kept, { limiter, now: clock.now() });
+        outcomes.push(out.ok ? "ok" : out.reason);
+        if (out.ok) kept = out.kept;
+      },
+      now: clock.now,
+      schedule: clock.schedule,
+    });
+    for (let t = 0; t <= 990; t += 110) { clock.advance(t); s.update({ cursor: { x: t, y: 0 } }); }
+    clock.advance(995);
+    s.setHidden(true);
+    clock.advance(3000);
+    assert.ok(outcomes.every((o) => o === "ok"), outcomes.join(","));
+    assert.equal(kept.cursor, null, "the room's last word is a hidden pointer");
+  });
+
+  test("the sender never sends more than 10 in a second, even with a short cool-down", () => {
+    const clock = fakeClock();
+    const at: number[] = [];
+    const s = C.createPresenceSender({ send: () => at.push(clock.now()), now: clock.now, schedule: clock.schedule, every: 10 });
+    for (let t = 0; t < 3000; t += 5) { clock.advance(t); s.update({ cursor: { x: t, y: 0 } }); }
+    clock.advance(5000);
+    assert.ok(at.length > 20);
+    for (let k = 10; k < at.length; k++) assert.ok(at[k] - at[k - 10] >= 1000, `11 within a second at ${at[k]}`);
+  });
+
+  test("multibyte typing is cut to fit the 1 KB frame, and the room accepts it", () => {
+    assert.equal(C.FRAME_BYTES, PRESENCE_LIMITS.frameBytes);
+    assert.equal(C.TEXT_CHARS, PRESENCE_LIMITS.textChars);
+    for (const text of ["é".repeat(512), "\u{1F600}".repeat(400), "x".repeat(2000)]) {
+      const clock = fakeClock();
+      const got: any[] = [];
+      const s = C.createPresenceSender({
+        send: (p: unknown) => {
+          const out = receivePresence(frame(p), anna, {}, ctx(clock.now()));
+          assert.ok(out.ok, out.ok ? "" : out.message);
+          got.push(p);
+        },
+        now: clock.now,
+        schedule: clock.schedule,
+      });
+      s.update({ cursor: { x: 1, y: 2 }, sel: ["a", "b"], editing: { id: "t1", text } });
+      clock.advance(1000);
+      assert.equal(got.length, 1);
+      const sentText: string = got[0].editing.text;
+      assert.ok(sentText.length > 0 && text.startsWith(sentText), "a prefix of the text");
+      assert.ok(!/[\ud800-\udbff]$/.test(sentText), "no half of a surrogate pair at the end");
+      // The same request again is not news.
+      s.update({ editing: { id: "t1", text } });
+      clock.advance(2000);
+      assert.equal(got.length, 1);
+    }
+  });
+
+  test("cursor traffic does not keep a stale preview or typing alive", () => {
+    const m = C.createPeers();
+    const peer = { session: "s-anna", by: { name: "Anna" }, role: "editor" };
+    m.receive([{ ...peer, preview: { kind: "move", ids: ["a"], dx: 1 }, editing: { id: "t", text: "Hi" } }], 0);
+    for (let t = 100; t <= 5000; t += 100) m.receive([{ ...peer, cursor: { x: t, y: 0 } }], t);
+    const [v] = m.view(5000, null);
+    assert.deepEqual(v.cursor, { x: 5000, y: 0 });
+    assert.equal(v.preview, null);
+    assert.equal(v.editing, null);
+    // Each field keeps its own clock: a fresh preview does not bring back a pointer that has faded.
+    m.receive([{ ...peer, preview: { kind: "move", ids: ["a"], dx: 2 } }], 9000);
+    const [w] = m.view(9100, null);
+    assert.ok(w.preview);
+    assert.equal(w.cursor, null, "the pointer last moved at 5 s, so it has faded");
+  });
+
+  test("values are copied when queued and when sent, so later mutation is seen as a change", () => {
+    const clock = fakeClock();
+    const sent: any[] = [];
+    const s = C.createPresenceSender({ send: (p: unknown) => sent.push(JSON.parse(JSON.stringify(p))), now: clock.now, schedule: clock.schedule });
+    const sel = ["a"];
+    s.update({ sel });
+    clock.advance(500);
+    sel.push("b");
+    s.update({ sel });
+    clock.advance(1000);
+    assert.deepEqual(sent, [{ sel: ["a"] }, { sel: ["a", "b"] }]);
+    s.update({ cursor: { x: 1, y: 1 } });
+    clock.advance(1010);
+    const q = { x: 2, y: 2 };
+    s.update({ cursor: q }); // during the cool-down: queued
+    q.x = 3;
+    clock.advance(3000);
+    assert.deepEqual(sent.slice(2), [{ cursor: { x: 1, y: 1 } }, { cursor: { x: 2, y: 2 } }]);
+  });
+
+  test("names and typed text with markup come out as plain strings, never HTML", () => {
+    const m = C.createPeers();
+    const name = '<img src=x onerror="alert(1)">';
+    const text = "<script>alert(1)</script>";
+    m.receive([{ session: "s-x", by: { name }, role: "editor", cursor: { x: 0, y: 0 }, editing: { id: "t", text } }], 0);
+    const [v] = m.view(1, null);
+    assert.equal(v.name, name.slice(0, 24), "the name is the text itself, not escaped or parsed");
+    assert.equal(v.editing.text, text);
+    assert.match(v.color, /^#[0-9A-F]{6}$/i, "the colour is from the palette, never from the name");
+    assert.match(v.ink, /^#[0-9A-F]{6}$/i);
+    assert.ok(!Object.keys(v).some((k) => /html/i.test(k)), "no HTML field to set");
   });
 });

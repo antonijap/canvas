@@ -168,11 +168,17 @@ export function receivePresence(
   return { ok: true, relay: shown ? stamp(shown, from) : null, kept: next };
 }
 
-/** A copy of a patch without any key that claims an identity. Non-objects pass through for checkPresence to refuse. */
+/**
+ * A copy of a patch without any key that claims an identity. Keys are checked on the object as parsed, before any
+ * copy: a key that is neither presence nor identity (`__proto__` included, which an assignment would swallow) leaves
+ * the patch as it was, for checkPresence to refuse. Non-objects pass through the same way.
+ */
 export function stripIdentity(p: unknown): unknown {
   if (!plain(p)) return p;
+  const keys = Object.keys(p);
+  if (keys.some((k) => !PRESENCE_KEYS.has(k) && !IDENTITY_KEYS.has(k))) return p;
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(p)) if (!IDENTITY_KEYS.has(k)) out[k] = v;
+  for (const k of keys) if (PRESENCE_KEYS.has(k)) out[k] = p[k];
   return out;
 }
 
