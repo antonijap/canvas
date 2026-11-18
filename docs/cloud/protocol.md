@@ -1,4 +1,4 @@
-How comments work locally and on a team's own Canvas server. The types and the shared rules are code in [cloud/protocol.ts](../../cloud/protocol.ts); this page says why. Canvas hosts no server: a team deploys `cloud/cloudflare` to its own Cloudflare account.
+How comments work locally and on a team's own Canvas server. The types and the shared rules are code in [cloud/protocol.ts](../../cloud/protocol.ts); this page says why. Canvas hosts no server: a team deploys `cloud/adapters/cloudflare` to its own Cloudflare account.
 
 ## Identity of things
 

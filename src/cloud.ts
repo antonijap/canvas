@@ -1,4 +1,4 @@
-// Talking to the Clouds this Canvas was given (cloud/cloudflare servers, Clouds hosted on a Mac): who we are at each,
+// Talking to the Clouds this Canvas was given (cloud/adapters/cloudflare servers, Clouds hosted on a Mac): who we are at each,
 // one room socket per open shared file, sharing a file, and the routes the app and the page use. What the messages
 // mean for comments.json is in src/cloud-sync.ts; this file only moves them.
 //
@@ -38,7 +38,7 @@ import { addCloud, bump, cleanServerUrl, cloudConfigs, devEmailFor, generation, 
 import { hostsHere, hostStatus, hostStatusAll, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
 import { deleteJoined, readJoined, writeJoined, type JoinedSecrets } from "./cloud-secrets.ts";
 import { forward, genkey, helperPath, hostIdFor, type Helper } from "./cloud-tunnel.ts";
-import { newSecret } from "../cloud/node/host.ts";
+import { newSecret } from "../cloud/adapters/mac/host.ts";
 import { acknowledge, confirm, discard, hooks, isShared, opsForShare, pendingStates, reject, retry, shareLocal, snapshot, viewOf, type SyncFile } from "./cloud-sync.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
 import { localName, packageOf } from "./comments.ts";

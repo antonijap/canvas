@@ -1,4 +1,4 @@
-import type { ErrorCode } from "../../protocol";
+import type { ErrorCode } from "../../../protocol";
 
 export class HttpError extends Error {
   constructor(readonly status: number, readonly code: ErrorCode, message: string) { super(message); }

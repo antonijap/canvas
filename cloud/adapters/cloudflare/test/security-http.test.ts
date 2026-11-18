@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { reset, runInDurableObject } from "cloudflare:test";
-import { PROTOCOL_VERSION } from "../../protocol";
+import { PROTOCOL_VERSION } from "../../../protocol";
 import { bindings, call, connect, envelope, owner, post, register } from "./helpers";
 
 beforeEach(reset);

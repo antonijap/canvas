@@ -1,5 +1,6 @@
-import { LIMITS, PROTOCOL_VERSION } from "../../protocol";
-import type { ServerInfo } from "../../protocol";
+import { route as routeComments } from "../../../core/router.ts";
+import { LIMITS, PROTOCOL_VERSION } from "../../../protocol";
+import type { ServerInfo } from "../../../protocol";
 import { authenticate } from "./auth";
 import type { Env } from "./env";
 import { failure, HttpError, readJson, sinceValue, uuid } from "./http";
@@ -68,21 +69,24 @@ async function route(request: Request, env: Env): Promise<Response> {
     headers.set("x-canvas-internal-doc", doc);
     return env.ROOM.getByName(doc).fetch(new Request(request, { headers }));
   }
-  if (action === "threads" && method === "GET") {
-    const since = sinceValue(url.searchParams.get("since") ?? "0");
-    return Response.json(await env.ROOM.getByName(doc).read(since));
-  }
-  if (action === "ops" && method === "POST") {
-    const body = await readJson(request);
-    const ops = body && typeof body === "object" && "ops" in body ? body.ops : null;
-    if (!Array.isArray(ops)) return failure(400, "invalid", "ops must be a list");
-    if (ops.length > LIMITS.opsPerMessage) {
-      await team.takeOps(me.email, ops.length);
-      return failure(429, "quota", "Too many ops in one message");
-    }
-    return Response.json(await env.ROOM.getByName(doc).submit(doc, ops, me, role));
-  }
-  return failure(404, "not_found", "No such route");
+  const result = await routeComments({
+    kind: "cloudflare",
+    team: () => ({ hasDoc: () => true }), // Registration and role were checked above, before socket dispatch.
+    room: id => ({
+      read: async req => ({ status: 200, body: await env.ROOM.getByName(id).read(sinceValue(req.query.get("since") ?? "0")) }),
+      submit: async req => {
+        const body = await req.body();
+        const ops = body && typeof body === "object" && "ops" in body ? body.ops : null;
+        if (!Array.isArray(ops)) throw new HttpError(400, "invalid", "ops must be a list");
+        if (ops.length > LIMITS.opsPerMessage) {
+          await team.takeOps(me.email, ops.length);
+          throw new HttpError(429, "quota", "Too many ops in one message");
+        }
+        return { status: 200, body: await env.ROOM.getByName(id).submit(id, ops, me, role) };
+      },
+    }),
+  }, { method, path, query: url.searchParams, headers: request.headers, body: () => readJson(request) });
+  return Response.json(result.body, { status: result.status });
 }
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {

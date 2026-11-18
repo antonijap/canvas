@@ -54,7 +54,7 @@ async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: st
 }
 
 sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, fingerprint and people; an invite is copied, never shown; a second Mac joins one; Stop hosting one leaves the other; Delete removes it", { covers: ["settings:cloud-host", "settings:cloud-remove"] }, async (t: NT) => {
-  const cloudPids = () => pgrep(["-P", String(t.app.server!.pid), "-f", "cloud/node/main.ts"]);
+  const cloudPids = () => pgrep(["-P", String(t.app.server!.pid), "-f", "cloud/adapters/mac/main.ts"]);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-qa-joiner-"));
   let joiner: Scratch | null = null;
   try {

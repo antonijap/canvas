@@ -1,4 +1,4 @@
-// A Cloud hosted on a Mac (cloud/node): enrolment with single-use join codes, device tokens, removal, person ids,
+// A Cloud hosted on a Mac (cloud/adapters/mac): enrolment with single-use join codes, device tokens, removal, person ids,
 // the screening every request gets, storage, the room socket and its framing, and the separate process.
 
 import assert from "node:assert/strict";
@@ -8,8 +8,8 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { CloudHost, INVITE_MS, newSecret, parseSecret } from "../cloud/node/host.ts";
-import { acceptKey, ServerSocket } from "../cloud/node/websocket.ts";
+import { CloudHost, INVITE_MS, newSecret, parseSecret } from "../cloud/adapters/mac/host.ts";
+import { acceptKey, ServerSocket } from "../cloud/adapters/mac/websocket.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const dirs: string[] = [];
@@ -510,13 +510,13 @@ test("the host process imports cloud code only", () => {
       walk(next);
     }
   };
-  walk(path.join(ROOT, "cloud", "node", "main.ts"));
+  walk(path.join(ROOT, "cloud", "adapters", "mac", "main.ts"));
   assert.ok(seen.size >= 5);
 });
 
 test("the host process: answers orders over IPC only, binds 127.0.0.1, exits when Canvas goes", async () => {
   const dir = tmp();
-  const child = fork(path.join(ROOT, "cloud", "node", "main.ts"), [], { env: { ...process.env, CANVAS_CLOUD_HOST_DIR: dir, CANVAS_CLOUD_HOST_PORT: "0" }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
+  const child = fork(path.join(ROOT, "cloud", "adapters", "mac", "main.ts"), [], { env: { ...process.env, CANVAS_CLOUD_HOST_DIR: dir, CANVAS_CLOUD_HOST_PORT: "0" }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
   const replies = new Map<number, any>();
   child.on("message", (m: any) => { if (m.id) replies.set(m.id, m); });
   let n = 0;
