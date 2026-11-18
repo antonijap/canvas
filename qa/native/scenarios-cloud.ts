@@ -238,6 +238,8 @@ sc("settings", "A Cloud's name, typed on its page in Settings, names its row, it
     await t.key("a", ["cmd"], { window: "settings" });
     await t.key("Delete", [], { window: "settings" });
     if (name) await t.type(name, { window: "settings" });
+    await t.key("Return", [], { window: "settings" });
+    await t.waitFor(async () => (await t.cmd("qa.cloud", {})).clouds[0]?.name === name, `the Cloud name saved as ${JSON.stringify(name)}`, 4000);
     await t.key("w", ["cmd"], { window: "settings" }).catch(() => {});
     await home(t);
   };
@@ -250,6 +252,7 @@ sc("settings", "A Cloud's name, typed on its page in Settings, names its row, it
     const bar = await t.js<{ text: string; label: string; title: string }>(`const b = document.querySelector(".cm-shared"); return { text: b.innerText, label: b.getAttribute("aria-label") || "", title: b.querySelector(".cm-server")?.title || "" };`);
     t.ok(!(bar.text + bar.label + bar.title).includes("127.0.0.1"), `the file shows no Cloud name: ${JSON.stringify(bar)}`);
     await home(t);
+    t.note("checking the initial host-name row");
     await t.mark({ id: "home-row", label: a.host }, 6000);
     await rename("Studio team");
     await t.mark({ id: "home-row", label: "Studio team" }, 6000);
@@ -259,7 +262,13 @@ sc("settings", "A Cloud's name, typed on its page in Settings, names its row, it
     await t.waitState((s) => s.homeSection === "cloud", "the Cloud's page");
     await t.waitFor(async () => (await t.marks({ label: "Studio team" })).length >= 2, "the page's title", 4000);
     await rename("");
+    t.note("checking the cleared-name host row");
     await t.mark({ id: "home-row", label: a.host }, 6000);
+  } catch (error) {
+    const shot = `${process.cwd()}/qa/out/native/cloud-name-failure.png`;
+    await t.shot(shot).catch(() => {});
+    t.note("before cleanup: qa/out/native/cloud-name-failure.png");
+    throw error;
   } finally {
     await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
     fs.rmSync(path.join(t.file, "comments.json"), { force: true });

@@ -901,6 +901,7 @@ enum QA {
                     var n: [String: Any] = ["x": r.minX, "y": w.frame.height - r.maxY, "w": r.width, "h": r.height, "full": rectTL(m, in: w)]
                     n["id"] = m.qaID
                     n["label"] = m.qaLabel ?? NSNull()
+                    n["windowFrame"] = ["x": w.frame.minX, "y": w.frame.minY, "w": w.frame.width, "h": w.frame.height]
                     out.append(n)
                 }
             }
