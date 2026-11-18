@@ -3,7 +3,7 @@
 // action must throw out of the transaction (room.ts does) so SQLite puts every row back.
 
 import type { SqlStore, SqlValue } from "../sql.ts";
-import { refsOfNode, ApplyError, type BlobRow, type DocNode, type Json, type NodeView, type PageRow, type Ver } from "./seam.ts";
+import { nextProps, refsOfNode, ApplyError, type BlobRow, type DocNode, type Json, type NodeView, type PageRow, type Ver } from "./seam.ts";
 import { keyAt, evenKeys } from "./positions.ts";
 import type { DocValueKey, FileState, RoomTree } from "./state.ts";
 
@@ -335,6 +335,13 @@ export class SqlTree implements RoomTree {
   }
   writeDocValue(key: DocValueKey, value: Json | undefined): void {
     this.writeKv(`doc/${key}`, value);
+    const top = this.topKeys();
+    if (value === undefined) delete top[key];
+    else top[key] = null;
+    this.w("UPDATE file_meta SET top_json = ? WHERE id = 1", JSON.stringify(top));
+  }
+  orderDocKeys(order: string[]): void {
+    this.w("UPDATE file_meta SET top_json = ? WHERE id = 1", JSON.stringify(nextProps(this.topKeys(), {}, order)));
   }
   writeWidget(id: string, value: Json | undefined, index: number | undefined): void {
     if (value === undefined) {

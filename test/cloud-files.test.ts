@@ -26,12 +26,13 @@ test("sidecar preserves explicit null separately from absence", () => {
   assert.equal(JSON.stringify(tree.envelope), JSON.stringify(after));
 });
 
-test("a failed action scope does not publish a partial action", async () => {
+test("a failed action scope whose changes were rolled back publishes no action", async () => {
   const heard: unknown[] = [];
   const off = onAction((_, a) => heard.push(a));
   try {
     await assert.rejects(asOneAction("placeholder", () => {
       docEditAction("placeholder", { children: [] }, { children: [{ id: "x", type: "rectangle" }] }, [{ t: "tree", kind: "insert", parent: null, index: 0, node: { id: "x", type: "rectangle" } }]);
+      docEditAction("placeholder", { children: [{ id: "x", type: "rectangle" }] }, { children: [] }, [{ t: "tree", kind: "remove", parent: null, index: 0, node: { id: "x", type: "rectangle" } }]);
       throw new Error("abort");
     }), /abort/);
     assert.equal(heard.length, 0);

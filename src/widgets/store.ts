@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import { deliverOps, envelopeEditAction, wantActions } from "../cloud-files-ops.ts";
+import { asOneAction, deliverOps, envelopeEditAction, wantActions } from "../cloud-files-ops.ts";
 import { widgetsPathFor } from "../docpath.ts";
 import { isObject } from "./check.ts";
 import { kindOf, validateWidget } from "./registry.ts";
@@ -235,6 +235,10 @@ export class Store {
    * (pages live there) and returns both. One lock, one atomic write, one rebase rule.
    */
   mutateEnvelope<T = undefined>(fn: (widgets: Widget[], extra: Record<string, unknown>) => { widgets: Widget[]; extra: Record<string, unknown>; result?: T }, opts: WriteOpts = {}): Promise<{ state: StoreState; result: T | undefined }> {
+    return asOneAction(this.docFile, () => this.mutateEnvelopeNow(fn, opts));
+  }
+
+  private mutateEnvelopeNow<T>(fn: (widgets: Widget[], extra: Record<string, unknown>) => { widgets: Widget[]; extra: Record<string, unknown>; result?: T }, opts: WriteOpts): Promise<{ state: StoreState; result: T | undefined }> {
     const run = async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         await this.refreshAsync(true);

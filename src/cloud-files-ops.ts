@@ -58,8 +58,44 @@ export const wantActions = () => actionChecks.enabled || listeners.size > 0;
 
 // ---------- one action per step ----------
 
-type Scope = { closed?: boolean; docFile: string; ops: FileOp[]; agent?: string; before?: DocLike; after?: DocLike; envelopeBefore?: Envelope; envelopeAfter?: Envelope };
+export type Writers = Record<string, string | 0>;
+const versions = new Map<string, Writers>();
+const recent = new Map<string, { id: string; writes: Writers }>();
+const docOrders = new Map<string, { b: string[]; a: string[] }>();
+export const lastDocOrders = (file: string) => docOrders.get(file);
+/** Writers of the last local action, for the history step recorded immediately after its writes. */
+export const lastActionWrites = (file: string): Writers => ({ ...recent.get(file)?.writes });
+const versionEntries = (file: string): [string, string][] => Object.entries(versions.get(file) ?? {}).filter((p): p is [string, string] => typeof p[1] === "string");
+
+function remember(file: string, tree: DocTree, id: string) {
+  const writes = Object.fromEntries(Object.entries(tree.allVers()).filter(([, v]) => v === id));
+  versions.set(file, { ...versions.get(file), ...writes });
+  recent.set(file, { id, writes: { ...(recent.get(file)?.id === id ? recent.get(file)!.writes : {}), ...writes } });
+}
+
+type Delivery = { ready: boolean; action?: Action };
+const deliveries = new Map<string, Delivery[]>();
+function reserve(file: string): Delivery {
+  const slot: Delivery = { ready: false };
+  const queue = deliveries.get(file) ?? [];
+  queue.push(slot);
+  deliveries.set(file, queue);
+  return slot;
+}
+function release(file: string, slot: Delivery, action?: Action) {
+  slot.ready = true;
+  slot.action = action;
+  const queue = deliveries.get(file)!;
+  while (queue[0]?.ready) {
+    const next = queue.shift()!;
+    if (next.action) emit(file, next.action);
+  }
+  if (!queue.length) deliveries.delete(file);
+}
+
+type Scope = { slot?: Delivery; id: string; versions: [string, string][]; closed?: boolean; docFile: string; ops: FileOp[]; agent?: string; before?: DocLike; after?: DocLike; envelopeBefore?: Envelope; envelopeAfter?: Envelope };
 const scopes = new AsyncLocalStorage<Scope>();
+const actionChains = new Map<string, Promise<void>>();
 const activeScope = () => {
   const scope = scopes.getStore();
   return scope?.closed ? undefined : scope;
@@ -69,26 +105,65 @@ const activeScope = () => {
  * Run `fn` as one step: the document and sidecar writes it makes (an undo of layers and cards, a structure op and
  * the page list that follows it) become one action, emitted when it ends. Writes outside any step are each one.
  */
-export async function asOneAction<T>(docFile: string, fn: () => Promise<T> | T, agent?: string): Promise<T> {
+export async function asOneAction<T>(docFile: string, fn: () => Promise<T> | T, agent?: string, writers?: Writers): Promise<T> {
   if (!wantActions() || activeScope()?.docFile === docFile) return fn();
-  const scope: Scope = { docFile, ops: [], agent };
+  const run = (actionChains.get(docFile) ?? Promise.resolve()).then(() => runAction(docFile, fn, agent, writers));
+  const settled = run.then(() => undefined, () => undefined);
+  actionChains.set(docFile, settled);
+  try { return await run; }
+  finally { if (actionChains.get(docFile) === settled) actionChains.delete(docFile); }
+}
+
+async function runAction<T>(docFile: string, fn: () => Promise<T> | T, agent?: string, writers?: Writers): Promise<T> {
+  const scope: Scope = { id: randomUUID(), versions: versionEntries(docFile), docFile, ops: [], agent };
+  const previous = recent.get(docFile);
   let result: T;
   try {
     result = await scopes.run(scope, fn);
+  } catch (error) {
+    scope.closed = true;
+    const reverted = !scope.ops.some((op) => op.k === "blob") && (!scope.before || !firstDifference(scope.before, scope.after)) && (!scope.envelopeBefore || !firstDifference(scope.envelopeBefore, scope.envelopeAfter));
+    if (reverted) {
+      const restored = { ...versions.get(docFile) }, before = Object.fromEntries(scope.versions);
+      for (const [key, writer] of Object.entries(restored)) if (writer === scope.id) {
+        if (before[key]) restored[key] = before[key];
+        else delete restored[key];
+      }
+      versions.set(docFile, restored);
+      if (recent.get(docFile)?.id === scope.id) {
+        if (previous) recent.set(docFile, previous);
+        else recent.delete(docFile);
+      }
+      if (scope.slot) release(docFile, scope.slot);
+    } else publishScope(scope, writers);
+    throw error;
   } finally {
     scope.closed = true;
   }
-  if (scope.ops.length) {
-    const action = makeAction(scope.ops, agent);
+  publishScope(scope, writers);
+  return result;
+}
+
+function publishScope(scope: Scope, writers?: Writers) {
+  const { docFile, agent } = scope;
+  try {
+    if (!scope.ops.length) {
+      if (scope.slot) release(docFile, scope.slot);
+      return;
+    }
+    const action = { ...makeAction(scope.ops, agent), id: scope.id };
+    if (writers) action.ops = withPreconditions(action.ops, writers, action.id, new DocTree(scope.before ?? { children: [] }, scope.envelopeBefore, [], scope.versions));
     if (actionChecks.enabled) {
-      const tree = new DocTree(scope.before ?? { children: [] }, scope.envelopeBefore);
+      const tree = new DocTree(scope.before ?? { children: [] }, scope.envelopeBefore, [], scope.versions);
       const r = applyAction(tree, action, { limits: null });
       const difference = isReject(r) ? r.message : firstDifference(tree.doc, scope.after ?? tree.doc) ?? firstDifference(tree.envelope, scope.envelopeAfter ?? tree.envelope);
       if (difference) throw new ActionCheckError(`The combined action is incomplete: ${difference}`);
     }
-    emit(docFile, action);
+    release(docFile, scope.slot!, action);
+  } catch (error) {
+    if (scope.slot && !scope.slot.ready) release(docFile, scope.slot);
+    throw error;
   }
-  return result;
 }
 
 function emit(docFile: string, action: Action) {
@@ -106,11 +181,37 @@ function emit(docFile: string, action: Action) {
 }
 
 /** Hand the ops of one write to the step it is part of, or emit them as their own action. */
-function deliver(docFile: string, ops: FileOp[]) {
+function deliver(docFile: string, ops: FileOp[], id = activeScope()?.docFile === docFile ? activeScope()!.id : randomUUID()) {
   if (!ops.length) return;
   const scope = activeScope();
-  if (scope && scope.docFile === docFile) scope.ops.push(...ops);
-  else emit(docFile, makeAction(ops));
+  if (scope && scope.docFile === docFile) {
+    scope.slot ??= reserve(docFile);
+    scope.ops.push(...ops);
+  } else release(docFile, reserve(docFile), { ...makeAction(ops), id });
+}
+
+/** Only the first write of a target checks history's writer; later writes check this action itself. */
+function withPreconditions(ops: FileOp[], writers: Writers, id: string, tree: DocTree): FileOp[] {
+  const run = opRunner(tree, id, { limits: null });
+  const want = (target: string) => tree.ver(target) === id ? id : writers[target] ?? 0;
+  const guard = (op: FileOp): FileOp => {
+    switch (op.k) {
+      case "set": return { ...op, if: Object.fromEntries(Object.keys(op.props).map((k) => [k, want(`n:${op.id}:${k}`)])) };
+      case "doc": return { ...op, if: want(`d:${op.key}`) };
+      case "widget": return { ...op, if: want(`w:${op.id}`) };
+      case "page": return { ...op, if: want(`p:${op.id}`) };
+      case "pageOf": return { ...op, if: want(`po:${op.board}`) };
+      case "meta": return { ...op, if: want(`m:${op.key}`) };
+      case "move": return { ...op, if: want(`t:${op.id}`) };
+      case "remove": return { ...op, if: want(tree.ver(`s:${op.id}`) !== 0 ? `s:${op.id}` : `t:${op.id}`) };
+      default: return op;
+    }
+  };
+  return ops.map((op): FileOp => {
+    const guarded = guard(op);
+    run(op);
+    return guarded;
+  });
 }
 
 export function makeAction(ops: FileOp[], agent?: string): Action {
@@ -191,7 +292,7 @@ export function docFileOps(before: DocLike, ops: Op[]): FileOp[] {
         }
         props[k] = d.a === null ? null : { v: clone(d.a.v) };
       }
-      if (!Object.keys(props).length) continue;
+      if (!Object.keys(props).length && !op.keys) continue;
       // Whole keys apply before per-path overrides. Keep the recorded order when both add new keys.
       const order = op.keys?.a.slice();
       push({ k: "set", id: op.id, props, ...(order ? { order } : {}) });
@@ -208,7 +309,12 @@ export function docFileOps(before: DocLike, ops: Op[]): FileOp[] {
       const list = tree.children(op.a.parent).filter((x) => x !== op.id);
       push({ k: "move", id: op.id, parent: op.a.parent, after: anchorOf(list, op.a.index) });
     } else if (op.t === "doc") {
-      for (const d of docKeyOps(tree, op.key, op.a)) push(d);
+      const changes = docKeyOps(tree, op.key, op.a);
+      for (let i = 0; i < changes.length; i++) {
+        const d = changes[i];
+        if (d.k === "doc" && i === changes.length - 1 && op.keys) d.order = op.keys.a.slice();
+        push(d);
+      }
     } else throw new TranslateError(`a ${op.t} op in a design-file edit`);
   }
   return out;
@@ -220,15 +326,18 @@ function docKeyOps(tree: DocTree, key: string, after: Val): FileOp[] {
   if (key !== "variables") throw new TranslateError(`the document key "${key}" is not one an edit may change (variables, themes, fonts)`);
   const b = tree.docValue("variables"), a = after?.v;
   if ((b !== undefined && !isObj(b)) || (a !== undefined && !isObj(a))) throw new TranslateError("the variables are not an object");
-  if (a === undefined && b !== undefined) throw new TranslateError("an edit took the variables key away (no variables op says that)");
   const set: Record<string, Val> = {};
   for (const name of new Set([...Object.keys(b ?? {}), ...Object.keys(a ?? {})])) {
     const x = b?.[name], y = a?.[name];
     if (JSON.stringify(x) !== JSON.stringify(y)) set[name] = val(y);
   }
   const predicted = Object.keys(nextProps(b ?? {}, set)).join("\n");
-  if (predicted !== Object.keys(a ?? {}).join("\n")) throw new TranslateError("the variables changed order (variable ops add new ones last)");
-  return Object.entries(set).map(([name, v]): FileOp => ({ k: "doc", key: `variables/${name}`, value: v }));
+  const out: FileOp[] = predicted !== Object.keys(a ?? {}).join("\n")
+    ? [...Object.keys(b ?? {}).map((name): FileOp => ({ k: "doc", key: `variables/${name}`, value: null })), ...Object.entries(a ?? {}).map(([name, v]): FileOp => ({ k: "doc", key: `variables/${name}`, value: val(v) }))]
+    : Object.entries(set).map(([name, v]): FileOp => ({ k: "doc", key: `variables/${name}`, value: v }));
+  if (a === undefined && b !== undefined) out.push({ k: "doc", key: "variables", value: null });
+  else if (a !== undefined && !Object.keys(a).length && b === undefined) out.push({ k: "doc", key: "variables", value: { v: {} } });
+  return out;
 }
 
 // ---------- translation: the sidecar ----------
@@ -437,7 +546,7 @@ const short = (v: unknown) => {
  * and `media` (package files it added). Returns its file ops for the step (delivered to listeners); with checks on,
  * refuses an edit whose ops, applied by the shared apply to `before`, do not give `after`.
  */
-export function docEditAction(docFile: string, before: DocLike, after: DocLike, ops: Op[] | undefined, media: string[] = []): void {
+export function docEditAction(docFile: string, before: DocLike, after: DocLike, ops: Op[] | undefined, media: string[] = [], defer = false): (() => void) | undefined {
   if (!wantActions()) return;
   const fail = (msg: string) => {
     console.error(`[canvas] action check: ${msg}`);
@@ -452,21 +561,30 @@ export function docEditAction(docFile: string, before: DocLike, after: DocLike, 
     if (!actionChecks.enabled) return;
     return fail((e as Error).message);
   }
+  const id = activeScope()?.docFile === docFile ? activeScope()!.id : randomUUID();
+  const tree = new DocTree(before, undefined, [], versionEntries(docFile));
+  const r = applyAction(tree, { ...makeAction(fileOps), id }, { limits: null });
   if (actionChecks.enabled) {
-    const tree = new DocTree(before);
-    const r = applyAction(tree, makeAction(fileOps), { limits: null });
     if (isReject(r)) return fail(`the shared apply refused it: ${r.message}`);
     const d = firstDifference(tree.doc, after);
     if (d) return fail(`applied to the state before, it gives another document: ${d}`);
     countInserts(fileOps);
     actionChecks.checked.doc++;
   }
-  const scope = activeScope();
-  if (scope?.docFile === docFile) {
-    scope.before ??= before;
-    scope.after = after;
-  }
-  deliver(docFile, fileOps);
+  const publish = () => {
+    if (!isReject(r)) {
+      remember(docFile, tree, id);
+      docOrders.set(docFile, { b: Object.keys(before), a: Object.keys(after) });
+    }
+    const scope = activeScope();
+    if (scope?.docFile === docFile) {
+      scope.before ??= before;
+      scope.after = after;
+    }
+    deliver(docFile, fileOps, id);
+  };
+  if (defer) return publish;
+  publish();
 }
 
 /**
@@ -504,7 +622,15 @@ export function deliverOps(docFile: string, ops: FileOp[] | null, before?: Envel
     scope.envelopeBefore ??= before;
     scope.envelopeAfter = after;
   }
-  if (ops) deliver(docFile, ops);
+  if (ops) {
+    const id = scope?.docFile === docFile ? scope.id : randomUUID();
+    if (before) {
+      const tree = new DocTree({ children: [] }, before, [], versionEntries(docFile));
+      const r = applyAction(tree, { ...makeAction(ops), id }, { limits: null });
+      if (!isReject(r)) remember(docFile, tree, id);
+    }
+    deliver(docFile, ops, id);
+  }
 }
 
 function countInserts(ops: FileOp[]) {

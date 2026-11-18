@@ -17,7 +17,7 @@ export type Val = { v: Json } | null;
 export type DocNode = { [k: string]: Json };
 
 /** Document keys an op may change, one variable at a time. Nothing else at the document's top level. */
-export type DocKey = `variables/${string}` | "themes" | "fonts";
+export type DocKey = `variables/${string}` | "variables" | "themes" | "fonts";
 /** A file in the design's package: `media/<name>.<ext>` or `shaders/<name>.wgsl` (checkBlobPath). */
 export type BlobPath = `media/${string}` | `shaders/${string}`;
 export type BlobType = (typeof BLOB_TYPES)[keyof typeof BLOB_TYPES];
@@ -37,7 +37,9 @@ export type FileOp =
   | { k: "move"; id: string; parent: string | null; after: string | null; if?: Uuid | 0 }
   /** A splice of a text layer's content written after `baseSeq` (the room transforms it over later splices). */
   | { k: "text"; id: string; baseSeq: number; from: number; del: number; ins: string; spans?: Json; lists?: Json }
-  | { k: "doc"; key: DocKey; value: Val; if?: Uuid | 0 }
+  /** `variables` itself only creates an empty container or removes an empty one; values travel per variable.
+   *  `order` restores the document's own key order, like a property's set order. */
+  | { k: "doc"; key: DocKey; value: Val; order?: string[]; if?: Uuid | 0 }
   /** A card. `after`: where it goes among the cards (undefined: an existing one stays, a new one goes last). */
   | { k: "widget"; id: string; value: Val; after?: string | null; if?: Uuid | 0 }
   /** A page and its name (null: the page goes, and its boards are listed on none). */
