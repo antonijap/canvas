@@ -20,9 +20,24 @@ struct ShellLogicTests {
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
-        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func fileTabs() {
+        check(ContextMenuLayout.fileTab(cloud: false).flatMap { $0 } == ["Rename...", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab menu order")
+        check(ContextMenuLayout.fileTab(cloud: true) == [["Rename...", "Show in Finder", "Duplicate", "Move to Cloud...", "Copy Link"], ["Close", "Close Other Tabs"]], "cloud action and separator")
+        for name in ["", " ", ".hidden", "../Other", "a/b", "a\0b", ".canvas"] {
+            check(TabRename.name(name) == nil, "invalid package name")
+        }
+        check(TabRename.name("  Board  ") == "Board.canvas", "trim and add extension")
+        check(TabRename.name("Board.canvas") == "Board.canvas", "extension stays once")
+        check(TabRename.name("Plan + #1") == "Plan + #1.canvas", "ordinary punctuation")
+        check(TabOrder.canDrag(button: 0, clicks: 1, editing: false), "single left press can drag")
+        check(!TabOrder.canDrag(button: 1, clicks: 1, editing: false), "right press never drags")
+        check(!TabOrder.canDrag(button: 0, clicks: 2, editing: false), "double press never drags")
+        check(!TabOrder.canDrag(button: 0, clicks: 1, editing: true), "rename never drags")
     }
 
     // Dragging file tabs into a new order: Home stays outside the list, a short move is a click.
