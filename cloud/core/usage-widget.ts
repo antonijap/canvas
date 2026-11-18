@@ -2,7 +2,7 @@
 // the time, and shows `line` with `detail` under it. It never says "free" as a promise: a Cloudflare
 // Cloud "Stays within the limits you set" (decision 13.6, review finding 26).
 
-import { AMBER_AT, DAILY, RED_AT, STORED, type Daily, type Resource, type Stored } from "./usage.ts";
+import { AMBER_AT, DAILY, isDaily, MONTHLY, RED_AT, STORED, type Daily, type Monthly, type Resource, type Stored } from "./usage.ts";
 
 export type WidgetLevel = "ok" | "amber" | "red";
 export type UsageWidget = { level: WidgetLevel; line: string; detail: string[] };
@@ -53,28 +53,45 @@ export function usageWidget(json: unknown, now = Date.now()): UsageWidget {
   }
   const metrics = body.metrics as Record<string, unknown>;
   let level: WidgetLevel = stale ? "amber" : "ok";
-  let top = { used: 0, free: 0, share: -1 };
-  const detail: string[] = ["Stays within the limits you set"];
-  for (const r of DAILY as readonly Daily[]) {
+  let top = { counted: 0, free: 0, share: -1 };
+  const lines: string[] = [];
+  const reached: string[] = [];
+  const resets = `resets on 1 ${nextMonthName(typeof body.month === "string" ? body.month : new Date(now).toISOString().slice(0, 7))}`;
+  // Reserved work counts: a room may already have spent what it holds.
+  const counted = (m: Metric) => m.used + (typeof m.reserved === "number" ? m.reserved : 0);
+  for (const r of [...DAILY, ...MONTHLY] as readonly (Daily | Monthly)[]) {
     const m = metrics[r];
     if (!isMetric(m)) continue;
-    const ofCap = m.cap > 0 ? m.used / m.cap : 1;
+    const n = counted(m);
+    const ofCap = m.cap > 0 ? n / m.cap : 1;
     level = max(level, ofCap >= RED_AT ? "red" : ofCap >= AMBER_AT ? "amber" : "ok");
-    const share = m.free > 0 ? m.used / m.free : 1;
-    if (share > top.share) top = { used: m.used, free: m.free, share };
-    detail.push(`${labels[r]}: ${number(m.used)} of ${number(m.cap)}`);
+    if (ofCap >= 1) reached.push(`${labels[r]} limit reached, ${isDaily(r) ? "resets at 00:00 UTC" : resets}`);
+    if (isDaily(r)) {
+      const share = m.free > 0 ? n / m.free : 1;
+      if (share > top.share) top = { counted: n, free: m.free, share };
+    }
+    lines.push(`${labels[r]}: ${number(n)} of ${number(m.cap)}`);
   }
   for (const r of STORED as readonly Stored[]) {
     const m = metrics[r];
     if (!isMetric(m)) continue;
-    const ofCap = m.cap > 0 ? m.used / m.cap : 1;
+    const n = counted(m);
+    const ofCap = m.cap > 0 ? n / m.cap : 1;
     level = max(level, ofCap >= 0.9 ? "red" : ofCap >= 0.7 ? "amber" : "ok");
-    detail.push(`${labels[r]}: ${bytes(m.used)} of ${bytes(m.cap)}`);
+    if (ofCap >= 1) reached.push(`${labels[r]} full, frees up when files are removed`);
+    lines.push(`${labels[r]}: ${bytes(n)} of ${bytes(m.cap)}`);
   }
+  if (body.brake === "amber") level = max(level, "amber");
   if (body.brake === "red" || body.brake === "stop") level = "red";
-  if (body.brake === "stop") detail.splice(1, 0, "Limit reached: edits wait until 00:00 UTC");
+  const detail = ["Stays within the limits you set", ...reached, ...lines];
   if (stale) detail.push("Last counted more than a day ago");
-  return { level, line: `Today, ${percent(top.used, top.free)} of free`, detail };
+  return { level, line: `Today, ${percent(top.counted, top.free)} of free`, detail };
+}
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function nextMonthName(month: string): string {
+  const m = Number(month.slice(5, 7));
+  return MONTHS[Number.isInteger(m) && m >= 1 && m <= 12 ? m % 12 : 0];
 }
 
 function macWidget(body: Record<string, unknown>, stale: boolean): UsageWidget {

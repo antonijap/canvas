@@ -87,6 +87,7 @@ export function parseCapConfig(text: string | undefined): CapConfig {
     for (const [key, cap] of Object.entries(raw.custom)) {
       if (!(RESOURCES as readonly string[]).includes(key)) throw new Error(`unknown cap ${key}`);
       if (typeof cap !== "number" || !Number.isFinite(cap) || cap < 0) throw new Error(`cap ${key} must be 0 or more`);
+      if (cap * UNITS[key as Resource] > Number.MAX_SAFE_INTEGER) throw new Error(`cap ${key} is too large`);
       config.custom[key as Resource] = cap;
     }
   }
@@ -100,13 +101,14 @@ export function freeFor(config: CapConfig): Record<Resource, number> {
   return out;
 }
 
-/** Caps in internal units. */
+/** Caps in internal units, always safe integers. A cap that is not a finite number is 0: refused, never unlimited. */
 export function capsFor(config: CapConfig): Record<Resource, number> {
   const free = freeFor(config);
   const out = {} as Record<Resource, number>;
   for (const r of RESOURCES) {
     const custom = config.custom?.[r];
-    out[r] = custom !== undefined ? Math.floor(custom * UNITS[r]) : Math.floor(free[r] * config.percent / 100);
+    const cap = custom !== undefined ? custom * UNITS[r] : free[r] * config.percent / 100;
+    out[r] = Number.isFinite(cap) && cap > 0 ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(cap)) : 0;
   }
   return out;
 }
@@ -118,11 +120,12 @@ export function requestUnits(count: { http?: number; messages?: number }): numbe
   return (count.http ?? 0) * UNITS.requests + (count.messages ?? 0) * (UNITS.requests / MESSAGES_PER_REQUEST);
 }
 /**
- * Estimated Durable Object duration: billed at 128 MB for every second awake, so one awake second
- * is 0.125 GB-s, which is 125 thousandths. Labelled "estimated" wherever it is shown.
+ * Estimated Durable Object duration: billed at 128 MB for every second awake, and the provider's
+ * pricing example counts 128 MB as 0.128 GB, so one awake second is 128 thousandths of a GB-s.
+ * Labelled "estimated" wherever it is shown.
  */
 export function durationUnits(awakeMs: number): number {
-  return Math.ceil(Math.max(0, awakeMs) / 8);
+  return Math.ceil(Math.max(0, awakeMs) * 128 / 1000);
 }
 
 // ---- Days ----
