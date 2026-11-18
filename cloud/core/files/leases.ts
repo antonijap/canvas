@@ -37,7 +37,7 @@ export class LeaseBank {
 
 /** A room's side: the leases it holds, spent one action at a time. */
 export class RoomLeases {
-  private readonly held = new Map<string, { minute: number; left: number }>();
+  private readonly held = new Map<string, { minute: number; left: number; spent: boolean }>();
   private readonly bank: Pick<LeaseBank, "grant">;
   private readonly now: () => number;
   /** Team calls made, to show that a lease covers many messages. */
@@ -51,10 +51,13 @@ export class RoomLeases {
     const t = this.now();
     const key = `${kind}:${person}`;
     let h = this.held.get(key);
-    if (!h || h.minute !== minuteOf(t)) h = { minute: minuteOf(t), left: 0 };
-    if (h.left < n) {
+    if (!h || h.minute !== minuteOf(t)) h = { minute: minuteOf(t), left: 0, spent: false };
+    // A minute the Team said is spent stays spent: no further calls until the next one.
+    if (h.left < n && !h.spent) {
       this.calls++;
-      h.left += this.bank.grant(person, kind, Math.max(n - h.left, LEASE_CHUNK[kind]), t);
+      const got = this.bank.grant(person, kind, Math.max(n - h.left, LEASE_CHUNK[kind]), t);
+      h.left += got;
+      if (h.left < n) h.spent = true;
     }
     this.held.set(key, h);
     if (h.left < n) return false;
