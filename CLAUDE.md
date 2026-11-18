@@ -1,5 +1,11 @@
 @AGENTS.md
 
+## QA for Claude sessions
+
+- "Testing: only what changed" in AGENTS.md is the rule for every gate here: merge, install and release. A release build gets the same delta QA as the changes it ships, plus the scrub.
+- When a delta run finds a bug, rerun only the failing scenario after the fix, not the area.
+- Hand Codex and subagents the exact scenario words to run, so they don't fall back to a full suite.
+
 ## Releases
 
 - Before every release build, ask the maintainer whether to bump the version, and to what. Never bump it, or keep it, on your own.
