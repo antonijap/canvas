@@ -485,7 +485,9 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   await t.cmd("qa.cloud", { url: prefs.cloudUrl, devEmail: prefs.cloudDevEmail, name: prefs.cloudName });
   t.eq((await t.state()).openFiles, order, "right click leaves the tab order alone");
   await t.pickMenu("Rename...");
-  const menuEdit = await t.mark({ id: "tab-rename" });
+  const menuEdit = await t.mark({ id: "tab-rename" }).catch(async (error) => {
+    throw new Error(`${error}; tabRename=${JSON.stringify((await t.state()).tabRename)}; editors=${JSON.stringify((await t.views()).filter((v) => v.kind === "text" && v.y < 70))}`);
+  });
   const menuField = (await t.views()).find((v) => v.kind === "text" && v.editing && v.y < menuEdit.y + menuEdit.h && v.y + v.h > menuEdit.y);
   t.ok(menuField, "menu rename focuses the field");
   t.eq(menuField?.value, "tab-actions", "menu rename edits the intended tab");
