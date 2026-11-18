@@ -598,35 +598,3 @@ private struct HomeCloudHeader: View {
         }
     }
 }
-
-/// The darker shades of the status hues, for text on their own tint (and the amber "Sign in" word).
-enum CloudInk {
-    static let live = Color(light: 0x15803D, dark: 0x86EFAC)
-    static let warn = Color(light: 0xB45309, dark: 0xFCD34D)
-}
-
-/// Live, Down or Sign in: a small capsule tinted by its tone, its text a darker shade of the same hue.
-struct CloudPill: View {
-    let text: String
-    let tone: HomeLogic.Tone
-    var action: () -> Void = {}
-
-    var body: some View {
-        let (fill, ink): (Color, Color) = switch tone {
-        case .live: (Palette.ok.opacity(0.16), CloudInk.live)
-        case .attention: (Palette.warn.opacity(0.18), CloudInk.warn)
-        case .muted: (Palette.active, Palette.mutedFg)
-        }
-        Button(action: action) {
-            HStack(spacing: 5) {
-                if tone != .muted { Circle().fill(tone == .live ? Palette.ok : Palette.warn).frame(width: 6, height: 6) }
-                Text(text).font(Typography.label).foregroundStyle(ink).lineLimit(1)
-            }
-            .padding(.horizontal, 8).frame(height: 22)
-            .background(Capsule().fill(fill))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .qaID("home-cloud-pill", label: text)
-    }
-}
