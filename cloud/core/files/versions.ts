@@ -1,5 +1,5 @@
 // Version history (Section 3, decision 7): every snapshot of the last 24 hours, the last of each hour for 7 days, the
-// last of each day for 30 days, and pinned ones ("Save version"). The newest done snapshot and any snapshot still
+// last of each day for 30 days, and pinned ones ("Save version") for 30 days too. The newest done snapshot and any snapshot still
 // building are always kept. Everything kept counts toward storage.
 
 import type { SqlStore } from "../sql.ts";
@@ -18,6 +18,7 @@ export function keptVersions(rows: readonly VersionRow[], now: number): Set<numb
   const hours = new Set<number>(), days = new Set<number>();
   for (const r of done) {
     const age = now - r.at;
+    if (age >= VERSION_DAYS * DAY) continue; // pinned ones too (decision 7)
     if (r.pinned) keep.add(r.seq);
     else if (age < DAY) keep.add(r.seq);
     else if (age < 7 * DAY) {

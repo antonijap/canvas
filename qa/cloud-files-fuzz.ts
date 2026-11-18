@@ -47,6 +47,7 @@ function prng(seed: number) {
 }
 
 const PEOPLE = ["anna", "ben", "cleo", "dan", "eve"].map((p) => ({ id: `${p}@studio.test`, name: p[0].toUpperCase() + p.slice(1) }));
+const OWNER = { author: PEOPLE[0], role: "owner" as const };
 const COLORS = ["#ff0000", "#00ff00", "#0000ff", "#222222", "#abcdef"];
 const IMAGES = [0, 1, 2].map((i) => {
   const b = new Uint8Array(64);
@@ -196,8 +197,8 @@ async function ensureUpload(sim: Sim, ledger: StorageLedger, sha: string): Promi
   if (have) return;
   const img = IMAGES.find((x) => x.sha === sha)!;
   const id = `up-fuzz-${String(++uploads).padStart(6, "0")}`;
-  reserveUpload(sim.room, ledger, { author: PEOPLE[0], role: "owner" }, { id, sha256: sha, bytes: img.bytes.length, type: "image/png" });
-  await putUpload(sim.room, ledger, id, img.bytes);
+  reserveUpload(sim.room, ledger, OWNER, { id, sha256: sha, bytes: img.bytes.length, type: "image/png" });
+  await putUpload(sim.room, ledger, OWNER, id, img.bytes);
 }
 
 async function runSeed(seed: number, m: Metrics): Promise<void> {
@@ -209,8 +210,8 @@ async function runSeed(seed: number, m: Metrics): Promise<void> {
   const sim = new Sim({ now: () => clock, fault: () => { if (r() < faultRate) { faults++; throw new Error("crash: room killed in its transaction"); } } });
   await sim.init();
   const ledger = new StorageLedger(new NodeSqlStore(), 1e9);
-  IMAGES.forEach((img, i) => reserveUpload(sim.room, ledger, { author: PEOPLE[0], role: "owner" }, { id: `up-seed-${i}`, sha256: img.sha, bytes: img.bytes.length, type: "image/png" }));
-  for (const [i, img] of IMAGES.entries()) await putUpload(sim.room, ledger, `up-seed-${i}`, img.bytes);
+  IMAGES.forEach((img, i) => reserveUpload(sim.room, ledger, OWNER, { id: `up-seed-${i}`, sha256: img.sha, bytes: img.bytes.length, type: "image/png" }));
+  for (const [i, img] of IMAGES.entries()) await putUpload(sim.room, ledger, OWNER, `up-seed-${i}`, img.bytes);
   const count = 2 + g.int(4);
   const cs: SimClient[] = [];
   for (let i = 0; i < count; i++) cs.push(await sim.addClient(PEOPLE[i]));

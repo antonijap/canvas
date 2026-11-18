@@ -50,7 +50,9 @@ async function buildLocked(room: FileRoom, opts: { label?: string; by?: string; 
     }
     tree.forget();
     const prevRow = store.sql.exec<{ manifest: string }>("SELECT manifest FROM snapshots WHERE state = 'done' ORDER BY seq DESC LIMIT 1").toArray()[0];
-    const prev = prevRow ? (JSON.parse(prevRow.manifest) as Manifest) : null;
+    const parsed = prevRow ? (JSON.parse(prevRow.manifest) as Manifest) : null;
+    // Objects of another epoch never stand in for boards of this one (a restore replaced every row).
+    const prev = parsed && parsed.epoch === m.epoch ? parsed : null;
     const prevBoards = new Map(prev?.boards.map((b) => [b.id, b.sha256]) ?? []);
     const dirty = new Set(store.sql.exec<{ board: string }>("SELECT board FROM dirty_boards").toArray().map((r) => r.board));
     // Only boards that changed are read and written again; the rest keep their object.
@@ -186,23 +188,23 @@ export async function manifestAt(room: FileRoom, seq: number): Promise<string | 
  * every action made before is refused), the log starts again at a new seq, and a snapshot of the restored
  * state is built so Macs can start from it.
  */
-export async function restoreVersion(room: FileRoom, seq: number): Promise<{ epoch: number; seq: number }> {
-  const text = await room.exclusive(async () => {
+export function restoreVersion(room: FileRoom, seq: number): Promise<{ epoch: number; seq: number }> {
+  // One lock from reading the version to its new snapshot: collection cannot drop the version's objects in between.
+  return room.exclusive(async () => {
     const row = room.store.sql.exec<{ manifest: string }>("SELECT manifest FROM snapshots WHERE seq = ? AND state = 'done'", seq).toArray()[0];
     if (!row) throw new Error(`no kept version at ${seq}`);
-    return row.manifest;
-  });
-  const { state } = await loadManifest(room.objects, text);
-  room.store.transactionSync(() => {
+    const { state } = await loadManifest(room.objects, row.manifest);
+    room.store.transactionSync(() => {
+      const m = room.meta();
+      room.tree.seq = m.seq;
+      room.tree.load(state);
+      room.store.sql.exec("DELETE FROM log; DELETE FROM text_edits");
+      // The restore takes a seq of its own, so its snapshot never shares a seq with the version before it.
+      room.store.sql.exec("UPDATE file_meta SET epoch = epoch + 1, seq = seq + 1, log_floor = seq + 1 WHERE id = 1");
+    });
+    room.tree.forget();
+    await buildLocked(room, { label: `Restored from ${seq}` });
     const m = room.meta();
-    room.tree.seq = m.seq;
-    room.tree.load(state);
-    room.store.sql.exec("DELETE FROM log; DELETE FROM text_edits");
-    // The restore takes a seq of its own, so its snapshot never shares a seq with the version before it.
-    room.store.sql.exec("UPDATE file_meta SET epoch = epoch + 1, seq = seq + 1, log_floor = seq + 1 WHERE id = 1");
+    return { epoch: m.epoch, seq: m.seq };
   });
-  room.tree.forget();
-  await buildSnapshot(room, { label: `Restored from ${seq}` });
-  const m = room.meta();
-  return { epoch: m.epoch, seq: m.seq };
 }

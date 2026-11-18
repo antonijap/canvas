@@ -82,7 +82,7 @@ export class Sim {
     this.openRoom();
   }
   openRoom(): void {
-    this.room = new FileRoom({ store: this.store, objects: this.objects, file: FILE, apply: this.o.apply, fault: this.o.fault, now: this.o.now });
+    this.room = new FileRoom({ roles: "socket", store: this.store, objects: this.objects, file: FILE, apply: this.o.apply, fault: this.o.fault, now: this.o.now });
     recoverSnapshots(this.room);
   }
   async init(): Promise<void> {

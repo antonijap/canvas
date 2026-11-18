@@ -17,7 +17,7 @@ import type { ObjectStore } from "./objects.ts";
 import type { RoleCache } from "./access.ts";
 import type { RoomLeases } from "./leases.ts";
 
-export const ROOM_LIMITS = { ...FILE_LIMITS, opsPerMessage: 100, pendingInHello: 500, actionIdLength: 100 };
+export const ROOM_LIMITS = { ...FILE_LIMITS, opsPerMessage: 100, actionsPerMessage: 100, pendingInHello: 500, actionIdLength: 100, jsonDepth: 300, jsonValues: 300_000 };
 export const RECEIPT_DAYS = 30;
 /** Node data per file (Section 3). */
 export const FILE_NODE_CAP = 500 * 1024 * 1024;
@@ -34,7 +34,10 @@ export interface FileRoomOptions {
   file: string;
   now?: () => number;
   apply?: ApplyFn;
-  roles?: RoleCache;
+  /** Who may do what: the Team through a RoleCache (re-checked every 60 s, pushes in force at once), or "socket", which trusts
+   *  the role the socket was opened with and never sees a removal (tests and a single process only). Required, so no
+   *  adapter forgets it. */
+  roles: RoleCache | "socket";
   leases?: RoomLeases;
   /** Tests: called at each step inside an action's transaction; a throw there is a crash before the commit. */
   fault?: (point: "applied" | "logged" | "receipted") => void;
@@ -52,6 +55,58 @@ export interface RoomMeta {
   logFloor: number;
   receiptFloor: number;
   snapshotSeq: number;
+}
+
+/**
+ * Why a value from the wire is too deep or too big to walk (null: it is not). Iterative, so a crafted value cannot
+ * overflow the stack here; everything after it (hashing, the apply, snapshots) then walks a bounded value.
+ */
+export function jsonShapeError(v: unknown, maxDepth: number, maxValues: number): string | null {
+  const stack: [unknown, number][] = [[v, 1]];
+  let seen = 0;
+  while (stack.length) {
+    const [x, d] = stack.pop()!;
+    if (++seen > maxValues) return `an action holds at most ${maxValues} values`;
+    if (x === null || typeof x !== "object") {
+      if (typeof x === "number" && !Number.isFinite(x)) return "numbers must be finite";
+      if (x !== null && typeof x !== "string" && typeof x !== "number" && typeof x !== "boolean") return "an action holds JSON only";
+      continue;
+    }
+    if (d > maxDepth) return `an action nests at most ${maxDepth} levels`;
+    for (const c of Array.isArray(x) ? x : Object.values(x)) stack.push([c, d + 1]);
+  }
+  return null;
+}
+
+/** A browser layer's address, or an override's: a Cloud file loads no web page (it would tell a site every viewer's address). */
+function webAddressIn(ops: FileOp[], typeOf: (id: string) => string | undefined): string | null {
+  const has = (v: unknown) => typeof v === "string" && v !== "";
+  const inNode = (n: unknown): string | null => {
+    const stack = [n];
+    while (stack.length) {
+      const x = stack.pop() as Record<string, unknown> | null;
+      if (!x || typeof x !== "object" || Array.isArray(x)) continue;
+      if (x.type === "browser" && has(x.url)) return String(x.url);
+      if (x.type === "ref" && x.descendants && typeof x.descendants === "object") for (const o of Object.values(x.descendants)) if (o && typeof o === "object" && has((o as Record<string, unknown>).url)) return String((o as Record<string, unknown>).url);
+      if (Array.isArray(x.children)) stack.push(...x.children);
+    }
+    return null;
+  };
+  for (const op of ops) {
+    if (op.k === "insert") {
+      const hit = inNode(op.node);
+      if (hit) return hit;
+    } else if (op.k === "set") {
+      const type = typeOf(op.id);
+      for (const [k, val] of Object.entries(op.props)) {
+        const v = val?.v as Record<string, unknown> | undefined;
+        if (k === "url" && (type === "browser" || type === "ref") && has(v)) return String(v);
+        if (k.startsWith("descendants/") && v && typeof v === "object" && has(v.url)) return String(v.url);
+        if (k === "descendants" && v && typeof v === "object") for (const o of Object.values(v)) if (o && typeof o === "object" && has((o as Record<string, unknown>).url)) return String((o as Record<string, unknown>).url);
+      }
+    }
+  }
+  return null;
 }
 
 class Refusal extends Error {
@@ -72,7 +127,7 @@ export class FileRoom {
   readonly tree: SqlTree;
   readonly now: () => number;
   private readonly apply: ApplyFn;
-  private readonly roles?: RoleCache;
+  private readonly roles: RoleCache | "socket";
   private readonly leases?: RoomLeases;
   private readonly fault?: FileRoomOptions["fault"];
   private lock: Promise<unknown> = Promise.resolve();
@@ -137,14 +192,25 @@ export class FileRoom {
       .map((r) => ({ first: r.first, last: r.last, id: r.action, by: JSON.parse(r.by_json), at: r.at, ops: JSON.parse(r.ops_json) }));
   }
 
-  private roleOf(conn: Conn): Role | null {
-    return this.roles ? this.roles.role(conn.author.id) : conn.role;
+  /** The role this room acts on for `conn` now (uploads ask it too). */
+  roleFor(conn: Conn): Role | null {
+    return this.roles === "socket" ? conn.role : this.roles.role(conn.author.id);
+  }
+  /** True once a fault hook threw: the room is gone, and the error leaves it. */
+  private killed = false;
+  private faultAt(point: "applied" | "logged" | "receipted"): void {
+    try {
+      this.fault?.(point);
+    } catch (e) {
+      this.killed = true;
+      throw e;
+    }
   }
 
   /** A socket's hello: the welcome, then (in the same turn) the tail it is missing. */
   hello(conn: Conn, h: Hello): FileServerMessage[] {
     this.usage.messages++;
-    const role = this.roleOf(conn);
+    const role = this.roleFor(conn);
     if (!role) return [{ type: "error", code: "forbidden", message: "you are not a member of this Cloud" }];
     if (!h || h.type !== "hello" || h.file !== this.file) return [{ type: "error", code: "invalid", message: "this socket is for another file" }];
     const m = this.meta();
@@ -192,6 +258,7 @@ export class FileRoom {
     const replies: FileServerMessage[] = [];
     const applied: AppliedAction[] = [];
     if (!msg || msg.type !== "actions" || !Array.isArray(msg.actions)) return { replies: [{ type: "error", code: "invalid", message: "an actions message holds a list of actions" }], applied };
+    if (msg.actions.length > ROOM_LIMITS.actionsPerMessage) return { replies: [{ type: "error", code: "invalid", message: `a message holds at most ${ROOM_LIMITS.actionsPerMessage} actions` }], applied };
     const total = msg.actions.reduce((n, a) => n + (a && Array.isArray(a.ops) ? a.ops.length : 0), 0);
     if (total > ROOM_LIMITS.opsPerMessage) return { replies: [{ type: "error", code: "invalid", message: `a message holds at most ${ROOM_LIMITS.opsPerMessage} ops` }], applied };
     if (this.leases && !this.leases.take(conn.author.id, "messages", 1)) {
@@ -208,8 +275,11 @@ export class FileRoom {
           replies.push({ type: "ack", id, first: r.first, last: r.last });
         }
       } catch (e) {
-        if (!(e instanceof Refusal)) throw e;
-        replies.push({ type: "reject", id, code: e.code, message: e.message });
+        // A crash (the process is going away) leaves the room; anything else this action threw is its own refusal,
+        // so the actions before it in the message keep their acks and broadcast.
+        if (this.killed) throw e;
+        if (e instanceof Refusal) replies.push({ type: "reject", id, code: e.code, message: e.message });
+        else replies.push({ type: "reject", id, code: "invalid", message: `the room could not apply this action: ${String((e as Error)?.message ?? e).slice(0, 200)}` });
       }
     }
     return { replies, applied };
@@ -222,17 +292,21 @@ export class FileRoom {
     if (!Array.isArray(a.ops)) throw new Refusal("invalid", "an action needs a list of ops");
     if (!Number.isSafeInteger(a.baseSeq) || a.baseSeq < 0) throw new Refusal("invalid", "an action needs the seq it was made on");
     if (a.epoch !== m.epoch) throw new Refusal("reset", "this action was made before the file was restored");
+    // Who may edit comes before any work on the payload; its shape is bounded before anything walks it recursively.
+    const role = this.roleFor(conn);
+    if (!role || !CAN_EDIT[role]) throw new Refusal("forbidden", role ? "your role in this Cloud cannot edit files" : "you are not a member of this Cloud");
+    if (!a.ops.length) throw new Refusal("invalid", "an action holds at least one op");
+    if (a.ops.length > ROOM_LIMITS.opsPerAction) throw new Refusal("invalid", `an action holds at most ${ROOM_LIMITS.opsPerAction} ops`);
+    const shape = jsonShapeError(a, ROOM_LIMITS.jsonDepth, ROOM_LIMITS.jsonValues);
+    if (shape) throw new Refusal("invalid", shape);
     const sha = actionSha(a);
     const rec = this.receipt(a.id);
     if (rec) {
       if (rec.sha === sha && rec.by_id === conn.author.id && rec.epoch === a.epoch) return { duplicate: true, first: rec.first, last: rec.last };
       throw new Refusal("invalid", "another action already has this id");
     }
-    const role = this.roleOf(conn);
-    if (!role || !CAN_EDIT[role]) throw new Refusal("forbidden", role ? "your role in this Cloud cannot edit files" : "you are not a member of this Cloud");
     if (a.baseSeq < m.receiptFloor) throw new Refusal("expired", "this edit was made on a version older than the Cloud keeps; your version is kept as a copy");
     if (a.baseSeq > m.seq) throw new Refusal("invalid", "this action names a seq the file has not reached");
-    if (a.ops.length > ROOM_LIMITS.opsPerAction) throw new Refusal("invalid", `an action holds at most ${ROOM_LIMITS.opsPerAction} ops`);
     if (actionBytes(a) > ROOM_LIMITS.actionBytes) throw new Refusal("invalid", "an action holds at most 1 MB");
     if (this.leases && !this.leases.take(conn.author.id, "ops", Math.max(1, a.ops.length))) throw new Refusal("quota", "too many edits this minute; they wait and go on their own");
 
@@ -257,16 +331,16 @@ export class FileRoom {
         const r = this.apply(this.tree, { ...a, ops, at }, { by: conn.author, seq: first, limits: FILE_LIMITS, confine: true });
         if (isReject(r)) throw new Refusal(r.reject, (r as Reject).message);
         this.uploadsFor(ops);
-        this.fault?.("applied");
+        this.faultAt("applied");
         const last = r.last;
         const w = (q: string, ...b: unknown[]) => {
           this.store.sql.exec(q, ...b);
           this.tree.rowsWritten++;
         };
         w("INSERT INTO log (first, last, action, by_json, at, ops_json) VALUES (?, ?, ?, ?, ?, ?)", first, last, a.id, JSON.stringify(conn.author), at, JSON.stringify(r.ops));
-        this.fault?.("logged");
+        this.faultAt("logged");
         w("INSERT INTO receipts (action, by_id, epoch, sha, first, last, at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)", a.id, conn.author.id, a.epoch, sha, first, last, this.now());
-        this.fault?.("receipted");
+        this.faultAt("receipted");
         for (const e of textEditsOf(r)) w("INSERT INTO text_edits (node, seq, action, whole, from_, del, ins) VALUES (?, ?, ?, ?, ?, ?, ?)", e.node, e.seq, e.action, e.whole ? 1 : 0, e.from, e.del, e.ins);
         const bytes = this.store.sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta WHERE id = 1").one().n + this.tree.bytesDelta;
         if (this.tree.bytesDelta > 0 && bytes > FILE_NODE_CAP) throw new Refusal("quota", `this file is full: it holds at most ${FILE_NODE_CAP / 1024 / 1024} MB of layers`);
@@ -291,11 +365,21 @@ export class FileRoom {
   private uploadsFor(ops: FileOp[]): void {
     for (const op of ops) {
       if (!op || op.k !== "blob" || typeof op.sha256 !== "string") continue;
-      const have = this.store.sql.exec("SELECT 1 FROM blobs WHERE sha256 = ? AND added_seq < ? LIMIT 1", op.sha256, this.tree.seq).toArray().length > 0;
-      const up = this.store.sql.exec<{ id: string }>("SELECT id FROM uploads WHERE sha256 = ? AND state IN ('stored', 'used') LIMIT 1", op.sha256).toArray()[0];
-      if (!have && !up) throw new Refusal("invalid", `blob: the bytes of ${String(op.path)} were not uploaded`);
+      // The size and type come from what was stored, never from the op: a blob op that claims 0 bytes would dodge the
+      // file's cap, one that names PNG bytes a shader would hand them to the shader compiler.
+      type Src = { bytes: number; type: string };
+      const had = this.store.sql.exec<Src>("SELECT bytes, type FROM blobs WHERE sha256 = ? AND added_seq < ? LIMIT 1", op.sha256, this.tree.seq).toArray()[0];
+      const up = this.store.sql.exec<Src & { id: string }>("SELECT id, bytes, type FROM uploads WHERE sha256 = ? AND state IN ('stored', 'used') LIMIT 1", op.sha256).toArray()[0];
+      const src = had ?? up;
+      if (!src) throw new Refusal("invalid", `blob: the bytes of ${String(op.path)} were not uploaded`);
+      if (src.bytes !== op.bytes || src.type !== op.type) throw new Refusal("invalid", `blob: ${String(op.path)} names ${op.bytes} bytes of ${op.type}; the stored file is ${src.bytes} bytes of ${src.type}`);
+      // A Mac's disk folds case: media/Logo.png and media/logo.png would be one file there.
+      const twin = this.store.sql.exec<{ path: string }>("SELECT path FROM blobs WHERE lower(path) = lower(?) AND path != ? LIMIT 1", op.path, op.path).toArray()[0];
+      if (twin) throw new Refusal("conflict", `blob: ${String(op.path)} and ${twin.path} differ only by case; a Mac would keep one file for both`);
       if (up) this.store.sql.exec("UPDATE uploads SET state = 'used' WHERE sha256 = ? AND state = 'stored'", op.sha256);
     }
+    const web = webAddressIn(ops, (id) => this.tree.node(id)?.type);
+    if (web) throw new Refusal("forbidden", `"${web.slice(0, 100)}" is a web page; a layer in a Cloud file loads none, as that would tell the site every viewer's address`);
   }
 
   /** Write the usage counted in memory to today's row (snapshots call it; an adapter may on its alarm). */

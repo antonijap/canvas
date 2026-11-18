@@ -302,7 +302,11 @@ export class SqlTree implements RoomTree {
     this.forget();
     this.w("UPDATE file_meta SET top_json = ? WHERE id = 1", JSON.stringify(state.top));
     const keys = evenKeys(state.children.length);
-    state.children.forEach((c, i) => this.insertTree(c, "", keys[i]));
+    state.children.forEach((c, i) => {
+      this.insertTree(c, "", keys[i]);
+      // Every board is new to the rows: a snapshot must write it, never reuse an object from before.
+      this.dirty(c.id as string);
+    });
     for (const [k, v] of Object.entries(state.doc)) if (v !== undefined) this.writeKv(`doc/${k}`, v);
     const wkeys = evenKeys(state.widgets.length);
     state.widgets.forEach((w, i) => {

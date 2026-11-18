@@ -36,7 +36,7 @@ class Disk {
   killAt: string | null = null;
   open(): FileRoom {
     this.store = new NodeSqlStore(this.path);
-    this.room = new FileRoom({
+    this.room = new FileRoom({ roles: "socket",
       store: this.store, objects: this.objects, file: FILE, now: () => this.t,
       fault: (point) => {
         if (point !== this.killAt) return;
@@ -248,7 +248,7 @@ test("upload killed after its bytes were stored, before the room noted it: the r
     await d.objects.putIfAbsent(blobKey(FILE, sha), bytes);
     const restarted = d.reopen();
     assert.equal(d.store.sql.exec<{ state: string }>("SELECT state FROM uploads WHERE id = 'up-00000001'").one().state, "open");
-    const r = await putUpload(restarted, ledger, "up-00000001", bytes);
+    const r = await putUpload(restarted, ledger, anna, "up-00000001", bytes);
     assert.equal(r.stored, false, "the bytes were there; never overwritten");
     assert.equal(d.store.sql.exec<{ state: string }>("SELECT state FROM uploads WHERE id = 'up-00000001'").one().state, "stored");
     assert.equal(ledger.held(), bytes.length, "reserved once");
@@ -282,7 +282,7 @@ test("upload killed after its reservation, before any bytes: the reservation goe
     // An upload that stored bytes no action used: its object goes too.
     const other = png(20);
     reserveUpload(restarted, ledger, anna, { id: "up-00000003", sha256: hex(other), bytes: other.length, type: "image/png" });
-    await putUpload(restarted, ledger, "up-00000003", other);
+    await putUpload(restarted, ledger, anna, "up-00000003", other);
     d.t += UPLOAD_GRACE_MS + 1;
     const gc = await collectGarbage(restarted, ledger);
     assert.ok(gc.deleted.includes(blobKey(FILE, hex(other))));
