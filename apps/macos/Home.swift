@@ -257,7 +257,7 @@ struct HomeView: View {
         .onChange(of: model.prefs.clouds.map(\.id)) { _, ids in
             if let id = store.section.cloudId, !ids.contains(id) { store.section = .recents }
         }
-        .task {
+        .task(id: model.prefs.clouds.map { $0.url + "|" + $0.devEmail }.joined(separator: ",")) {
             // Every Cloud's status: asked now, then every 30 s while Home is up (a connected answer is reused for a
             // minute, so each Cloud hears from this Mac about once a minute at most), and again when Canvas comes to
             // the front.
