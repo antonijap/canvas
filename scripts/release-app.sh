@@ -48,8 +48,10 @@ mkdir -p "$SRV/engine/src" "$SRV/demos"
 rsync -a --exclude '.*' src mcp vendor package.json pnpm-lock.yaml pnpm-workspace.yaml "$SRV/"
 # The comments protocol the server shares with a team's own Canvas server (src/comments.ts imports it).
 mkdir -p "$SRV/cloud" && cp cloud/protocol.ts "$SRV/cloud/"
-# A Cloud hosted on a Mac (src/cloud-host.ts) runs cloud/node with the room and team logic it shares with the Worker.
-rsync -a --exclude '.*' cloud/core cloud/node "$SRV/cloud/"
+# A Cloud hosted on a Mac (src/cloud-host.ts) runs cloud/adapters/mac with the room and team logic it shares with the Worker.
+rsync -a --exclude '.*' cloud/core "$SRV/cloud/"
+mkdir -p "$SRV/cloud/adapters"
+rsync -a --exclude '.*' cloud/adapters/mac "$SRV/cloud/adapters/"
 rsync -a --exclude '.*' engine/pkg "$SRV/engine/"
 cp engine/src/paper_noise.rgba "$SRV/engine/src/"
 rsync -a --exclude '.*' demos/learn.canvas "$SRV/demos/"

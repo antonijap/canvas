@@ -1,5 +1,5 @@
 // Host on this Mac, on the editor server's side: up to eight Clouds hosted here at once (one per team), each its own
-// process (cloud/node/main.ts) on its own 127.0.0.1 port, with its own data folder, people, invites and tunnel keys,
+// process (cloud/adapters/mac/main.ts) on its own 127.0.0.1 port, with its own data folder, people, invites and tunnel keys,
 // known by its host id. This Canvas joins each as its owner with a device token that never leaves this process. The
 // editor server itself stays on 127.0.0.1:5189 and is never reachable through a Cloud's port or its tunnels.
 //
@@ -33,7 +33,7 @@ import { deleteSecret, readSecret, writeSecret } from "./cloud-secrets.ts";
 import { fingerprint, genkey, helperPath, hostIdFor, ownsPort, serve, type Helper } from "./cloud-tunnel.ts";
 import { stateDir } from "./usage-counts.ts";
 
-const MAIN = path.join(import.meta.dirname, "..", "cloud", "node", "main.ts");
+const MAIN = path.join(import.meta.dirname, "..", "cloud", "adapters", "mac", "main.ts");
 /** The first hosted Cloud's folder (where the only one always was). */
 export const hostDir = () => path.join(stateDir(), "cloud-host");
 const SLOT = /^(main|[0-9a-f]{8})$/;

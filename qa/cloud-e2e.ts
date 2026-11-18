@@ -1,9 +1,9 @@
-// End to end for comments sync through a team's own Canvas server, with the real server (cloud/cloudflare) run
+// End to end for comments sync through a team's own Canvas server, with the real server (cloud/adapters/cloudflare) run
 // locally in DEV mode. Two Canvas servers with their own scratch state, one per person:
 //   anna (owner) shares a file; ben (commenter) opens a copy; a comment of ben's reaches anna's comments.json;
 //   anna goes offline (her connection to the server is cut), comments, the comment waits, then arrives when she is back;
 //   ben is removed from the people rules and is disconnected.
-// Run: node qa/cloud-e2e.ts      (cleans up after itself; needs `pnpm install --frozen-lockfile` in cloud/cloudflare)
+// Run: node qa/cloud-e2e.ts      (cleans up after itself; needs `pnpm install --frozen-lockfile` in cloud/adapters/cloudflare)
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
@@ -12,7 +12,7 @@ import path from "node:path";
 import { freePort, ROOT, sleep, startServer, type Scratch } from "./lib.ts";
 import { shareLocal } from "../src/cloud-sync.ts";
 
-const SERVER = path.join(ROOT, "cloud", "cloudflare");
+const SERVER = path.join(ROOT, "cloud", "adapters", "cloudflare");
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "canvas-cloud-e2e-")));
 let failed = 0;
 const line = (ok: boolean, what: string) => { console.log(`${ok ? "PASS" : "FAIL"} ${what}`); if (!ok) failed++; };
@@ -61,7 +61,7 @@ async function cleanup() {
 }
 
 async function main() {
-  if (!fs.existsSync(path.join(SERVER, "node_modules"))) throw new Error("run `pnpm install --frozen-lockfile` in cloud/cloudflare first");
+  if (!fs.existsSync(path.join(SERVER, "node_modules"))) throw new Error("run `pnpm install --frozen-lockfile` in cloud/adapters/cloudflare first");
   // 1. the team server, locally, in DEV mode (the dev email header stands in for Cloudflare Access)
   const wport = await freePort();
   const wlog: string[] = [];

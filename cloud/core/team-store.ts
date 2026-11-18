@@ -1,5 +1,5 @@
 // A Cloud's team: its people rules, its registered documents and the rules generation rooms check. Plain SQL over a
-// SqlStore, so the Worker's Team object (cloud/cloudflare/src/team.ts) and a Cloud hosted on a Mac (cloud/node) share it.
+// SqlStore, so the Worker's Team object (cloud/adapters/cloudflare/src/team.ts) and a Cloud hosted on a Mac (cloud/adapters/mac) share it.
 
 import { LIMITS } from "../protocol.ts";
 import type { PeopleRule, Role } from "../protocol.ts";
