@@ -36,12 +36,24 @@ function handle(o: any) {
     return;
   }
   if (o.op === "serve") {
-    if (o.port !== 5190 && !process.env.CANVAS_FAKE_TUNNEL_ANY_PORT) { out({ event: "error", message: "serve takes port 5190 only" }); process.exit(1); }
+    // As the real helper: a served tunnel reaches one port from 5190 to 5197 on this Mac (one per hosted Cloud).
+    if (!(o.port >= 5190 && o.port <= 5197) && !process.env.CANVAS_FAKE_TUNNEL_ANY_PORT) { out({ event: "error", message: "serve takes a port from 5190 to 5197 only" }); process.exit(1); }
     const addr = addrOf(o.key);
     const file = path.join(dir, `${addr}.json`);
-    fs.writeFileSync(file, JSON.stringify({ port: o.port, allow: o.allow, pid: process.pid }));
-    cleanup = () => { try { if (JSON.parse(fs.readFileSync(file, "utf8")).pid === process.pid) fs.rmSync(file); } catch { /* gone */ } };
-    out({ event: "ready", addr });
+    const ready = () => {
+      fs.writeFileSync(file, JSON.stringify({ port: o.port, allow: o.allow, pid: process.pid }));
+      cleanup = () => { try { if (JSON.parse(fs.readFileSync(file, "utf8")).pid === process.pid) fs.rmSync(file); } catch { /* gone */ } };
+      out({ event: "ready", addr });
+    };
+    // Tests of races: with CANVAS_FAKE_TUNNEL_GATE set, a serve says it waits (<gate>.waiting.<pid>) and starts only
+    // once the gate file exists, so a test decides exactly when a slow tunnel start finishes.
+    const gate = process.env.CANVAS_FAKE_TUNNEL_GATE;
+    if (gate && !fs.existsSync(gate)) {
+      fs.writeFileSync(`${gate}.waiting.${process.pid}`, String(o.port));
+      const t = setInterval(() => { if (fs.existsSync(gate)) { clearInterval(t); ready(); } }, 20);
+      return;
+    }
+    ready();
     return;
   }
   if (o.op === "forward") {
@@ -49,7 +61,8 @@ function handle(o: any) {
     const server = net.createServer((c) => {
       let target: { port: number; allow: string[] | null } | null = null;
       try { target = JSON.parse(fs.readFileSync(path.join(dir, `${o.addr}.json`), "utf8")); } catch { /* not served */ }
-      const portOk = target?.port === o.port || !!process.env.CANVAS_FAKE_TUNNEL_ANY_PORT;
+      // Inside the tunnel a Cloud is always on 5190, whichever local port it has.
+      const portOk = o.port === 5190 || !!process.env.CANVAS_FAKE_TUNNEL_ANY_PORT;
       if (!target || (target.allow && !target.allow.includes(me)) || !portOk) { c.destroy(); return; }
       const up = net.connect(target.port, "127.0.0.1");
       c.pipe(up); up.pipe(c);

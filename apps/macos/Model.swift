@@ -221,6 +221,8 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             let c = prefs.clamped
             if c != prefs { prefs = c; return }
             guard prefs != oldValue else { return }
+            // A changed list of Clouds is a newer revision: the server takes only the newest (src/cloud-config.ts).
+            if prefs.clouds != oldValue.clouds && prefs.cloudsRev == oldValue.cloudsRev { prefs.cloudsRev += 1; return }
             prefs.save(.standard)
             pushPrefs(everywhere: true)
             if prefs.keptTabs != oldValue.keptTabs { evictTabs() }

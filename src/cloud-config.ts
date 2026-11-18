@@ -1,6 +1,7 @@
-// Which Cloud this Canvas talks to (Settings > Cloud, apps/macos/CloudSettings.swift). The shell sends it with its
-// state like the other settings (src/settings.ts). Only the address and the local-development email live here; tokens
-// are never part of a setting (src/cloud.ts keeps them in memory, the Keychain keeps them on disk).
+// Which Clouds this Canvas talks to (Settings > Cloud, apps/macos/CloudSettings.swift): any number, each by its own
+// address. The shell sends the list with its state like the other settings (src/settings.ts). Only the addresses and,
+// for a development address, its email live here; tokens are never part of a setting (src/cloud.ts keeps them in
+// memory, the Keychain keeps them on disk). No request leaves this process for an address that is not in the list.
 //
 // Three kinds of Cloud, never mixed up:
 //   access    https://team.example.com    a Worker behind Cloudflare Access (cf-access-token)
@@ -62,29 +63,147 @@ export function parseInvite(raw: unknown): Invite | null {
   return { name: name || "Cloud", hostId, addr, code };
 }
 
-let current = { url: "", devEmail: "" };
-let joined = "";
+/** The most Clouds one Canvas keeps (Settings > Cloud), and the longest name one takes. The shell has the same limits. */
+export const CLOUD_LIMITS = { clouds: 200, name: 60 };
 
-/** Whatever the shell sent, made safe. */
-export function setCloudConfig(raw: unknown): void {
-  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const email = typeof o.cloudDevEmail === "string" ? o.cloudDevEmail.trim().toLowerCase() : "";
-  const url = cleanServerUrl(o.cloudUrl) ?? "";
-  current = { url, devEmail: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : "" };
-  if (url) joined = "";
+/** One Cloud this Canvas talks to: its canonical address, and for a development address only, the email its DEV mode takes. */
+export interface CloudEntry { url: string; devEmail: string }
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Who decides which Clouds this process may talk to:
+ *   the shell's list   once the app sent one (even an empty one), it is the whole truth. It comes with a revision
+ *                      (`cloudsRev`): a list older than the last one taken is ignored.
+ *   the environment    CANVAS_CLOUD_URL (with CANVAS_CLOUD_DEV_EMAIL), only while no shell sent a list: tests, dev.
+ *   added here         a Cloud joined or started here (POST /api/cloud/join, /host/start). The shell adds the entry it
+ *                      gets back; the addition counts until a list newer than the one in force when it was made.
+ *   held back          a Cloud removed here (POST /api/cloud/remove): nothing goes to it until a list newer than the
+ *                      one in force at the removal names it again.
+ */
+let shellList: CloudEntry[] | null = null;
+let shellRev = -Infinity;
+const added = new Map<string, { entry: CloudEntry; rev: number }>();
+const held = new Map<string, number>();
+/** Bumped for a Cloud whenever it is removed or signed out of: work begun before must not finish against it. */
+const generations = new Map<string, number>();
+const listeners: ((removed: string[], back: string[]) => void)[] = [];
+
+/** A Cloud's work is outdated once its generation moved on (src/cloud.ts checks it after every await). */
+export const generation = (url: string): number => generations.get(url) ?? 0;
+export function bump(url: string): void { generations.set(url, generation(url) + 1); }
+
+/** src/cloud.ts tears down what belonged to a Cloud that is gone, and wakes the files of one that came back. */
+export function onCloudsChanged(fn: (removed: string[], back: string[]) => void): void { listeners.push(fn); }
+
+/** A list as the shell sent it, made safe: canonical addresses, no repeats, at most 200, emails only for development. */
+export function cleanCloudList(raw: unknown): CloudEntry[] {
+  const out: CloudEntry[] = [];
+  const seen = new Set<string>();
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (out.length >= CLOUD_LIMITS.clouds) break;
+    const o = item && typeof item === "object" ? (item as Record<string, unknown>) : {};
+    const url = cleanServerUrl(o.url);
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    const email = typeof o.devEmail === "string" ? o.devEmail.trim().toLowerCase() : "";
+    out.push({ url, devEmail: isLocalDev(url) && email.length <= 120 && EMAIL.test(email) ? email : "" });
+  }
+  return out;
 }
 
-/** A Cloud just joined here: it is the configured one until the shell's next state says otherwise. */
-export function setJoined(url: string): void { joined = url; }
+function envEntry(): CloudEntry | null {
+  const url = cleanServerUrl(process.env.CANVAS_CLOUD_URL);
+  if (!url) return null;
+  const email = (process.env.CANVAS_CLOUD_DEV_EMAIL ?? "").trim().toLowerCase();
+  return { url, devEmail: isLocalDev(url) && EMAIL.test(email) ? email : "" };
+}
 
-/** The configured Cloud, with the environment (CANVAS_CLOUD_URL, CANVAS_CLOUD_DEV_EMAIL) filling what the app did not set. */
-export function cloudConfig(): { url: string; devEmail: string } {
-  const url = current.url || joined || cleanServerUrl(process.env.CANVAS_CLOUD_URL) || "";
-  return {
-    url,
-    // Used only for a development address (authHeaders); never for a hosted Cloud or an https one.
-    devEmail: current.devEmail || (process.env.CANVAS_CLOUD_DEV_EMAIL ?? "").trim().toLowerCase(),
-  };
+/** Every Cloud this process may talk to now. */
+export function cloudConfigs(): CloudEntry[] {
+  const env = shellList === null ? envEntry() : null;
+  const out = (shellList ?? (env ? [env] : [])).filter((e) => !held.has(e.url));
+  for (const { entry } of added.values()) if (!held.has(entry.url) && !out.some((e) => e.url === entry.url)) out.push(entry);
+  return out;
+}
+
+/** Whether `url` is, exactly (canonical form, port included), one of the Clouds this process may talk to. */
+export function isConfigured(url: unknown): url is string {
+  return typeof url === "string" && cleanServerUrl(url) === url && cloudConfigs().some((e) => e.url === url);
+}
+
+/** The development email for exactly this address, else "". Never another origin's, never a fallback. */
+export function devEmailFor(url: string): string {
+  if (!isLocalDev(url)) return "";
+  return cloudConfigs().find((e) => e.url === url)?.devEmail ?? "";
+}
+
+/**
+ * What changed between two lists: Clouds gone, Clouds new. A Cloud whose development email changed is both: whoever
+ * this Canvas was there is someone else now, so its work, answers and sockets go and it connects again as the new one.
+ */
+function changed(beforeList: CloudEntry[]): void {
+  const nowList = cloudConfigs();
+  const now = new Map(nowList.map((e) => [e.url, e.devEmail]));
+  const before = new Map(beforeList.map((e) => [e.url, e.devEmail]));
+  const removed = [...before.keys()].filter((u) => !now.has(u) || now.get(u) !== before.get(u));
+  const back = [...now.keys()].filter((u) => !before.has(u) || now.get(u) !== before.get(u));
+  for (const u of removed) bump(u);
+  if (removed.length || back.length) for (const fn of listeners) fn(removed, back);
+}
+
+/** Whatever the shell sent, made safe. Settings without a `clouds` list leave the Clouds as they are. */
+export function setCloudConfig(raw: unknown): void {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if (!Array.isArray(o.clouds)) return;
+  const rev = Number(o.cloudsRev);
+  const versioned = o.cloudsRev !== undefined && Number.isFinite(rev);
+  if (versioned && rev < shellRev) return; // older than the list in force
+  const before = cloudConfigs();
+  shellList = cleanCloudList(o.clouds);
+  if (versioned) {
+    // A list newer than the one an addition or a removal was made under has seen it: the list decides from now on.
+    for (const [u, a] of added) if (rev > a.rev) added.delete(u);
+    // A removal stands until the shell sent a list without that Cloud (it saw the removal). A list it sent before
+    // that, even one newer than the removal (another Cloud renamed meanwhile), does not bring it back.
+    for (const u of [...held.keys()]) if (!shellList.some((e) => e.url === u)) held.delete(u);
+    shellRev = rev;
+  } else {
+    added.clear();
+    held.clear();
+  }
+  changed(before);
+}
+
+/** A Cloud joined or started here: it counts until the shell's next list (see above). */
+export function addCloud(url: string): void {
+  const clean = cleanServerUrl(url);
+  if (!clean) return;
+  const before = cloudConfigs();
+  held.delete(clean);
+  added.set(clean, { entry: { url: clean, devEmail: "" }, rev: shellRev });
+  changed(before);
+}
+
+/** A Cloud removed here: nothing goes to it until a newer list names it again. */
+export function removeCloud(url: string): void {
+  const clean = cleanServerUrl(url);
+  if (!clean) return;
+  const before = cloudConfigs();
+  added.delete(clean);
+  held.set(clean, shellRev);
+  bump(clean);
+  changed(before);
+}
+
+/** Tests: back to a process that never heard from a shell. */
+export function resetCloudConfig(): void {
+  const before = cloudConfigs();
+  shellList = null;
+  shellRev = -Infinity;
+  added.clear();
+  held.clear();
+  changed(before);
 }
 
 export const hostOf = (url: string): string => {

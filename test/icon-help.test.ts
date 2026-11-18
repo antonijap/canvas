@@ -1,6 +1,6 @@
 // Every icon-only control carries a tooltip. Static checks over the source, no build needed:
 // - Swift: IconButton and MiniButton pass a non-empty `help:`, and every Button or Menu whose label has no
-//   Text or Label has a `.help(...)` (or `.chromeHelp(...)`, its titlebar form, or `.sparkTip(...)`, the spark's own tooltip from the design) in its modifier chain.
+//   Text, Label or ChipLabel has a `.help(...)` (or `.chromeHelp(...)`, its titlebar form, or `.sparkTip(...)`, the spark's own tooltip from the design) in its modifier chain.
 // - Page: a <button> made without text (an icon) in the page scripts gets a `title`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -82,7 +82,7 @@ test("every icon-only Swift Button and Menu has a tooltip", () => {
       const e = parse(s, m.index!);
       // A titled button or menu ("Rename", a file name) reads on its own.
       if (e.args !== null && !/^\s*(action|content|role)\s*:/.test(e.args)) continue;
-      if (e.label === null || /\b(Text|Label|TextField)\s*\(/.test(e.label)) continue;
+      if (e.label === null || /\b(Text|Label|TextField|ChipLabel)\s*\(/.test(e.label)) continue;
       checked++;
       if (!/\.(?:help|chromeHelp|sparkTip)\(/.test(e.modifiers)) missing.push(`${f.slice(root.length + 1)}:${e.line} ${m[1]} with an icon-only label has no .help(...)`);
     }
