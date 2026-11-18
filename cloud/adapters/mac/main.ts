@@ -1,4 +1,4 @@
-// The hosted Cloud as its own process: `node cloud/node/main.ts`, forked by Canvas's editor server
+// The hosted Cloud as its own process: `node cloud/adapters/mac/main.ts`, forked by Canvas's editor server
 // (src/cloud-host.ts), one per Cloud this Mac hosts, while hosting it is on. It imports cloud code only (no editor route,
 // handler or proxy can reach this process), listens on 127.0.0.1 (its own port), and takes orders only over the IPC channel of
 // the process that forked it. When that channel closes (Canvas quit or crashed), it stops and exits: no orphan.
@@ -10,7 +10,7 @@
 // Results that carry a secret (a join code, the host's own device token) go over IPC only, never to a log.
 
 import { CloudHost, HostError } from "./host.ts";
-import type { Role } from "../protocol.ts";
+import type { Role } from "../../protocol.ts";
 
 const dir = process.env.CANVAS_CLOUD_HOST_DIR;
 if (!dir || !process.send) {

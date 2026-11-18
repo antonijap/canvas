@@ -1,5 +1,5 @@
 // A Cloud hosted on a Mac: the Worker's protocol (docs/cloud/protocol.md) and the same room and team logic
-// (cloud/core) on node:http and node:sqlite. It runs as its own process (cloud/node/main.ts) with this http.Server
+// (cloud/core) on node:http and node:sqlite. It runs as its own process (cloud/adapters/mac/main.ts) with this http.Server
 // only: the Cloud API, nothing of the editor. It listens on 127.0.0.1 and nowhere else; other Macs reach it through an
 // encrypted tunnel (src/cloud-tunnel.ts) that also arrives on 127.0.0.1, so an address proves nothing and every
 // route, the room socket included, needs a bearer token.
@@ -13,17 +13,18 @@
 // Storage, in `dir` (0700, files 0600): team.sqlite and rooms/<doc>.sqlite (one per shared document, the Worker's room
 // schema). Comments and people only; no files, no tokens in clear.
 
+import { route } from "../../core/router.ts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
-import { LIMITS, PROTOCOL_VERSION } from "../protocol.ts";
-import type { Role, ServerInfo, ServerMessage } from "../protocol.ts";
-import { Operations, type Identity } from "../core/operations.ts";
-import { ranks } from "../core/people.ts";
-import { TeamStore } from "../core/team-store.ts";
+import { LIMITS, PROTOCOL_VERSION } from "../../protocol.ts";
+import type { Role, ServerInfo, ServerMessage } from "../../protocol.ts";
+import { Operations, type Identity } from "../../core/operations.ts";
+import { ranks } from "../../core/people.ts";
+import { TeamStore } from "../../core/team-store.ts";
 import { SqliteStore } from "./sqlite.ts";
 import { ServerSocket, upgrade } from "./websocket.ts";
 
@@ -502,27 +503,28 @@ export class CloudHost {
       if (!this.team.register(doc, now.id)) return json(409, { code: "quota", message: "This Cloud has too many documents" });
       return json(200, { doc });
     }
-    const match = /^\/v1\/docs\/([^/]+)\/(threads|ops)$/.exec(p);
-    if (!match) return json(404, { code: "not_found", message: "No such route" });
-    const [, doc, action] = match;
-    if (!uuid(doc)) return json(400, { code: "invalid", message: "doc must be a uuid" });
-    if (!this.team.hasDoc(doc)) return json(404, { code: "not_found", message: "Document is not registered" });
-    if (action === "threads" && method === "GET") {
-      const since = Number(url.searchParams.get("since") ?? "0");
-      if (!Number.isSafeInteger(since) || since < 0) return json(400, { code: "invalid", message: "since must be a nonnegative integer" });
-      return json(200, this.room(doc).ops.read(since));
-    }
-    if (action === "ops" && method === "POST") {
-      const body = await this.body(req, MAX_BODY_BYTES, me.device);
-      const now = this.still(me);
-      if (!now) return json(401, { code: "unauthenticated", message: "This device was removed" });
-      const ops = body && typeof body === "object" && "ops" in body ? (body as { ops: unknown }).ops : null;
-      if (!Array.isArray(ops)) return json(400, { code: "invalid", message: "ops must be a list" });
-      const allowance = this.team.takeOps(now.id, ops.length);
-      if (ops.length > LIMITS.opsPerMessage) return json(429, { code: "quota", message: "Too many ops in one message" });
-      return json(200, this.submit(doc, ops, now, allowance));
-    }
-    return json(404, { code: "not_found", message: "No such route" });
+    const result = await route({
+      kind: "mac",
+      team: () => this.team,
+      room: doc => ({
+        read: request => {
+          const since = Number(request.query.get("since") ?? "0");
+          if (!Number.isSafeInteger(since) || since < 0) return { status: 400, body: { code: "invalid", message: "since must be a nonnegative integer" } };
+          return { status: 200, body: this.room(doc).ops.read(since) };
+        },
+        submit: async request => {
+          const body = await request.body();
+          const now = this.still(me);
+          if (!now) return { status: 401, body: { code: "unauthenticated", message: "This device was removed" } };
+          const ops = body && typeof body === "object" && "ops" in body ? (body as { ops: unknown }).ops : null;
+          if (!Array.isArray(ops)) return { status: 400, body: { code: "invalid", message: "ops must be a list" } };
+          const allowance = this.team.takeOps(now.id, ops.length);
+          if (ops.length > LIMITS.opsPerMessage) return { status: 429, body: { code: "quota", message: "Too many ops in one message" } };
+          return { status: 200, body: this.submit(doc, ops, now, allowance) };
+        },
+      }),
+    }, { method, path: p, query: url.searchParams, headers: new Headers(), body: () => this.body(req, MAX_BODY_BYTES, me.device) });
+    return json(result.status, result.body);
   }
 
   private onUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): void {

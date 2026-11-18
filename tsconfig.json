@@ -20,5 +20,5 @@
     "qa",
     "cloud"
   ],
-  "exclude": ["qa/out", "cloud/cloudflare"]
+  "exclude": ["qa/out", "cloud/adapters/cloudflare"]
 }

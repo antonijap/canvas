@@ -183,7 +183,7 @@ async function main() {
   }
 
   // 5. The Cloud stops answering (its process paused, like a Mac asleep with the lid closed).
-  paused = (() => { try { return execFileSync("pgrep", ["-P", String(sa.proc.pid), "-f", path.join("cloud", "node", "main.ts")], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } })();
+  paused = (() => { try { return execFileSync("pgrep", ["-P", String(sa.proc.pid), "-f", path.join("cloud", "adapters", "mac", "main.ts")], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } })();
   line(paused.length === 1, "Anna's Cloud runs as its own process");
   for (const pid of paused) process.kill(Number(pid), "SIGSTOP");
   const downAfter = await until("Ben reads down", async () => (await comments(sb, pkgB)).sync?.status === "down", 60_000);
@@ -227,7 +227,7 @@ async function main() {
   for (const s of scratch) await s.stop();
   scratch.length = 0;
   await sleep(1500);
-  const left = [...pgrep(path.join(ROOT, "cloud", "node", "main.ts")), ...pgrep(path.join(ROOT, "test", "fixtures", "fake-tunnel")), ...(REAL ? pgrep(REAL) : [])];
+  const left = [...pgrep(path.join(ROOT, "cloud", "adapters", "mac", "main.ts")), ...pgrep(path.join(ROOT, "test", "fixtures", "fake-tunnel")), ...(REAL ? pgrep(REAL) : [])];
   line(left.length === 0, `no Cloud process or tunnel helper left running (${left.length})`);
 }
 

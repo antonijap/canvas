@@ -79,7 +79,7 @@ function scrubPatterns(): Pattern[] {
     { id: "google-key", what: "Google API key", re: /\bAIza[0-9A-Za-z_-]{35}\b/g, secret: true, status: "FAIL" },
     { id: "fal-key", what: "fal.ai key", re: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}:[0-9a-f]{32}\b/g, secret: true, status: "FAIL" },
     { id: "private-key", what: "private key", re: /-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/g, secret: true, status: "FAIL" },
-    // A hosted Cloud's secrets (cloud/node/host.ts, src/cloud-tunnel.ts): an invite link, a join code, a device token,
+    // A hosted Cloud's secrets (cloud/adapters/mac/host.ts, src/cloud-tunnel.ts): an invite link, a join code, a device token,
     // a tunnel address (it carries keys), a bearer header with a real value.
     { id: "cloud-invite", what: "Cloud invite link", re: /canvas:\/\/cloud\/join\?[^\s"'`<>)]*(?:code|tc)=[A-Za-z0-9_.-]{20,}/g, secret: true, status: "FAIL" },
     { id: "cloud-secret", what: "Cloud device token or join code", re: /\bcc[dj]_[0-9a-f]{16}\.[A-Za-z0-9_-]{43}/g, secret: true, status: "FAIL" },

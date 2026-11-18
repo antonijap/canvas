@@ -1,10 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
-import type { PeopleRule } from "../../protocol";
+import type { PeopleRule } from "../../../protocol";
 import type { Env } from "./env";
-import { configuredOwners } from "../../core/people.ts";
-import type { SqlStore } from "../../core/sql.ts";
-import { TeamStore } from "../../core/team-store.ts";
-export type { DocumentRecord } from "../../core/team-store.ts";
+import { configuredOwners } from "../../../core/people.ts";
+import type { SqlStore } from "../../../core/sql.ts";
+import { TeamStore } from "../../../core/team-store.ts";
+export type { DocumentRecord } from "../../../core/team-store.ts";
 
 /** The team's rules and documents (cloud/core/team-store.ts), as one Durable Object, plus pushing rule changes to rooms. */
 export class Team extends DurableObject<Env> {

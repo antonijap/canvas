@@ -77,7 +77,7 @@ export class Operations {
         if (usage + size(json) - (row ? size(row.json) : 0) + size(opJson) + size(opId) + 8 > DOCUMENT_BYTES) { reject("quota", "Document storage quota exceeded"); return; }
         sql.exec("INSERT INTO threads (id, json) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET json = excluded.json", changed.id, json);
         if (op.kind === "thread.create" || op.kind === "comment.add") sql.exec("INSERT INTO comment_threads (comment_id, thread_id) VALUES (?, ?)", op.comment, changed.id);
-        // by_id exists only in a hosted Cloud's rooms (cloud/node/host.ts adds it); a Worker never sets an id.
+        // by_id exists only in a hosted Cloud's rooms (cloud/adapters/mac/host.ts adds it); a Worker never sets an id.
         const seq = (me.id
           ? sql.exec<{ seq: number }>("INSERT INTO ops (op_id, by_email, by_name, by_id, at, op_json) VALUES (?, ?, ?, ?, ?, ?) RETURNING seq", opId, me.email, me.name, me.id, at, opJson)
           : sql.exec<{ seq: number }>("INSERT INTO ops (op_id, by_email, by_name, at, op_json) VALUES (?, ?, ?, ?, ?) RETURNING seq", opId, me.email, me.name, at, opJson)

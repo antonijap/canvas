@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from "vitest";
 import { listDurableObjectIds, reset, runInDurableObject } from "cloudflare:test";
 import { Team } from "../src/team";
-import { LIMITS, PROTOCOL_VERSION, roleFor } from "../../protocol";
+import { LIMITS, PROTOCOL_VERSION, roleFor } from "../../../protocol";
 import { bindings, call, envelope, member, owner, post, register, rules } from "./helpers";
 
 beforeEach(reset);

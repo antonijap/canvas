@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { evictDurableObject, reset } from "cloudflare:test";
-import { LIMITS, PROTOCOL_VERSION } from "../../protocol";
+import { LIMITS, PROTOCOL_VERSION } from "../../../protocol";
 import { bindings, call, connect, envelope, member, owner, post, register, rules } from "./helpers";
 
 const sockets: WebSocket[] = [];

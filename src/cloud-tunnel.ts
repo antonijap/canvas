@@ -18,7 +18,7 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { HOST_PORT } from "../cloud/node/host.ts";
+import { HOST_PORT } from "../cloud/adapters/mac/host.ts";
 
 /** The helper's path: CANVAS_TUNNEL_BIN (the app sets it to its bundled copy), else none and Anywhere is unavailable. */
 export function helperPath(): string | null {

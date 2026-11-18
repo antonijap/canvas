@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import { applyOp, checkEnvelope } from "../../protocol";
-import type { Thread } from "../../protocol";
+import { applyOp, checkEnvelope } from "../../../protocol";
+import type { Thread } from "../../../protocol";
 import { envelope } from "./helpers";
 
 it("rejects reused initial comment ids in the shared creation helper", () => {
