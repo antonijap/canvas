@@ -73,3 +73,53 @@ test("after a storm of invites, joins and removals: one member tunnel with exact
   assert.deepEqual(Tn.runningHelpers(), [], "no helper after Stop hosting");
   assert.ok(!alive(h.member!) && !alive(h.enrol!), "both helper processes are gone");
 });
+
+test("several Clouds hosted at once: each its own id, port, folder, people and tunnels; stop, restart and delete one leave the others", async () => {
+  const bin = Tn.helperPath()!;
+  const a = await Host.startHosting({ name: "Studio", label: "Anna" });
+  const b = await Host.startHosting({ name: "Client review", label: "Anna" });
+  assert.notEqual(a, b, "a new Cloud gets its own id");
+  const sa = await Host.hostStatus(a) as any, sb = await Host.hostStatus(b) as any;
+  assert.ok(sa.hosting && sb.hosting && sa.port !== sb.port, "two processes on two ports");
+  assert.notEqual(sa.fingerprint, sb.fingerprint, "two tunnel identities");
+  assert.equal(Host.localHost(a)!.hostId, a);
+  assert.equal(Host.localHost(b)!.hostId, b);
+  assert.equal(Host.localHost(), null, "with two running, no call goes to one by default");
+  // An invite to b names b, and the person who joins with it is in b only.
+  const link = await Host.invite("ben@studio.test", undefined, b);
+  const q = new URL(link).searchParams;
+  assert.equal(q.get("host"), b);
+  const key = await Tn.genkey(bin, "client");
+  const f = await Tn.forward(bin, key.key, q.get("tc")!);
+  const r = await fetch(`${f.origin}/v1/join`, { method: "POST", headers: { authorization: `Bearer ${q.get("code")}`, "content-type": "application/json" }, body: JSON.stringify({ token: `ccd_0123456789abcdef.${"t".repeat(43)}`, device: "Ben's MacBook", key: key.public }) });
+  f.helper.stop();
+  assert.equal(r.status, 200);
+  const labels = async (id: string) => ((await Host.hostStatus(id)) as any).people.map((p: any) => p.label).sort();
+  assert.deepEqual(await labels(b), ["Anna", "ben@studio.test"]);
+  assert.deepEqual(await labels(a), ["Anna"], "the other Cloud has nobody new");
+  // Each Cloud has its own enrolment tunnel.
+  const linkA = await Host.invite("cy@studio.test", undefined, a);
+  assert.notEqual(new URL(linkA).searchParams.get("tc"), q.get("tc"), "each Cloud its own enrolment tunnel");
+  // Stop a: b runs on; a starts again under the same id with its people.
+  await Host.stopHosting(a);
+  assert.equal(Host.localHost(a), null);
+  assert.ok(Host.localHost(b), "b still runs");
+  assert.equal(await Host.startHosting({ name: "Studio", label: "Anna", hostId: a }), a, "the same Cloud again");
+  assert.deepEqual(await labels(a), ["Anna", "cy@studio.test"], "with its people (the invite still waiting)");
+  // Delete b: its folder, slot and keys go; a new Cloud never takes its id.
+  const all = await Host.hostStatusAll();
+  const known = all.clouds.map((c: any) => c.hostId);
+  assert.ok(known.includes(a) && known.includes(b), "both are listed with the Clouds this Mac hosts");
+  await Host.wipeHosting(b);
+  assert.equal(Host.localHost(b), null);
+  assert.ok(!(await Host.hostsHere(b)), "b is forgotten");
+  await assert.rejects(Host.startHosting({ name: "x", label: "Anna", hostId: b }), /does not host/);
+  const c = await Host.startHosting({ name: "Third", label: "Anna" });
+  assert.ok(c !== a && c !== b, "a new Cloud gets a new id");
+  // Starting several at once never gives two the same slot or id.
+  const many = await Promise.all([1, 2, 3].map((i) => Host.startHosting({ name: `Team ${i}`, label: "Anna" })));
+  assert.equal(new Set([...many, a, c]).size, 5);
+  await Host.stopHosting();
+  await sleep(1000);
+  assert.deepEqual(Tn.runningHelpers(), [], "no helper after stopping them all");
+});

@@ -7,12 +7,13 @@
 // stdin closes (Canvas quit or crashed) it exits, so it never outlives Canvas.
 //
 //	{"op":"genkey","kind":"server"|"client"}                 -> {"event":"key","key":{...},"public":"nodekey:..","addr"?:"tc.."}
-//	{"op":"serve","key":{...},"port":5190,"allow":[...]|null} -> {"event":"ready","addr":"tc.."}   (allow null: anyone)
+//	{"op":"serve","key":{...},"port":5190,"allow":[...]|null} -> {"event":"ready","addr":"tc.."}   (allow null: anyone; port 5190-5289)
 //	{"op":"forward","key":{...},"addr":"tc..","port":5190}     -> {"event":"ready","port":N}       (listener on 127.0.0.1:N)
 //	any failure                                                -> {"event":"error","message":".."} and exit 1
 //
-// serve forwards only to 127.0.0.1:5190: the port is fixed here, whatever the order says, and there is no exit-node
-// or any other service.
+// serve forwards only to one port on 127.0.0.1, between 5190 and 5289 (one per Cloud this Mac hosts): the range is
+// fixed here, so no order can reach the editor on 5189 or anything else, and there is no exit-node or any other
+// service. Inside the tunnel the Cloud is always on port 5190, whichever local port it has.
 package main
 
 import (
@@ -22,14 +23,18 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/tailscale/tailcat"
 	"tailscale.com/types/key"
 )
 
-// cloudPort is the only port a served tunnel reaches: the hosted Cloud on 127.0.0.1.
+// cloudPort is the Cloud's port inside every tunnel; a served tunnel reaches its Cloud on 127.0.0.1 at a port in
+// firstLocalPort..lastLocalPort and nowhere else.
 const cloudPort = 5190
+const firstLocalPort = 5190
+const lastLocalPort = 5289
 
 type order struct {
 	Op    string              `json:"op"`
@@ -103,9 +108,21 @@ func pubText(k key.NodePublic) string {
 	return string(b)
 }
 
+// localTarget is where a served tunnel's connections go: 127.0.0.1 at `port`, only inside the hosted Clouds' range.
+func localTarget(port int) (string, bool) {
+	if port < firstLocalPort || port > lastLocalPort {
+		return "", false
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), true
+}
+
 func serve(ctx context.Context, o order) {
 	if o.Key == nil {
 		fail("no key")
+	}
+	local, ok := localTarget(o.Port)
+	if !ok {
+		fail("serve takes a port from 5190 to 5289 only")
 	}
 	ci := o.Key.Public
 	if err := ci.Expand(ctx, tailcat.ExpandForServer, tailcat.DERPMapURL(tailcat.DefaultDERPMapURL)); err != nil || len(ci.Region) == 0 {
@@ -138,7 +155,7 @@ func serve(ctx context.Context, o order) {
 			os.Exit(1)
 		}
 		go func() {
-			up, err := net.DialTimeout("tcp", "127.0.0.1:5190", 5*time.Second)
+			up, err := net.DialTimeout("tcp", local, 5*time.Second)
 			if err != nil {
 				c.Close()
 				return

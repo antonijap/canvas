@@ -119,7 +119,7 @@ async function main() {
   line(diskA().threads.length === 3 && !diskA().server, "anna's file has 3 local threads, including tombstones, and no server");
 
   // 4. anna signs in (dev header) and shares the file
-  const st = await (await fetch(`${sa.base}/api/cloud/status`)).json() as any;
+  const st = (await (await fetch(`${sa.base}/api/cloud/status?url=${encodeURIComponent(annaUrl)}`)).json()) as any;
   line(st.status === "connected" && st.email === "anna@studio.test" && st.role === "owner", `status says connected as ${st.email}, ${st.role}`);
   const shared = await post(sa, "/api/cloud/share", {}, fileA);
   line(shared.status === 200 && shared.j.ops === 9, `share sent ${shared.j.ops} ops, including the deleted reply and thread`);

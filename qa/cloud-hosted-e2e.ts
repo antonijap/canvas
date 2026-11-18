@@ -66,7 +66,8 @@ async function main() {
     const r = await fetch(s.base + p, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
     return { status: r.status, j: (await r.json()) as any };
   };
-  const status = async (s: Scratch) => (await (await fetch(`${s.base}/api/cloud/status?fresh=1`)).json()) as any;
+  // Each Canvas here has one Cloud: the one it hosts, or the one it joined.
+  const status = async (s: Scratch) => ((await (await fetch(`${s.base}/api/cloud/status?fresh=1`)).json()) as any).clouds[0] ?? {};
   const comments = async (s: Scratch, file: string) => (await (await fetch(`${s.base}/api/comments?file=${encodeURIComponent(file)}`)).json()) as any;
   const postOps = (s: Scratch, file: string, ops: unknown[]) => call(s, `/api/comments/ops?file=${encodeURIComponent(file)}`, { ops });
 
@@ -98,8 +99,8 @@ async function main() {
   // Another invite keeps the enrolment tunnel open, so it is the used code itself that is refused.
   await call(sa, "/api/cloud/host/invite", { label: "dee@studio.test" });
   const again = await call(sb, "/api/cloud/join", { link, device: "Ben's other Mac" });
-  line(again.status !== 200 && /already used|expired/.test(again.j.error), "the same link does not work twice");
-  const people = (await (await fetch(`${sa.base}/api/cloud/host`)).json() as any).people;
+  line(again.status !== 200 && /already used|expired|already in that Cloud/.test(again.j.error), "the same link does not work twice (and this Mac does not join the same Cloud twice)");
+  const people = (await (await fetch(`${sa.base}/api/cloud/host?hostId=${started.j.hostId}`)).json() as any).people;
   line(people.some((p: any) => p.label === "ben@studio.test" && p.devices.length === 1 && p.devices[0].name === "Ben's MacBook"), "Anna sees Ben joined from Ben's MacBook");
   await until("Ben connected", async () => (await status(sb)).status === "connected", REAL ? 60_000 : 8000);
   line(true, `Ben is connected as ${(await status(sb)).role}`);
@@ -124,8 +125,18 @@ async function main() {
     forged.searchParams.set("host", started.j.hostId);
     const beforeB = fs.readFileSync(path.join(tmp, "Ben-secrets.json"), "utf8");
     const hijack = await call(sb, "/api/cloud/join", { link: forged.toString(), device: "Ben's MacBook" });
-    line(startedC.status === 200 && hijack.status !== 200 && /different Cloud/.test(hijack.j.error), `an invite to another Cloud under Anna's id is refused (${hijack.status}: ${hijack.j.error})`);
+    line(startedC.status === 200 && hijack.status !== 200, `an invite naming a Cloud Ben is already in is refused (${hijack.status}: ${hijack.j.error})`);
     line(fs.readFileSync(path.join(tmp, "Ben-secrets.json"), "utf8") === beforeB, "Ben's saved Cloud is untouched");
+    // A Mac not in Anna's Cloud yet (Dee) gets past that check: the key its tunnel reached is what refuses it.
+    const dirD = path.join(tmp, "dee");
+    fs.mkdirSync(dirD);
+    const sd = await startServer(dirD, env("Dee"));
+    scratch.push(sd);
+    const hijackD = await call(sd, "/api/cloud/join", { link: forged.toString(), device: "Dee's MacBook" });
+    line(hijackD.status !== 200 && /different Cloud/.test(hijackD.j.error), `an invite to another Cloud under Anna's id is refused (${hijackD.status}: ${hijackD.j.error})`);
+    line(!fs.existsSync(path.join(tmp, "Dee-secrets.json")) || !fs.readFileSync(path.join(tmp, "Dee-secrets.json"), "utf8").includes("hosted:"), "and Dee's Mac saved nothing");
+    await sd.stop();
+    scratch.splice(scratch.indexOf(sd), 1);
     await call(sc, "/api/cloud/host/stop");
     await sc.stop();
     scratch.splice(scratch.indexOf(sc), 1);
@@ -189,7 +200,7 @@ async function main() {
   await until("Ben's outbox empty", () => diskB().outbox.length === 0);
 
   // 6. Anna removes Ben.
-  const ben = (await (await fetch(`${sa.base}/api/cloud/host`)).json() as any).people.find((p: any) => p.label === "ben@studio.test");
+  const ben = (await (await fetch(`${sa.base}/api/cloud/host?hostId=${started.j.hostId}`)).json() as any).people.find((p: any) => p.label === "ben@studio.test");
   await call(sa, "/api/cloud/host/remove", { personId: ben.id });
   await until("Ben removed", async () => (await comments(sb, pkgB)).sync?.status === "removed", 15_000);
   line(true, "Ben's socket closed and he reads \"removed\"");

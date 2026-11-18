@@ -26,6 +26,7 @@ const Sec = await import("../src/cloud-secrets.ts");
 after(() => { Cl.stopAll(); Tn.stopHelpers(); fs.rmSync(tmp, { recursive: true, force: true }); });
 
 const HOST = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
+const HOST2 = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
 // A stand-in tunnel address: "tc" and the 64 hex digits of the server key it names (test/fixtures/fake-tunnel.ts).
 const TC = `tc${"a".repeat(64)}`;
 const CODE = `ccj_0123456789abcdef.${"b".repeat(43)}`;
@@ -60,7 +61,7 @@ test("invite links: every part checked; a link with anything missing or odd is n
 });
 
 test("a hosted Cloud never gets a dev email or an Access token; with no invite saved it is signed out", async () => {
-  Cfg.setCloudConfig({ cloudUrl: `canvas-cloud://${HOST}`, cloudDevEmail: "anna@studio.test" });
+  Cfg.setCloudConfig({ clouds: [{ url: `canvas-cloud://${HOST}`, devEmail: "anna@studio.test" }, { url: "https://team.example.com" }, { url: `canvas-cloud://${HOST2}` }] });
   const t = await Cl.target(`canvas-cloud://${HOST}`);
   assert.deepEqual(t, { fail: "signedOut" });
   Cl.setToken("https://team.example.com", "eyJhbGciOi.payload.signature");
@@ -86,7 +87,7 @@ test("a joined Cloud is reached through this Mac's own helper on 127.0.0.1, with
   await Sec.deleteJoined(HOST);
 });
 
-const HOST2 = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+
 test("a joined Cloud's tunnel must reach the key pinned at join: another key gets no token", async () => {
   const bin = Tn.helperPath()!;
   const key = await Tn.genkey(bin, "client");
