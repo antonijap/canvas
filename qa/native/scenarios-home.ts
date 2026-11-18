@@ -416,6 +416,29 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   await t.waitState((s) => s.file === c, "Shift+Cmd+[ to the tab before");
 });
 
+sc("comments", "Comment hint shares the zoom island bottom edge and gap", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
+  const initial = await t.state();
+  await t.settle();
+  await t.key("c");
+  await t.waitJs("document.querySelector('.cm-hint')?.classList.contains('on')", "comment hint");
+  try {
+    for (const theme of ["light", "dark"]) {
+      await t.cmd("qa.theme", { theme });
+      for (const [width, height] of [[720, 420], [1280, 800]]) {
+        await t.cmd("qa.window", { width, height });
+        const zoom = await t.mark({ id: "zoom-island" });
+        await t.waitJs(`Math.abs(document.querySelector('.cm-hint').getBoundingClientRect().right + parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) - ${zoom.x}) <= 1`, "hint beside zoom");
+        const hint = await t.js<{ bottom: number; right: number }>("const r = document.querySelector('.cm-hint').getBoundingClientRect(); return {bottom:r.bottom,right:r.right}");
+        t.near(hint.bottom, zoom.y + zoom.h, 1, `${theme} ${width}: bottom edges align`);
+      }
+    }
+  } finally {
+    await t.key("escape");
+    await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });
+    await t.cmd("qa.theme", { theme: initial.theme });
+  }
+});
+
 sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["tabs:context-menu", "tabs:rename-menu", "tabs:rename-double-click", "tabs:close-others", "tabs:drag-after-rename"] }, async (t: NT) => {
   const original = path.join(t.app.docs, "tab-actions.canvas");
   copyDir(PLAYGROUND, original);
