@@ -3,6 +3,7 @@
 
 import Foundation
 import CoreGraphics
+import CryptoKit
 
 /// Page URLs the shell loads. Paths go in as query values, so `&`, `=`, `+` and `#` in a file name are encoded
 /// (URLComponents leaves `+` alone, and the server reads `+` as a space).
@@ -545,6 +546,106 @@ enum EmptyPage {
 
     static func isEmpty(fileOpen: Bool, home: Bool, loaded: Bool, boards: Int, cards: Int) -> Bool {
         fileOpen && !home && loaded && boards == 0 && cards == 0
+    }
+}
+
+/// Which server code is which, the way src/version.ts says it: a running server answers /health with its `version`
+/// (a hash of every file under its src folder) and its `root` (a hash of that folder's path). A server left running
+/// by an older Canvas (a quit that did not stop it, an update installed by hand) still answers on the port; the app
+/// must not attach to it and run old code, so at launch it compares that answer with its own server's code.
+enum ServerCode {
+    /// A Canvas server's /health: which code (version) of which installation (root) it runs.
+    struct Health: Equatable {
+        let version: String
+        let root: String
+    }
+
+    enum Choice: Equatable {
+        /// Nothing answers: start ours.
+        case start
+        /// It runs our code: use it.
+        case reuse
+        /// Our installation, other code (an update replaced the files under it): stop it (POST /quit, it saves first)
+        /// and start ours.
+        case replace
+        /// Another copy of Canvas (a checkout, another installed copy, another account's Canvas) owns the port. It is
+        /// never stopped from here: its own clients rely on it. Use it, and say so.
+        case otherCopy
+        /// Something that is not Canvas answers on the port. Never stopped; ours cannot start beside it.
+        case notCanvas
+    }
+
+    /// What to do with whatever is on the port. `answered`: anything answered /health over HTTP. `running`: that
+    /// answer when it is positively a Canvas server's (health(_:)). `own`: our server's version and root, nil when they
+    /// could not be read (then a running server is kept: we cannot tell it is old).
+    static func choice(answered: Bool, running: Health?, own: Health?) -> Choice {
+        guard answered else { return .start }
+        guard let running else { return .notCanvas }
+        guard let own else { return .reuse }
+        if running.root != own.root { return .otherCopy }
+        return running.version == own.version ? .reuse : .replace
+    }
+
+    private static func isId(_ v: Any?) -> Bool {
+        guard let s = v as? String, s.count == 12 else { return false }
+        return s.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+    }
+
+    /// The /health answer as a Canvas server's, or nil. Canvas names itself (`app: "canvas"`); a server from before
+    /// that is recognised only by its exact answer: ok, a 12-digit hex version and root, nothing else.
+    static func health(_ data: Data) -> Health? {
+        guard let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], j["ok"] as? Bool == true,
+              isId(j["version"]), isId(j["root"]) else { return nil }
+        let named = j["app"] as? String == "canvas"
+        let legacy = j["app"] == nil && Set(j.keys) == ["ok", "version", "root"]
+        guard named || legacy else { return nil }
+        return Health(version: j["version"] as! String, root: j["root"] as! String)
+    }
+
+    /// codeRootId: the first 12 hex digits of the SHA-1 of the src folder's real path (Node runs a module from its
+    /// real path, symlinks resolved).
+    static func rootId(srcDir: String) -> String {
+        hex(Insecure.SHA1.hash(data: Data(realPath(srcDir).utf8)))
+    }
+
+    private static func hex(_ d: Insecure.SHA1.Digest) -> String { String(d.map { String(format: "%02x", $0) }.joined().prefix(12)) }
+
+    /// version(): the first 12 hex digits of the SHA-1 over every regular file under the src folder, in the order
+    /// JavaScript sorts their paths, each as its relative path then its bytes. Like Node's recursive readdir: hidden
+    /// files count, a symlink to a file does not, a symlink to a folder is walked into. nil when the folder cannot be read.
+    static func version(srcDir: String) -> String? {
+        let root = realPath(srcDir)
+        let fm = FileManager.default
+        var files = [String]()
+        func walk(_ rel: String, depth: Int) {
+            guard depth < 40, let names = try? fm.contentsOfDirectory(atPath: rel.isEmpty ? root : root + "/" + rel) else { return }
+            for name in names {
+                let r = rel.isEmpty ? name : rel + "/" + name
+                let type = (try? fm.attributesOfItem(atPath: root + "/" + r))?[.type] as? FileAttributeType
+                if type == .typeRegular { files.append(r) }
+                else if type == .typeDirectory { walk(r, depth: depth + 1) }
+                else if type == .typeSymbolicLink {
+                    var isDir: ObjCBool = false
+                    if fm.fileExists(atPath: root + "/" + r, isDirectory: &isDir), isDir.boolValue { walk(r, depth: depth + 1) }
+                }
+            }
+        }
+        walk("", depth: 0)
+        if files.isEmpty { return nil }
+        files.sort { $0.utf16.lexicographicallyPrecedes($1.utf16) }
+        var sha = Insecure.SHA1()
+        for rel in files {
+            guard let bytes = FileManager.default.contents(atPath: root + "/" + rel) else { continue } // gone since the listing
+            sha.update(data: Data(rel.utf8))
+            sha.update(data: bytes)
+        }
+        return hex(sha.finalize())
+    }
+
+    static func realPath(_ p: String) -> String {
+        guard let r = realpath(p, nil) else { return (p as NSString).standardizingPath }
+        defer { free(r) }
+        return String(cString: r)
     }
 }
 

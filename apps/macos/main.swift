@@ -30,6 +30,60 @@ func serverUp() -> Bool {
   return ok
 }
 
+/// What answers /health on the port: `answered` when anything answered over HTTP, `health` when that answer is
+/// positively a Canvas server's (ServerCode.health). A request that times out (a busy server) is asked again with a
+/// longer wait; a refused connection means nothing is there.
+func probeServer() -> (answered: Bool, health: ServerCode.Health?) {
+  for wait in [0.6, 2.0, 5.0] {
+    var req = URLRequest(url: base.appendingPathComponent("health"))
+    req.timeoutInterval = wait
+    var out: (answered: Bool, health: ServerCode.Health?) = (false, nil)
+    var timedOut = false
+    let sem = DispatchSemaphore(value: 0)
+    URLSession.shared.dataTask(with: req) { data, response, error in
+      if let r = response as? HTTPURLResponse {
+        out = (true, r.statusCode == 200 ? data.flatMap(ServerCode.health) : nil)
+      } else if (error as? URLError)?.code == .timedOut {
+        timedOut = true
+      }
+      sem.signal()
+    }.resume()
+    sem.wait()
+    if out.answered || !timedOut { return out }
+  }
+  return (false, nil)
+}
+
+/// At launch: start our server, or, when our installation's server answers with other code (an older Canvas left it
+/// running, then an update replaced the files), stop it (POST /quit: it saves every edit first) and start ours, so a
+/// new app never runs old server code. Another copy of Canvas, or anything that is not Canvas, is never stopped.
+func startOrReplaceServer() {
+  let probe = probeServer()
+  let src = (serverScript as NSString).deletingLastPathComponent
+  let own = probe.answered ? ServerCode.version(srcDir: src).map { ServerCode.Health(version: $0, root: ServerCode.rootId(srcDir: src)) } : nil
+  switch ServerCode.choice(answered: probe.answered, running: probe.health, own: own) {
+  case .start:
+    startServer()
+  case .reuse:
+    break
+  case .otherCopy:
+    NSLog("canvas: port \(port) is served by another copy of Canvas (root \(probe.health?.root ?? "?"), ours \(own?.root ?? "?")): using it, not stopping it")
+    if probe.health?.version != own?.version {
+      DispatchQueue.main.async { MainActor.assumeIsolated { model.flash("Another copy of Canvas is running its server, so this window uses that one. Quit it to use this copy\u{2019}s.", durationMs: 10000) } }
+    }
+  case .notCanvas:
+    reportServerProblem("Another program is using port \(port), so Canvas cannot start its server. Quit that program and open Canvas again.")
+  case .replace:
+    NSLog("canvas: the server on port \(port) runs older code of this copy (\(probe.health?.version ?? "?"), ours \(own?.version ?? "?")): replacing it")
+    stoppingServer = true
+    let stopped = Updater.stopServer(base)
+    stoppingServer = false
+    if stopped { startServer() } else {
+      reportServerProblem("An older Canvas server is still running and did not stop. Quit Canvas and open it again.")
+    }
+  }
+}
+
 let serverLock = NSLock()
 var serverProc: Process?
 /// Starts that did not bring the server up, in a row. After a few, the window says why instead of retrying silently.
@@ -1055,7 +1109,7 @@ func loadDesign() {
 }
 
 DispatchQueue.global(qos: .userInitiated).async {
-  if !serverUp() { startServer() }
+  startOrReplaceServer()
   for _ in 0..<200 { if serverUp() { break }; usleep(100_000) }
   // Usage counts (src/usage-counts.ts): this launch, and a crash when the last run never quit.
   if lastRunCrashed { UsageCount.send("crash", to: base) }

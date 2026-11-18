@@ -71,7 +71,7 @@ after(() => {
 describe("canvas server", () => {
   test("health and page", async () => {
     const health = await get<{ ok: boolean; version: string; root: string }>("/health");
-    assert.deepEqual(health, { ok: true, version: (await import("../src/server.ts")).version(), root: (await import("../src/version.ts")).codeRootId() });
+    assert.deepEqual(health, { ok: true, app: "canvas", version: (await import("../src/server.ts")).version(), root: (await import("../src/version.ts")).codeRootId() }, "the app names itself, so the Mac app never takes another service for Canvas");
     const page = await fetch(`${base}/`).then((r) => r.text());
     assert.match(page, /<b>Canvas<\/b>/);
     assert.match(page, /api\/node/);
