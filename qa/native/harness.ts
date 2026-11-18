@@ -5,6 +5,7 @@ import path from "node:path";
 import { Fail, Skip, find, type AnyNode, type Rect } from "../harness.ts";
 import { api, sleep } from "../lib.ts";
 import type { QaApp } from "./app.ts";
+import { postSystemDrag } from "./system-drag.ts";
 
 export { Fail, Skip, find };
 export type Pt = { x: number; y: number };
@@ -59,6 +60,13 @@ export class NT {
   move(p: Pt) { return this.cmd("qa.mouse", { action: "move", x: p.x, y: p.y }); }
   drag(from: Pt, to: Pt, o: { mods?: Mods; steps?: number; via?: Pt[]; holdMs?: number; dwellMs?: number } = {}) {
     return this.cmd("qa.drag", { from: [from.x, from.y], to: [to.x, to.y], mods: o.mods ?? [], steps: o.steps ?? 14, via: (o.via ?? []).map((p) => [p.x, p.y]), holdMs: o.holdMs, dwellMs: o.dwellMs });
+  }
+  async systemDrag(from: Pt, to: Pt, o: { mods?: Mods; steps?: number; holdMs?: number; dwellMs?: number } = {}) {
+    const { window: frame } = await this.state();
+    // QA state uses AppKit's bottom-left screen origin; input uses the window's top-left, in points.
+    const screen = (p: Pt): Pt => ({ x: frame.x + p.x, y: frame.y + frame.height - p.y });
+    return postSystemDrag({ pid: this.app.pid, from: screen(from), to: screen(to), mods: o.mods ?? [],
+      steps: Math.max(2, o.steps ?? 4), holdMs: o.holdMs ?? 0, dwellMs: o.dwellMs ?? 0 });
   }
   key(key: string, mods: Mods = [], o: { window?: Win; repeat?: number } = {}) { return this.cmd("qa.key", { key, mods, window: o.window ?? "main", repeat: o.repeat ?? 1 }); }
   type(text: string, o: { window?: Win } = {}) { return this.cmd("qa.type", { text, window: o.window ?? "main" }); }

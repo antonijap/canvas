@@ -20,9 +20,34 @@ struct ShellLogicTests {
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
-        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func tabSizing() {
+        let full: [CGFloat] = [340, 200, 120]
+        check(TabSizing.widths(natural: full, available: 664, minimum: 96) == full, "full names when there is room, including names over 180 pt")
+        check(TabSizing.widths(natural: [240, 200, 160], available: 484, minimum: 96) == [200, 160, 120], "all tabs lose the same width when crowded")
+        check(TabSizing.widths(natural: [300, 120, 100], available: 354, minimum: 96) == [158, 96, 96], "short tabs stop at the minimum and the rest share the remaining deficit")
+        check(TabSizing.widths(natural: full, available: 100, minimum: 96) == [96, 96, 96], "scroll when even minimum widths do not fit, including the active tab")
+        check(TabSizing.widths(natural: [], available: 100, minimum: 96).isEmpty, "no tabs")
+        check(TabSizing.widths(natural: [40, 200], available: 500, minimum: 96) == [96, 200], "short names still keep room for controls")
+    }
+
+    static func fileTabs() {
+        check(ContextMenuLayout.fileTab(cloud: false).flatMap { $0 } == ["Rename...", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab menu order")
+        check(ContextMenuLayout.fileTab(cloud: true) == [["Rename...", "Show in Finder", "Duplicate", "Move to Cloud...", "Copy Link"], ["Close", "Close Other Tabs"]], "cloud action and separator")
+        for name in ["", " ", ".hidden", "../Other", "a/b", "a\0b", ".canvas"] {
+            check(TabRename.name(name) == nil, "invalid package name")
+        }
+        check(TabRename.name("  Board  ") == "Board.canvas", "trim and add extension")
+        check(TabRename.name("Board.canvas") == "Board.canvas", "extension stays once")
+        check(TabRename.name("Plan + #1") == "Plan + #1.canvas", "ordinary punctuation")
+        check(TabOrder.canDrag(button: 0, clicks: 1, editing: false), "single left press can drag")
+        check(!TabOrder.canDrag(button: 1, clicks: 1, editing: false), "right press never drags")
+        check(!TabOrder.canDrag(button: 0, clicks: 2, editing: false), "double press never drags")
+        check(!TabOrder.canDrag(button: 0, clicks: 1, editing: true), "rename never drags")
     }
 
     // Dragging file tabs into a new order: Home stays outside the list, a short move is a click.

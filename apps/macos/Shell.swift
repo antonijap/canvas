@@ -32,6 +32,26 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
+/// The top bar sits where the hidden titlebar is, so on mouse down the window server starts a window drag before any
+/// SwiftUI gesture sees the press (a background NSView cannot change that: SwiftUI hit-tests its own content). While the
+/// pointer is over a control that drags or clicks (the tabs, Home, +), the window it is in does not move; empty glass
+/// and the gap between the pills still drag the window.
+struct KeepsWindowStill: ViewModifier {
+    func body(content: Content) -> some View {
+        content.onHover { inside in
+            let at = NSEvent.mouseLocation
+            guard let w = NSApp.windows.first(where: { $0.isVisible && $0.frame.contains(at) }) ?? NSApp.mainWindow else { return }
+            w.isMovable = !inside
+        }
+    }
+}
+extension View { func keepsWindowStill() -> some View { modifier(KeepsWindowStill()) } }
+
+/// SwiftUI controls in the hidden titlebar must not inherit window dragging.
+final class ControlHostingView<Content: View>: NSHostingView<Content> {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
 private let barY: CGFloat = Metric.inset
 private let columnTop: CGFloat = Metric.inset + Metric.pill + Metric.islandGap
 
@@ -136,9 +156,67 @@ private struct TabWidthKey: PreferenceKey {
 struct TopBar: View {
     @ObservedObject var model: CanvasModel
     @State private var tabWidths: [String: CGFloat] = [:]
+    @State private var barWidth: CGFloat = 0
+    @State private var actionsWidth: CGFloat = 0
+
+    private var tabRoom: CGFloat {
+        max(0, barWidth - actionsWidth - 2 * Metric.islandGap - 2 * Metric.pillPad
+            - Metric.trafficLights - 2 * Metric.control - 2)
+    }
+    private var fittedWidths: [CGFloat] {
+        let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        // Leading/trailing padding, document glyph, gap and close target, matching TabChip.
+        let chromeWidth: CGFloat = Metric.control + 29
+        let natural: [CGFloat] = model.openFiles.map { file in
+            let titleWidth = (model.name(of: file) as NSString).size(withAttributes: [.font: font]).width
+            return ceil(titleWidth) + chromeWidth
+        }
+        return TabSizing.widths(natural: natural, available: tabRoom, minimum: Metric.tabMin)
+    }
+    private var stripWidth: CGFloat {
+        min(tabRoom, fittedWidths.reduce(0, +) + CGFloat(max(0, model.openFiles.count - 1)) * 2)
+    }
     /// The file tab being dragged and how far it is from its place (clamped inside the strip).
     @State private var dragging: String?
     @State private var dragX: CGFloat = 0
+
+    @State private var renaming: String?
+    @State private var renameDraft = ""
+
+    private func beginRename(_ file: String) {
+        renaming = file
+        renameDraft = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+    }
+
+    private func finishRename(_ save: Bool) {
+        guard let file = renaming else { return }
+        renaming = nil
+        if save { model.renameFile(file, to: renameDraft) }
+    }
+
+    private func tabMenu(_ file: String, view: NSView, at: CGPoint) {
+        let menu = ContextMenuBuilder(model: model, at: at)
+        for (i, group) in ContextMenuLayout.fileTab(cloud: CloudURL.clean(model.prefs.cloudUrl) != nil).enumerated() {
+            if i > 0 { menu.separator() }
+            for title in group {
+                menu.action(title) {
+                    switch title {
+                    case "Rename...": beginRename(file)
+                    case "Show in Finder": NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)])
+                    case "Duplicate": model.duplicateFile(file)
+                    case "Move to Cloud...": CloudAccount.shared.shareOpenFile(model, file: file)
+                    case "Copy Link":
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("canvas://open?file=" + DocURL.encode(file), forType: .string)
+                    case "Close": model.close(file)
+                    case "Close Other Tabs": model.closeOtherTabs(file)
+                    default: break
+                    }
+                }
+            }
+        }
+        menu.pop(in: view)
+    }
 
     private var widths: [CGFloat] { model.openFiles.map { tabWidths[$0] ?? 0 } }
     private var dragTarget: Int? {
@@ -147,7 +225,7 @@ struct TopBar: View {
     }
 
     /// One file tab. Press and drag sideways: it follows the pointer, the others slide aside, and the drop saves the
-    /// order. A click or a move under TabOrder.dragThreshold stays a click (the gesture only starts past it).
+    /// order. A click or a move under TabOrder.dragThreshold stays a click.
     private func draggableTab(_ f: String, index i: Int) -> some View {
         let isDragged = dragging == f
         var off: CGFloat = 0
@@ -155,26 +233,35 @@ struct TopBar: View {
         else if let d = dragging, let di = model.openFiles.firstIndex(of: d), let t = dragTarget {
             off = TabOrder.slide(i, dragged: di, target: t, width: tabWidths[d] ?? 0, gap: 2)
         }
-        return TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, missing: model.isMissing(f),
+        return TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, width: fittedWidths[i], missing: model.isMissing(f),
                        onClose: { model.close(f) }) { model.openTab(f) }
             .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
+            .overlay {
+                if renaming == f {
+                    TabNameField(text: $renameDraft, finish: finishRename)
+                        .frame(height: 20)
+                        .padding(.leading, 10).padding(.trailing, 30)
+                        .qaID("tab-rename", label: "Rename file")
+                } else {
+                    TabPointer(onClick: { model.openTab(f) }, onRename: { beginRename(f) },
+                               onMenu: { view, at in tabMenu(f, view: view, at: at) },
+                               onDrag: { dx in
+                        guard let at = model.openFiles.firstIndex(of: f) else { return }
+                        dragging = f
+                        dragX = TabOrder.clamp(dx, index: at, widths: widths, gap: 2)
+                    }, onDrop: {
+                        let to = dragTarget
+                        withAnimation(Motion.island) {
+                            if let to { model.moveTab(f, to: to) }
+                            dragging = nil
+                            dragX = 0
+                        }
+                    })
+                }
+            }
             .offset(x: off)
             .animation(isDragged ? nil : Motion.island, value: off)
             .zIndex(isDragged ? 1 : 0)
-            .highPriorityGesture(DragGesture(minimumDistance: TabOrder.dragThreshold, coordinateSpace: .global)
-                .onChanged { v in
-                    guard let at = model.openFiles.firstIndex(of: f) else { return }
-                    if dragging != f { dragging = f }
-                    dragX = TabOrder.clamp(v.translation.width, index: at, widths: widths, gap: 2)
-                }
-                .onEnded { _ in
-                    let to = dragTarget
-                    withAnimation(Motion.island) {
-                        if let to { model.moveTab(f, to: to) }
-                        dragging = nil
-                        dragX = 0
-                    }
-                })
             .qaID("file-tab", label: model.name(of: f))
             .id(f)
     }
@@ -187,6 +274,7 @@ struct TopBar: View {
                     // Home: always first, never closed. Its name shows while no file is open; the glyph alone after.
                     PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
                               help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
+                        .keepsWindowStill()
                         .qaID("home-tab", label: "Home")
                         .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
                         .animation(Motion.island, value: model.openFiles.isEmpty)
@@ -195,6 +283,8 @@ struct TopBar: View {
                             draggableTab(f, index: i)
                         }
                     }
+                    .frame(width: stripWidth)
+                    .keepsWindowStill()
                     .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
                     Menu {
                         ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
@@ -205,6 +295,8 @@ struct TopBar: View {
                             .frame(width: Metric.control, height: Metric.control).contentShape(Circle())
                     }
                     .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().chromeHelp("Open a canvas")
+                    .keepsWindowStill()
+                        .qaID("tab-open", label: "Open a canvas")
                 }
             }
             .background(WindowDragArea())
@@ -221,8 +313,11 @@ struct TopBar: View {
                     }
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { actionsWidth = $0 }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
         // This bar sits in the window's titlebar strip, where AppKit shows no tooltips: its controls draw their own.
         .environment(\.titlebarTips, true)
     }
@@ -448,3 +543,103 @@ struct ZoomCorner: View {
 }
 
 
+
+
+/// Handles tab presses explicitly so double and secondary clicks cannot become reorder drags.
+private struct TabPointer: NSViewRepresentable {
+    let onClick: () -> Void
+    let onRename: () -> Void
+    let onMenu: (NSView, CGPoint) -> Void
+    let onDrag: (CGFloat) -> Void
+    let onDrop: () -> Void
+    func makeNSView(context: Context) -> Pointer { Pointer() }
+    func updateNSView(_ v: Pointer, context: Context) {
+        v.click = onClick; v.rename = onRename; v.menuAction = onMenu; v.drag = onDrag; v.drop = onDrop
+    }
+    final class Pointer: NSView {
+        var click: () -> Void = {}, rename: () -> Void = {}, drop: () -> Void = {}
+        var menuAction: (NSView, CGPoint) -> Void = { _, _ in }
+        var drag: (CGFloat) -> Void = { _ in }
+        private var start: CGFloat = 0
+        private var allowed = false
+        private var moved = false
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            guard let hit = super.hitTest(point) else { return nil }
+            let local = convert(point, from: superview)
+            let event = NSApp.currentEvent
+            let secondary = event?.type == .rightMouseDown || event?.modifierFlags.contains(.control) == true
+            if local.x >= bounds.width - 28 && !secondary { return nil }
+            return hit
+        }
+        override func mouseDown(with event: NSEvent) {
+            if event.modifierFlags.contains(.control) { rightMouseDown(with: event); return }
+            start = event.locationInWindow.x; moved = false
+            allowed = TabOrder.canDrag(button: event.buttonNumber, clicks: event.clickCount, editing: false)
+            if event.clickCount == 2 { rename() }
+        }
+        override func mouseDragged(with event: NSEvent) {
+            guard allowed else { return }
+            let dx = event.locationInWindow.x - start
+            if moved || TabOrder.isDrag(dx) { moved = true; drag(dx) }
+        }
+        override func mouseUp(with event: NSEvent) {
+            guard allowed else { return }
+            allowed = false
+            if moved { drop() } else { click() }
+        }
+        override func rightMouseDown(with event: NSEvent) {
+            allowed = false; moved = false
+            menuAction(self, convert(event.locationInWindow, from: nil))
+        }
+    }
+}
+
+/// The field editor commits on focus loss and Return; Escape leaves the package untouched.
+private struct TabNameField: NSViewRepresentable {
+    @Binding var text: String
+    let finish: (Bool) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField(string: text)
+        field.delegate = context.coordinator
+        context.coordinator.field = field
+        context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak coordinator = context.coordinator] event in
+            if let field = coordinator?.field, event.window === field.window,
+               !field.bounds.contains(field.convert(event.locationInWindow, from: nil)) {
+                coordinator?.end(true)
+            }
+            return event
+        }
+        field.font = .systemFont(ofSize: 12, weight: .medium)
+        field.drawsBackground = true
+        field.isBordered = false
+        field.focusRingType = .default
+        DispatchQueue.main.async { field.window?.makeFirstResponder(field); field.selectText(nil) }
+        return field
+    }
+    func updateNSView(_ field: NSTextField, context: Context) { context.coordinator.owner = self }
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var owner: TabNameField
+        weak var field: NSTextField?
+        var monitor: Any?
+        deinit { if let monitor { NSEvent.removeMonitor(monitor) } }
+        private var finished = false
+        init(_ owner: TabNameField) { self.owner = owner }
+        func end(_ save: Bool) {
+            guard !finished else { return }
+            finished = true
+            owner.finish(save)
+        }
+        func controlTextDidChange(_ notification: Notification) {
+            if let field = notification.object as? NSTextField { owner.text = field.stringValue }
+        }
+        func controlTextDidEndEditing(_ notification: Notification) { end(true) }
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            if selector == #selector(NSResponder.cancelOperation(_:)) { end(false); return true }
+            if selector == #selector(NSResponder.insertNewline(_:)) { end(true); return true }
+            return false
+        }
+    }
+}
