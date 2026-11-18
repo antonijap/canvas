@@ -11,7 +11,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { Sim, seedDocument, FILE, type SimClient } from "./cloud-files-sim.ts";
-import { buildSnapshot, compact } from "../cloud/core/files/snapshots.ts";
+import { buildSnapshot, compact, manifestAt, treeFromManifest } from "../cloud/core/files/snapshots.ts";
+import { materialize } from "../cloud/core/files/state.ts";
 import { collectGarbage } from "../cloud/core/files/gc.ts";
 import { reserveUpload, putUpload, StorageLedger } from "../cloud/core/files/uploads.ts";
 import { NodeSqlStore } from "../cloud/core/files/memory.ts";
@@ -29,7 +30,8 @@ if (!args.includes("--memory")) {
   console.error("only --memory is built so far (--servers and --adapter cloudflare come with Phases 3 and 5)");
   process.exit(2);
 }
-const SEEDS = opt("seeds", 10_000), FROM = opt("from", 1), STEPS = opt("steps", 80);
+const SEEDS = opt("seeds", 10_000), FROM = opt("from", 1), STEPS = opt("steps", 80), RESTORE_RATE = opt("restore-rate", 0.004), HOSTILE_RATE = opt("hostile-rate", 0.04);
+const TRACE = args.includes("--trace");
 const OUT = (() => {
   const i = args.indexOf("--out");
   return i >= 0 ? args[i + 1] : "qa/out/cloud-files-metrics.json";
@@ -58,7 +60,7 @@ const IMAGES = [0, 1, 2].map((i) => {
 
 type Metrics = {
   seeds: number; divergence: number; lost: number; doubles: number; errors: number; actions: number; applied: number;
-  rejects: Record<string, number>; samples: Record<string, string>; reasons: Record<string, number>; localRejects: number; serverCrashes: number; clientCrashes: number; snapshots: number; snapshotWelcomes: number;
+  rejects: Record<string, number>; samples: Record<string, string>; reasons: Record<string, number>; localRejects: number; serverCrashes: number; clientCrashes: number; snapshots: number; snapshotWelcomes: number; hostile: number; hostileAccepted: number; restores: number;
   rowsWritten: number; ms: number; failures: string[];
 };
 
@@ -95,7 +97,7 @@ class Gen {
   }
   subtree(c: SimClient, components: string[]): DocNode {
     const k = this.int(6);
-    if (k === 0) return { id: this.id(c), type: "text", content: this.pick(["One", "Two words", "Three more words"])!, x: this.int(100) };
+    if (k === 0) return { id: this.id(c), type: "text", content: this.pick(["One", "Two words", "Three more words", "界の文字", "emoji 🙂 here"])!, x: this.int(100) };
     if (k === 1 && components.length) return { id: this.id(c), type: "ref", ref: this.pick(components)!, x: this.int(100) };
     if (k === 2) return { id: this.id(c), type: "frame", name: "Comp", reusable: true, width: 50, height: 50, children: [{ id: this.id(c), type: "rectangle", width: 10, height: 10 }] };
     if (k === 3) return { id: this.id(c), type: "group", children: [{ id: this.id(c), type: "ellipse", width: 5, height: 5 }, { id: this.id(c), type: "text", content: "In a group" }] };
@@ -134,18 +136,31 @@ class Gen {
       if (!t) return [];
       const s = t.props.content as string;
       const from = this.int(s.length + 1), del = this.int(Math.min(4, s.length - from) + 1);
-      return [{ k: "text", id: t.id, baseSeq: 0, from, del, ins: this.pick(["", "x", "yz", " new "])! }];
+      const ins = this.pick(["", "x", "yz", " new ", "界", "é漢"])!;
+      const one: FileOp = { k: "text", id: t.id, baseSeq: 0, from, del, ins };
+      if (!this.chance(0.35)) return [one];
+      // Two splices in one action: the second in the text the first left.
+      const s2 = s.slice(0, from) + ins + s.slice(from + del);
+      const from2 = this.int(s2.length + 1), del2 = this.int(Math.min(3, s2.length - from2) + 1);
+      return [one, { k: "text", id: t.id, baseSeq: 0, from: from2, del: del2, ins: this.pick(["", "q", "界"])! }];
     }
     if (k < 54) {
       const parent = this.chance(0.2) ? null : this.pick(containers)?.id ?? null;
       return [{ k: "insert", parent, after: afterIn(parent), node: this.subtree(c, components) }];
     }
     if (k < 62) {
-      const n = any();
+      // Containers half the time, so an undo style remove meets children others added.
+      const n = this.chance(0.5) ? this.pick(containers) ?? any() : any();
       if (!n) return [];
-      return [{ k: "remove", id: n.id, ...(this.chance(0.2) ? { if: v.ver(`t:${n.id}`) } : {}) }];
+      return [{ k: "remove", id: n.id, ...(this.chance(0.3) ? { if: v.ver(`s:${n.id}`) || v.ver(`t:${n.id}`) } : {}) }];
     }
     if (k < 72) {
+      if (this.chance(0.15)) {
+        // An instance into its own component, or a component into another: the cycle check must catch the bad ones.
+        const inst = this.pick(nodes.filter((x) => x.type === "ref" || x.props.reusable === true));
+        const into = this.pick(nodes.filter((x) => x.props.reusable === true && x.type === "frame"));
+        if (inst && into && inst.id !== into.id) return [{ k: "move", id: inst.id, parent: into.id, after: null }];
+      }
       const n = any();
       if (!n) return [];
       const parent = this.chance(0.5) ? n.parent : this.chance(0.2) ? null : this.pick(containers)?.id ?? null;
@@ -201,6 +216,63 @@ async function ensureUpload(sim: Sim, ledger: StorageLedger, sha: string): Promi
   await putUpload(sim.room, ledger, OWNER, id, img.bytes);
 }
 
+/** The oracle for snapshots: the newest manifest, read back from its objects, is the room's rows byte for byte. */
+async function checkSnapshot(sim: Sim, m: Metrics, seed: number, when: string): Promise<void> {
+  const row = sim.store.sql.exec<{ seq: number }>("SELECT seq FROM snapshots WHERE state = 'done' ORDER BY seq DESC LIMIT 1").toArray()[0];
+  if (!row || row.seq !== sim.room.meta().seq) return;
+  const text = await manifestAt(sim.room, row.seq);
+  if (!text) return void record(m, seed, "snapshot", `${when}: the manifest at ${row.seq} is missing`);
+  const { tree } = await treeFromManifest(sim.objects, text);
+  const a = materialize(tree), b = sim.room.materialize();
+  for (const k of ["document", "widgets", "blobs", "vers"] as const) if (a[k] !== b[k]) {
+    m.divergence++;
+    return void record(m, seed, "snapshot", `${when}: the manifest's ${k} differs from the rows`);
+  }
+  for (const bad of sim.invariants()) {
+    m.divergence++;
+    return void record(m, seed, "invariant", `${when}: ${bad}`);
+  }
+}
+
+type Hostile = { kind: string; actions: unknown[]; expect: "refused" | "any" };
+/** One crafted message: the shapes the reviews named. */
+async function hostile(g: Gen, sim: Sim, ledger: StorageLedger, seed: number, step: number): Promise<Hostile> {
+  const meta = sim.room.meta();
+  const act = (ops: unknown[], i = 0) => ({ id: `hostile-${seed}-${step}-${i}`, baseSeq: meta.seq, epoch: meta.epoch, at: "", ops });
+  const img = g.pick(IMAGES)!;
+  const k = g.int(8);
+  if (k === 0) {
+    let v: Json = 1;
+    for (let i = 0, d = 301 + g.int(5000); i < d; i++) v = g.chance(0.5) ? [v] : { a: v };
+    return { kind: "deep value", actions: [act([{ k: "meta", key: "brief", value: { v } }])], expect: "refused" };
+  }
+  if (k === 1) return { kind: "empty action", actions: [act([])], expect: "refused" };
+  if (k === 2) {
+    await ensureUpload(sim, ledger, img.sha);
+    return { kind: "blob with claimed bytes", actions: [act([{ k: "blob", path: `media/claim${g.int(3)}.png`, sha256: img.sha, bytes: g.chance(0.5) ? 0 : img.bytes.length + 1, type: "image/png" }])], expect: "refused" };
+  }
+  if (k === 3) {
+    await ensureUpload(sim, ledger, img.sha);
+    return { kind: "blob with claimed type", actions: [act([{ k: "blob", path: `shaders/png${g.int(3)}.wgsl`, sha256: img.sha, bytes: img.bytes.length, type: "text/wgsl" }])], expect: "refused" };
+  }
+  if (k === 4) {
+    await ensureUpload(sim, ledger, img.sha);
+    const have = sim.store.sql.exec<{ path: string }>("SELECT path FROM blobs ORDER BY path").toArray().map((r) => r.path);
+    const base = g.pick(have);
+    if (base) {
+      const name = base.slice(base.indexOf("/") + 1);
+      const flip = [...name].map((ch) => (g.chance(0.5) ? ch.toUpperCase() : ch.toLowerCase())).join("");
+      const path = `media/${flip === name ? name.toUpperCase() : flip}`;
+      const differs = path !== base;
+      return { kind: "case-folded path", actions: [act([{ k: "blob", path, sha256: img.sha, bytes: img.bytes.length, type: "image/png" }])], expect: differs ? "refused" : "any" };
+    }
+    return { kind: "case-folded path", actions: [act([{ k: "blob", path: "media/Img.png", sha256: img.sha, bytes: img.bytes.length, type: "image/png" }])], expect: "any" };
+  }
+  if (k === 5) return { kind: "browser url", actions: [act([{ k: "insert", parent: null, after: null, node: { id: `web-${seed}-${step}`, type: "browser", url: "https://example.com/" } }])], expect: "refused" };
+  if (k === 6) return { kind: "too many actions", actions: Array.from({ length: 101 }, (_, i) => act([{ k: "set", id: "r1", props: { x: { v: i } } }], i)), expect: "refused" };
+  return { kind: "malformed ops", actions: [act([null, 5, { k: "set" }, { k: "text", id: "t1", baseSeq: -1, from: 0, del: 0, ins: "x" }])], expect: "refused" };
+}
+
 async function runSeed(seed: number, m: Metrics): Promise<void> {
   const r = prng(seed);
   const g = new Gen(r);
@@ -212,6 +284,7 @@ async function runSeed(seed: number, m: Metrics): Promise<void> {
   const ledger = new StorageLedger(new NodeSqlStore(), 1e9);
   IMAGES.forEach((img, i) => reserveUpload(sim.room, ledger, OWNER, { id: `up-seed-${i}`, sha256: img.sha, bytes: img.bytes.length, type: "image/png" }));
   for (const [i, img] of IMAGES.entries()) await putUpload(sim.room, ledger, OWNER, `up-seed-${i}`, img.bytes);
+  if (g.chance(0.3)) sim.helloWindow = 1 + g.int(4);
   const count = 2 + g.int(4);
   const cs: SimClient[] = [];
   for (let i = 0; i < count; i++) cs.push(await sim.addClient(PEOPLE[i]));
@@ -224,7 +297,28 @@ async function runSeed(seed: number, m: Metrics): Promise<void> {
       const c = g.pick(cs)!;
       // Time passes: mostly seconds, sometimes days, so versions, the log and receipts age out mid run.
       clock += g.chance(0.06) ? (1 + g.int(6)) * 86_400_000 : 1000 * (1 + g.int(120));
+      if (g.chance(HOSTILE_RATE)) {
+        // A hostile or broken client: ops the Mac would never make, sent straight to the room.
+        const h = await hostile(g, sim, ledger, seed, step);
+        const replies = sim.raw(c, h.actions);
+        if (TRACE) console.log(`step ${step} hostile ${h.kind} -> ${JSON.stringify(replies).slice(0, 150)}`);
+        m.hostile++;
+        if (h.expect === "refused" && replies.some((x) => x.type === "ack")) record(m, seed, "hostile", `${h.kind} was accepted: ${JSON.stringify(replies).slice(0, 200)}`), m.hostileAccepted++;
+        continue;
+      }
+      if (g.chance(RESTORE_RATE)) {
+        const kept = sim.store.sql.exec<{ seq: number }>("SELECT seq FROM snapshots WHERE state = 'done'").toArray();
+        const pick = g.pick(kept);
+        if (pick) {
+          await sim.restore(pick.seq);
+          if (TRACE) console.log(`step ${step} restore to ${pick.seq} -> ${JSON.stringify(sim.room.meta())}`);
+          m.restores++;
+          await checkSnapshot(sim, m, seed, "restore");
+        }
+        continue;
+      }
       const e = g.int(100);
+      if (TRACE) console.log(`step ${step} ${c.replica.author.id} e=${e} seq=${c.replica.seq} epoch=${c.replica.epoch} room=${sim.room.meta().seq}/${sim.room.meta().epoch} pending=${c.replica.pending.length}`);
       if (e < 40) {
         const ops = g.action(c, c.replica.view());
         if (ops.length) {
@@ -258,6 +352,7 @@ async function runSeed(seed: number, m: Metrics): Promise<void> {
         c.conn.role = (g.pick(["editor", "editor", "viewer", "commenter", "owner"]) as Role);
       } else if (e < 97) {
         await buildSnapshot(sim.room);
+        await checkSnapshot(sim, m, seed, "snapshot");
         snaps++;
         if (g.chance(0.5)) compact(sim.room);
         if (g.chance(0.3)) await collectGarbage(sim.room, ledger);
@@ -272,6 +367,7 @@ async function runSeed(seed: number, m: Metrics): Promise<void> {
     for (const c of cs) c.conn.role = "editor";
     await sim.quiesce(400);
     const div = sim.divergences(), lost = sim.lost(), dbl = sim.doubles();
+    div.push(...sim.invariants().map((x) => `invariant: ${x}`));
     // Also a Mac that opens the file fresh from the last snapshot plus the tail matches.
     await buildSnapshot(sim.room);
     const late = await sim.addClient({ id: "late@studio.test", name: "Late" });
@@ -319,7 +415,7 @@ function record(m: Metrics, seed: number, kind: string, detail: string) {
   writeFileSync(`qa/out/cloud-fuzz/${sig}.json`, JSON.stringify({ kind, seed, steps: STEPS, detail, rerun: `node qa/cloud-files-fuzz.ts --memory --from ${seed} --seeds 1 --steps ${STEPS}` }, null, 2));
 }
 
-const m: Metrics = { seeds: 0, divergence: 0, lost: 0, doubles: 0, errors: 0, actions: 0, applied: 0, rejects: {}, samples: {}, reasons: {}, localRejects: 0, serverCrashes: 0, clientCrashes: 0, snapshots: 0, snapshotWelcomes: 0, rowsWritten: 0, ms: 0, failures: [] };
+const m: Metrics = { seeds: 0, divergence: 0, lost: 0, doubles: 0, errors: 0, actions: 0, applied: 0, rejects: {}, samples: {}, reasons: {}, localRejects: 0, serverCrashes: 0, clientCrashes: 0, snapshots: 0, snapshotWelcomes: 0, hostile: 0, hostileAccepted: 0, restores: 0, rowsWritten: 0, ms: 0, failures: [] };
 const t0 = Date.now();
 void FILE;
 void seedDocument;
@@ -331,7 +427,7 @@ for (let s = FROM; s < FROM + SEEDS; s++) {
 m.ms = Date.now() - t0;
 mkdirSync("qa/out", { recursive: true });
 writeFileSync(OUT, JSON.stringify({ ...m, failures: m.failures.slice(0, 50), rowsPerAction: m.applied ? +(m.rowsWritten / m.applied).toFixed(1) : 0 }, null, 2));
-console.log(JSON.stringify({ seeds: m.seeds, divergence: m.divergence, lost: m.lost, doubles: m.doubles, errors: m.errors, actions: m.actions, applied: m.applied, rejects: m.rejects, samples: m.samples, localRejects: m.localRejects, serverCrashes: m.serverCrashes, clientCrashes: m.clientCrashes, snapshots: m.snapshots, snapshotWelcomes: m.snapshotWelcomes, seconds: Math.round(m.ms / 1000) }));
+console.log(JSON.stringify({ seeds: m.seeds, divergence: m.divergence, lost: m.lost, doubles: m.doubles, errors: m.errors, actions: m.actions, applied: m.applied, rejects: m.rejects, samples: m.samples, localRejects: m.localRejects, serverCrashes: m.serverCrashes, clientCrashes: m.clientCrashes, snapshots: m.snapshots, snapshotWelcomes: m.snapshotWelcomes, hostile: m.hostile, hostileAccepted: m.hostileAccepted, restores: m.restores, seconds: Math.round(m.ms / 1000) }));
 for (const [why, count] of Object.entries(m.reasons).sort((a, b) => b[1] - a[1]).slice(0, 25)) console.log(`${String(count).padStart(6)}  ${why}`);
 for (const f of m.failures.slice(0, 10)) console.log(f);
-process.exit(m.divergence || m.lost || m.doubles || m.errors ? 1 : 0);
+process.exit(m.divergence || m.lost || m.doubles || m.errors || m.hostileAccepted ? 1 : 0);
