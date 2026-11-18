@@ -117,6 +117,10 @@ final class CloudAccount: ObservableObject {
     /// Canvas comes to the front); otherwise a connected answer is reused for a minute (src/cloud.ts STATUS_REUSE_MS).
     /// An answer for a Cloud removed meanwhile is dropped.
     func refresh(_ model: CanvasModel, fresh: Bool = false) async {
+        // The shell posts list edits asynchronously. Home must not cache the old, empty list for 30 seconds.
+        if let last = model.prefs.clouds.last {
+            guard await waitListed(model, last.url), !Task.isCancelled else { return }
+        }
         var c = URLComponents(url: model.base.appendingPathComponent("api/cloud/status"), resolvingAgainstBaseURL: false)!
         if fresh { c.queryItems = [URLQueryItem(name: "fresh", value: "1")] }
         var req = URLRequest(url: c.url!)
