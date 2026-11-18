@@ -1113,10 +1113,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// The free rectangle last sent, so a freshly loaded page (tab switch, reload) gets it again: SwiftUI only
     /// sends insets when they change, and a new page starts with none.
     private var lastInsets: (CGFloat, CGFloat, CGFloat, CGFloat)?
-    private var zoomCornerWidth: CGFloat = 0
-    func setZoomCorner(width: CGFloat) {
-        zoomCornerWidth = width
-        run("{cmd:'zoomCorner',width:\(width)}")
+    private var zoomCornerFrame: CGRect = .zero
+    func setZoomCorner(frame: CGRect) {
+        zoomCornerFrame = frame
+        run("{cmd:'zoomCorner',left:\(frame.minX),bottom:\(frame.maxY)}")
     }
     func setInsets(l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
         lastInsets = (l, t, r, b)
@@ -1124,7 +1124,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     func resendInsets() {
         if let i = lastInsets { setInsets(l: i.0, t: i.1, r: i.2, b: i.3) }
-        setZoomCorner(width: zoomCornerWidth)
+        setZoomCorner(frame: zoomCornerFrame)
     }
 
     /// Shows a toast. `durationMs` 0 keeps it until `clearToast()` (the bridge's wait prompts). A path or an error copies

@@ -3618,9 +3618,10 @@ window.canvasCmd = (c) => {
   else if (c.cmd === "insets") { insets = { l: c.l, t: c.t, r: c.r, b: c.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); sizeGuides(); }
   else if (c.cmd === "zoomCorner") {
     // Keep geometry on the root even when the comments module has not loaded yet.
-    const width = Number.isFinite(c.width) ? Math.max(0, c.width) : 0;
-    document.documentElement.style.setProperty("--cm-zoom-width", width + "px");
-    document.documentElement.style.setProperty("--cm-zoom-gap", width ? "var(--c-island-gap)" : "0px");
+    const shown = Number.isFinite(c.left) && c.left > 0 && Number.isFinite(c.bottom) && c.bottom > 0;
+    const style = document.documentElement.style;
+    style.setProperty("--cm-hint-right", shown ? "calc(100% - " + c.left + "px + var(--c-island-gap))" : "var(--c-inset)");
+    style.setProperty("--cm-hint-bottom", shown ? "calc(100% - " + c.bottom + "px)" : "var(--c-inset)");
   }
   else if (c.cmd === "snap") setSnap(c, false);
   else if (c.cmd === "prefs") setPrefs(c.prefs);
