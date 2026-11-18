@@ -95,6 +95,8 @@ async function main() {
   line(inv.status === 200 && link.startsWith("canvas://cloud/join?"), "Anna has an invite link");
   const joined = await call(sb, "/api/cloud/join", { link, device: "Ben's MacBook" });
   line(joined.status === 200 && joined.j.hostId === started.j.hostId, `Ben joined with it${joined.status === 200 ? "" : `: ${joined.j.error}`}`);
+  // Another invite keeps the enrolment tunnel open, so it is the used code itself that is refused.
+  await call(sa, "/api/cloud/host/invite", { label: "dee@studio.test" });
   const again = await call(sb, "/api/cloud/join", { link, device: "Ben's other Mac" });
   line(again.status !== 200 && /already used|expired/.test(again.j.error), "the same link does not work twice");
   const people = (await (await fetch(`${sa.base}/api/cloud/host`)).json() as any).people;
