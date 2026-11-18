@@ -37,8 +37,8 @@ test("incoming socket messages count 20 to a request; HTTP requests count whole"
   assert.equal(report.metrics.requests.used, 8);
   assert.deepEqual(report.counts, { http: 5, messages: 41 });
   assert.equal(report.metrics.requests.cap, 80_000, "80% of the free 100,000 by default");
-  // An awake second is 0.125 GB-s at 128 MB.
-  assert.equal(durationUnits(8_000), 1_000);
+  // An awake second is 0.128 GB-s at 128 MB.
+  assert.equal(durationUnits(8_000), 1_024);
   assert.equal(report.metrics.durationGbS.estimated, true);
 });
 
@@ -148,7 +148,7 @@ test("daily counts restart at 00:00 UTC; monthly ones on the 1st; old leases set
   assert.equal(report.metrics.rowsWritten.reserved, 0, "yesterday's leases hold nothing today");
   assert.equal(report.metrics.blobClassA.used, 7, "monthly counts carry over the day");
   assert.equal(report.days[0].day, "2026-11-18");
-  assert.equal(report.days[0].rowsWritten, 510, "a lease from yesterday settles into yesterday");
+  assert.equal(report.days[0].rowsWritten, 2_510, "yesterday's leases land in yesterday, the unsettled one charged in full");
   assert.equal(report.days[0].requests, 10 * UNITS.requests);
 
   const saved = JSON.parse(JSON.stringify(team.save()));
@@ -232,4 +232,133 @@ test("only owners get /v1/usage", () => {
   const ok = answerUsage("owner", () => team.report(T0));
   assert.equal(ok.status, 200);
   assert.equal(ok.body.adapter, "cloudflare");
+});
+
+// ---- Review findings: each failed before its fix ----
+
+const rows = (units: number, priority: "bulk" | "work" | "essential" = "essential") =>
+  ({ kind: "cloud" as const, resource: "rowsWritten" as const, units, priority });
+const capped = (n: number) => ({ ...defaultCapConfig(), custom: { rowsWritten: n } });
+
+test("a restart keeps open leases and never reuses a lease id", () => {
+  const team = new UsageTeam(capped(4_000), undefined, T0);
+  const first = team.lease(rows(4_000), T0);
+  assert.ok(first.ok);
+  const back = new UsageTeam(capped(4_000), JSON.parse(JSON.stringify(team.save())), T0 + 1_000);
+  assert.equal(back.lease(rows(4_000), T0 + 1_000).ok, false, "the reservation survived the restart");
+  back.settle({ leases: [{ id: first.lease.id, used: 1_000 }] }, T0 + 2_000);
+  assert.equal(back.used("rowsWritten", T0 + 2_000), 1_000);
+  const second = back.lease(rows(3_000), T0 + 2_000);
+  assert.ok(second.ok && second.lease.id !== first.lease.id);
+  // Even from a save older than the last lease, ids do not collide.
+  const a = new UsageTeam(capped(4_000), undefined, T0).lease(rows(10), T0);
+  const b = new UsageTeam(capped(4_000), undefined, T0).lease(rows(10), T0);
+  assert.ok(a.ok && b.ok && a.lease.id !== b.lease.id);
+});
+
+test("an expired lease stays charged in full until it settles", () => {
+  const team = new UsageTeam(capped(4_000), undefined, T0);
+  const first = team.lease(rows(4_000), T0);
+  assert.ok(first.ok);
+  const later = T0 + 11 * 60_000;
+  assert.equal(team.lease(rows(4_000), later).ok, false, "expiry does not hand the budget out again");
+  assert.equal(team.used("rowsWritten", later) + team.outstanding("rowsWritten"), 4_000);
+  team.settle({ leases: [{ id: first.lease.id, used: 1_000 }] }, later);
+  assert.equal(team.used("rowsWritten", later), 1_000, "settling refunds what was not used");
+  assert.ok(team.lease(rows(3_000), later).ok);
+});
+
+test("a failed flush keeps its counts and a retry delivers them once", async () => {
+  const team = new UsageTeam(defaultCapConfig(), undefined, T0);
+  let fail = true;
+  const room = new RoomLeases({
+    ask: async r => team.lease(r, T0),
+    settle: async s => { if (fail) throw new Error("Team unreachable"); team.settle(s, T0); },
+    now: () => T0,
+  });
+  room.charge("rowsRead", 100);
+  for (let i = 0; i < 20; i++) room.message();
+  await assert.rejects(room.flush());
+  fail = false;
+  await room.flush();
+  await room.flush();
+  assert.equal(team.used("rowsRead", T0), 100);
+  assert.equal(team.report(T0).counts.messages, 20);
+});
+
+test("custom caps never turn into unlimited", () => {
+  assert.throws(() => parseCapConfig('{"custom":{"requests":1e308}}'));
+  const caps = capsFor({ ...defaultCapConfig(), custom: { requests: Infinity, rowsRead: NaN, rowsWritten: 1e308 } });
+  for (const cap of Object.values(caps)) assert.ok(Number.isSafeInteger(cap), `cap ${cap} is a safe integer`);
+  assert.equal(caps.requests, 0, "a non-finite cap refuses instead of allowing everything");
+});
+
+test("duration uses 128 MB as 0.128 GB, as the provider bills it", () => {
+  assert.equal(durationUnits(1_000), 128);
+  assert.equal(Math.ceil(durationUnits(104_000_000) / UNITS.durationGbS), 13_312);
+});
+
+test("a retried settlement counts once, extras and messages too", () => {
+  const team = new UsageTeam(defaultCapConfig(), undefined, T0);
+  const settlement = { id: "room-a-1", extra: { requests: 20 }, messages: 20 };
+  team.settle(settlement, T0);
+  team.settle(settlement, T0 + 1_000);
+  const back = new UsageTeam(defaultCapConfig(), JSON.parse(JSON.stringify(team.save())), T0 + 2_000);
+  back.settle(settlement, T0 + 2_000);
+  assert.equal(back.report(T0 + 2_000).metrics.requests.used, 1);
+  assert.equal(back.report(T0 + 2_000).counts.messages, 20);
+});
+
+test("work a room counted before midnight lands on that day", async () => {
+  const team = new UsageTeam(defaultCapConfig(), undefined, T0);
+  let at = Date.UTC(2026, 10, 18, 23, 59, 59);
+  const room = new RoomLeases(wire(team, () => at));
+  room.charge("rowsRead", 100);
+  for (let i = 0; i < 20; i++) room.message();
+  at = Date.UTC(2026, 10, 19, 0, 0, 1);
+  await room.flush();
+  const report = team.report(at);
+  assert.equal(report.metrics.rowsRead.used, 0);
+  assert.equal(report.metrics.requests.used, 0);
+  assert.equal(report.days[0].day, "2026-11-18");
+  assert.equal(report.days[0].rowsRead, 100);
+  assert.equal(report.days[0].requests, 20);
+});
+
+test("brakes, report and widget count reserved work", () => {
+  const team = new UsageTeam(capped(4_000), undefined, T0);
+  assert.ok(team.lease(rows(4_000), T0).ok);
+  assert.equal(team.brake(T0), "stop");
+  const report = team.report(T0);
+  assert.equal(report.metrics.rowsWritten.level, "stop");
+  const w = usageWidget(report, T0);
+  assert.equal(w.level, "red");
+  assert.equal(w.line, "Today, 4% of free");
+});
+
+test("the widget shows monthly resources and follows an amber brake", () => {
+  const team = new UsageTeam(defaultCapConfig(), undefined, T0);
+  team.settle({ extra: { blobClassA: 600_000 } }, T0);
+  assert.equal(team.brake(T0), "amber");
+  const w = usageWidget(team.report(T0), T0);
+  assert.equal(w.level, "amber");
+  assert.ok(w.detail.includes("File writes this month: 600,000 of 800,000"));
+  const quiet = JSON.parse(JSON.stringify(new UsageTeam(defaultCapConfig(), undefined, T0).report(T0)));
+  assert.equal(usageWidget({ ...quiet, brake: "amber" }, T0).level, "amber");
+});
+
+test("the widget says when each exhausted limit comes back", () => {
+  const monthly = new UsageTeam(defaultCapConfig(), undefined, T0);
+  monthly.settle({ extra: { blobClassA: 800_000 } }, T0);
+  const m = usageWidget(monthly.report(T0), T0).detail.join("\n");
+  assert.doesNotMatch(m, /00:00 UTC/);
+  assert.match(m, /File writes this month limit reached, resets on 1 December/);
+  const stored = new UsageTeam(defaultCapConfig(), undefined, T0);
+  stored.settle({ extra: { blobBytes: 8_000_000_000 } }, T0);
+  const s = usageWidget(stored.report(T0), T0).detail.join("\n");
+  assert.doesNotMatch(s, /00:00 UTC/);
+  assert.match(s, /Images and videos full, frees up when files are removed/);
+  const daily = new UsageTeam(capped(10), undefined, T0);
+  daily.settle({ extra: { rowsWritten: 10 } }, T0);
+  assert.match(usageWidget(daily.report(T0), T0).detail.join("\n"), /Rows written limit reached, resets at 00:00 UTC/);
 });
