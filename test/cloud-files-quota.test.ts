@@ -46,7 +46,7 @@ test("parallel uploads racing for the last bytes: exactly those that fit get in,
     files.map(async (b, i) => {
       const room = rooms[i % 3];
       const id = reserveUpload(room, ledger, i % 2 ? anna : ben, { id: `up-race-${i}`, sha256: hex(b), bytes: b.length, type: "image/png" });
-      return putUpload(room, ledger, id, b);
+      return putUpload(room, ledger, i % 2 ? anna : ben, id, b);
     }),
   );
   const ok = results.filter((r) => r.status === "fulfilled").length;
@@ -59,7 +59,7 @@ test("parallel uploads racing for the last bytes: exactly those that fit get in,
   const b = png(50, 99);
   reserveUpload(rooms[0], ledger, anna, { id: "up-bad-hash", sha256: hex(png(50, 98)), bytes: 50, type: "image/png" });
   assert.equal(ledger.held(), 950);
-  await assert.rejects(putUpload(rooms[0], ledger, "up-bad-hash", b), /hash/);
+  await assert.rejects(putUpload(rooms[0], ledger, anna, "up-bad-hash", b), /hash/);
   assert.equal(ledger.held(), 900);
 });
 
@@ -71,7 +71,7 @@ test("upload checks: role, type sniffed from the bytes, per kind and per file si
   assert.throws(() => reserveUpload(room, ledger, anna, { id: "up-x-00001", sha256: hex(b), bytes: 80, type: "application/x-sh" }), /not a type/);
   assert.throws(() => reserveUpload(room, ledger, anna, { id: "up-big-0001", sha256: hex(b), bytes: UPLOAD_LIMITS.image + 1, type: "image/png" }), /at most 100 MB/);
   reserveUpload(room, ledger, anna, { id: "up-lie-0001", sha256: hex(b), bytes: 80, type: "image/jpeg" });
-  await assert.rejects(putUpload(room, ledger, "up-lie-0001", b), /image\/png, not image\/jpeg/);
+  await assert.rejects(putUpload(room, ledger, anna, "up-lie-0001", b), /image\/png, not image\/jpeg/);
   // Per file: 1 GB of blobs, counted before any bytes come.
   for (let i = 0; i < 10; i++) reserveUpload(room, ledger, anna, { id: `up-gb-${String(i).padStart(4, "0")}`, sha256: hex(png(10, i)), bytes: 100 * 1024 * 1024, type: "image/png" });
   assert.throws(() => reserveUpload(room, ledger, anna, { id: "up-gb-last", sha256: hex(b), bytes: 100 * 1024 * 1024, type: "image/png" }), /at most 1 GB/);

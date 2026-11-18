@@ -76,9 +76,16 @@ export function sniffType(b: Uint8Array): string | null {
   return "text/wgsl";
 }
 
+/** May `conn` add files now? The room's own role check decides (a RoleCache sees removals), not the socket's role. */
+function canAdd(room: FileRoom, conn: Conn): void {
+  const role = room.roleFor(conn);
+  if (!role) throw new UploadError("forbidden", "you are not a member of this Cloud");
+  if (!CAN_EDIT[role]) throw new UploadError("forbidden", "your role in this Cloud cannot add files");
+}
+
 /** POST /v1/files/:file/uploads: hold the bytes against the Cloud's storage first. Returns the upload id. */
 export function reserveUpload(room: FileRoom, budget: StorageBudget, conn: Conn, req: { id: string; sha256: string; bytes: number; type: string }): string {
-  if (!CAN_EDIT[conn.role]) throw new UploadError("forbidden", "your role in this Cloud cannot add files");
+  canAdd(room, conn);
   if (typeof req.id !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(req.id)) throw new UploadError("invalid", "an upload needs an id");
   if (typeof req.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(req.sha256)) throw new UploadError("invalid", "sha256 must be 64 hex digits");
   if (!Number.isSafeInteger(req.bytes) || req.bytes <= 0) throw new UploadError("invalid", "bytes must be a positive whole number");
@@ -98,9 +105,11 @@ export function reserveUpload(room: FileRoom, budget: StorageBudget, conn: Conn,
 }
 
 /** PUT /v1/files/:file/uploads/:id: the bytes. Checked against the reservation, the hash and the type. */
-export async function putUpload(room: FileRoom, budget: StorageBudget, id: string, bytes: Uint8Array): Promise<{ sha256: string; stored: boolean }> {
-  const up = room.store.sql.exec<{ sha256: string; bytes: number; type: string; state: string }>("SELECT sha256, bytes, type, state FROM uploads WHERE id = ?", id).toArray()[0];
+export async function putUpload(room: FileRoom, budget: StorageBudget, conn: Conn, id: string, bytes: Uint8Array): Promise<{ sha256: string; stored: boolean }> {
+  canAdd(room, conn);
+  const up = room.store.sql.exec<{ sha256: string; bytes: number; type: string; state: string; by_id: string }>("SELECT sha256, bytes, type, state, by_id FROM uploads WHERE id = ?", id).toArray()[0];
   if (!up) throw new UploadError("invalid", "no such upload");
+  if (up.by_id !== conn.author.id) throw new UploadError("forbidden", "this is someone else's upload");
   if (up.state !== "open") return { sha256: up.sha256, stored: false };
   const refuse = (msg: string): never => {
     room.store.sql.exec("DELETE FROM uploads WHERE id = ?", id);

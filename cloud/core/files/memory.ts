@@ -66,5 +66,5 @@ export class NodeSqlStore implements SqlStore {
 
 /** A room on the memory adapter. */
 export function memoryRoom(file: string, o: Partial<FileRoomOptions> = {}): FileRoom {
-  return new FileRoom({ store: o.store ?? new NodeSqlStore(), objects: o.objects ?? new MemoryObjects(), file, ...o });
+  return new FileRoom({ store: o.store ?? new NodeSqlStore(), objects: o.objects ?? new MemoryObjects(), file, roles: "socket", ...o });
 }
