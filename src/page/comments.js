@@ -154,7 +154,7 @@ function start(host) {
 .cm-bar svg{color:var(--c-muted-fg)}
 .cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
 .cm-hint{height:36px;padding:0 12px 0 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
-.native .cm-hint{left:auto;translate:none;bottom:var(--c-inset);right:calc(var(--c-inset) + var(--cm-zoom-width,0px) + var(--cm-zoom-gap,0px));max-width:calc(100% - 2 * var(--c-inset) - var(--cm-zoom-width,0px) - var(--cm-zoom-gap,0px));box-sizing:border-box}
+.native .cm-hint{left:auto;translate:none;bottom:var(--cm-hint-bottom,var(--c-inset));right:var(--cm-hint-right,var(--c-inset));max-width:calc(100% - var(--c-inset) - var(--cm-hint-right,var(--c-inset)));box-sizing:border-box}
 .native .cm-hint .cm-soft{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .native .cm-hint>b,.native .cm-hint>.cm-key,.native .cm-hint>span:first-child{flex-shrink:0}
 .cm-hint b{font-weight:600}

@@ -130,6 +130,7 @@ struct RootView: View {
             // Quick actions (Cmd+K, Cmd+/): Palette.swift.
             CommandPaletteLayer(model: model)
         }
+        .coordinateSpace(name: "canvas")
         .frame(minWidth: 720, minHeight: 420)
         .onChange(of: model.revealBoardId) { _, board in if board != nil { model.panelOpen = true } }
         .onChange(of: insets) { _, v in model.setInsets(l: v[0], t: v[1], r: v[2], b: v[3]) }
@@ -542,8 +543,8 @@ struct ZoomCorner: View {
                  reset: { model.zoomReset() }, fitPage: { model.fitPage() }, fitSelection: { model.fit() },
                  zoomTo: { model.zoomTo($0); model.focusCanvas() }, open: $model.zoomFieldOpen)
             .qaID("zoom-island")
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { model.setZoomCorner(width: $0) }
-            .onDisappear { model.setZoomCorner(width: 0) }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("canvas")) } action: { model.setZoomCorner(frame: $0) }
+            .onDisappear { model.setZoomCorner(frame: .zero) }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     }
 }

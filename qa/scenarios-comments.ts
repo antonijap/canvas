@@ -44,9 +44,10 @@ sc("comments", "Comment hint follows the zoom corner at every window size", { co
       await t.ev(`(() => {
         let e = document.getElementById('qa-zoom-corner');
         if (!e) { e = document.createElement('div'); e.id = 'qa-zoom-corner'; document.body.append(e); }
-        e.style.cssText = 'position:fixed;right:var(--c-inset);bottom:var(--c-inset);width:124px;height:var(--c-pill)';
+        e.style.cssText = 'position:fixed;right:24px;bottom:18px;width:124px;height:var(--c-pill)';
         window.canvasCmd({cmd:'insets',l:60,t:60,r:304,b:60});
-        window.canvasCmd({cmd:'zoomCorner',width:e.getBoundingClientRect().width});
+        const r = e.getBoundingClientRect();
+        window.canvasCmd({cmd:'zoomCorner',left:r.left,bottom:r.bottom});
       })()`);
       await t.settle();
       const boxes = await t.ev<any>(`(() => {
