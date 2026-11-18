@@ -129,7 +129,7 @@ const waitFor = async (ok: () => boolean | Promise<boolean>, what: string, ms = 
   const t0 = Date.now();
   while (!(await ok())) { if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`); await sleep(25); }
 };
-const cloudPids = () => { try { return execFileSync("pgrep", ["-P", String(process.pid), "-f", "cloud/node/main.ts"], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } };
+const cloudPids = () => { try { return execFileSync("pgrep", ["-P", String(process.pid), "-f", "cloud/adapters/mac/main.ts"], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } };
 
 test("a tunnel start that finishes after Stop and Start again never serves the old port", async () => {
   const a = await Host.startHosting({ name: "Gate", label: "Anna" });

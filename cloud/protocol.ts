@@ -1,4 +1,4 @@
-// The comments protocol shared by the Canvas app (src/) and a team's own Canvas server (cloud/cloudflare).
+// The comments protocol shared by the Canvas app (src/) and a team's own Canvas server (cloud/adapters/cloudflare).
 // Plain types and pure helpers, no imports: it runs in Node, in the page and in a Worker. The rules are in
 // docs/cloud/protocol.md; change both together, and bump PROTOCOL_VERSION for any change an older side cannot read.
 

@@ -2,7 +2,7 @@
 // for a Cloud hosted on a Mac. The Worker gets the same calls from its Durable Object storage.
 
 import { DatabaseSync } from "node:sqlite";
-import type { SqlCursor, SqlStore, SqlValue } from "../core/sql.ts";
+import type { SqlCursor, SqlStore, SqlValue } from "../../core/sql.ts";
 
 const EMPTY: SqlCursor<never> = {
   one() { throw new Error("Expected exactly one row"); },

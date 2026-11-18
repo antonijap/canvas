@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { expect } from "vitest";
 import worker from "../src/index";
 import type { Env } from "../src/env";
-import type { Op, OpEnvelope, PeopleRule, ServerMessage } from "../../protocol";
+import type { Op, OpEnvelope, PeopleRule, ServerMessage } from "../../../protocol";
 
 export const bindings = env as Env;
 export const owner = "owner@example.com";

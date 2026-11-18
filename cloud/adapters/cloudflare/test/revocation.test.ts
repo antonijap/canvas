@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { reset, runInDurableObject } from "cloudflare:test";
 import { Team } from "../src/team";
 import { Room } from "../src/room";
-import { PROTOCOL_VERSION } from "../../protocol";
+import { PROTOCOL_VERSION } from "../../../protocol";
 import { bindings, connect, envelope, member, post, register, rules } from "./helpers";
 
 const sockets: WebSocket[] = [];
