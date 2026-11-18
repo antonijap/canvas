@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 // @ts-ignore: a plain ES module the page imports too
-import { WELCOME_HINT, WELCOME_OUTDATED, WELCOME_TEMPORARY, WELCOME_TITLE, welcomeAdded, welcomeHint, welcomeRow } from "../src/page/widget-kinds.js";
+import { WELCOME_HINT, WELCOME_OTHER_COPY, WELCOME_OUTDATED, WELCOME_TEMPORARY, WELCOME_TITLE, welcomeAdded, welcomeHint, welcomeRow } from "../src/page/widget-kinds.js";
 import { TEMPORARY_SERVER, addedMessage } from "../src/mcp-connect.ts";
 
 describe("welcome card rows", () => {
@@ -43,6 +43,14 @@ describe("welcome card rows", () => {
     assert.equal(welcomeHint(s), "Connected (older version, restart your agent session)");
     assert.equal(WELCOME_OUTDATED, "Connected (older version, restart your agent session)");
     assert.equal(welcomeHint({ ...s, outdated: false }), WELCOME_HINT);
+  });
+
+  test("an MCP of another copy of Canvas: Connected, and the footer says so, not restart", () => {
+    const s = { installed: { claude: true }, connected: true, outdated: false, otherCopy: true, client: "Claude" };
+    assert.deepEqual(welcomeRow(s, "claude"), { connected: true, button: null });
+    assert.equal(welcomeHint(s), "Connected (an agent runs another copy of Canvas)");
+    assert.equal(WELCOME_OTHER_COPY, "Connected (an agent runs another copy of Canvas)");
+    assert.ok(!/restart/.test(WELCOME_OTHER_COPY), "restarting would load the same copy again");
   });
 
   test("Connect's next step says that sessions already open must restart", () => {

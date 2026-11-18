@@ -199,6 +199,14 @@ enum ConnectCopy {
     static func added(_ agent: String) -> String { "Added. New \(agent) sessions use it; restart any that are open." }
     /// An MCP from before an update is talking to Canvas (GET /api/mcp/setup `outdated`): its agent session must restart.
     static let outdated = "Connected (older version, restart your agent session)"
+    /// Only an MCP of another copy of Canvas talks (`otherCopy`): not older, so no restart advice.
+    static let otherCopy = "Connected (an agent runs another copy of Canvas)"
+    /// The line under the Agents card for a GET /api/mcp/setup answer, nil when there is nothing to say.
+    static func status(_ setup: [String: Any]) -> String? {
+        if setup["outdated"] as? Bool == true { return outdated }
+        if setup["otherCopy"] as? Bool == true { return otherCopy }
+        return nil
+    }
     /// The button's title; "Added" reads as Connected in Settings; nil hides it (the agent's CLI is not installed:
     /// Copy command in the row's menu is all there is).
     static func button(installed: Bool, registered: Bool, busy: Bool) -> String? {

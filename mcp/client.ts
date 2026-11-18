@@ -3,7 +3,7 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { codeRootId, version as codeVersion } from "../src/version.ts";
+import { codeRootId, mcpCodeVersion, version as codeVersion } from "../src/version.ts";
 
 /** How often canvas-mcp says hello; src/onboarding.ts calls it gone after OFF_AFTER_MS (50 s) of silence. */
 export const HEARTBEAT_MS = 20_000;
@@ -50,13 +50,14 @@ function seeBoot(b: unknown) {
 }
 
 /**
- * The code this process loaded (src/version.ts), worked out once at start: an update that replaces the files later
- * does not change what runs here. The server compares it with its own and calls an MCP of other code an older version,
- * whose agent session must restart (src/onboarding.ts).
+ * The code this process loaded (src and mcp, src/version.ts mcpCodeVersion), worked out once at start: an update that
+ * replaces the files later does not change what runs here. With the copy it comes from (codeRootId), the server tells
+ * an MCP of its own copy whose code is gone (older: its agent session must restart) from another copy's (src/onboarding.ts).
  */
-const LOADED_VERSION = codeVersion();
-/** Who asks, on every request: the agent's name and this MCP's code version. */
-const who = (): Record<string, string> => ({ "x-canvas-mcp-version": LOADED_VERSION, ...(AGENT ? { "x-canvas-agent": AGENT } : {}) });
+const LOADED_VERSION = mcpCodeVersion(fileURLToPath(new URL("../src/", import.meta.url)));
+const LOADED_ROOT = codeRootId(fileURLToPath(new URL("../src/", import.meta.url)));
+/** Who asks, on every request: the agent's name and this MCP's code version and copy. */
+const who = (): Record<string, string> => ({ "x-canvas-mcp-version": LOADED_VERSION, "x-canvas-mcp-root": LOADED_ROOT, ...(AGENT ? { "x-canvas-agent": AGENT } : {}) });
 /** Reads say who asks (x-canvas-mcp: the session), so the Welcome card and Settings > Agents can show "Connected". */
 const readHeaders = (): Record<string, string> => ({ "x-canvas-mcp": SESSION, ...who() });
 /** Writes say they come from an MCP (x-canvas-source), for the undo history and the agent cursor. */

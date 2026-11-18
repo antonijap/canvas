@@ -189,6 +189,9 @@ struct SettingsTests {
         check(ConnectCopy.otherAppsURL.absoluteString == "https://getcanvas.cc/download#connect", "the download page's connect section")
         check(ConnectCopy.added("Codex") == "Added. New Codex sessions use it; restart any that are open.", "the next step, and that sessions already open must restart")
         check(ConnectCopy.outdated == "Connected (older version, restart your agent session)", "an MCP from before an update")
+        check(ConnectCopy.status(["outdated": true]) == ConnectCopy.outdated, "an older MCP of this copy: restart")
+        check(ConnectCopy.status(["otherCopy": true]) == "Connected (an agent runs another copy of Canvas)", "another copy's MCP: no restart advice")
+        check(ConnectCopy.status(["connected": true]) == nil && ConnectCopy.status([:]) == nil, "a current MCP or none: no line")
         check(!ConnectCopy.outdated.contains("\u{2014}") && !ConnectCopy.added("Codex").contains("\u{2014}"), "no em dash")
     }
 }
