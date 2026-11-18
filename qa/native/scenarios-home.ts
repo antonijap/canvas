@@ -355,7 +355,10 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   // Drag the last tab to the front: the others slide aside, the drop saves the order.
   const home0 = await t.mark({ id: "home-tab" });
   tb = await tabs();
-  await t.drag(mid(tb[2]), { x: tb[0].x + 6, y: mid(tb[2]).y }, { steps: 24 });
+  const frame0 = (await t.state()).window;
+  await t.systemDrag(mid(tb[2]), { x: tb[0].x + 6, y: mid(tb[2]).y }, { steps: 3 });
+  const frame1 = (await t.state()).window;
+  t.eq([frame1.x, frame1.y, frame1.width, frame1.height], [frame0.x, frame0.y, frame0.width, frame0.height], "a fast tab drag never moves the window");
   await sleep(500);
   t.eq(await order(), [c, t.file, b], "the dragged tab took the first place");
   t.eq(stored(), [c, t.file, b], "the order is saved in preferences");
@@ -369,10 +372,21 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
 
   // Home is not draggable: pulling it right changes nothing.
   const l1 = await last();
-  await t.drag(center(home1), { x: l1.x + l1.w, y: center(home1).y }, { steps: 24 });
+  await t.systemDrag(center(home1), { x: l1.x + l1.w, y: center(home1).y }, { steps: 4 });
+  const homeFrame = (await t.state()).window;
+  t.eq([homeFrame.x, homeFrame.y], [frame0.x, frame0.y], "Home never drags the window");
   await sleep(400);
   t.eq(await order(), [c, t.file, b], "dragging Home reorders nothing");
   t.ok(Math.abs((await t.mark({ id: "home-tab" })).x - home0.x) < 0.5, "Home stays first");
+
+  for (const control of [await t.mark({ id: "tab-open" }), await t.mark({ id: "tab-close", label: baseName(c) })]) {
+    const from = center(control);
+    await t.systemDrag(from, { x: from.x, y: from.y + 80 }, { steps: 4 });
+    const frame = (await t.state()).window;
+    t.eq([frame.x, frame.y], [frame0.x, frame0.y], "tab buttons never drag the window");
+    t.eq(await order(), [c, t.file, b], "dragging off a tab button leaves the tabs open");
+    if ((await t.state()).menu) await t.cmd("qa.menu", { cancel: true });
+  }
 
   // A tab dragged right, to the end.
   tb = await tabs();

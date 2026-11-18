@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, test } from "node:test";
 import { tmpDir } from "./helpers.ts";
-import { withVisionLock } from "../qa/native/harness.ts";
+import { NT, withVisionLock } from "../qa/native/harness.ts";
 import { QaApp, BUNDLE_BASE } from "../qa/native/app.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -44,4 +44,12 @@ describe("qa:native harness", () => {
     assert.ok(a.bundleId.includes(String(process.pid)), `${a.bundleId} does not name the run`);
     assert.notEqual(a.bundleId, new QaApp("/tmp/x", 2).bundleId);
   });
+});
+
+test("systemDrag sends fast input through the system mode", async () => {
+  let sent: unknown;
+  const app = { cmd: async (message: unknown) => { sent = message; return {}; }, base: "http://127.0.0.1:1" };
+  const t = new NT(app as unknown as QaApp, "example.canvas");
+  await t.systemDrag({ x: 12, y: 20 }, { x: 240, y: 20 }, { steps: 3 });
+  assert.deepEqual(sent, { op: "qa.drag", args: { system: true, from: [12, 20], to: [240, 20], mods: [], steps: 3, holdMs: 0, dwellMs: 0 }, timeoutMs: 30000 });
 });

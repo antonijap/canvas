@@ -60,6 +60,9 @@ export class NT {
   drag(from: Pt, to: Pt, o: { mods?: Mods; steps?: number; via?: Pt[]; holdMs?: number; dwellMs?: number } = {}) {
     return this.cmd("qa.drag", { from: [from.x, from.y], to: [to.x, to.y], mods: o.mods ?? [], steps: o.steps ?? 14, via: (o.via ?? []).map((p) => [p.x, p.y]), holdMs: o.holdMs, dwellMs: o.dwellMs });
   }
+  systemDrag(from: Pt, to: Pt, o: { mods?: Mods; steps?: number; holdMs?: number; dwellMs?: number } = {}) {
+    return this.cmd("qa.drag", { system: true, from: [from.x, from.y], to: [to.x, to.y], mods: o.mods ?? [], steps: o.steps ?? 4, holdMs: o.holdMs ?? 0, dwellMs: o.dwellMs ?? 0 });
+  }
   key(key: string, mods: Mods = [], o: { window?: Win; repeat?: number } = {}) { return this.cmd("qa.key", { key, mods, window: o.window ?? "main", repeat: o.repeat ?? 1 }); }
   type(text: string, o: { window?: Win } = {}) { return this.cmd("qa.type", { text, window: o.window ?? "main" }); }
   scroll(p: Pt, dx: number, dy: number) { return this.cmd("qa.scroll", { x: p.x, y: p.y, dx, dy }); }
