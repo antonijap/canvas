@@ -20,9 +20,29 @@ struct ShellLogicTests {
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
-        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress(); tabRenameFocus()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func tabRenameFocus() {
+        var focus = TabRenameFocus()
+        var attempts = 0
+        var selections = 0
+        func attempt(attached: Bool, accepted: Bool) {
+            focus.attempt(attached: attached, makeFirstResponder: {
+                attempts += 1
+                return accepted
+            }, selectAll: { selections += 1 })
+        }
+        attempt(attached: false, accepted: true)
+        check(attempts == 0 && selections == 0, "rename waits for window attachment")
+        attempt(attached: true, accepted: false)
+        check(attempts == 1 && selections == 0, "rejected focus must not select text")
+        attempt(attached: true, accepted: true)
+        check(attempts == 2 && selections == 1, "retry focus and select the full name")
+        attempt(attached: true, accepted: true)
+        check(attempts == 2 && selections == 1, "updates must not reset the selection")
     }
 
     static func tabPress() {

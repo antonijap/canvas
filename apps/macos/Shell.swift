@@ -198,12 +198,13 @@ struct TopBar: View {
 
     private func tabMenu(_ file: String, view: NSView, at: CGPoint) {
         let menu = ContextMenuBuilder(model: model, at: at)
+        var renameRequested = false
         for (i, group) in ContextMenuLayout.fileTab(cloud: CloudURL.clean(model.prefs.cloudUrl) != nil).enumerated() {
             if i > 0 { menu.separator() }
             for title in group {
                 menu.action(title) {
                     switch title {
-                    case "Rename...": beginRename(file)
+                    case "Rename...": renameRequested = true
                     case "Show in Finder": NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)])
                     case "Duplicate": model.duplicateFile(file)
                     case "Move to Cloud...": CloudAccount.shared.shareOpenFile(model, file: file)
@@ -218,6 +219,8 @@ struct TopBar: View {
             }
         }
         menu.pop(in: view)
+        // Menu tracking restores the previous responder when it closes.
+        if renameRequested { beginRename(file) }
     }
 
     private var widths: [CGFloat] { model.openFiles.map { tabWidths[$0] ?? 0 } }
@@ -618,8 +621,8 @@ private struct TabNameField: NSViewRepresentable {
     @Binding var text: String
     let finish: (Bool) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField(string: text)
+    func makeNSView(context: Context) -> Field {
+        let field = Field(string: text)
         field.delegate = context.coordinator
         context.coordinator.field = field
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak coordinator = context.coordinator] event in
@@ -633,10 +636,30 @@ private struct TabNameField: NSViewRepresentable {
         field.drawsBackground = true
         field.isBordered = false
         field.focusRingType = .default
-        DispatchQueue.main.async { field.window?.makeFirstResponder(field); field.selectText(nil) }
         return field
     }
-    func updateNSView(_ field: NSTextField, context: Context) { context.coordinator.owner = self }
+    func updateNSView(_ field: Field, context: Context) {
+        context.coordinator.owner = self
+        field.requestFocus()
+    }
+    final class Field: NSTextField {
+        private var focus = TabRenameFocus()
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            requestFocus()
+        }
+
+        func requestFocus() {
+            guard let window else { return }
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window, self.window === window else { return }
+                self.focus.attempt(attached: true, makeFirstResponder: {
+                    window.makeFirstResponder(self)
+                }, selectAll: { self.selectText(nil) })
+            }
+        }
+    }
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var owner: TabNameField
         weak var field: NSTextField?

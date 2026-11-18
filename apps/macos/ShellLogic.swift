@@ -5,6 +5,17 @@ import Foundation
 import CoreGraphics
 import CryptoKit
 
+/// Initial rename focus waits for a window and a successful responder change.
+struct TabRenameFocus {
+    private var pending = true
+
+    mutating func attempt(attached: Bool, makeFirstResponder: () -> Bool, selectAll: () -> Void) {
+        guard pending, attached, makeFirstResponder() else { return }
+        pending = false
+        selectAll()
+    }
+}
+
 /// Page URLs the shell loads. Paths go in as query values, so `&`, `=`, `+` and `#` in a file name are encoded
 /// (URLComponents leaves `+` alone, and the server reads `+` as a space).
 enum DocURL {
