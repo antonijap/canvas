@@ -46,7 +46,7 @@ async function team(email = "anna@studio.test") {
   return { url, host: url.replace("http://", ""), asked, close: async () => { srv.closeAllConnections(); if (srv.listening) await new Promise<void>((r) => srv.close(() => r())); } };
 }
 
-sc("settings", "Add Cloud: the sheet from Home's + offers Join, Host and Connect a server; a local server asks for its email, connects, gets a row and a page; Settings > Cloud lists it and opens its page; Sign out; Offline speaks", { covers: ["settings:add-cloud", "settings:cloud", "home:clouds"] }, async (t: NT) => {
+sc("settings", "Add Cloud: the sheet from Home's + offers Join, This Mac and Cloudflare Alpha; a local server asks for its email, connects, gets a row and a page; Settings > Cloud lists it and opens its page; Sign out; Offline speaks", { covers: ["settings:add-cloud", "settings:cloud", "home:clouds"] }, async (t: NT) => {
   const a = await team();
   try {
     await t.cmd("qa.cloud", { clouds: [] });
@@ -55,6 +55,14 @@ sc("settings", "Add Cloud: the sheet from Home's + offers Join, Host and Connect
     await t.waitState((s) => s.addCloud, "the Add Cloud sheet");
     for (const id of ["add-cloud-join", "add-cloud-host", "add-cloud-server"]) await t.mark({ id, window: SHEET }, 4000);
     await t.waitText("Add a Cloud", undefined, 4000, SHEET);
+    const join = await t.mark({ id: "add-cloud-join", label: "Join with an invite", window: SHEET });
+    const mac = await t.mark({ id: "add-cloud-host", label: "This Mac", window: SHEET });
+    const adapter = await t.mark({ id: "add-cloud-server", label: "Cloudflare", window: SHEET });
+    await t.waitText("Run your own Cloud on", undefined, 4000, SHEET);
+    t.ok(join.y < mac.y && mac.y < adapter.y, "Join comes first, then This Mac, then Cloudflare");
+    await t.waitText("Free, no account. Live while this Mac is awake", undefined, 4000, SHEET);
+    await t.waitText("Always on, on your Cloudflare account", undefined, 4000, SHEET);
+    t.eq((await t.marks({ id: "add-cloud-alpha", label: "Alpha", window: SHEET })).length, 1, "only Cloudflare gets Alpha in the sheet");
     await t.shot(`${process.cwd()}/qa/out/native/add-cloud-pick.png`, SHEET);
     // Connect a server: an address Canvas cannot use gets a hint and no Connect.
     await t.click(center(await t.mark({ id: "add-cloud-server", window: SHEET })), { window: SHEET });
@@ -78,12 +86,15 @@ sc("settings", "Add Cloud: the sheet from Home's + offers Join, Host and Connect
     await t.waitState((s) => s.toast === "You’re connected to Studio" && s.toastKind === "success", "the connected toast", 8000);
     await t.mark({ id: "home-row", label: "Studio" }, 4000);
     t.ok(a.asked.some((x) => x.url === "/v1/me" && x.email === "anna@studio.test" && !x.token), "asked who this is with the development email, no token");
+    await t.mark({ id: "cloud-alpha-badge", label: "Alpha" }, 4000);
+    await t.mark({ id: "cloud-alpha-notice", label: "The Cloudflare adapter is in Alpha: it works, but it is not yet well tested. Keep your own copies of important files." }, 4000);
     await t.shot(`${process.cwd()}/qa/out/native/cloud-page-new.png`);
     // Settings > Cloud: the list, then the Cloud's page from its row, and back.
     await t.click(center(await t.mark({ id: "home-cloud-settings" }, 4000)));
     await t.waitState((s) => s.windows.some((w: any) => w.settings), "Settings from the gear");
     await t.waitText("Signed in as anna@studio.test, owner", undefined, 8000, "settings");
     await t.mark({ id: "cloud-address", label: a.host, window: "settings" }, 4000);
+    await t.mark({ id: "cloud-alpha-badge", label: "Alpha", window: "settings" }, 4000);
     t.eq((await t.marks({ id: "cloud-fingerprint", window: "settings" })).length + (await t.marks({ id: "cloud-invitee", window: "settings" })).length, 0, "a server Cloud shows its address and account, no people");
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
@@ -93,6 +104,7 @@ sc("settings", "Add Cloud: the sheet from Home's + offers Join, Host and Connect
     await t.cmd("qa.theme", { theme: "light" });
     await t.click(center(await t.mark({ id: "cloud-back", window: "settings" })), { window: "settings" });
     await t.mark({ id: "cloud-row", label: "Studio", window: "settings" }, 4000);
+    await t.mark({ id: "cloud-alpha-badge", label: "Alpha", window: "settings" }, 4000);
     await t.mark({ id: "cloud-add", window: "settings" });
     t.eq((await t.marks({ id: "cloud-filter", window: "settings" })).length, 0, "no filter for one Cloud");
     t.eq((await t.marks({ id: "cloud-row-word", window: "settings" })).length, 0, "a Cloud that works says nothing in the list");
@@ -252,5 +264,25 @@ sc("settings", "A Cloud's name, typed on its page in Settings, names its row, it
     await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
     fs.rmSync(path.join(t.file, "comments.json"), { force: true });
     await a.close();
+  }
+});
+
+sc("settings", "Joined Mac Cloud: Home and Settings have no adapter Alpha badge or notice", { covers: ["settings:cloud", "home:clouds"] }, async (t: NT) => {
+  const id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
+  try {
+    await t.cmd("qa.cloud", { clouds: [{ id: "joined", url: `canvas-cloud://${id}`, name: "Studio", kind: "joined" }], select: null, home: "joined" });
+    await home(t);
+    await t.waitState((s) => s.homeSection === "cloud", "the joined Cloud page");
+    t.eq((await t.marks({ id: "cloud-alpha-badge" })).length, 0, "no Alpha badge on the joined Cloud");
+    t.eq((await t.marks({ id: "cloud-alpha-notice" })).length, 0, "no Alpha notice on the joined Cloud");
+    await settingsCloud(t);
+    t.eq((await t.marks({ id: "cloud-alpha-badge", window: "settings" })).length, 0, "no badge on its Settings row");
+    await t.click(center(await t.mark({ id: "cloud-row", label: "Studio", window: "settings" }, 4000)), { window: "settings" });
+    await t.mark({ id: "cloud-back", window: "settings" }, 4000);
+    t.eq((await t.marks({ id: "cloud-alpha-badge", window: "settings" })).length, 0, "no badge on its Settings page");
+    await t.shot(`${process.cwd()}/qa/out/native/cloud-joined-no-alpha.png`, "settings");
+  } finally {
+    await t.key("w", ["cmd"], { window: "settings" }).catch(() => {});
+    await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
   }
 });

@@ -23,9 +23,25 @@ struct SettingsTests {
     }
 
     static func main() {
-        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration(); reviewFixes()
+        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration(); reviewFixes(); adapters()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func adapters() {
+        let id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b"
+        let server = CloudEntry(url: "https://team.example.com", kind: .server)
+        let local = CloudEntry(url: "http://localhost:8787", kind: .server)
+        let hosted = CloudEntry(url: "canvas-cloud://\(id)", kind: .hosted)
+        let joined = CloudEntry(url: hosted.url, kind: .joined)
+        check(server.adapterAlpha && local.adapterAlpha, "Cloudflare servers, including local development, get Alpha")
+        check(!hosted.adapterAlpha && !joined.adapterAlpha, "Mac hosted and joined Clouds get no badge")
+        check(server.adapterTooltip == "Cloudflare adapter, Alpha", "the sidebar explains the adapter")
+        check(hosted.adapterTooltip.isEmpty && joined.adapterTooltip.isEmpty, "Mac Clouds have no Alpha tooltip")
+        check(CloudList.hostLimit(99) == 8 && CloudList.hostLimit(0) == 1 && CloudList.hostLimit(nil) == 8, "the server limit is clamped to one through eight")
+        check(CloudList.hostedIds([hosted, hosted], known: [id]).count == 1, "the hosting limit counts host ids once")
+        let other = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        check(CloudList.hostedIds([hosted], known: [other]).count == 2, "shell and server hosting ids are combined")
     }
 
     static func defaults() {
@@ -304,7 +320,7 @@ extension SettingsTests {
         let h = fresh()
         h.set("canvas-cloud://\(id)", forKey: k("cloudUrl")); h.set(true, forKey: k("cloudHosting"))
         let hs = AppSettings.load(h).clouds
-        check(hs.first?.kind == .hosted && hs.first?.hosting == true && hs.first?.hostId == id, "the Cloud this Mac hosted, still hosting")
+        check(hs.first?.kind == .joined && hs.first?.hosting == false && hs.first?.hostId == id, "an old address waits for the server to identify which Cloud this Mac hosted")
         let j = fresh()
         j.set("canvas-cloud://\(id)", forKey: k("cloudUrl"))
         check(AppSettings.load(j).clouds.first?.kind == .joined, "a hosted address without hosting was joined")

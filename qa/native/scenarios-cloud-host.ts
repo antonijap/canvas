@@ -48,6 +48,8 @@ async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: st
   await t.waitState((s) => !s.addCloud && s.homeSection === "cloud", `${name}'s page`, 20_000);
   const added = (await t.cmd("qa.cloud", {})).clouds.find((c: any) => !before.includes(c.id));
   t.ok(added && added.kind === "hosted" && added.name === name, `${name} is in the list as hosted here`);
+  t.eq((await t.marks({ id: "cloud-alpha-badge" })).length, 0, "Mac hosted Clouds have no Alpha badge");
+  t.eq((await t.marks({ id: "cloud-alpha-notice" })).length, 0, "Mac hosted Clouds have no Alpha notice");
   return added;
 }
 
@@ -67,6 +69,7 @@ sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, 
     await t.mark({ id: "home-row", label: "Studio" }, 4000);
     await t.mark({ id: "home-row", label: "Client review" }, 4000);
     await settingsCloud(t);
+    t.eq((await t.marks({ id: "cloud-alpha-badge", window: "settings" })).length, 0, "Mac hosted Clouds have no Alpha badge in Settings");
     await t.waitFor(async () => (await t.marks({ id: "cloud-row-word", label: "Hosting", window: "settings" })).length === 2, "both rows say Hosting", 15_000);
     await t.shot(`${process.cwd()}/qa/out/native/settings-cloud-two-hosted.png`, "settings");
     // Studio's page: its fingerprint and people; Add person copies an invite that is never on screen.

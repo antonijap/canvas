@@ -1041,3 +1041,14 @@ struct SecretField: View {
         }
     }
 }
+
+/// A compact, noninteractive status label.
+struct Badge: View {
+    let text: String
+    var body: some View {
+        Text(text).font(Typography.badge).foregroundStyle(BadgeInk.amber).lineLimit(1)
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Capsule().fill(BadgeInk.amberFill))
+            .fixedSize().qaText(text)
+    }
+}

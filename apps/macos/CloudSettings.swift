@@ -1,4 +1,4 @@
-// Settings > Cloud: every Cloud this Canvas talks to (any number of servers and joined Clouds, and at most one this Mac
+// Settings > Cloud: every Cloud this Canvas talks to (any number of servers and joined Clouds, and at most eight this Mac
 // hosts), who is signed in at each, and sharing a file's comments to one (File > Share Comments). The list lives in
 // AppSettings.clouds (SettingsLogic.swift CloudList) and goes to the server with the shell's state, versioned; the
 // server refuses any address that is not in it (src/cloud-config.ts). Home's sidebar has a row per Cloud; Add Cloud
@@ -194,7 +194,8 @@ final class CloudAccount: ObservableObject {
         let available = j["available"] as? Bool ?? false
         if next != hosts { hosts = next }
         if available != hostAvailable { hostAvailable = available }
-        if let m = j["max"] as? Int, m != hostMax { hostMax = m }
+        let limit = CloudList.hostLimit(j["max"] as? Int)
+        if limit != hostMax { hostMax = limit }
         keepAwake(next.values.contains { $0.hosting })
         reconcile(model)
     }
@@ -242,7 +243,7 @@ final class CloudAccount: ObservableObject {
         if let i = model.prefs.clouds.firstIndex(where: { $0.id == id }) { model.prefs.clouds[i].hosting = on }
     }
 
-    /// Host on this Mac: with an entry, that Cloud again; without one, a new Cloud (this Mac hosts any number, one per
+    /// Host on this Mac: with an entry, that Cloud again; without one, a new Cloud (this Mac hosts up to eight, one per
     /// team). This Canvas is each one's first member (the owner, on loopback). Nil when it worked, else why not.
     func startHosting(_ model: CanvasModel, entry: CloudEntry? = nil, name: String) async -> String? {
         let key = entry?.hostId ?? "new"
@@ -521,23 +522,12 @@ final class CloudAccount: ObservableObject {
         let a = NSAlert()
         a.messageText = "Share comments to which Cloud?"
         a.informativeText = "Everyone in that Cloud can read the comments on this file."
-        let menu = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26), pullsDown: false)
-        // Items by tag, with titles never alike: a menu keeps one item per title, so two Clouds named "Cloud" would
-        // otherwise leave one out and move the index of the rest.
-        let titles = CloudShare.titles(clouds, name: HomeLogic.cloudName, detail: { $0.kind == .server ? ServerName.host($0.url) : "on a Mac, \($0.hostId?.prefix(4) ?? "")" })
-        for (i, t) in titles.enumerated() {
-            let item = NSMenuItem(title: t, action: nil, keyEquivalent: "")
-            item.tag = i
-            menu.menu?.addItem(item)
-        }
-        menu.selectItem(withTag: 0)
-        menu.setAccessibilityLabel("Cloud")
+        let menu = CloudSharePicker.make(clouds, name: HomeLogic.cloudName, detail: { $0.kind == .server ? ServerName.host($0.url) : "on a Mac, \($0.hostId?.prefix(4) ?? "")" })
         a.accessoryView = menu
         a.addButton(withTitle: "Share")
         a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return nil }
-        guard let i = menu.selectedItem?.tag, clouds.indices.contains(i) else { return nil }
-        return clouds[i]
+        return CloudSharePicker.selected(menu, in: clouds)
     }
 
     nonisolated static func post(_ model: CanvasModel, _ path: String, _ body: [String: Any], query: [URLQueryItem] = []) async -> (Int, [String: Any]) {
@@ -718,6 +708,7 @@ struct CloudListRow: View {
                 Image(systemName: HomeLogic.rowSymbol(kind: entry.kind)).glyph(GlyphSize.row + 1)
                     .foregroundStyle(Palette.fg).frame(width: 16)
                 Text(name).font(Typography.body).fontWeight(.medium).foregroundStyle(word?.tone == .muted ? Palette.mutedFg : Palette.fg).lineLimit(1).qaText(name)
+                if entry.adapterAlpha { Badge(text: "Alpha").qaID("cloud-alpha-badge", label: "Alpha") }
                 Spacer(minLength: 8)
                 if let word {
                     Text(word.text).font(Typography.label).foregroundStyle(word.tone == .attention ? CloudInk.warn : Palette.mutedFg).lineLimit(1)
@@ -757,6 +748,7 @@ struct CloudPage: View {
             HStack(spacing: 10) {
                 MiniButton(symbol: "chevron.left", help: "All Clouds") { account.selected = nil }.qaID("cloud-back", label: "All Clouds")
                 Text(name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Palette.fg).lineLimit(1).qaText(name)
+                if e.adapterAlpha { Badge(text: "Alpha").qaID("cloud-alpha-badge", label: "Alpha") }
                 let pill = pill(e, s)
                 CloudPill(text: pill.text, tone: pill.tone).help(CloudStatusText.detail(s.status, name: name) ?? "")
                 Spacer(minLength: 0)
@@ -1013,7 +1005,7 @@ struct AddCloudSheet: View {
     /// Why Host on this Mac is off, or nil when it is on. Hosting one Cloud never stops another: one per team.
     private var hostBlocked: String? {
         if !account.hostAvailable { return "Needs the tunnel helper, which this build does not have" }
-        if max(CloudList.hosted(model.prefs.clouds).count, account.hosts.count) >= account.hostMax { return "This Mac hosts \(account.hostMax) Clouds, the most it can. Delete one first" }
+        if CloudList.hostedIds(model.prefs.clouds, known: Set(account.hosts.keys)).count >= account.hostMax { return "This Mac hosts \(account.hostMax) Clouds, the most it can. Delete one first" }
         if model.prefs.clouds.count >= SettingsLimits.clouds { return "Canvas keeps \(SettingsLimits.clouds) Clouds at most" }
         return nil
     }
@@ -1024,12 +1016,14 @@ struct AddCloudSheet: View {
                 Text("Add a Cloud").font(Typography.title).foregroundStyle(Palette.fg).qaText("Add a Cloud")
                 Text("A Cloud keeps comments in sync with your team.").font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg)
             }
-            VStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 4) {
                 AddCloudOption(symbol: "link", title: "Join with an invite", detail: "Paste the link a teammate sent you", id: "add-cloud-join") { route.step = .join(nil) }
-                AddCloudOption(symbol: "laptopcomputer", title: "Host on this Mac", detail: hostBlocked ?? "Free, no account. Live while this Mac is awake", id: "add-cloud-host", enabled: hostBlocked == nil) {
+                Text("Run your own Cloud on").font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                    .padding(.leading, 10).padding(.top, 10).padding(.bottom, 2).qaText("Run your own Cloud on")
+                AddCloudOption(symbol: "laptopcomputer", title: "This Mac", detail: hostBlocked ?? "Free, no account. Live while this Mac is awake", id: "add-cloud-host", enabled: hostBlocked == nil) {
                     cloudName = ""; route.step = .host
                 }
-                AddCloudOption(symbol: "server.rack", title: "Connect a server", detail: "Your own Cloud on Cloudflare, always on", id: "add-cloud-server") { route.step = .server }
+                AddCloudOption(symbol: "cloud", title: "Cloudflare", detail: "Always on, on your Cloudflare account", id: "add-cloud-server", alpha: true) { route.step = .server }
             }
             HStack { Spacer(); FieldButton(title: "Cancel", symbol: nil) { close() }.qaID("add-cloud-cancel", label: "Cancel") }
         }
@@ -1166,7 +1160,7 @@ struct AddCloudSheet: View {
         let next = CloudSetup.next(address, devEmail: devEmail)
         let local = CloudURL.isLocal(address)
         let exists = CloudURL.clean(address).flatMap { u in model.prefs.clouds.first { $0.url == u } }
-        header("Connect a server")
+        header("Cloudflare")
         VStack(alignment: .leading, spacing: 6) {
             Text("Address").font(Typography.label).foregroundStyle(Palette.mutedFg)
             FieldBox {
@@ -1212,6 +1206,7 @@ private struct AddCloudOption: View {
     let detail: String
     let id: String
     var enabled = true
+    var alpha = false
     let action: () -> Void
     @State private var hovering = false
 
@@ -1220,7 +1215,10 @@ private struct AddCloudOption: View {
             HStack(spacing: 12) {
                 AddCloudGlyph(symbol: symbol)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(Typography.body).fontWeight(.semibold).foregroundStyle(Palette.fg).lineLimit(1).qaText(title)
+                    HStack(spacing: 6) {
+                        Text(title).font(Typography.body).fontWeight(.semibold).foregroundStyle(Palette.fg).lineLimit(1).qaText(title)
+                        if alpha { Badge(text: "Alpha").qaID("add-cloud-alpha", label: "Alpha") }
+                    }
                     Text(detail).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1).qaText(detail)
                 }
                 Spacer(minLength: 8)

@@ -4,7 +4,7 @@ A Cloud keeps a file's comments in sync between people. You can host one on your
 
 ## Start hosting
 
-1. In Home, click **+** next to **Clouds** (or **Add Cloud** in Settings > Cloud), choose **Host on this Mac**, give the Cloud a name and click **Start hosting**. You can host several Clouds at once, one per team: each has its own people and invites.
+1. In Home, click **+** next to **Clouds** (or **Add Cloud** in Settings > Cloud), choose **This Mac**, give the Cloud a name and click **Start hosting**. You can host several Clouds at once, one per team: each has its own people and invites.
 2. Open the Cloud's settings (the gear on its page in Home). Type the person's name or email and click **Copy Invite**. The invite link is now on your clipboard. Canvas never shows it on screen.
 3. Send it to them the way you like (a message, an email). It works once, within 48 hours.
 4. They open the link (or choose **Join with an invite** in Add Cloud and paste it). Canvas shows them the Cloud's name, a short **fingerprint** and what joining means before they click Join. Read yours from the Cloud's settings: they should match.

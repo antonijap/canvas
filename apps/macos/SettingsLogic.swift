@@ -346,6 +346,11 @@ struct CloudEntry: Codable, Equatable, Identifiable {
         hosting = try c.decodeIfPresent(Bool.self, forKey: .hosting) ?? false
     }
 
+    /// The server adapter is in Alpha, including its local development mode.
+    var adapterAlpha: Bool { kind == .server && !CloudURL.isHosted(url) }
+    var adapterTooltip: String { adapterAlpha ? "Cloudflare adapter, Alpha" : "" }
+    static let alphaNotice = "The Cloudflare adapter is in Alpha: it works, but it is not yet well tested. Keep your own copies of important files."
+
     /// A hosted Cloud's id (canvas-cloud://<id>), else nil.
     var hostId: String? { url.hasPrefix("canvas-cloud://") ? String(url.dropFirst("canvas-cloud://".count)) : nil }
 }
@@ -416,11 +421,11 @@ enum CloudList {
         return clean(list)
     }
 
-    /// The single Cloud of an older version as an entry: a hosted address is this Mac's own Cloud while hosting was
-    /// on (stopping it cleared the address then), else one joined with an invite.
+    /// The old address moves as joined until the server identifies which Cloud this Mac hosted. The old hosting
+    /// flag alone cannot identify it: older versions could host one Cloud while joined to another.
     static func migrate(url: String, name: String, devEmail: String, hosting: Bool) -> [CloudEntry] {
         guard let clean = CloudURL.clean(url) else { return [] }
-        let kind: CloudKind = CloudURL.isHosted(clean) ? (hosting ? .hosted : .joined) : .server
+        let kind: CloudKind = CloudURL.isHosted(clean) ? .joined : .server
         return self.clean([CloudEntry(url: clean, name: name, devEmail: devEmail, kind: kind, hosting: kind == .hosted)])
     }
 
@@ -453,6 +458,10 @@ struct HostedInfo: Equatable {
 extension CloudList {
     /// The most Clouds one Mac hosts (src/cloud-host.ts MAX_HOSTED).
     static let maxHosted = 8
+    static func hostLimit(_ reported: Int?) -> Int { min(max(reported ?? maxHosted, 1), maxHosted) }
+    static func hostedIds(_ list: [CloudEntry], known: Set<String>) -> Set<String> {
+        known.union(hosted(list).compactMap(\.hostId))
+    }
     /// Set by the move from an older version when hosting was on: the Cloud this Mac hosted then starts again once the
     /// server has said which one it is (reconcile).
     static let legacyHostingKey = "cloudsLegacyHosting"
