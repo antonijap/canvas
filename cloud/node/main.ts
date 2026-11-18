@@ -4,7 +4,7 @@
 // the process that forked it. When that channel closes (Canvas quit or crashed), it stops and exits: no orphan.
 //
 //   env CANVAS_CLOUD_HOST_DIR   the data folder (required)
-//   env CANVAS_CLOUD_HOST_PORT  the port (src/cloud-host.ts gives each hosted Cloud its own, 5190-5289; tests: 0, a free one)
+//   env CANVAS_CLOUD_HOST_PORT  the port (src/cloud-host.ts gives each hosted Cloud its own, 5190-5197; tests: 0, a free one)
 //
 // Orders: { id, op, ...args } -> { id, ok: true, result } | { id, ok: false, error }. Events: { event: "people" }.
 // Results that carry a secret (a join code, the host's own device token) go over IPC only, never to a log.

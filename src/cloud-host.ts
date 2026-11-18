@@ -9,7 +9,7 @@
 // <state>/cloud-hosts.json maps each slot to its host id (not a secret: the id is in every invite and comments.json).
 // A Cloud's id comes from its enrolment tunnel's public key, so a slot keeps its id across restarts and wipes.
 //
-// Two tunnels per Cloud, both serving that Cloud's port only (the helper takes ports 5190-5289, never 5189):
+// Two tunnels per Cloud, both serving that Cloud's port only (the helper takes ports 5190-5197, never 5189):
 //   member     lets in the tunnel keys of enrolled devices only; restarted with the new list when people change.
 //   enrolment  runs only while a join code is waiting; anyone holding its address reaches the Cloud, where nothing
 //              but POST /v1/join with a valid code answers without a device token.
@@ -40,9 +40,9 @@ const dirOf = (slot: string) => (slot === "main" ? hostDir() : path.join(stateDi
 const keysAccount = (slot: string) => (slot === "main" ? "host:keys" : `host:keys:${slot}`);
 const indexFile = () => path.join(stateDir(), "cloud-hosts.json");
 /** The ports a hosted Cloud may take: the tunnel helper serves these and no other (cloud/tunnel/main.go). */
-export const HOST_PORTS = { first: 5190, last: 5289 };
-/** The most Clouds one Mac hosts at once. */
-export const MAX_HOSTED = HOST_PORTS.last - HOST_PORTS.first + 1;
+export const HOST_PORTS = { first: 5190, last: 5197 };
+/** The most Clouds one Mac hosts (running or kept): one port each. */
+export const MAX_HOSTED = 8;
 
 interface TunnelKey { key: unknown; addr: string; public: string }
 interface HostKeys { member: TunnelKey; enrol: TunnelKey }
@@ -133,11 +133,16 @@ class HostedCloud {
   }
 
   private async followOnce(): Promise<void> {
-    if (!this.child) return;
+    // The process and port this run is for. A run that outlives them (Stop, then Start again on another port) must
+    // not install a tunnel to the old port, which another Cloud may have taken since: after every await it checks.
+    const c = this.child, port = this.port;
+    if (!c) return;
+    const stale = () => this.child !== c || this.port !== port;
     const r = await this.ask("people");
+    if (stale()) return;
     this.people = r.people;
     const bin = helperPath();
-    if (!bin || !this.keys || !this.child) return;
+    if (!bin || !this.keys) return;
     try {
       const allow = JSON.stringify(r.keys);
       if (!this.member || !this.member.helper.alive || this.member.allow !== allow) {
@@ -145,21 +150,22 @@ class HostedCloud {
         const old = this.member;
         this.member = null;
         old?.helper.stop();
-        const s = await serve(bin, this.keys.member.key, r.keys, this.port);
-        if (!this.child) { s.helper.stop(); return; }
+        const s = await serve(bin, this.keys.member.key, r.keys, port);
+        if (stale()) { s.helper.stop(); return; }
         this.member = { helper: s.helper, allow };
         s.helper.onExit = () => { if (this.member?.helper === s.helper) { this.member = null; setTimeout(() => void this.follow().catch(() => {}), 2000).unref?.(); } };
         await this.ask("config", { memberAddr: s.addr, memberKey: this.keys.member.public });
+        if (stale()) return;
       }
       if (r.pending > 0 && !this.enrol?.alive) {
-        const s = await serve(bin, this.keys.enrol.key, null, this.port);
-        if (!this.child) { s.helper.stop(); return; }
+        const s = await serve(bin, this.keys.enrol.key, null, port);
+        if (stale()) { s.helper.stop(); return; }
         this.enrol?.stop();
         this.enrol = s.helper;
       } else if (r.pending === 0 && this.enrol) { this.enrol.stop(); this.enrol = null; }
       this.tunnelError = "";
     } catch (e) {
-      this.tunnelError = (e as Error).message;
+      if (!stale()) this.tunnelError = (e as Error).message;
     }
   }
 
@@ -217,6 +223,8 @@ class HostedCloud {
       hostId: this.hostId || null,
       port: this.port || null,
       name: this.name,
+      // The first slot, where the single hosted Cloud of older versions lives: the app adds it to its list if missing.
+      legacy: this.slot === "main",
       fingerprint: this.keys ? await fingerprint(this.keys.enrol.addr) : null,
       tunnel: !helperPath() ? "unavailable" : this.member?.helper.alive ? "up" : this.child ? (this.tunnelError ? "error" : "starting") : "off",
       tunnelError: this.tunnelError || null,
@@ -245,22 +253,36 @@ async function freePort(): Promise<number> {
 const clouds = new Map<string, HostedCloud>();
 const cloudOf = (slot: string) => { let c = clouds.get(slot); if (!c) { c = new HostedCloud(slot); clouds.set(slot, c); } return c; };
 
+/** The host id of the first slot from its tunnel keys (a Cloud hosted before the index existed), or null. */
+async function mainIdFromKeys(): Promise<string | null> {
+  const raw = await readSecret(keysAccount("main"));
+  if (!raw) return null;
+  try { return hostIdFor(JSON.parse(raw).enrol.public); } catch { return null; }
+}
+
 /** The slot of a host id: one started in this run, else the index, else the first Cloud's keys (from before the index). */
 async function slotOf(hostId: string): Promise<string | null> {
   const id = hostId.toLowerCase();
   for (const c of clouds.values()) if (c.hostId === id) return c.slot;
   for (const [slot, h] of Object.entries(readIndex())) if (h === id) return slot;
-  const raw = await readSecret(keysAccount("main"));
-  if (raw) { try { if (hostIdFor(JSON.parse(raw).enrol.public) === id) return "main"; } catch { /* not readable */ } }
-  return null;
+  return (await mainIdFromKeys()) === id ? "main" : null;
 }
 
-/** A slot for a new Cloud: the first one while it was never used, else a new one. */
+/** Every slot this Mac keeps: the index, the ones started in this run, and the first one if its keys or folder exist. */
+async function knownSlots(): Promise<Set<string>> {
+  const out = new Set(Object.keys(readIndex()));
+  for (const c of clouds.values()) if (c.hostId || c.child || c.starting) out.add(c.slot);
+  if (fs.existsSync(hostDir()) || (await readSecret(keysAccount("main")))) out.add("main");
+  return out;
+}
+
+/** A slot for a new Cloud: the first one while it was never used, else a new one. At most MAX_HOSTED in all. */
 async function newSlot(): Promise<string> {
-  const ix = readIndex();
-  if (!ix.main && !clouds.get("main")?.hostId && !(await readSecret(keysAccount("main"))) && !fs.existsSync(hostDir())) return "main";
+  const known = await knownSlots();
+  if (known.size >= MAX_HOSTED) throw new Error(`This Mac hosts ${MAX_HOSTED} Clouds at most. Delete one first.`);
+  if (!known.has("main")) return "main";
   let slot: string;
-  do { slot = randomBytes(4).toString("hex"); } while (ix[slot] || clouds.has(slot));
+  do { slot = randomBytes(4).toString("hex"); } while (known.has(slot));
   return slot;
 }
 
@@ -293,16 +315,23 @@ export function hostHelpers(hostId?: string): { member: number | null; enrol: nu
 }
 
 /**
- * Starts hosting: with a host id, that Cloud again (its people and data as they were); without one, a new Cloud in a
- * slot of its own. Returns the Cloud's host id.
+ * Start, stop and delete run one at a time: two new Clouds at once must not get the same slot or port, and a Delete
+ * must not run while a start of the same Cloud is half done (the start would bring back what Delete removed).
  */
-export function startHosting(opts: { name: string; label: string; hostId?: string | null }): Promise<string> {
-  // One start at a time: two new Clouds at once must not get the same slot, nor two Clouds the same port.
-  const run = startChain.catch(() => {}).then(() => startOnce(opts));
-  startChain = run;
+let chain: Promise<unknown> = Promise.resolve();
+function serial<T>(fn: () => Promise<T>): Promise<T> {
+  const run = chain.catch(() => {}).then(fn);
+  chain = run;
   return run;
 }
-let startChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Starts hosting: with a host id, that Cloud again (its people and data as they were); without one, a new Cloud in a
+ * slot of its own (at most MAX_HOSTED). Returns the Cloud's host id.
+ */
+export function startHosting(opts: { name: string; label: string; hostId?: string | null }): Promise<string> {
+  return serial(() => startOnce(opts));
+}
 
 async function startOnce(opts: { name: string; label: string; hostId?: string | null }): Promise<string> {
   let slot: string | null;
@@ -312,36 +341,40 @@ async function startOnce(opts: { name: string; label: string; hostId?: string | 
   } else {
     slot = await newSlot();
   }
-  if (!clouds.get(slot)?.child && [...clouds.values()].filter((c) => c.child).length >= MAX_HOSTED) throw new Error(`This Mac hosts ${MAX_HOSTED} Clouds at most`);
   const c = cloudOf(slot);
   await c.start({ name: opts.name, label: opts.label });
   return c.hostId;
 }
 
 /** Stop hosting a Cloud: every device token is revoked (members need a new invite), its tunnels and process stop. */
-export async function stopHosting(hostId?: string | null): Promise<void> {
-  const list = hostId ? [running(hostId)].filter(Boolean) as HostedCloud[] : [...clouds.values()].filter((c) => c.child);
-  for (const c of list) {
-    await c.ask("stop").catch(() => {});
-    c.stopChild();
-  }
+export function stopHosting(hostId?: string | null): Promise<void> {
+  return serial(async () => {
+    const list = hostId ? [running(hostId)].filter(Boolean) as HostedCloud[] : [...clouds.values()].filter((c) => c.child);
+    for (const c of list) {
+      await c.ask("stop").catch(() => {});
+      c.stopChild();
+    }
+  });
 }
 
 /**
  * Delete a hosted Cloud: stops it (every token revoked), removes its folder, and forgets its slot and tunnel keys, so
- * nothing of it is left on this Mac and a new Cloud never takes its id.
+ * nothing of it is left on this Mac and a new Cloud never takes its id. Throws when the folder could not be removed.
  */
-export async function wipeHosting(hostId?: string | null): Promise<void> {
-  const slot = hostId ? await slotOf(hostId) : running(null)?.slot ?? null;
-  if (!slot) throw new Error("This Mac does not host that Cloud");
-  const c = cloudOf(slot);
-  if (c.child) await c.ask("wipe").catch(() => {});
-  c.stopChild();
-  fs.rmSync(dirOf(slot), { recursive: true, force: true });
-  const ix = readIndex();
-  if (slot in ix) { delete ix[slot]; writeIndex(ix); }
-  await deleteSecret(keysAccount(slot));
-  clouds.delete(slot);
+export function wipeHosting(hostId?: string | null): Promise<void> {
+  return serial(async () => {
+    const slot = hostId ? await slotOf(hostId) : running(null)?.slot ?? null;
+    if (!slot) throw new Error("This Mac does not host that Cloud");
+    const c = cloudOf(slot);
+    if (c.child) await c.ask("wipe").catch(() => {});
+    c.stopChild();
+    fs.rmSync(dirOf(slot), { recursive: true, force: true });
+    if (fs.existsSync(dirOf(slot))) throw new Error("Could not delete the Cloud's data on this Mac");
+    const ix = readIndex();
+    if (slot in ix) { delete ix[slot]; writeIndex(ix); }
+    await deleteSecret(keysAccount(slot));
+    clouds.delete(slot);
+  });
 }
 
 /** An invite link: the Cloud's name and id, the enrolment tunnel's address and a single-use join code. A secret. */
@@ -363,10 +396,7 @@ export async function removePerson(personId: string, hostId?: string | null): Pr
   await c.follow();
 }
 
-/**
- * One hosted Cloud's status (by host id, or the only one running), or with `all`, every Cloud this Mac hosts or kept
- * a slot for: { available, hosting, clouds: [...] }.
- */
+/** One hosted Cloud's status, by host id, or the only one running. */
 export async function hostStatus(hostId?: string | null): Promise<Record<string, unknown>> {
   if (hostId) {
     const slot = await slotOf(hostId);
@@ -379,9 +409,17 @@ export async function hostStatus(hostId?: string | null): Promise<Record<string,
   return { available: !!helperPath(), hosting: false, hostId: null, port: null, name: "", fingerprint: null, tunnel: helperPath() ? "off" : "unavailable", tunnelError: null, people: [] };
 }
 
-export async function hostStatusAll(): Promise<{ available: boolean; hosting: boolean; clouds: Record<string, unknown>[] }> {
+/**
+ * Every Cloud this Mac hosts or keeps a slot for, running or not: { available, hosting, max, clouds: [...] }. The
+ * first slot is listed from its keys too, so a Cloud hosted (or stopped) by an older version is never lost.
+ */
+export async function hostStatusAll(): Promise<{ available: boolean; hosting: boolean; max: number; clouds: Record<string, unknown>[] }> {
   const ix = readIndex();
   for (const [slot, id] of Object.entries(ix)) { const c = cloudOf(slot); if (!c.hostId) c.hostId = id; }
+  if (!ix.main) {
+    const id = await mainIdFromKeys();
+    if (id) { const c = cloudOf("main"); if (!c.hostId) c.hostId = id; ix.main = id; writeIndex(ix); }
+  }
   const list = await Promise.all([...clouds.values()].filter((c) => c.hostId).map((c) => c.status()));
-  return { available: !!helperPath(), hosting: hosting(), clouds: list };
+  return { available: !!helperPath(), hosting: hosting(), max: MAX_HOSTED, clouds: list };
 }

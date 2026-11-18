@@ -3,6 +3,7 @@
 // stand-in helper (test/fixtures/fake-tunnel.ts) writes what each serve was started with, so the test can read it.
 
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -122,4 +123,74 @@ test("several Clouds hosted at once: each its own id, port, folder, people and t
   await Host.stopHosting();
   await sleep(1000);
   assert.deepEqual(Tn.runningHelpers(), [], "no helper after stopping them all");
+});
+
+const waitFor = async (ok: () => boolean | Promise<boolean>, what: string, ms = 10_000) => {
+  const t0 = Date.now();
+  while (!(await ok())) { if (Date.now() - t0 > ms) throw new Error(`timed out waiting for ${what}`); await sleep(25); }
+};
+const cloudPids = () => { try { return execFileSync("pgrep", ["-P", String(process.pid), "-f", "cloud/node/main.ts"], { encoding: "utf8" }).trim().split("\n").filter(Boolean); } catch { return []; } };
+
+test("a tunnel start that finishes after Stop and Start again never serves the old port", async () => {
+  const a = await Host.startHosting({ name: "Gate", label: "Anna" });
+  const oldPort = ((await Host.hostStatus(a)) as any).port as number;
+  const gate = path.join(tmp, "gate");
+  const waiting = () => fs.readdirSync(tmp).filter((f) => f.startsWith("gate.waiting.")).length;
+  process.env.CANVAS_FAKE_TUNNEL_GATE = gate;
+  try {
+    // An invite starts the enrolment tunnel; the helper is held at the gate.
+    const inv = Host.invite("ben@studio.test", undefined, a).catch((e) => e);
+    await waitFor(() => waiting() >= 1, "the enrolment tunnel to wait at the gate");
+    // Meanwhile the Cloud stops and starts again, on another port; its own tunnels wait at the gate too.
+    await Host.stopHosting(a);
+    const restart = Host.startHosting({ name: "Gate", label: "Anna", hostId: a });
+    await waitFor(() => waiting() >= 2, "the restarted Cloud's tunnel to wait");
+    fs.writeFileSync(gate, "");
+    await restart;
+    await inv;
+    await sleep(500);
+    await Host.hostStatus(a);
+    await sleep(500);
+    const newPort = ((await Host.hostStatus(a)) as any).port as number;
+    assert.notEqual(newPort, oldPort, "started again on another port");
+    const s = (served() as unknown as { port: number; pid: number }[]).filter((x) => alive(x.pid));
+    assert.ok(s.length > 0 && s.every((x) => x.port === newPort), `every served tunnel goes to the new port (${s.map((x) => x.port)}; old ${oldPort})`);
+    const h = Host.hostHelpers(a);
+    assert.deepEqual(Tn.runningHelpers().sort(), [h.member, h.enrol].filter(Boolean).sort(), "no helper from the old run left running");
+  } finally {
+    delete process.env.CANVAS_FAKE_TUNNEL_GATE;
+    await Host.stopHosting(a);
+  }
+});
+
+test("Delete while a start of the same Cloud is under way: the start finishes first, then nothing of it is left", async () => {
+  const x = await Host.startHosting({ name: "Gone", label: "Anna" });
+  await Host.stopHosting(x);
+  const start = Host.startHosting({ name: "Gone", label: "Anna", hostId: x }).catch((e) => e);
+  const wipe = Host.wipeHosting(x);
+  await start;
+  await wipe;
+  await sleep(800);
+  assert.equal(Host.localHost(x), null, "not running");
+  assert.ok(!(await Host.hostsHere(x)), "not kept");
+  assert.ok(!(await Host.hostStatusAll()).clouds.some((c: any) => c.hostId === x), "not listed");
+  const runningNow = (await Host.hostStatusAll()).clouds.filter((c: any) => c.hosting).length;
+  await waitFor(() => cloudPids().length === runningNow, `no Cloud process left behind for it (${cloudPids().length} running, ${runningNow} hosting)`);
+  const ix = JSON.parse(fs.readFileSync(path.join(tmp, "state", "cloud-hosts.json"), "utf8"));
+  assert.ok(!Object.values(ix).includes(x), "not in the index");
+});
+
+test("at most 8 Clouds on one Mac: the ninth is refused with a reason", async () => {
+  const known = (await Host.hostStatusAll()).clouds.length;
+  const made: string[] = [];
+  for (let i = known; i < Host.MAX_HOSTED; i++) made.push(await Host.startHosting({ name: `Team ${i}`, label: "Anna" }));
+  assert.equal((await Host.hostStatusAll()).clouds.length, 8);
+  await assert.rejects(Host.startHosting({ name: "Ninth", label: "Anna" }), /8 Clouds at most/);
+  assert.equal(Host.MAX_HOSTED, 8);
+  assert.deepEqual(Host.HOST_PORTS, { first: 5190, last: 5197 }, "one port each, and the helper serves no other");
+  // Deleting one makes room again.
+  await Host.wipeHosting(made[0] ?? (await Host.hostStatusAll()).clouds[0].hostId as string);
+  const again = await Host.startHosting({ name: "Room again", label: "Anna" });
+  assert.ok(again);
+  await Host.stopHosting();
 });

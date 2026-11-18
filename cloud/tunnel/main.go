@@ -7,11 +7,11 @@
 // stdin closes (Canvas quit or crashed) it exits, so it never outlives Canvas.
 //
 //	{"op":"genkey","kind":"server"|"client"}                 -> {"event":"key","key":{...},"public":"nodekey:..","addr"?:"tc.."}
-//	{"op":"serve","key":{...},"port":5190,"allow":[...]|null} -> {"event":"ready","addr":"tc.."}   (allow null: anyone; port 5190-5289)
+//	{"op":"serve","key":{...},"port":5190,"allow":[...]|null} -> {"event":"ready","addr":"tc.."}   (allow null: anyone; port 5190-5197)
 //	{"op":"forward","key":{...},"addr":"tc..","port":5190}     -> {"event":"ready","port":N}       (listener on 127.0.0.1:N)
 //	any failure                                                -> {"event":"error","message":".."} and exit 1
 //
-// serve forwards only to one port on 127.0.0.1, between 5190 and 5289 (one per Cloud this Mac hosts): the range is
+// serve forwards only to one port on 127.0.0.1, between 5190 and 5197 (one per Cloud this Mac hosts): the range is
 // fixed here, so no order can reach the editor on 5189 or anything else, and there is no exit-node or any other
 // service. Inside the tunnel the Cloud is always on port 5190, whichever local port it has.
 package main
@@ -34,7 +34,7 @@ import (
 // firstLocalPort..lastLocalPort and nowhere else.
 const cloudPort = 5190
 const firstLocalPort = 5190
-const lastLocalPort = 5289
+const lastLocalPort = 5197
 
 type order struct {
 	Op    string              `json:"op"`
@@ -122,7 +122,7 @@ func serve(ctx context.Context, o order) {
 	}
 	local, ok := localTarget(o.Port)
 	if !ok {
-		fail("serve takes a port from 5190 to 5289 only")
+		fail("serve takes a port from 5190 to 5197 only")
 	}
 	ci := o.Key.Public
 	if err := ci.Expand(ctx, tailcat.ExpandForServer, tailcat.DERPMapURL(tailcat.DefaultDERPMapURL)); err != nil || len(ci.Region) == 0 {

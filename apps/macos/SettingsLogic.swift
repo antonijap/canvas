@@ -422,13 +422,92 @@ enum CloudList {
         let list = migrate(url: d.string(forKey: k("cloudUrl")) ?? "", name: d.string(forKey: k("cloudName")) ?? "",
                            devEmail: d.string(forKey: k("cloudDevEmail")) ?? "", hosting: d.bool(forKey: k("cloudHosting")))
         d.set(encode(list), forKey: k(key))
+        // Hosting was on: the Cloud this Mac hosted may not be the address above (an older version kept hosting while
+        // the address named a Cloud it joined). Remembered until reconcile learns which Cloud it is from the server.
+        if d.bool(forKey: k("cloudHosting")) { d.set(true, forKey: k(legacyHostingKey)) }
         if d.object(forKey: k(key)) != nil { for old in legacyKeys { d.removeObject(forKey: k(old)) } }
         return list
     }
 }
 
+/// A Cloud this Mac hosts, as GET /api/cloud/host lists it.
+struct HostedInfo: Equatable {
+    let hostId: String
+    let name: String
+    let hosting: Bool
+    /// The first slot, where the single hosted Cloud of older versions lives.
+    let legacy: Bool
+}
+
+extension CloudList {
+    /// The most Clouds one Mac hosts (src/cloud-host.ts MAX_HOSTED).
+    static let maxHosted = 8
+    /// Set by the move from an older version when hosting was on: the Cloud this Mac hosted then starts again once the
+    /// server has said which one it is (reconcile).
+    static let legacyHostingKey = "cloudsLegacyHosting"
+
+    /// The list made to agree with what this Mac hosts: a hosted Cloud the list does not have is added (a Cloud an
+    /// older version hosted, running or stopped, is never lost), an entry this Mac hosts is a hosted one, and a
+    /// "hosted" entry this Mac does not host is one it joined. `legacyHosting`: the older version had hosting on.
+    static func reconcile(_ list: [CloudEntry], hosted: [HostedInfo], legacyHosting: Bool) -> [CloudEntry] {
+        var out = list
+        let ids = Set(hosted.map(\.hostId))
+        for i in out.indices where out[i].kind != .server {
+            guard let id = out[i].hostId else { continue }
+            if ids.contains(id) {
+                if out[i].kind != .hosted, let h = hosted.first(where: { $0.hostId == id }) {
+                    out[i].kind = .hosted
+                    out[i].hosting = h.hosting || (h.legacy && legacyHosting)
+                }
+            } else if out[i].kind == .hosted {
+                out[i].kind = .joined
+                out[i].hosting = false
+            }
+        }
+        for h in hosted where !out.contains(where: { $0.hostId == h.hostId }) {
+            let name = h.name.trimmingCharacters(in: .whitespaces)
+            out.append(CloudEntry(url: "canvas-cloud://\(h.hostId)", name: name.isEmpty ? "Cloud" : name, kind: .hosted, hosting: h.hosting || (h.legacy && legacyHosting)))
+        }
+        return clean(out)
+    }
+}
+
+/// Remove or Delete a Cloud: what went wrong, from the answers of the server's routes, or nil when it all worked.
+enum CloudRemoval {
+    /// `wipe`: the answer to deleting a hosted Cloud's data (nil when there was none to delete); `remove`: to removing it.
+    static func problem(wipe: (status: Int, error: String?)?, remove: (status: Int, error: String?)) -> String? {
+        if let wipe, wipe.status != 200 { return wipe.error ?? "Could not delete the Cloud\u{2019}s data on this Mac" }
+        if remove.status != 200 { return remove.error ?? "Could not remove the Cloud" }
+        return nil
+    }
+}
+
 /// File > Share Comments: which Clouds can take the open file now.
 enum CloudShare {
+    /// The titles of the Clouds in the question, one per Cloud and never two alike (a menu keeps only one of each
+    /// title): a repeated name gets its address, then a number.
+    static func titles(_ list: [CloudEntry], name: (CloudEntry) -> String, detail: (CloudEntry) -> String) -> [String] {
+        let names = list.map(name)
+        var out: [String] = []
+        for (i, e) in list.enumerated() {
+            var t = names[i]
+            if names.filter({ $0 == t }).count > 1 { t = "\(t) (\(detail(e)))" }
+            var n = 2
+            let base = t
+            while out.contains(t) { t = "\(base) \(n)"; n += 1 }
+            out.append(t)
+        }
+        return out
+    }
+
+    /// What the toast says after a share: where the comments went, and for a file that was already shared, whether
+    /// that Cloud is reachable now. `ok` is false when the person has something to do.
+    static func message(already: Bool, name: String, status: String?) -> (text: String, ok: Bool) {
+        if !already { return ("Comments shared to \(name)", true) }
+        if status == "connected" { return ("Already shared. Connected to \(name)", true) }
+        return ("Already shared to \(name). \(CloudStatusText.line(status ?? "offline", configured: true))", false)
+    }
+
     /// Connected, as an owner or an editor (a viewer or commenter cannot register a file).
     static func candidates(_ list: [CloudEntry], status: [String: (status: String, role: String?)]) -> [CloudEntry] {
         list.filter { e in

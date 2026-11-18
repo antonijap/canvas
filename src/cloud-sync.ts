@@ -225,5 +225,11 @@ export interface SyncHooks {
   touch(pkg: string, file: string | null): void;
   /** What the page needs to draw the shared bar, or null for a file that is not shared. */
   info(pkg: string, f: SyncFile): unknown;
+  /**
+   * Before anything of a shared file is sent from this Mac for the first time: ops it arrived with (a copy made by
+   * someone else) move to the refused list, for the person to Retry (send as them) or Discard. Changes `f`; true when
+   * it did.
+   */
+  vouch(pkg: string, f: SyncFile): boolean;
 }
-export const hooks: SyncHooks = { touch() {}, info: () => null };
+export const hooks: SyncHooks = { touch() {}, info: () => null, vouch: () => false };

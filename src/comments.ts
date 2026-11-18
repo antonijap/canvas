@@ -100,7 +100,10 @@ export function applyEnvelopes(pkg: string, envelopes: unknown, by: Author, now 
  */
 function queueShared(pkg: string, file: SyncFile, envelopes: unknown[], by: Author): OpsResult {
   const list = envelopes.map((e) => (e && typeof e === "object" ? withDoc(e as OpEnvelope, file.doc) : e)) as OpEnvelope[];
+  // What the file arrived with is held back first (src/cloud.ts vouch): only the ops made here now go out at once.
+  const held = hooks.vouch(pkg, file);
   const { queued, refused } = queueLocal(file, list, by, { name: localName() });
+  if (held && !queued.length) writeCommentsFile(pkg, file);
   const counts: string[] = [];
   for (const e of list) if (queued.includes(e.opId)) { const c = countOf(e.op); if (c) counts.push(c); }
   if (queued.length) { writeCommentsFile(pkg, file); hooks.touch(pkg, null); }
