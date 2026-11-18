@@ -17,7 +17,7 @@ export const FILE_ROOM_SCHEMA_VERSION = 1;
 export const FILE_ROOM_DDL = `
 CREATE TABLE IF NOT EXISTS file_meta (id INTEGER PRIMARY KEY CHECK (id = 1), file TEXT NOT NULL, schema INTEGER NOT NULL,
   epoch INTEGER NOT NULL, seq INTEGER NOT NULL, log_floor INTEGER NOT NULL, receipt_floor INTEGER NOT NULL,
-  snapshot_seq INTEGER NOT NULL, top_json TEXT NOT NULL);
+  snapshot_seq INTEGER NOT NULL, node_bytes INTEGER NOT NULL DEFAULT 0, top_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, parent TEXT NOT NULL, pos TEXT NOT NULL, type TEXT NOT NULL,
   props TEXT NOT NULL, deleted_seq INTEGER) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS nodes_children ON nodes(parent, pos);

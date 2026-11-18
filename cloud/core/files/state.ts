@@ -103,7 +103,7 @@ function blobsOf(tree: RoomTree, out: Record<string, BlobRow>): Record<string, B
 }
 
 /** A tree's whole state, for a snapshot. */
-export function stateOf(tree: RoomTree): FileState {
+export function stateOf(tree: RoomTree, withBoards = true): FileState {
   const doc: FileState["doc"] = {};
   for (const k of DOC_VALUE_KEYS) {
     const v = tree.docValue(k);
@@ -119,7 +119,7 @@ export function stateOf(tree: RoomTree): FileState {
   const pages = tree.pages();
   return {
     top: tree.topKeys(),
-    children: tree.children(null).map((id) => tree.subtree(id)!),
+    children: withBoards ? tree.children(null).map((id) => tree.subtree(id)!) : [],
     doc,
     widgets: tree.widgetIds().map((id) => tree.widget(id) ?? null),
     pages: pages ? pages.map((p) => ({ id: p.id, name: p.name, boards: [...p.boards] })) : null,

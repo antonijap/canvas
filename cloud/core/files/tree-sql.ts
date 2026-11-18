@@ -3,12 +3,15 @@
 // action must throw out of the transaction (room.ts does) so SQLite puts every row back.
 
 import type { SqlStore, SqlValue } from "../sql.ts";
-import { refsOfNode, type BlobRow, type DocNode, type Json, type NodeView, type PageRow, type Ver } from "./seam.ts";
+import { refsOfNode, ApplyError, type BlobRow, type DocNode, type Json, type NodeView, type PageRow, type Ver } from "./seam.ts";
 import { keyAt, evenKeys } from "./positions.ts";
 import type { DocValueKey, FileState, RoomTree } from "./state.ts";
 
 type Row = { id: string; parent: string; pos: string; type: string; props: string; deleted_seq: number | null };
 const MAX_DEPTH = 1024;
+/** Caps (Section 3): a node row (a Durable Object row holds 2 MB; a little is kept for the other columns), boards per file. */
+export const ROW_CAP = 2 * 1024 * 1024 - 4096;
+export const BOARD_CAP = 20_000;
 const isArr = Array.isArray;
 
 export class SqlTree implements RoomTree {
@@ -17,6 +20,8 @@ export class SqlTree implements RoomTree {
   /** Statements that wrote rows since the last reset: the room's honest meter of rows written. */
   rowsWritten = 0;
   rowsRead = 0;
+  /** Change in node JSON bytes since the room last read it (the file cap counts these). */
+  bytesDelta = 0;
   private cache = new Map<string, Row | null>();
   private readonly store: SqlStore;
   constructor(store: SqlStore) {
@@ -151,21 +156,31 @@ export class SqlTree implements RoomTree {
     this.forget();
   }
 
+  /** A node row's JSON, refused when it would pass the row cap (a Durable Object row holds at most 2 MB). */
+  private rowJson(id: string, props: Record<string, Json>): string {
+    const s = JSON.stringify(props);
+    const size = s.length > ROW_CAP / 3 ? new TextEncoder().encode(s).length : s.length;
+    if (size > ROW_CAP) throw new ApplyError("invalid", `"${id}" would hold ${Math.round(size / 1024)} KB; a layer holds at most ${ROW_CAP / 1024 / 1024} MB`);
+    return s;
+  }
   private writeRow(id: string, parent: string, pos: string, type: string, props: Record<string, Json>): void {
-    this.w("INSERT INTO nodes (id, parent, pos, type, props, deleted_seq) VALUES (?, ?, ?, ?, ?, NULL)", id, parent, pos, type, JSON.stringify(props));
+    const json = this.rowJson(id, props);
+    this.w("INSERT INTO nodes (id, parent, pos, type, props, deleted_seq) VALUES (?, ?, ?, ?, ?, NULL)", id, parent, pos, type, json);
+    this.bytesDelta += json.length;
     this.cache.delete(id);
     for (const ref of new Set(refsOfNode(props))) this.w("INSERT OR IGNORE INTO refs (ref, user) VALUES (?, ?)", ref, id);
   }
   /** Drop the rows of `id` and everything stored under it (a removed subtree an insert brings back by id). */
   private purge(id: string): void {
-    const ids = this.q<{ id: string }>(
-      "WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT n.id FROM nodes n JOIN sub ON n.parent = sub.id) SELECT id FROM sub",
+    const rows = this.q<{ id: string; n: number }>(
+      "WITH RECURSIVE sub(id) AS (SELECT ? UNION SELECT n.id FROM nodes n JOIN sub ON n.parent = sub.id) SELECT sub.id AS id, length(nodes.props) AS n FROM sub JOIN nodes ON nodes.id = sub.id",
       id,
-    ).map((r) => r.id);
-    for (const x of ids) {
-      this.w("DELETE FROM nodes WHERE id = ?", x);
-      this.w("DELETE FROM refs WHERE user = ?", x);
-      this.cache.delete(x);
+    );
+    for (const x of rows) {
+      this.w("DELETE FROM nodes WHERE id = ?", x.id);
+      this.w("DELETE FROM refs WHERE user = ?", x.id);
+      this.bytesDelta -= x.n;
+      this.cache.delete(x.id);
     }
   }
   /** Make sure a container's props say where its children list sits. */
@@ -175,8 +190,15 @@ export class SqlTree implements RoomTree {
     const props = JSON.parse(r.props) as Record<string, Json>;
     if (Object.hasOwn(props, "children")) return;
     props.children = null;
-    this.w("UPDATE nodes SET props = ? WHERE id = ?", JSON.stringify(props), parent);
+    const json = this.rowJson(parent, props);
+    this.w("UPDATE nodes SET props = ? WHERE id = ?", json, parent);
+    this.bytesDelta += json.length - r.props.length;
     this.cache.delete(parent);
+  }
+  /** A new top level board: refused past BOARD_CAP. */
+  private roomForBoard(): void {
+    const n = this.q<{ n: number }>("SELECT COUNT(*) AS n FROM nodes WHERE parent = '' AND deleted_seq IS NULL")[0].n;
+    if (n >= BOARD_CAP) throw new ApplyError("invalid", `a file holds at most ${BOARD_CAP} boards`);
   }
   /** A position key for `index` among `siblings`, renumbering them when the key would grow too long. */
   private placeAmong(siblings: { id: string; pos: string }[], index: number, table: "nodes" | "widgets"): string {
@@ -193,7 +215,9 @@ export class SqlTree implements RoomTree {
 
   writeProps(id: string, props: Record<string, Json>): void {
     const r = this.row(id)!;
-    this.w("UPDATE nodes SET props = ? WHERE id = ?", JSON.stringify(props), id);
+    const json = this.rowJson(id, props);
+    this.w("UPDATE nodes SET props = ? WHERE id = ?", json, id);
+    this.bytesDelta += json.length - r.props.length;
     this.cache.delete(id);
     this.w("DELETE FROM refs WHERE user = ?", id);
     for (const ref of new Set(refsOfNode(props))) this.w("INSERT OR IGNORE INTO refs (ref, user) VALUES (?, ?)", ref, id);
@@ -207,6 +231,7 @@ export class SqlTree implements RoomTree {
     };
     collect(node);
     for (const id of ids) if (this.row(id)) this.purge(id);
+    if (parent === null) this.roomForBoard();
     this.ensureChildrenKey(parent);
     const pos = this.placeAmong(this.childRows(parent), index, "nodes");
     this.insertTree(node, parent ?? "", pos);
@@ -228,6 +253,7 @@ export class SqlTree implements RoomTree {
   }
   move(id: string, parent: string | null, index: number): void {
     this.dirty(this.boardOf(id));
+    if (parent === null && this.row(id)!.parent !== "") this.roomForBoard();
     this.ensureChildrenKey(parent);
     const siblings = this.childRows(parent).filter((s) => s.id !== id);
     const pos = this.placeAmong(siblings, index, "nodes");
@@ -287,6 +313,8 @@ export class SqlTree implements RoomTree {
     for (const [k, v] of Object.entries(state.meta)) this.writeKv(`meta/${k}`, v);
     for (const [p, b] of Object.entries(state.blobs)) this.w("INSERT INTO blobs (path, sha256, bytes, type, added_seq) VALUES (?, ?, ?, ?, ?)", p, b.sha256, b.bytes, b.type, this.seq);
     for (const [t, a] of Object.entries(state.vers)) this.w("INSERT INTO vers (target, action) VALUES (?, ?)", t, a);
+    this.w("UPDATE file_meta SET node_bytes = (SELECT COALESCE(SUM(length(props)), 0) FROM nodes) WHERE id = 1");
+    this.bytesDelta = 0;
   }
 
   /** Drop removed subtrees whose removal is at or before `seq` (compaction). Returns the rows dropped. */

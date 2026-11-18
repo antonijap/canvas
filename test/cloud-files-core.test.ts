@@ -240,7 +240,7 @@ test("undo preconditions: a key must still hold the undone action's value, chang
   const a2 = action(room, [{ k: "set", id: "r1", props: { x: { v: 77 } } }]);
   ok(send(room, anna, a2).replies[0]);
   ok(one(room, anna, [{ k: "set", id: "r1", props: { x: { v: 50 } }, if: { x: a2.id } }]));
-  ok(one(room, anna, [{ k: "set", id: "t1", props: { x: { v: 3 } }, if: { x: 0 } }]), "0: never written since load");
+  ok(one(room, anna, [{ k: "set", id: "t1", props: { x: { v: 3 } }, if: { x: 0 } }])); // 0: never written since load
   refused(one(room, anna, [{ k: "remove", id: "t1", if: a2.id }]), "conflict");
 });
 
