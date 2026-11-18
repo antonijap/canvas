@@ -193,7 +193,8 @@ final class CloudAccount: ObservableObject {
         let who = label.trimmingCharacters(in: .whitespaces)
         guard !who.isEmpty else { return }
         Task {
-            let (status, j) = await CloudAccount.post(model, "api/cloud/host/invite", ["label": who, "role": "editor"])
+            // No role: a new person is an editor, someone already here keeps theirs.
+            let (status, j) = await CloudAccount.post(model, "api/cloud/host/invite", ["label": who])
             if status == 200, let link = j["link"] as? String {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(link, forType: .string)
@@ -225,7 +226,7 @@ final class CloudAccount: ObservableObject {
     func confirmJoin(_ model: CanvasModel, _ invite: CloudInvite) {
         let a = NSAlert()
         a.messageText = "Join \(invite.name)?"
-        a.informativeText = "Fingerprint \(invite.fingerprint). Ask the host to read theirs from Settings > Cloud: they should match.\n\n" + CloudDisclosure.lines.joined(separator: " ")
+        a.informativeText = CloudInvite.confirmText(invite, current: CloudURL.clean(model.prefs.cloudUrl), currentName: ServerName.label(model.prefs.cloudUrl, name: model.prefs.cloudName))
         a.addButton(withTitle: "Join")
         a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }

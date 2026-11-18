@@ -152,7 +152,8 @@ func forward(ctx context.Context, o order) {
 	if o.Key == nil || o.Addr == "" {
 		fail("no key or address")
 	}
-	if _, err := tailcat.ParseAddr(tailcat.Addr(o.Addr)); err != nil {
+	ci, err := tailcat.ParseAddr(tailcat.Addr(o.Addr))
+	if err != nil {
 		fail("not a tunnel address")
 	}
 	cl := tailcat.NewClient(tailcat.Addr(o.Addr))
@@ -161,7 +162,8 @@ func forward(ctx context.Context, o order) {
 	if err != nil {
 		fail("could not listen")
 	}
-	say(map[string]any{"event": "ready", "port": ln.Addr().(*net.TCPAddr).Port})
+	// The server key the address names: WireGuard only completes with its holder, so Canvas can check whom it reached.
+	say(map[string]any{"event": "ready", "port": ln.Addr().(*net.TCPAddr).Port, "server": pubText(ci.ServerPublic.NodePublic)})
 	// Which way the traffic goes, now and then: straight between the two Macs, or through a relay. Only that bit
 	// is said, never an address.
 	go func() {

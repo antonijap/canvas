@@ -383,6 +383,20 @@ struct CloudInvite: Equatable {
         return CloudInvite(name: name.isEmpty ? "Cloud" : String(name.prefix(60)), hostId: host, addr: addr, code: code, link: t)
     }
 
+    /// What the join question says: the fingerprint to compare, plainly that it replaces the Cloud this Mac uses now
+    /// (when it would), and what being in a Cloud means.
+    static func confirmText(_ invite: CloudInvite, current: String?, currentName: String) -> String {
+        var lines = ["Fingerprint \(invite.fingerprint). Ask the host to read theirs from Settings > Cloud: they should match."]
+        if let current, !current.isEmpty {
+            if current == "canvas-cloud://\(invite.hostId)" {
+                lines.append("This Mac is already in this Cloud. Joining again adds this Mac once more.")
+            } else {
+                lines.append("This replaces \(currentName) as this Mac\u{2019}s Cloud.")
+            }
+        }
+        return lines.joined(separator: "\n\n") + "\n\n" + CloudDisclosure.lines.joined(separator: " ")
+    }
+
     /// A short fingerprint of the tunnel address to compare with the host's by eye: "3F9A-C21B" (src/cloud-tunnel.ts).
     var fingerprint: String { CloudInvite.fingerprint(addr) }
     static func fingerprint(_ addr: String) -> String {

@@ -31,7 +31,15 @@ export const SERVER_VERSION = "0.1.0-mac";
 /** The hosted Cloud's port, on 127.0.0.1 only. The tunnel serves exactly this port. */
 export const HOST_PORT = 5190;
 export const INVITE_MS = 48 * 3600_000;
-const MAX_CONNECTIONS = 256;
+/** Upgraded room sockets, all devices together. */
+const MAX_SOCKETS = 256;
+/** Plain HTTP connections not (yet) upgraded: kept apart, so idle ones cannot take the sockets' places. */
+const MAX_HTTP_CONNECTIONS = 64;
+/** Request bodies being read at once, and their bytes together. */
+const MAX_BODIES = 16;
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
+const MAX_BODIES_BYTES = 32 * 1024 * 1024;
+const JOIN_BODY_BYTES = 4 * 1024;
 const SOCKETS_PER_DEVICE = 20;
 const ROLES: Role[] = ["owner", "editor", "commenter", "viewer"];
 const uuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v);
@@ -105,6 +113,8 @@ export class CloudHost {
   private readonly rooms = new Map<string, RoomState>();
   private server?: http.Server;
   private readonly conns = new Set<Socket>();
+  private readonly http = new Set<Socket>();
+  private sockets = 0;
   private readonly failures = { start: 0, count: 0 };
   /** Called after people change (enrolment, removal, revocation), so the tunnel's key list can follow. */
   onPeopleChanged: () => void = () => {};
@@ -140,10 +150,19 @@ export class CloudHost {
     }
   }
 
-  /** This Cloud's id: random, made once. Joining Macs know the Cloud by it. */
+  /**
+   * This Cloud's id. With a tunnel it is derived from the enrolment tunnel's public key (src/cloud-tunnel.ts
+   * hostIdFor), which a joining Mac checks against the key its tunnel actually reached; Canvas sets it with useHostId.
+   * Without a tunnel (tests), a random id made once.
+   */
   hostId(): string {
     return this.db.sql.exec<{ host_id: string }>("SELECT host_id FROM host WHERE id = 1").one().host_id;
   }
+  useHostId(id: string): void {
+    if (uuid(id)) this.db.sql.exec("UPDATE host SET host_id = ? WHERE id = 1", id);
+  }
+  /** The member tunnel's public key, sent with its address in a join answer, so the joining Mac can pin it. */
+  memberKey: string | null = null;
 
   // ---------- people ----------
 
@@ -184,10 +203,10 @@ export class CloudHost {
    * Invites a person (new, or one already here who adds a device): a join code, single use, valid 48 hours. Any
    * earlier pending code for that person stops working. Returns the code; the host keeps only its hash.
    */
-  invite(label: string, role: Role = "editor"): { personId: string; code: string; expiresAt: string } {
+  invite(label: string, role?: Role): { personId: string; code: string; expiresAt: string } {
     const clean = cleanLabel(label);
     if (!clean) throw new HostError(400, "invalid", "Type a name or an email for this person");
-    if (!ROLES.includes(role) || role === "owner") throw new HostError(400, "invalid", "Choose editor, commenter or viewer");
+    if (role !== undefined && (!ROLES.includes(role) || role === "owner")) throw new HostError(400, "invalid", "Choose editor, commenter or viewer");
     const code = newSecret("ccj");
     const { id } = parseSecret("ccj", code)!;
     const expires = this.now() + INVITE_MS;
@@ -195,8 +214,9 @@ export class CloudHost {
       const existing = this.db.sql.exec<{ id: string; role: string }>("SELECT id, role FROM persons WHERE label = ?", clean).toArray()[0];
       if (existing?.role === "owner") throw new HostError(409, "conflict", "That is the host");
       const pid = existing?.id ?? crypto.randomUUID();
-      if (!existing) this.db.sql.exec("INSERT INTO persons (id, label, role, created_at) VALUES (?, ?, ?, ?)", pid, clean, role, new Date(this.now()).toISOString());
-      else this.db.sql.exec("UPDATE persons SET role = ? WHERE id = ?", role, pid);
+      // A new person is an editor unless the host chose; a person already here keeps their role unless the host chose one.
+      if (!existing) this.db.sql.exec("INSERT INTO persons (id, label, role, created_at) VALUES (?, ?, ?, ?)", pid, clean, role ?? "editor", new Date(this.now()).toISOString());
+      else if (role) this.db.sql.exec("UPDATE persons SET role = ? WHERE id = ?", role, pid);
       this.db.sql.exec("DELETE FROM invites WHERE person_id = ?", pid);
       this.db.sql.exec("INSERT INTO invites (id, person_id, hash, expires_at) VALUES (?, ?, ?, ?)", id, pid, sha(code).toString("hex"), expires);
       return pid;
@@ -290,6 +310,10 @@ export class CloudHost {
 
   /** Every open socket against the devices and roles now: a removed device or a lower role closes it. */
   private recheck(): void {
+    // Requests still sending their body from a device that is gone are cut off.
+    for (const [req, device] of this.reading) {
+      if (!this.db.sql.exec("SELECT 1 FROM devices WHERE id = ?", device).toArray().length) req.destroy();
+    }
     for (const room of this.rooms.values()) {
       for (const [socket, s] of room.sockets) {
         const now = this.current(s.me);
@@ -344,12 +368,21 @@ export class CloudHost {
 
   // ---------- HTTP ----------
 
-  /** Failed sign-ins, all peers together (every tunnel peer arrives as 127.0.0.1): 30 a minute, then 429. */
+  /**
+   * Failed sign-ins, all peers together (every tunnel peer arrives as 127.0.0.1): past 30 in a minute a failing
+   * attempt gets 429. Only failing ones: a valid token is checked first and always gets in.
+   */
   private blocked(): boolean {
     if (this.now() - this.failures.start >= 60_000) { this.failures.start = this.now(); this.failures.count = 0; }
     return this.failures.count >= 30;
   }
   private failed(): void { if (!this.blocked()) this.failures.count++; }
+  /** The answer to a failed sign-in: 401, or 429 once the minute's failures are used up. */
+  private refusal(): [number, string, string] {
+    const over = this.blocked();
+    this.failed();
+    return over ? [429, "quota", "Too many failed sign-ins"] : [401, "unauthenticated", "A valid device token is required"];
+  }
 
   /**
    * What every request must look like before anything else: no identity headers but the bearer, no browser (no
@@ -370,12 +403,58 @@ export class CloudHost {
   }
 
   private who(req: http.IncomingMessage): Me | null {
-    if (this.blocked()) throw new HostError(429, "quota", "Too many failed sign-ins");
     const t = this.bearer(req);
-    const me = t ? this.identify(t) : null;
-    if (!me) this.failed();
-    return me;
+    return t ? this.identify(t) : null;
   }
+
+  /** Whether a join code would be taken now (without taking it): checked before a join's body is read. */
+  private validCode(code: string): boolean {
+    const c = parseSecret("ccj", code);
+    if (!c) return false;
+    const row = this.db.sql.exec<{ hash: string; expires_at: number }>("SELECT hash, expires_at FROM invites WHERE id = ?", c.id).toArray()[0];
+    if (!row || !sameHash(row.hash, code)) return false;
+    if (row.expires_at <= this.now()) { this.db.sql.exec("DELETE FROM invites WHERE id = ?", c.id); return false; } // expired: gone
+    return true;
+  }
+
+  // Bodies being read, for the aggregate limits, and the requests reading them, so a removal can cut them off.
+  private bodies = { count: 0, bytes: 0 };
+  private readonly reading = new Map<http.IncomingMessage, string>();
+
+  /**
+   * A JSON body within the limits: `max` bytes for this request, 16 bodies and 32 MiB for all at once. With a
+   * device, the request is cut off if that device is removed while its body arrives.
+   */
+  private body(req: http.IncomingMessage, max: number, device?: string): Promise<unknown> {
+    const declared = Number(req.headers["content-length"] ?? 0);
+    if (declared > max) return Promise.reject(new HostError(413, "quota", "Request body is too large"));
+    if (this.bodies.count >= MAX_BODIES || this.bodies.bytes + Math.min(declared || max, max) > MAX_BODIES_BYTES) return Promise.reject(new HostError(503, "quota", "Busy, try again"));
+    this.bodies.count++;
+    if (device) this.reading.set(req, device);
+    let held = 0;
+    const release = () => { this.bodies.count--; this.bodies.bytes -= held; held = 0; this.reading.delete(req); };
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let size = 0, done = false;
+      const end = (e: Error | null, v?: unknown) => { if (done) return; done = true; release(); e ? reject(e) : resolve(v); };
+      req.on("data", (c: Buffer) => {
+        size += c.length;
+        if (size > max || this.bodies.bytes + c.length > MAX_BODIES_BYTES) { req.destroy(); end(new HostError(413, "quota", "Request body is too large")); return; }
+        held += c.length; this.bodies.bytes += c.length;
+        chunks.push(c);
+      });
+      req.on("end", () => {
+        let v: unknown;
+        try { v = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return end(new HostError(400, "invalid", "Invalid JSON")); }
+        end(null, v);
+      });
+      req.on("error", () => end(new HostError(400, "invalid", "The request ended")));
+      req.on("close", () => end(new HostError(400, "invalid", "The request ended")));
+    });
+  }
+
+  /** After a body is read: the same device, still here, with its role now. Null when it was removed meanwhile. */
+  private still(me: Me): Me | null { return this.current(me); }
 
   private async route(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const json = (status: number, body: unknown) => {
@@ -391,29 +470,34 @@ export class CloudHost {
       const type = String(req.headers["content-type"] ?? "").split(";", 1)[0].trim().toLowerCase();
       if (type !== "application/json") return json(415, { code: "invalid", message: "JSON required" });
     }
-    // Enrolment: the join code is the bearer, once.
+    // Enrolment: the join code is the bearer, once. It is checked before any of the body is read, and the body is small.
     if (p === "/v1/join" && method === "POST") {
-      if (this.blocked()) return json(429, { code: "quota", message: "Too many failed sign-ins" });
+      const code = this.bearer(req) ?? "";
+      if (!this.validCode(code)) { const [st, c, m] = this.refusal(); res.setHeader("connection", "close"); return json(st, { code: c, message: m }); }
       try {
-        const me = this.enroll(this.bearer(req) ?? "", await readJson(req));
+        const me = this.enroll(code, await this.body(req, JOIN_BODY_BYTES));
         // The member tunnel's address: what this device uses from now on (the invite's address is for joining only).
-        return json(200, { hostId: this.hostId(), member: this.memberAddr, me: { id: me.id, email: me.email, name: me.name, role: me.role } });
+        return json(200, { hostId: this.hostId(), member: this.memberAddr, memberKey: this.memberKey, me: { id: me.id, email: me.email, name: me.name, role: me.role } });
       } catch (e) {
         if (e instanceof HostError && e.status === 401) this.failed();
         throw e;
       }
     }
     const me = this.who(req);
-    if (!me) return json(401, { code: "unauthenticated", message: "A valid device token is required" });
+    if (!me) { const [st, c, m] = this.refusal(); res.setHeader("connection", "close"); return json(st, { code: c, message: m }); }
     if (!this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
     if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted"], hostId: this.hostId() } as ServerInfo);
     if (p === "/v1/me" && method === "GET") return json(200, { id: me.id, email: me.email, name: me.name, role: me.role, hostId: this.hostId() });
     if (p === "/v1/docs" && method === "POST") {
       if (me.role !== "owner" && me.role !== "editor") return json(403, { code: "forbidden", message: "Owner or editor role required" });
-      const body = await readJson(req);
+      const body = await this.body(req, MAX_BODY_BYTES, me.device);
+      // Checked again now the body is here: a device removed (or demoted) while it arrived changes nothing.
+      const now = this.still(me);
+      if (!now) return json(401, { code: "unauthenticated", message: "This device was removed" });
+      if (now.role !== "owner" && now.role !== "editor") return json(403, { code: "forbidden", message: "Owner or editor role required" });
       const doc = body && typeof body === "object" && "doc" in body ? (body as { doc: unknown }).doc : null;
       if (!uuid(doc)) return json(400, { code: "invalid", message: "doc must be a uuid" });
-      if (!this.team.register(doc, me.id)) return json(409, { code: "quota", message: "This Cloud has too many documents" });
+      if (!this.team.register(doc, now.id)) return json(409, { code: "quota", message: "This Cloud has too many documents" });
       return json(200, { doc });
     }
     const match = /^\/v1\/docs\/([^/]+)\/(threads|ops)$/.exec(p);
@@ -427,12 +511,14 @@ export class CloudHost {
       return json(200, this.room(doc).ops.read(since));
     }
     if (action === "ops" && method === "POST") {
-      const body = await readJson(req);
+      const body = await this.body(req, MAX_BODY_BYTES, me.device);
+      const now = this.still(me);
+      if (!now) return json(401, { code: "unauthenticated", message: "This device was removed" });
       const ops = body && typeof body === "object" && "ops" in body ? (body as { ops: unknown }).ops : null;
       if (!Array.isArray(ops)) return json(400, { code: "invalid", message: "ops must be a list" });
-      const allowance = this.team.takeOps(me.id, ops.length);
+      const allowance = this.team.takeOps(now.id, ops.length);
       if (ops.length > LIMITS.opsPerMessage) return json(429, { code: "quota", message: "Too many ops in one message" });
-      return json(200, this.submit(doc, ops, me, allowance));
+      return json(200, this.submit(doc, ops, now, allowance));
     }
     return json(404, { code: "not_found", message: "No such route" });
   }
@@ -447,8 +533,9 @@ export class CloudHost {
       const m = /^\/v1\/docs\/([^/]+)\/socket$/.exec(url.pathname);
       // Authentication first: nothing about routes or documents is said to someone without a token.
       const me = this.who(req);
-      if (!me) return refuse(401, "Unauthorized");
+      if (!me) { const [st] = this.refusal(); return refuse(st, st === 429 ? "Too Many Requests" : "Unauthorized"); }
       if (!m || !uuid(m[1])) return refuse(404, "Not Found");
+      if (this.sockets >= MAX_SOCKETS) return refuse(503, "Service Unavailable");
       if (!this.team.allowMessage(me.device)) return refuse(429, "Too Many Requests");
       const doc = m[1];
       if (!this.team.hasDoc(doc)) return refuse(404, "Not Found");
@@ -460,6 +547,10 @@ export class CloudHost {
       if (all >= SOCKETS_PER_DEVICE) return refuse(429, "Too Many Requests");
       const ws = upgrade(req, socket, head, { maxMessage: 8 * 1024 * 1024, maxFragments: 1024, pingMs: this.opts.pingMs });
       if (!ws) return;
+      // An upgraded connection counts as a socket now, no longer as one of the plain HTTP connections.
+      this.http.delete(socket as Socket);
+      this.sockets++;
+      ws.on("close", () => { this.sockets--; });
       const session: Session = { doc, me, ready: false, opened: Date.now(), window: Date.now(), messages: 0 };
       room.sockets.set(ws, session);
       ws.on("message", (text: string) => this.onMessage(room, ws, text));
@@ -531,9 +622,13 @@ export class CloudHost {
         else res.destroy();
       });
     });
-    server.maxConnections = MAX_CONNECTIONS;
     // Every TCP connection, upgraded ones included (the http server stops tracking those), so stop() ends them all.
-    server.on("connection", (c: Socket) => { this.conns.add(c); c.on("close", () => this.conns.delete(c)); });
+    // Plain HTTP connections have their own cap; an upgrade moves its connection to the sockets' count.
+    server.on("connection", (c: Socket) => {
+      if (this.http.size >= MAX_HTTP_CONNECTIONS) { c.destroy(); return; }
+      this.conns.add(c); this.http.add(c);
+      c.on("close", () => { this.conns.delete(c); this.http.delete(c); });
+    });
     server.on("upgrade", (req, socket, head) => this.onUpgrade(req, socket, head));
     server.on("clientError", (_e, socket) => socket.destroy());
     this.server = server;
@@ -567,21 +662,4 @@ export class CloudHost {
     await this.stop();
     fs.rmSync(this.opts.dir, { recursive: true, force: true });
   }
-}
-
-/** A JSON body of at most 8 MiB. */
-function readJson(req: http.IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    req.on("data", (c: Buffer) => {
-      size += c.length;
-      if (size > 8 * 1024 * 1024) { req.destroy(); reject(new HostError(413, "quota", "Request body is too large")); return; }
-      chunks.push(c);
-    });
-    req.on("end", () => {
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString("utf8"))); } catch { reject(new HostError(400, "invalid", "Invalid JSON")); }
-    });
-    req.on("error", reject);
-  });
 }

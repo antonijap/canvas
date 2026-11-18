@@ -26,7 +26,8 @@ const Sec = await import("../src/cloud-secrets.ts");
 after(() => { Cl.stopAll(); Tn.stopHelpers(); fs.rmSync(tmp, { recursive: true, force: true }); });
 
 const HOST = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
-const TC = `tc${"A".repeat(60)}`;
+// A stand-in tunnel address: "tc" and the 64 hex digits of the server key it names (test/fixtures/fake-tunnel.ts).
+const TC = `tc${"a".repeat(64)}`;
 const CODE = `ccj_0123456789abcdef.${"b".repeat(43)}`;
 const link = (q: Record<string, string>) => `canvas://cloud/join?${new URLSearchParams(q)}`;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -83,6 +84,26 @@ test("a joined Cloud is reached through this Mac's own helper on 127.0.0.1, with
   assert.equal(st.status, "down");
   Cl.closeTunnel(HOST);
   await Sec.deleteJoined(HOST);
+});
+
+const HOST2 = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+test("a joined Cloud's tunnel must reach the key pinned at join: another key gets no token", async () => {
+  const bin = Tn.helperPath()!;
+  const key = await Tn.genkey(bin, "client");
+  // The saved address leads to a server whose key is a…a; the key pinned when this Mac joined was b…b.
+  await Sec.writeJoined(HOST2, { token: `ccd_0123456789abcdef.${"c".repeat(43)}`, addr: TC, key: key.key, memberKey: `nodekey:${"b".repeat(64)}` });
+  const t = await Cl.target(`canvas-cloud://${HOST2}`);
+  assert.deepEqual(t, { fail: "down" }, "no request goes out with the token");
+  for (let i = 0; i < 40 && Tn.runningHelpers().length; i++) await sleep(50);
+  assert.deepEqual(Tn.runningHelpers(), [], "and the helper that reached the wrong key is stopped");
+  await Sec.deleteJoined(HOST);
+});
+
+test("a Cloud's id comes from its enrolment tunnel's key", () => {
+  const a = Tn.hostIdFor(`nodekey:${"a".repeat(64)}`), b = Tn.hostIdFor(`nodekey:${"b".repeat(64)}`);
+  assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  assert.notEqual(a, b);
+  assert.equal(a, Tn.hostIdFor(`nodekey:${"a".repeat(64)}`));
 });
 
 test("tunnel helper: serve, forward, the port belongs to the helper, and it quits when told or when its parent goes", async () => {

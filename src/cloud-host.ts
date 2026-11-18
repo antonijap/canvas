@@ -21,13 +21,14 @@ import { fork, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { readSecret, writeSecret } from "./cloud-secrets.ts";
-import { fingerprint, genkey, helperPath, ownsPort, serve, type Helper } from "./cloud-tunnel.ts";
+import { fingerprint, genkey, helperPath, hostIdFor, ownsPort, serve, type Helper } from "./cloud-tunnel.ts";
 import { stateDir } from "./usage-counts.ts";
 
 const MAIN = path.join(import.meta.dirname, "..", "cloud", "node", "main.ts");
 export const hostDir = () => path.join(stateDir(), "cloud-host");
 
-interface HostKeys { member: { key: unknown; addr: string }; enrol: { key: unknown; addr: string } }
+interface TunnelKey { key: unknown; addr: string; public: string }
+interface HostKeys { member: TunnelKey; enrol: TunnelKey }
 interface Person { id: string; label: string; role: string; devices: { id: string; name: string; joinedAt: string }[]; invite?: { expiresAt: string } }
 
 let child: ChildProcess | null = null;
@@ -65,37 +66,68 @@ export function hosting(): boolean { return !!child; }
 
 async function loadKeys(bin: string): Promise<HostKeys> {
   const raw = await readSecret("host:keys");
-  if (raw) { try { const k = JSON.parse(raw); if (k.member?.addr && k.enrol?.addr) return k; } catch { /* made again below */ } }
+  if (raw) { try { const k = JSON.parse(raw); if (k.member?.addr && k.enrol?.addr && k.member.public && k.enrol.public) return k; } catch { /* made again below */ } }
   const m = await genkey(bin, "server"), e = await genkey(bin, "server");
-  const k: HostKeys = { member: { key: m.key, addr: m.addr! }, enrol: { key: e.key, addr: e.addr! } };
+  const k: HostKeys = { member: { key: m.key, addr: m.addr!, public: m.public }, enrol: { key: e.key, addr: e.addr!, public: e.public } };
   if (!(await writeSecret("host:keys", JSON.stringify(k)))) throw new Error("Could not save the tunnel keys to the Keychain");
   return k;
 }
 
-/** The tunnels follow the people: the member tunnel's allow list, and the enrolment tunnel while a code waits. */
-async function follow(): Promise<void> {
+/**
+ * The tunnels follow the people: the member tunnel's allow list, and the enrolment tunnel while a code waits. One run
+ * at a time: a call during a run asks for one more run after it (and waits for that), so two helpers can never be
+ * started for the same tunnel, and the last run always sees the latest people.
+ */
+let following: Promise<void> | null = null;
+let again = false;
+function follow(): Promise<void> {
+  if (following) { again = true; return following; }
+  following = (async () => {
+    try {
+      do { again = false; await followOnce(); } while (again && child);
+    } finally { following = null; }
+  })();
+  return following;
+}
+
+async function followOnce(): Promise<void> {
   if (!child) return;
   const r = await ask("people");
   people = r.people;
   const bin = helperPath();
-  if (!bin || !keys) return;
+  if (!bin || !keys || !child) return;
   try {
     const allow = JSON.stringify(r.keys);
     if (!member || !member.helper.alive || member.allow !== allow) {
-      member?.helper.stop();
+      // The old one stops before the new one starts: never two, and never an old allow list left running.
+      const old = member;
+      member = null;
+      old?.helper.stop();
       const s = await serve(bin, keys.member.key, r.keys, port);
+      if (!child) { s.helper.stop(); return; }
       member = { helper: s.helper, allow };
       s.helper.onExit = () => { if (member?.helper === s.helper) { member = null; setTimeout(() => void follow().catch(() => {}), 2000).unref?.(); } };
-      await ask("config", { memberAddr: s.addr });
+      await ask("config", { memberAddr: s.addr, memberKey: keys.member.public });
     }
     if (r.pending > 0 && !enrol?.alive) {
       const s = await serve(bin, keys.enrol.key, null, port);
+      if (!child) { s.helper.stop(); return; }
+      enrol?.stop();
       enrol = s.helper;
     } else if (r.pending === 0 && enrol) { enrol.stop(); enrol = null; }
     tunnelError = "";
   } catch (e) {
     tunnelError = (e as Error).message;
   }
+}
+
+/** The helpers hosting runs now, and the allow list the member tunnel was started with (tests). */
+export function hostHelpers(): { member: number | null; enrol: number | null; allow: string[] | null } {
+  return {
+    member: member?.helper.alive ? member.helper.child.pid ?? null : null,
+    enrol: enrol?.alive ? enrol.child.pid ?? null : null,
+    allow: member ? JSON.parse(member.allow) : null,
+  };
 }
 
 /** Starts hosting (again): the Cloud process, its owner device for this Canvas, the tunnels. */
@@ -121,11 +153,12 @@ export async function startHosting(opts: { name: string; label: string }): Promi
       c.once("message", () => { clearTimeout(t); resolve(); });
       c.once("exit", () => { clearTimeout(t); reject(new Error("The Cloud stopped while starting")); });
     });
-    const r = await ask("start", { label: opts.label });
-    if (!(await ownsPort(c.pid!, r.port))) { c.kill("SIGKILL"); throw new Error("Another program is using the Cloud's port"); }
-    port = r.port; hostId = r.hostId; ownerToken = r.ownerToken;
+    // The tunnel keys first: the Cloud's id is derived from the enrolment tunnel's public key.
     const bin = helperPath();
     if (bin) { try { keys = await loadKeys(bin); } catch (e) { tunnelError = (e as Error).message; } }
+    const r = await ask("start", { label: opts.label, ...(keys ? { hostId: hostIdFor(keys.enrol.public) } : {}) });
+    if (!(await ownsPort(c.pid!, r.port))) { c.kill("SIGKILL"); throw new Error("Another program is using the Cloud's port"); }
+    port = r.port; hostId = r.hostId; ownerToken = r.ownerToken;
     await follow();
   })();
   try { await starting; } catch (e) { stopChild(); throw e; } finally { starting = null; }
@@ -153,7 +186,7 @@ export async function wipeHosting(): Promise<void> {
 }
 
 /** An invite link: the Cloud's name and id, the enrolment tunnel's address and a single-use join code. A secret. */
-export async function invite(label: string, role: string): Promise<string> {
+export async function invite(label: string, role?: string): Promise<string> {
   if (!child) throw new Error("Turn on Host on this Mac first");
   if (!helperPath() || !keys) throw new Error(tunnelError || "This Canvas has no tunnel helper, so no one can join");
   const r = await ask("invite", { label, role });
