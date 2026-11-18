@@ -8,7 +8,7 @@
     "app": "scripts/app.sh",
     "start": "node src/server.ts",
     "build:engine": "engine/build.sh",
-    "test": "node --test --test-concurrency=1 test/*.test.ts",
+    "test": "CANVAS_CHECK_ACTIONS=1 node --test --test-concurrency=1 test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "tokens": "node scripts/gen-swift-tokens.ts",
     "bench": "node bench/speed.ts",

@@ -315,8 +315,10 @@ describe("reset one override", () => {
     const d = await reset("I1", ["descendants"]);
     assert.equal(d.body.changed, true);
     assert.equal(find("I1").descendants, undefined);
-    await undo();
-    await undo();
+    const restoreLayers = await undo();
+    assert.equal(restoreLayers.status, 200, JSON.stringify(restoreLayers.body));
+    const restoreOwn = await undo();
+    assert.equal(restoreOwn.status, 200, JSON.stringify(restoreOwn.body));
     assert.equal(find("I1").fill, "#DC2626");
   });
 

@@ -30,3 +30,14 @@ test("moves reject component cycles and roll back", () => {
   assert.ok(!isReject(send(tree, [{ k: "insert", parent: "board", after: null, node: { id: "other", type: "frame", reusable: true, children: [{ id: "nested", type: "ref", ref: "component" }] } }])));
   assert.ok(isReject(send(tree, [{ k: "move", id: "other", parent: "component", after: null }])));
 });
+
+test("whole override resets and per-path writes share writer preconditions", () => {
+  const tree = seed();
+  const path = makeAction([{ k: "set", id: "instance", props: { "descendants/label": { v: { content: "One" } } } }]);
+  assert.ok(!isReject(applyAction(tree, path)));
+  assert.equal(tree.ver("n:instance:descendants"), path.id);
+  const reset = makeAction([{ k: "set", id: "instance", props: { descendants: null }, if: { descendants: path.id } }]);
+  assert.ok(!isReject(applyAction(tree, reset)));
+  assert.equal(tree.ver("n:instance:descendants/label"), reset.id);
+  assert.ok(isReject(send(tree, [{ k: "set", id: "instance", props: { "descendants/label": { v: { content: "Two" } } }, if: { "descendants/label": path.id } }])));
+});

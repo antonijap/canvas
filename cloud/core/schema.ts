@@ -261,7 +261,7 @@ export function setKeyError(type: string, key: string): string | null {
 
 /** Document-level keys an edit may change: one variable at a time, the themes, the font list. Nothing else. */
 export function docKeyError(key: string): string | null {
-  if (key === "themes" || key === "fonts") return null;
+  if (key === "variables" || key === "themes" || key === "fonts") return null;
   if (typeof key === "string" && key.startsWith("variables/")) {
     const name = key.slice("variables/".length);
     if (!name || PROTO_KEYS.has(name)) return `"${key}" is not a variable`;

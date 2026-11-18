@@ -6,7 +6,7 @@
 
 import type { DocNode, Json } from "../cloud/core/schema.ts";
 import type { BlobRow, NodeView, PageRow, TreeAccess, Ver } from "../cloud/core/files/apply.ts";
-import { refsOfNode } from "../cloud/core/files/apply.ts";
+import { orderLike, refsOfNode } from "../cloud/core/files/apply.ts";
 
 export type DocLike = { children: DocNode[]; [k: string]: unknown };
 export type Envelope = { widgets: Record<string, unknown>[]; extra: Record<string, unknown> };
@@ -30,10 +30,11 @@ export class DocTree implements TreeAccess {
   private undo: Undo[] | null = null;
   private saved: { doc: DocLike; envelope: Envelope } | null = null;
 
-  constructor(doc: DocLike, envelope: Envelope = { widgets: [], extra: {} }, blobs: Iterable<[string, BlobRow]> = []) {
+  constructor(doc: DocLike, envelope: Envelope = { widgets: [], extra: {} }, blobs: Iterable<[string, BlobRow]> = [], vers: Iterable<[string, string]> = []) {
     this.doc = doc;
     this.envelope = envelope;
     this.blobs = new Map(blobs);
+    this.vers = new Map(vers);
     const index = (n: DocNode, parent: string | null) => {
       if (!isObj(n)) return;
       if (typeof n.id === "string" && !this.nodes.has(n.id)) {
@@ -124,6 +125,9 @@ export class DocTree implements TreeAccess {
   }
   ver(target: string): Ver {
     return this.vers.get(target) ?? 0;
+  }
+  allVers(): Record<string, string> {
+    return Object.fromEntries(this.vers);
   }
 
   // ---------- copy on write ----------
@@ -223,6 +227,11 @@ export class DocTree implements TreeAccess {
     const d = this.ownDoc();
     if (value === undefined) delete d[key];
     else d[key] = value;
+  }
+  orderDocKeys(order: string[]): void {
+    const d = this.ownDoc();
+    this.doc = Object.fromEntries(orderLike(Object.keys(d), order).map((k) => [k, d[k]])) as DocLike;
+    this.owned.add(this.doc);
   }
   writeWidget(id: string, value: Json | undefined, index: number | undefined): void {
     const env = this.ownEnvelope();

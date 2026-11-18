@@ -15,7 +15,7 @@
 import type http from "node:http";
 import { allIds, buildIndex, findNode, loadDoc, revisionOf, stateHashOf, StaleFileError, updateNode, type Json, type DocNode } from "./engine.ts";
 import { currentDoc, editDoc, pendingEdits, writerHooks } from "./docwriter.ts";
-import { asOneAction } from "./cloud-files-ops.ts";
+import { asOneAction, lastActionWrites, lastDocOrders, type Writers } from "./cloud-files-ops.ts";
 import { envelopeHook, storeForAsync, type EnvelopeState } from "./widgets/store.ts";
 import type { Widget } from "./widgets/types.ts";
 import { countUsage } from "./usage-counts.ts";
@@ -33,10 +33,10 @@ export type NodeOp = { t: "node"; id: string; props: Record<string, { b: Val; a:
 /** The key orders of a node op between `before` and `after`, when the set of keys differs (else none). */
 export function keyOrders(before: Record<string, unknown>, after: Record<string, unknown>): NodeOp["keys"] {
   const b = Object.keys(before).filter((k) => before[k] !== undefined), a = Object.keys(after).filter((k) => after[k] !== undefined);
-  if (b.length === a.length && b.every((k) => Object.hasOwn(after, k) && after[k] !== undefined)) return undefined;
   // propsOf leaves children out but remembers where they were among the keys.
   const full = (o: Record<string, unknown>, ks: string[]) => ((o as any)[KEY_ORDER] as string[] | undefined)?.filter((k) => k === "children" || ks.includes(k)) ?? ks;
-  return { b: full(before, b), a: full(after, a) };
+  const kb = full(before, b), ka = full(after, a);
+  return kb.length === ka.length && kb.every((k, i) => k === ka[i]) ? undefined : { b: kb, a: ka };
 }
 const KEY_ORDER = Symbol("keyOrder");
 
@@ -68,11 +68,13 @@ export type Place = { parent: string | null; index: number };
 /** A node that moved from one place in the tree to another (reorder, into a new group). */
 export type MoveOp = { t: "move"; id: string; b: Place; a: Place };
 /** A document-level key (variables, themes, fonts) before and after. */
-export type DocOp = { t: "doc"; key: string; b: Val; a: Val };
+export type DocOp = { t: "doc"; key: string; b: Val; a: Val; keys?: { b: string[]; a: string[] } };
 export type Op = NodeOp | WidgetOp | PagesOp | TreeOp | MoveOp | DocOp;
 const isStructural = (o: Op): o is TreeOp | MoveOp => o.t === "tree" || o.t === "move";
 
 export type Entry = {
+  /** Last writers of this step's values, carried by its next undo or redo action. */
+  writers?: Writers;
   seq: number;
   label: string;
   ops: Op[];
@@ -194,7 +196,7 @@ function same(a: unknown, b: unknown): boolean {
   if (Array.isArray(a)) return a.length === (b as unknown[]).length && a.every((x, i) => same(x, (b as unknown[])[i]));
   const ka = Object.keys(a as object).filter((k) => (a as any)[k] !== undefined);
   const kb = Object.keys(b as object).filter((k) => (b as any)[k] !== undefined);
-  return ka.length === kb.length && ka.every((k) => Object.hasOwn(b as object, k) && same((a as any)[k], (b as any)[k]));
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i] && same((a as any)[k], (b as any)[k]));
 }
 const sameVal = (x: Val, y: Val) => (x === null || y === null ? x === y : same(x.v, y.v));
 const valOf = (n: Record<string, unknown>, k: string): Val => (Object.hasOwn(n, k) && n[k] !== undefined ? { v: structuredClone(n[k]) as Json } : null);
@@ -276,7 +278,10 @@ function mergeOps(into: Op[], ops: Op[]): Op[] {
       const barrier = out.findLastIndex(isStructural);
       const have = out.find((o, i): o is NodeOp => i > barrier && o.t === "node" && o.id === op.id);
       if (!have) out.push({ ...op, props: { ...op.props } });
-      else for (const [k, d] of Object.entries(op.props)) have.props[k] = have.props[k] ? { b: have.props[k].b, a: d.a } : d;
+      else {
+        for (const [k, d] of Object.entries(op.props)) have.props[k] = have.props[k] ? { b: have.props[k].b, a: d.a } : d;
+        if (op.keys) have.keys = { b: have.keys?.b ?? op.keys.b, a: op.keys.a };
+      }
     } else if (isStructural(op)) {
       // Kept in order and never folded: each one depends on the tree the ones before it left.
       out.push(op);
@@ -287,7 +292,10 @@ function mergeOps(into: Op[], ops: Op[]): Op[] {
     } else if (op.t === "doc") {
       const at = out.findIndex((o) => o.t === "doc" && o.key === op.key);
       if (at < 0) out.push(op);
-      else out[at] = { ...(out[at] as DocOp), a: op.a };
+      else {
+        const prev = out[at] as DocOp;
+        out[at] = { ...prev, a: op.a, ...(op.keys ? { keys: { b: prev.keys?.b ?? op.keys.b, a: op.keys.a } } : {}) };
+      }
     } else {
       const at = out.findIndex((o) => o.t === "pages");
       if (at < 0) out.push(op);
@@ -297,12 +305,12 @@ function mergeOps(into: Op[], ops: Op[]): Op[] {
   return out.filter((o) => {
     if (o.t === "node") {
       for (const [k, d] of Object.entries(o.props)) if (sameVal(d.b, d.a)) delete o.props[k];
-      return Object.keys(o.props).length > 0;
+      return Object.keys(o.props).length > 0 || !!(o.keys && !same(o.keys.b, o.keys.a));
     }
     if (o.t === "widget") return !same(o.b, o.a);
     if (o.t === "tree") return true;
     if (o.t === "move") return !same(o.b, o.a);
-    if (o.t === "doc") return !sameVal(o.b, o.a);
+    if (o.t === "doc") return !sameVal(o.b, o.a) || !!(o.keys && !same(o.keys.b, o.keys.a));
     return !same(o.b ?? null, o.a ?? null);
   });
 }
@@ -369,6 +377,7 @@ function trim(s: Stacks) {
 
 /** Record one edit that already happened. Clears redo. Merges per the rules at the top of this file. */
 export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: string): void {
+  ops = ops.map((op) => op.t === "doc" && !op.keys && lastDocOrders(docFile) ? { ...op, keys: lastDocOrders(docFile) } : op);
   ops = mergeOps([], ops);
   if (!ops.length) return;
   const part = { edit: meta.edit, ops: clone(ops), at: Date.now() };
@@ -393,6 +402,7 @@ export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: 
     const e = s.undo[at];
     if (e && continuous(e.ops, ops) && !touchedAbove(s.undo.slice(at + 1), ops)) {
       e.ops = mergeOps(e.ops, ops);
+      e.writers = { ...e.writers, ...lastActionWrites(docFile) };
       e.parts?.push(part);
       if (at === s.undo.length - 1) e.at = t;
       compact(docFile, e);
@@ -412,6 +422,7 @@ export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: 
     // starts a new step, so undo stops at that value instead of erasing it.
     if (top?.agent?.open && top.agent.session === session && !breaks(top.ops, ops)) {
       top.ops = mergeOps(top.ops, ops);
+      top.writers = { ...top.writers, ...lastActionWrites(docFile) };
       top.parts?.push(part);
       top.agent.edits++;
       top.at = t;
@@ -426,6 +437,7 @@ export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: 
   } else {
     if (top && !top.agent && meta.mergeKey && top.mergeKey === meta.mergeKey && t - top.at < (meta.mergeMs ?? MERGE_MS) && continuous(top.ops, ops)) {
       top.ops = mergeOps(top.ops, ops);
+      top.writers = { ...top.writers, ...lastActionWrites(docFile) };
       top.parts?.push(part);
       top.at = t;
       if (revision) top.revision = revision;
@@ -434,6 +446,8 @@ export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: 
       if (!top.ops.length) s.undo.pop();
     } else s.undo.push({ seq: ++seq, label: meta.label, ops, revision, at: t, mergeKey: meta.mergeKey, bytes: bytesOf({ ops, parts: [part] }), parts: [part], ...(meta.selBefore?.length ? { selBefore: [...meta.selBefore] } : {}), ...(meta.sel?.length ? { sel: [...meta.sel] } : {}) });
   }
+  const recorded = s.undo.at(-1);
+  if (recorded && !recorded.writers) recorded.writers = lastActionWrites(docFile);
   trim(s);
   notify(docFile);
 }
@@ -546,6 +560,11 @@ function breaks(prev: Op[], next: Op[]): boolean {
       if (p && !same(p.a ?? null, op.b ?? null)) return true;
       continue;
     }
+    if (op.t === "doc") {
+      const p = prev.findLast((o): o is DocOp => o.t === "doc" && o.key === op.key);
+      if (p && !sameVal(p.a, op.b)) return true;
+      continue;
+    }
     if (op.t !== "node") continue;
     for (const [k, d] of Object.entries(op.props)) {
       const was = last.get(`${op.id}\n${k}`);
@@ -578,7 +597,7 @@ function regroup(e: Entry): Entry[] {
   const out = groups.map((parts, i): Entry => {
     const ops = parts.reduce<Op[]>((acc, p) => mergeOps(acc, clone(p.ops)), []);
     if (i === 0) return Object.assign(e, { parts, ops, bytes: bytesOf({ ops, parts }) });
-    return { seq: ++seq, label: e.label, ops, parts, revision: e.revision, at: 0, mergeKey: e.mergeKey, bytes: bytesOf({ ops, parts }) };
+    return { seq: ++seq, label: e.label, ops, parts, writers: e.writers && { ...e.writers }, revision: e.revision, at: 0, mergeKey: e.mergeKey, bytes: bytesOf({ ops, parts }) };
   });
   if (out.length > 1 && e.agent) {
     // The newest half carries the agent's step on; the older ones are closed.
@@ -794,7 +813,7 @@ function runSequence(doc: Doc, ops: Op[], dir: Dir, e: Entry): void {
   for (const op of list) {
     if (op.t === "doc") {
       if (!sameVal(valOf(doc as unknown as Record<string, unknown>, op.key), wantOf(dir, op.b, op.a))) fail(`the document's ${op.key}`);
-      writeDocKey(doc, op.key, toOf(dir, op.b, op.a));
+      writeDocKey(doc, op.key, toOf(dir, op.b, op.a), op.keys && toOf(dir, op.keys.b, op.keys.a));
     } else if (op.t === "node") {
       const c = docConflicts(doc, [op], dir);
       if (c.length) fail(c[0]);
@@ -875,16 +894,17 @@ export function invertOps(ops: Op[]): Op[] {
     if (o.t === "node") return { t: "node", id: o.id, props: Object.fromEntries(Object.entries(o.props).map(([k, d]) => [k, { b: clone(d.a), a: clone(d.b) }])), ...(o.keys ? { keys: { b: o.keys.a.slice(), a: o.keys.b.slice() } } : {}) };
     if (o.t === "tree") return { ...o, kind: o.kind === "insert" ? "remove" : "insert", node: clone(o.node) };
     if (o.t === "move") return { t: "move", id: o.id, b: { ...o.a }, a: { ...o.b } };
-    if (o.t === "doc") return { t: "doc", key: o.key, b: clone(o.a), a: clone(o.b) };
+    if (o.t === "doc") return { t: "doc", key: o.key, b: clone(o.a), a: clone(o.b), ...(o.keys ? { keys: { b: o.keys.a.slice(), a: o.keys.b.slice() } } : {}) };
     return clone(o);
   });
 }
 
 /** Set a document-level key to a value (null: remove it). */
-function writeDocKey(doc: Doc, key: string, to: Val): void {
+function writeDocKey(doc: Doc, key: string, to: Val, order?: string[]): void {
   const d = doc as unknown as Record<string, unknown>;
   if (to === null) delete d[key];
   else d[key] = clone(to.v);
+  orderKeys(d, order);
 }
 
 /**
@@ -918,8 +938,9 @@ export function replayOps(doc: Doc, ops: Op[]): Op[] {
       if (Object.keys(props).length) out.push({ t: "node", id: op.id, props, ...(op.keys ? { keys: { b: keysBefore, a: op.keys.a.slice() } } : {}) });
     } else if (op.t === "doc") {
       const b = valOf(doc as unknown as Record<string, unknown>, op.key);
-      writeDocKey(doc, op.key, op.a);
-      if (!sameVal(b, op.a)) out.push({ t: "doc", key: op.key, b, a: clone(op.a) });
+      const keys = op.keys ? { b: Object.keys(doc), a: op.keys.a.slice() } : undefined;
+      writeDocKey(doc, op.key, op.a, op.keys?.a);
+      if (!sameVal(b, op.a) || keys) out.push({ t: "doc", key: op.key, b, a: clone(op.a), ...(keys ? { keys } : {}) });
     } else if (op.t === "tree") {
       if (op.kind === "insert") {
         const kids = listOf(doc, op.parent);
@@ -1024,7 +1045,7 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
           // The same check on the bytes the write is based on.
           const c2 = [...docConflicts(doc, nodeNow, d), ...docKeyConflicts(doc, docNow, d)];
           if (c2.length) throw refuse(d, e, c2);
-          for (const op of docNow) writeDocKey(doc as unknown as Doc, op.key, toOf(d, op.b, op.a));
+          for (const op of docNow) writeDocKey(doc as unknown as Doc, op.key, toOf(d, op.b, op.a), op.keys && toOf(d, op.keys.b, op.keys.a));
           for (const op of nodeNow) {
             const set: Record<string, Json> = {};
             const remove: string[] = [];
@@ -1167,7 +1188,11 @@ async function step(docFile: string, dir: Dir, hooks: ApplyHooks, opts: { skip?:
     }
     let revision: string | undefined;
     try {
-      revision = await asOneAction(docFile, () => apply(docFile, e, dir, hooks));
+      revision = await asOneAction(docFile, () => apply(docFile, e, dir, hooks), undefined, e.writers);
+      const writes = lastActionWrites(docFile);
+      // Undoing a later step restores an earlier step's value with a new writer. The next undo must name that
+      // writer. Outside edits never enter here, so a change away and back still fails its precondition.
+      for (const entry of [...s.undo, ...s.redo]) entry.writers = { ...entry.writers, ...writes };
     } catch (err) {
       if (!(err instanceof HistoryError) || err.code !== "conflict") throw err;
       // The second press on the same blocked step drops it, so the one before is reachable; nothing is written.

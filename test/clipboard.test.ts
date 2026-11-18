@@ -242,6 +242,7 @@ test("local paste, media creation and history emit one complete action each", as
     const { widgets, version: _version, ...extra } = JSON.parse(fs.readFileSync(path.join(target, "widgets.json"), "utf8"));
     return { widgets, extra };
   };
+  let writers: Record<string, string> = {};
   const check = async (change: () => Promise<any>) => {
     const before = doc(target), side = env();
     emitted.length = 0;
@@ -249,9 +250,10 @@ test("local paste, media creation and history emit one complete action each", as
     assert.ok(r.status === 200 || r.status === 201, JSON.stringify(r.body));
     await flush(target);
     assert.equal(emitted.length, 1);
-    const tree = new DocTree(before, side);
+    const tree = new DocTree(before, side, [], Object.entries(writers));
     const applied = applyAction(tree, emitted[0]);
     assert.ok(!isReject(applied), JSON.stringify(applied));
+    writers = tree.allVers();
     assert.equal(JSON.stringify(tree.doc), JSON.stringify(doc(target)));
     assert.equal(JSON.stringify(tree.envelope), JSON.stringify(env()));
     return emitted[0];
