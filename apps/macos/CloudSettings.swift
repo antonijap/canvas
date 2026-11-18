@@ -447,6 +447,11 @@ final class CloudAccount: ObservableObject {
             await refresh(model, fresh: true)
             let summary = CommentsRead.summary(try? Data(contentsOf: URL(fileURLWithPath: file + "/comments.json")))
             var to: CloudEntry?
+            if let server = summary.server, entry(model, url: CloudURL.clean(server) ?? server) == nil {
+                // Shared to a Cloud this Canvas no longer has: it stays there (a file keeps its Cloud) and does not sync.
+                model.flash("This file is shared to a Cloud that is not in your list. Add that Cloud again to sync it.")
+                return
+            }
             if summary.server == nil {
                 let can = CloudShare.candidates(model.prefs.clouds, status: states.mapValues { ($0.status, $0.role) })
                 if can.isEmpty {
