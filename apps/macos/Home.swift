@@ -318,6 +318,7 @@ private struct HomeSidebar: View {
                                 word: word, muted: word?.tone == .muted) {
                             store.section = .cloud(e.id)
                         }
+                        .help(e.adapterTooltip)
                     }
                 }
             }
@@ -571,23 +572,30 @@ private struct HomeCloudHeader: View {
         let name = HomeLogic.cloudName(entry)
         let s = account.state(entry)
         let word = HomeLogic.word(status: s.known ? s.status : nil)
-        HStack(spacing: 10) {
-            Text(name).font(Typography.display).lineLimit(1).foregroundStyle(Palette.fg).qaText(name)
-            // A pill only when the Cloud needs the person (Sign in, Down): a Cloud that works says nothing.
-            if let word {
-                CloudPill(text: word.text, tone: word.tone) {
-                    if s.status == "signedOut" || s.status == "signInAgain", entry.kind == .server { account.signIn(model, entry) }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Text(name).font(Typography.display).lineLimit(1).foregroundStyle(Palette.fg).qaText(name)
+                if entry.adapterAlpha { Badge(text: "Alpha").qaID("cloud-alpha-badge", label: "Alpha") }
+                // A pill only when the Cloud needs the person (Sign in, Down): a Cloud that works says nothing.
+                if let word {
+                    CloudPill(text: word.text, tone: word.tone) {
+                        if s.status == "signedOut" || s.status == "signInAgain", entry.kind == .server { account.signIn(model, entry) }
+                    }
+                    .help(CloudStatusText.detail(s.status, name: name) ?? CloudStatusText.line(s.status, configured: true))
                 }
-                .help(CloudStatusText.detail(s.status, name: name) ?? CloudStatusText.line(s.status, configured: true))
+                Spacer(minLength: 8)
+                MiniButton(symbol: "gearshape", help: "Cloud settings", inRow: true) {
+                    account.selected = entry.id
+                    SettingsWindow.shared.show(model, tab: .cloud)
+                }
+                .qaID("home-cloud-settings", label: "Cloud settings")
             }
-            Spacer(minLength: 8)
-            MiniButton(symbol: "gearshape", help: "Cloud settings", inRow: true) {
-                account.selected = entry.id
-                SettingsWindow.shared.show(model, tab: .cloud)
+            .frame(height: height)
+            if entry.adapterAlpha {
+                Text(CloudEntry.alphaNotice).font(Typography.micro).foregroundStyle(CloudInk.warn)
+                    .fixedSize(horizontal: false, vertical: true).qaID("cloud-alpha-notice", label: CloudEntry.alphaNotice)
             }
-            .qaID("home-cloud-settings", label: "Cloud settings")
         }
-        .frame(height: height)
     }
 }
 
