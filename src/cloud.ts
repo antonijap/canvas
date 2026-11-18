@@ -49,9 +49,10 @@ export type Status = "signedOut" | "connected" | "offline" | "signInAgain" | "fo
 
 /**
  * Test seams for races: called right after `target` answered (before anything is sent), and after a join's answer
- * (before anything is saved). A test removes a Cloud there to prove nothing goes out or is kept. Never set otherwise.
+ * (before anything is saved), or just before a join request. Tests remove a Cloud there to prove nothing goes out
+ * or is kept. Never set otherwise.
  */
-export const testHooks: { afterTarget?: (url: string) => void; afterJoinAnswer?: (url: string) => void | Promise<void> } = {};
+export const testHooks: { afterTarget?: (url: string) => void; beforeJoinRequest?: (url: string) => void | Promise<void>; afterJoinAnswer?: (url: string) => void | Promise<void> } = {};
 
 /** Thrown inside a Cloud's work when it was removed or signed out of meanwhile: nothing more happens for it. */
 const outdated = () => Object.assign(new Error("This Cloud was removed"), { status: "notAdded" as Status });
@@ -882,32 +883,41 @@ async function hostRoute(p: string, body: Record<string, unknown>): Promise<[num
 export function join(link: unknown, device: string): Promise<{ url: string; hostId: string; name: string; me: unknown }> {
   // One join at a time: two at once into the same Cloud would both redeem a code and the second Keychain write would
   // orphan the first device token.
-  const run = joining.catch(() => {}).then(() => joinOnce(link, device));
+  const inv = parseInvite(link);
+  const g = inv ? generation(hostedUrl(inv.hostId)) : 0;
+  const run = joining.catch(() => {}).then(() => joinOnce(link, device, g));
   joining = run;
   return run;
 }
 let joining: Promise<unknown> = Promise.resolve();
 
-async function joinOnce(link: unknown, device: string): Promise<{ url: string; hostId: string; name: string; me: unknown }> {
+async function joinOnce(link: unknown, device: string, g: number): Promise<{ url: string; hostId: string; name: string; me: unknown }> {
   const inv = parseInvite(link);
   if (!inv) throw new CloudError(400, "invalid", "That is not a Canvas invite link");
   // Removed while this join waited for the Cloud: nothing is saved, and the removal stands.
   const url = hostedUrl(inv.hostId);
-  const g = generation(url);
   const removedMeanwhile = () => generation(url) !== g;
+  const check = () => { if (removedMeanwhile()) throw new CloudError(409, "conflict", "That Cloud was removed while joining. Nothing was saved."); };
+  check();
   // Never twice into the same Cloud, and never into the one this Mac hosts: the invite would be spent for nothing.
-  if (await hostsHere(inv.hostId)) throw new CloudError(409, "conflict", "This Mac hosts that Cloud.");
+  const here = await hostsHere(inv.hostId);
+  check();
+  if (here) throw new CloudError(409, "conflict", "This Mac hosts that Cloud.");
   if (isConfigured(hostedUrl(inv.hostId))) throw new CloudError(409, "conflict", "This Mac is already in that Cloud.");
   const bin = helperPath();
   if (!bin) throw new CloudError(400, "invalid", WHY.unavailable);
   const key = await genkey(bin, "client");
+  check();
   let f: { helper: Helper; origin: string; server: string } | null = null;
   try {
     f = await forward(bin, key.key, inv.addr);
+    check();
     // The Cloud's id comes from the public key its tunnel reached, not from anything the other side says: an invite
     // that names one Cloud and leads to another (a member passing his own Cloud off as the host's) stops here.
     if (hostIdFor(f.server) !== inv.hostId) throw new CloudError(409, "conflict", "This invite leads to a different Cloud than the one it names. Ask the host for a new one.");
     const existing = await readJoined(inv.hostId);
+    await testHooks.beforeJoinRequest?.(url);
+    check();
     if (existing?.hostKey && existing.hostKey !== f.server) throw new CloudError(409, "conflict", "This Mac already joined a Cloud with that id and another key. Leave it first.");
     const token = newSecret("ccd");
     let res: Response;
