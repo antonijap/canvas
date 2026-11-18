@@ -705,11 +705,14 @@ enum TipPlacement {
 }
 
 /// A visible package name typed into a file tab.
-enum TabRename {
-    /// Start from the picked action, after menu tracking restores the previous responder.
-    /// Held menus may deliver that action after pop has already returned.
-    static func afterMenu(_ begin: @escaping () -> Void) {
-        DispatchQueue.main.async(execute: begin)
+struct TabRename {
+    var file: String?
+    var draft = ""
+
+    /// Menu actions set the overlay state immediately; only field focus waits for attachment.
+    mutating func begin(_ file: String) {
+        draft = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+        self.file = file
     }
 
     static func name(_ raw: String) -> String? {
