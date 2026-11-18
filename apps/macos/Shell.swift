@@ -2,6 +2,7 @@
 // full-bleed WKWebView canvas. Nothing here sets a color, size or font of its own.
 
 import SwiftUI
+import ObjectiveC
 import UniformTypeIdentifiers
 import WebKit
 
@@ -54,6 +55,22 @@ final class ControlHostingView<Content: View>: NSHostingView<Content> {
     // QA stays in the background; its first native click must reach the control, as its page clicks do.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     #endif
+}
+
+/// Keeps the controller's sizing and root-view updates while accepting QA's background clicks in secondary windows.
+final class ControlHostingController<Content: View>: NSHostingController<Content> {
+    override init(rootView: Content) {
+        super.init(rootView: rootView)
+        #if CANVAS_QA
+        let selector = #selector(NSView.acceptsFirstMouse(for:))
+        let accept: @convention(block) (AnyObject, NSEvent?) -> Bool = { _, _ in true }
+        if let method = class_getInstanceMethod(type(of: view), selector) {
+            class_replaceMethod(type(of: view), selector, imp_implementationWithBlock(accept), method_getTypeEncoding(method))
+        }
+        #endif
+    }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("Use init(rootView:)") }
 }
 
 private let barY: CGFloat = Metric.inset

@@ -41,6 +41,11 @@ final class SettingsWindow {
 
     func close() { window?.orderOut(nil) }
 
+    #if CANVAS_QA
+    /// Discard pane-local state, including the Cloud filter, between scenarios.
+    func resetForQA() { window?.close(); window = nil }
+    #endif
+
     /// The window while it shows (a sheet opened from Settings > Cloud attaches to it).
     var nsWindow: NSWindow? { window?.isVisible == true ? window : nil }
 
@@ -55,7 +60,7 @@ final class SettingsWindow {
         let tabs = SettingsTabs()
         tabs.tabStyle = .toolbar
         for t in Tab.allCases {
-            let host = NSHostingController(rootView: SettingsPane(model: model, tab: t))
+            let host = ControlHostingController(rootView: SettingsPane(model: model, tab: t))
             host.sizingOptions = [.preferredContentSize]
             host.title = t.title
             let item = NSTabViewItem(viewController: host)
@@ -634,7 +639,7 @@ struct SettingsRow<Control: View>: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1).qaText(title)
-                if let detail { Text(detail).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1) }
+                if let detail { Text(detail).font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1).qaText(detail) }
             }
             Spacer(minLength: 12)
             control()
