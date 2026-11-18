@@ -160,7 +160,7 @@ export class SqlTree implements RoomTree {
   private rowJson(id: string, props: Record<string, Json>): string {
     const s = JSON.stringify(props);
     const size = s.length > ROW_CAP / 3 ? new TextEncoder().encode(s).length : s.length;
-    if (size > ROW_CAP) throw new ApplyError("invalid", `"${id}" would hold ${Math.round(size / 1024)} KB; a layer holds at most ${ROW_CAP / 1024 / 1024} MB`);
+    if (size > ROW_CAP) throw new ApplyError("invalid", `"${id}" would hold ${Math.round(size / 1024)} KB; a layer holds at most 2 MB`);
     return s;
   }
   private writeRow(id: string, parent: string, pos: string, type: string, props: Record<string, Json>): void {
