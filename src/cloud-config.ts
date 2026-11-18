@@ -138,10 +138,16 @@ export function devEmailFor(url: string): string {
   return cloudConfigs().find((e) => e.url === url)?.devEmail ?? "";
 }
 
-function changed(before: string[]): void {
-  const now = cloudConfigs().map((e) => e.url);
-  const removed = before.filter((u) => !now.includes(u));
-  const back = now.filter((u) => !before.includes(u));
+/**
+ * What changed between two lists: Clouds gone, Clouds new. A Cloud whose development email changed is both: whoever
+ * this Canvas was there is someone else now, so its work, answers and sockets go and it connects again as the new one.
+ */
+function changed(beforeList: CloudEntry[]): void {
+  const nowList = cloudConfigs();
+  const now = new Map(nowList.map((e) => [e.url, e.devEmail]));
+  const before = new Map(beforeList.map((e) => [e.url, e.devEmail]));
+  const removed = [...before.keys()].filter((u) => !now.has(u) || now.get(u) !== before.get(u));
+  const back = [...now.keys()].filter((u) => !before.has(u) || now.get(u) !== before.get(u));
   for (const u of removed) bump(u);
   if (removed.length || back.length) for (const fn of listeners) fn(removed, back);
 }
@@ -153,12 +159,14 @@ export function setCloudConfig(raw: unknown): void {
   const rev = Number(o.cloudsRev);
   const versioned = o.cloudsRev !== undefined && Number.isFinite(rev);
   if (versioned && rev < shellRev) return; // older than the list in force
-  const before = cloudConfigs().map((e) => e.url);
+  const before = cloudConfigs();
   shellList = cleanCloudList(o.clouds);
   if (versioned) {
     // A list newer than the one an addition or a removal was made under has seen it: the list decides from now on.
     for (const [u, a] of added) if (rev > a.rev) added.delete(u);
-    for (const [u, r] of held) if (rev > r) held.delete(u);
+    // A removal stands until the shell sent a list without that Cloud (it saw the removal). A list it sent before
+    // that, even one newer than the removal (another Cloud renamed meanwhile), does not bring it back.
+    for (const u of [...held.keys()]) if (!shellList.some((e) => e.url === u)) held.delete(u);
     shellRev = rev;
   } else {
     added.clear();
@@ -171,7 +179,7 @@ export function setCloudConfig(raw: unknown): void {
 export function addCloud(url: string): void {
   const clean = cleanServerUrl(url);
   if (!clean) return;
-  const before = cloudConfigs().map((e) => e.url);
+  const before = cloudConfigs();
   held.delete(clean);
   added.set(clean, { entry: { url: clean, devEmail: "" }, rev: shellRev });
   changed(before);
@@ -181,7 +189,7 @@ export function addCloud(url: string): void {
 export function removeCloud(url: string): void {
   const clean = cleanServerUrl(url);
   if (!clean) return;
-  const before = cloudConfigs().map((e) => e.url);
+  const before = cloudConfigs();
   added.delete(clean);
   held.set(clean, shellRev);
   bump(clean);
@@ -190,7 +198,7 @@ export function removeCloud(url: string): void {
 
 /** Tests: back to a process that never heard from a shell. */
 export function resetCloudConfig(): void {
-  const before = cloudConfigs().map((e) => e.url);
+  const before = cloudConfigs();
   shellList = null;
   shellRev = -Infinity;
   added.clear();

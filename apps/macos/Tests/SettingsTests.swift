@@ -23,7 +23,7 @@ struct SettingsTests {
     }
 
     static func main() {
-        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration()
+        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration(); reviewFixes()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -304,5 +304,45 @@ extension SettingsTests {
         j.set("canvas-cloud://\(id)", forKey: k("cloudUrl"))
         check(AppSettings.load(j).clouds.first?.kind == .joined, "a hosted address without hosting was joined")
         check(AppSettings.load(fresh()).clouds.isEmpty, "nothing to move: no Clouds")
+    }
+}
+
+extension SettingsTests {
+    /// Fixes from the review of many Clouds: a hosted Cloud an older version left is never lost, the share question
+    /// never picks a Cloud that was not chosen, Delete says when it failed, and a share reports where things stand.
+    static func reviewFixes() {
+        let mine = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b", theirs = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        let k = { (n: String) in AppSettings.prefix + n }
+        // An older version hosted a Cloud and then joined another: the address named the joined one, hosting stayed on.
+        let d = fresh()
+        d.set("canvas-cloud://\(theirs)", forKey: k("cloudUrl")); d.set(true, forKey: k("cloudHosting"))
+        let moved = AppSettings.load(d).clouds
+        check(d.bool(forKey: k(CloudList.legacyHostingKey)), "hosting being on is remembered until the server says which Cloud it was")
+        let fixed = CloudList.reconcile(moved, hosted: [HostedInfo(hostId: mine, name: "Studio", hosting: false, legacy: true)], legacyHosting: true)
+        check(fixed.first { $0.hostId == theirs }?.kind == .joined, "the joined Cloud stays joined")
+        let own = fixed.first { $0.hostId == mine }
+        check(own?.kind == .hosted && own?.name == "Studio" && own?.hosting == true, "the Cloud this Mac hosted is added, and starts again: \(String(describing: own))")
+        // A stopped hosted Cloud (an older Stop cleared the address but kept its data): listed, added, not started.
+        let stopped = CloudList.reconcile([], hosted: [HostedInfo(hostId: mine, name: "", hosting: false, legacy: true)], legacyHosting: false)
+        check(stopped.count == 1 && stopped[0].kind == .hosted && !stopped[0].hosting && stopped[0].name == "Cloud", "a stopped hosted Cloud gets its entry, off")
+        check(CloudList.reconcile(stopped, hosted: [HostedInfo(hostId: mine, name: "", hosting: false, legacy: true)], legacyHosting: false) == stopped, "and only once")
+        let server = CloudEntry(url: "https://studio.workers.dev", kind: .server)
+        check(CloudList.reconcile([server], hosted: [], legacyHosting: false) == [server], "servers are left alone")
+        // The share question: two Clouds called "Cloud" are two items, each the Cloud it names.
+        let two = [CloudEntry(url: "canvas-cloud://\(mine)", kind: .hosted), CloudEntry(url: "canvas-cloud://\(theirs)", kind: .joined), server]
+        let titles = CloudShare.titles(two, name: { _ in "Cloud" }, detail: { $0.hostId.map { String($0.prefix(4)) } ?? "server" })
+        check(Set(titles).count == 3, "never two items alike: \(titles)")
+        check(titles == ["Cloud (3f2b)", "Cloud (9a8b)", "Cloud (server)"], "a repeated name gets where it lives: \(titles)")
+        check(CloudShare.titles(two, name: { _ in "Same" }, detail: { _ in "x" }) == ["Same (x)", "Same (x) 2", "Same (x) 3"], "and a number when that repeats too")
+        // Delete or Remove: a failure keeps the Cloud and says why.
+        check(CloudRemoval.problem(wipe: (200, nil), remove: (200, nil)) == nil, "both worked")
+        check(CloudRemoval.problem(wipe: nil, remove: (200, nil)) == nil, "nothing to delete, removed")
+        check(CloudRemoval.problem(wipe: (400, "Could not delete the Cloud's data on this Mac"), remove: (200, nil)) == "Could not delete the Cloud's data on this Mac", "a failed delete says so")
+        check(CloudRemoval.problem(wipe: (200, nil), remove: (0, nil)) == "Could not remove the Cloud", "no answer is a failure too")
+        // A share's toast: an already shared file says where its Cloud stands.
+        check(CloudShare.message(already: false, name: "Studio", status: "connected") == ("Comments shared to Studio", true), "shared")
+        check(CloudShare.message(already: true, name: "Studio", status: "connected") == ("Already shared. Connected to Studio", true), "already, connected")
+        check(CloudShare.message(already: true, name: "Studio", status: "signInAgain") == ("Already shared to Studio. Sign in again", false), "already, but signed out: no claim it connected")
+        check(CloudShare.message(already: true, name: "Studio", status: "down").text == "Already shared to Studio. Cloud down", "already, down")
     }
 }

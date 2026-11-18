@@ -58,9 +58,14 @@ struct HostState: Equatable {
     var fingerprint: String?
     var tunnel = "off"
     var people: [Person] = []
+    var name = ""
+    /// The first slot, where the single hosted Cloud of older versions lives.
+    var legacy = false
 
     init() {}
     init(_ j: [String: Any]) {
+        name = j["name"] as? String ?? ""
+        legacy = j["legacy"] as? Bool ?? false
         available = j["available"] as? Bool ?? false
         hosting = j["hosting"] as? Bool ?? false
         hostId = j["hostId"] as? String
@@ -92,6 +97,8 @@ final class CloudAccount: ObservableObject {
     /// The Clouds this Mac hosts, by host id, and whether this build can host at all (the tunnel helper).
     @Published private(set) var hosts: [String: HostState] = [:]
     @Published private(set) var hostAvailable = false
+    /// The most Clouds this Mac hosts (src/cloud-host.ts MAX_HOSTED).
+    @Published private(set) var hostMax = CloudList.maxHosted
     /// Clouds with work under way (joining, signing in, removing), by address.
     @Published var busy: Set<String> = []
     /// Hosted Clouds starting, by host id ("new" for one being made).
@@ -187,7 +194,22 @@ final class CloudAccount: ObservableObject {
         let available = j["available"] as? Bool ?? false
         if next != hosts { hosts = next }
         if available != hostAvailable { hostAvailable = available }
+        if let m = j["max"] as? Int, m != hostMax { hostMax = m }
         keepAwake(next.values.contains { $0.hosting })
+        reconcile(model)
+    }
+
+    /// The list agrees with what this Mac hosts (CloudList.reconcile): a Cloud an older version hosted, running or
+    /// stopped, gets its entry; one it hosted when it quit starts again.
+    private func reconcile(_ model: CanvasModel) {
+        let d = UserDefaults.standard, key = AppSettings.prefix + CloudList.legacyHostingKey
+        let legacy = d.bool(forKey: key)
+        let infos = hosts.values.compactMap { h in h.hostId.map { HostedInfo(hostId: $0, name: h.name, hosting: h.hosting, legacy: h.legacy) } }
+        let next = CloudList.reconcile(model.prefs.clouds, hosted: infos, legacyHosting: legacy)
+        if next != model.prefs.clouds { model.prefs.clouds = next }
+        guard legacy else { return }
+        d.removeObject(forKey: key)
+        resumeHosting(model)
     }
 
     /// A hosted Cloud's state (people, fingerprint, tunnel), by its entry.
@@ -343,15 +365,27 @@ final class CloudAccount: ObservableObject {
         busy.insert(e.url)
         signIns.removeValue(forKey: e.url)?.close()
         Task {
+            var wipe: (status: Int, error: String?)?
             if e.kind == .hosted, let id = e.hostId {
                 // Stops it if it runs (every token revoked), then deletes its folder on this Mac.
-                _ = await CloudAccount.post(model, "api/cloud/host/wipe", ["hostId": id])
+                let (st, j) = await CloudAccount.post(model, "api/cloud/host/wipe", ["hostId": id])
+                wipe = (st, j["error"] as? String)
             }
-            if e.kind == .server && !CloudURL.isLocal(e.url) {
-                let account = CloudURL.host(e.url)
-                _ = await Task.detached { KeychainStore.delete(service: CloudAccount.service, account: account) }.value
+            if wipe?.status == 200 || wipe == nil {
+                if e.kind == .server && !CloudURL.isLocal(e.url) {
+                    let account = CloudURL.host(e.url)
+                    _ = await Task.detached { KeychainStore.delete(service: CloudAccount.service, account: account) }.value
+                }
             }
-            _ = await CloudAccount.post(model, "api/cloud/remove", ["url": e.url])
+            var removed: (Int, [String: Any]) = (0, [:])
+            if wipe == nil || wipe?.status == 200 { removed = await CloudAccount.post(model, "api/cloud/remove", ["url": e.url]) }
+            // Something failed: the Cloud stays in the list, with its controls, and the toast says what.
+            if let why = CloudRemoval.problem(wipe: wipe, remove: (removed.0, removed.1["error"] as? String)) {
+                busy.remove(e.url)
+                await refreshHost(model)
+                model.flash(why)
+                return
+            }
             model.prefs.clouds = CloudList.remove(model.prefs.clouds, id: e.id)
             states.removeValue(forKey: e.url)
             busy.remove(e.url)
@@ -469,7 +503,10 @@ final class CloudAccount: ObservableObject {
                 // The answer names the Cloud the file is on, which for a file already shared is not the one picked.
                 let url = j["url"] as? String ?? to?.url ?? ""
                 let name = entry(model, url: url).map(HomeLogic.cloudName) ?? HomeLogic.whereLabel(server: url).text
-                model.flash((j["already"] as? Bool == true) ? "Already shared. Connected to \(name)" : "Comments shared to \(name)", level: "success")
+                // A file already shared says whether its Cloud is reachable now, not that it connected.
+                await refresh(model, fresh: true)
+                let m = CloudShare.message(already: j["already"] as? Bool == true, name: name, status: states[url]?.status)
+                model.flash(m.text, level: m.ok ? "success" : nil)
                 model.reloadPage()
             } else {
                 model.flash(j["error"] as? String ?? "Could not share the comments")
@@ -485,14 +522,22 @@ final class CloudAccount: ObservableObject {
         a.messageText = "Share comments to which Cloud?"
         a.informativeText = "Everyone in that Cloud can read the comments on this file."
         let menu = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 260, height: 26), pullsDown: false)
-        for c in clouds { menu.addItem(withTitle: HomeLogic.cloudName(c)) }
+        // Items by tag, with titles never alike: a menu keeps one item per title, so two Clouds named "Cloud" would
+        // otherwise leave one out and move the index of the rest.
+        let titles = CloudShare.titles(clouds, name: HomeLogic.cloudName, detail: { $0.kind == .server ? ServerName.host($0.url) : "on a Mac, \($0.hostId?.prefix(4) ?? "")" })
+        for (i, t) in titles.enumerated() {
+            let item = NSMenuItem(title: t, action: nil, keyEquivalent: "")
+            item.tag = i
+            menu.menu?.addItem(item)
+        }
+        menu.selectItem(withTag: 0)
         menu.setAccessibilityLabel("Cloud")
         a.accessoryView = menu
         a.addButton(withTitle: "Share")
         a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return nil }
-        let i = menu.indexOfSelectedItem
-        return clouds.indices.contains(i) ? clouds[i] : nil
+        guard let i = menu.selectedItem?.tag, clouds.indices.contains(i) else { return nil }
+        return clouds[i]
     }
 
     nonisolated static func post(_ model: CanvasModel, _ path: String, _ body: [String: Any], query: [URLQueryItem] = []) async -> (Int, [String: Any]) {
@@ -968,6 +1013,7 @@ struct AddCloudSheet: View {
     /// Why Host on this Mac is off, or nil when it is on. Hosting one Cloud never stops another: one per team.
     private var hostBlocked: String? {
         if !account.hostAvailable { return "Needs the tunnel helper, which this build does not have" }
+        if max(CloudList.hosted(model.prefs.clouds).count, account.hosts.count) >= account.hostMax { return "This Mac hosts \(account.hostMax) Clouds, the most it can. Delete one first" }
         if model.prefs.clouds.count >= SettingsLimits.clouds { return "Canvas keeps \(SettingsLimits.clouds) Clouds at most" }
         return nil
     }
