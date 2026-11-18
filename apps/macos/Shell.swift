@@ -132,6 +132,7 @@ struct RootView: View {
         }
         .coordinateSpace(name: "canvas")
         .frame(minWidth: 720, minHeight: 420)
+        .ignoresSafeArea()
         .onChange(of: model.revealBoardId) { _, board in if board != nil { model.panelOpen = true } }
         .onChange(of: insets) { _, v in model.setInsets(l: v[0], t: v[1], r: v[2], b: v[3]) }
         .onAppear { model.setInsets(l: insets[0], t: insets[1], r: insets[2], b: insets[3]) }
@@ -267,7 +268,7 @@ struct TopBar: View {
             .id(f)
     }
 
-    var body: some View {
+    private var bar: some View {
         HStack(alignment: .top, spacing: Metric.islandGap) {
             GlassPill {
                 HStack(spacing: 0) {
@@ -321,6 +322,12 @@ struct TopBar: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { actionsWidth = $0 }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    var body: some View {
+        // Measure the available width independently of the tab strip's previous fixed width.
+        GeometryReader { _ in bar }
+        .frame(height: Metric.pill)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
         // This bar sits in the window's titlebar strip, where AppKit shows no tooltips: its controls draw their own.
         .environment(\.titlebarTips, true)
