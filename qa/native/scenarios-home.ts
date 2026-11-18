@@ -370,6 +370,12 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   t.ok(Math.abs(home1.x - home0.x) < 0.5 && home1.x + home1.w <= tb[0].x, "Home did not move and is still before the first file tab");
   t.near(tb[0].h, 32, 0.6, "tabs keep the control height");
 
+  // The whole control row shares a hover lock, including the boundaries between Home, tabs and +.
+  const controls = await t.mark({ id: "tab-controls" });
+  const open = await t.mark({ id: "tab-open" });
+  t.ok(controls.x <= home1.x && controls.x + controls.w >= open.x + open.w,
+    "one hover region covers Home, file tabs and +");
+
   // Home is not draggable: pulling it right changes nothing.
   const l1 = await last();
   await t.systemDrag(center(home1), { x: l1.x + l1.w, y: center(home1).y }, { steps: 4 });
