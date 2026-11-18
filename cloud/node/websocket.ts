@@ -204,8 +204,12 @@ export class ServerSocket extends EventEmitter {
   }
 }
 
-/** Completes the handshake and returns the socket, or answers 400 and returns null. */
-export function upgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer, opts: WebSocketOptions = {}): ServerSocket | null {
+/**
+ * Completes the handshake and returns the socket, or answers 400 and returns null. `register` runs before any byte
+ * that came with the request is read, so the caller has counted the socket and is listening for its close even when
+ * those bytes close it at once.
+ */
+export function upgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer, opts: WebSocketOptions = {}, register?: (ws: ServerSocket) => void): ServerSocket | null {
   const accept = acceptKey(req);
   if (!accept) {
     socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
@@ -213,6 +217,7 @@ export function upgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer,
   }
   socket.write(["HTTP/1.1 101 Switching Protocols", "Upgrade: websocket", "Connection: Upgrade", `Sec-WebSocket-Accept: ${accept}`, "", ""].join("\r\n"));
   const ws = new ServerSocket(socket, opts);
+  register?.(ws);
   if (head.length) ws.feed(head);
   return ws;
 }

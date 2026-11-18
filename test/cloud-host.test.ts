@@ -413,6 +413,31 @@ test("framing: too many fragments close the socket; a peer that stops answering 
   await until(() => s.ended(), 2000);
 });
 
+test("300 upgrades whose first frame (sent with the request) is malformed leave no socket counted; a good upgrade still works", async () => {
+  const { h, base, port } = await host();
+  const doc = crypto.randomUUID();
+  h.team.register(doc, "x");
+  // Three viewers, each under the per-device message quota.
+  const tokens: string[] = [];
+  for (const who of ["ben@studio.test", "cy@studio.test", "dee@studio.test"]) tokens.push((await join(base, h.invite(who, "viewer").code)).token);
+  const bad = Buffer.concat([Buffer.from([0x81, 2]), Buffer.from("hi")]); // unmasked: closed with 1002 at once
+  const cycle = (token: string) => new Promise<void>((resolve) => {
+    const c = net.connect(port, "127.0.0.1", () => {
+      // Headers and the bad frame in one write, so the frame arrives with the upgrade request itself.
+      c.write(Buffer.concat([Buffer.from([`GET /v1/docs/${doc}/socket HTTP/1.1`, "Host: 127.0.0.1", "Upgrade: websocket", "Connection: Upgrade", "Sec-WebSocket-Version: 13", `Sec-WebSocket-Key: ${Buffer.alloc(16, 3).toString("base64")}`, `Authorization: Bearer ${token}`, "", ""].join("\r\n")), bad]));
+    });
+    c.on("data", () => {}); c.on("close", () => resolve()); c.on("error", () => resolve());
+    setTimeout(() => { c.destroy(); resolve(); }, 3000).unref();
+  });
+  for (let i = 0; i < 300; i++) await cycle(tokens[i % 3]);
+  await until(() => h.openSockets() === 0, 3000).catch(() => {});
+  assert.equal(h.openSockets(), 0, `no room socket left counted (${h.openSockets()})`);
+  const owner = h.ownerDevice("Anna");
+  const s = await rawSocket(port, owner, doc);
+  assert.match(s.head(), /^HTTP\/1\.1 101/, "a good upgrade still gets in");
+  s.c.destroy();
+});
+
 test("framing: a ping flood is closed, pongs never pile up for a peer that does not read, and unsolicited pongs are not liveness", async () => {
   // A transport that never drains: whatever is written stays queued, as with a peer that stopped reading.
   const { Duplex } = await import("node:stream");
