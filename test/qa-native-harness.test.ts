@@ -114,3 +114,19 @@ test("system drag helper compiles once per source hash and never caches a failed
   assert.throws(() => systemDragHelper(source, out), /compile failed/);
   assert.equal(fs.readdirSync(out).length, 2, "no partial binary or cached failure");
 });
+
+test("mark waits for the target window to finish resizing before a click", async () => {
+  let reads = 0;
+  const app = { base: "http://127.0.0.1:1", cmd: async () => ({ marks: [{ id: "cloud-row", label: "Review", x: 20, y: 80, w: 200, h: 40,
+    windowFrame: { x: 0, y: 0, w: 500, h: Math.max(400, 700 - ++reads * 50) } }] }) };
+  const t = new NT(app as unknown as QaApp, "example.canvas");
+  const mark = await t.mark({ id: "cloud-row", window: "settings" });
+  assert.equal((mark as any).windowFrame.h, 400, "window-relative row coordinates can stay still while the window resizes");
+});
+
+test("mark never returns a stale click target that disappeared while settling", async () => {
+  let reads = 0;
+  const app = { base: "http://127.0.0.1:1", cmd: async () => ({ marks: ++reads === 1 ? [{ id: "cloud-row", label: "Review", x: 20, y: 80, w: 200, h: 40 }] : [] }) };
+  const t = new NT(app as unknown as QaApp, "example.canvas");
+  await assert.rejects(t.mark({ id: "cloud-row" }), /disappeared/);
+});

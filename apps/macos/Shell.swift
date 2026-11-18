@@ -50,6 +50,10 @@ extension View { func keepsWindowStill() -> some View { modifier(KeepsWindowStil
 /// SwiftUI controls in the hidden titlebar must not inherit window dragging.
 final class ControlHostingView<Content: View>: NSHostingView<Content> {
     override var mouseDownCanMoveWindow: Bool { false }
+    #if CANVAS_QA
+    // QA stays in the background; its first native click must reach the control, as its page clicks do.
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    #endif
 }
 
 private let barY: CGFloat = Metric.inset

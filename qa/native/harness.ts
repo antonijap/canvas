@@ -10,6 +10,7 @@ import { postSystemDrag } from "./system-drag.ts";
 
 export { Fail, Skip, find };
 export type Pt = { x: number; y: number };
+type Mark = Rect & { id: string; label: string | null; windowFrame?: Rect };
 export type Mods = ("cmd" | "shift" | "alt" | "ctrl")[];
 // "Add Cloud": the Add Cloud sheet (CloudSettings.swift AddCloudPanel), found by its title.
 type Win = "main" | "settings" | "key" | "modal" | "menu" | "popover" | "about" | "Add Cloud";
@@ -79,14 +80,14 @@ export class NT {
    * Views marked .qaID / .qaText in the SwiftUI chrome (QA.swift qa.marks) that show now: frame (the part a scroll
    * view leaves visible) and label. `label` matches a substring, case-insensitive; `region` keeps marks centred in it.
    */
-  async marks(o: { id?: string; label?: string; region?: Rect; window?: Win } = {}): Promise<(Rect & { id: string; label: string | null })[]> {
-    const all = (await this.cmd("qa.marks", { id: o.id, label: o.label, window: o.window ?? "main" })).marks as (Rect & { id: string; label: string | null })[];
+  async marks(o: { id?: string; label?: string; region?: Rect; window?: Win } = {}): Promise<Mark[]> {
+    const all = (await this.cmd("qa.marks", { id: o.id, label: o.label, window: o.window ?? "main" })).marks as Mark[];
     const r = o.region;
     return all.filter((m) => !r || (m.x + m.w / 2 >= r.x && m.x + m.w / 2 <= r.x + r.w && m.y + m.h / 2 >= r.y && m.y + m.h / 2 <= r.y + r.h))
       .sort((a, b) => a.y - b.y || a.x - b.x);
   }
   /** The mark `id` (or the first one labelled `label`), waited for; a Fail when it never shows. */
-  async mark(o: { id?: string; label?: string; region?: Rect; window?: Win }, ms = 5000): Promise<Rect & { id: string; label: string | null }> {
+  async mark(o: { id?: string; label?: string; region?: Rect; window?: Win }, ms = 5000): Promise<Mark> {
     const t0 = Date.now();
     for (;;) {
       const m = await this.marks(o);
@@ -97,18 +98,22 @@ export class NT {
   }
   /**
    * The mark once it stops moving: a panel slides in (the inspector after a selection), and a click aimed at a
-   * frame read mid-slide lands beside the control once it is in place. Two reads a beat apart must agree.
+   * frame read mid-slide lands beside the control once it is in place. The view and window must both settle.
    */
-  private async settled(o: { id?: string; label?: string; region?: Rect; window?: Win }, first: Rect & { id: string; label: string | null }) {
+  private async settled(o: { id?: string; label?: string; region?: Rect; window?: Win }, first: Mark) {
     let prev = first;
+    let stableSince = Date.now();
+    const same = (a: Rect, b: Rect) => (["x", "y", "w", "h"] as const).every((k) => Math.abs(a[k] - b[k]) < 0.5);
     for (let i = 0; i < 40; i++) {
       await sleep(80);
       const next = (await this.marks(o).catch(() => []))[0];
-      if (!next) return prev;
-      if (Math.abs(next.x - prev.x) < 0.5 && Math.abs(next.y - prev.y) < 0.5 && Math.abs(next.w - prev.w) < 0.5) return next;
+      if (!next) throw new Fail(`${o.id ?? "control"} disappeared while settling`);
+      const windowStill = next.windowFrame && prev.windowFrame ? same(next.windowFrame, prev.windowFrame) : true;
+      if (!same(next, prev) || !windowStill) stableSince = Date.now();
+      else if (Date.now() - stableSince >= 240) return next;
       prev = next;
     }
-    return prev;
+    throw new Fail(`${o.id ?? "control"} did not stop moving`);
   }
   /** Reads of the window through text recognition this run (marks found everything else). */
   static ocrReads = 0;
