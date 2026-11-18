@@ -1,7 +1,5 @@
-// A structure op's page-list write is a second write (the sidecar) that joins the op's undo step. An agent's write
-// landing between the two used to make the listing a step of its own, labelled like the op: Undo then took the page
-// list back without the board, and a second Undo the board, so for one Undo a page listed an id the document lacked.
-// Here the agent's write is injected exactly in that gap (the sidecar's commit hook).
+// A structure action includes its page-list write. A competing agent edit queued from the sidecar commit hook
+// waits until that action finishes. Each action keeps its own undo step, with the boards and page list together.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -65,21 +63,25 @@ const topIds = (docFile: string) => (currentDoc(docFile).doc.children as any[]).
 const listed = (sidecar: string): string[] => JSON.parse(fs.readFileSync(sidecar, "utf8")).pages.flatMap((p: any) => p.boards);
 const fillOf = (docFile: string, id: string) => (currentDoc(docFile).doc.children as any[]).find((n) => n.id === id)?.fill;
 
-/** Once: an agent's edit of board `target` lands while the page list waits to be written. */
+/** Start a competing request while the page list waits, then await it outside the compound action. */
 function agentInGap(docFile: string, target: string) {
   let fired = false;
+  let pending: ReturnType<typeof call> | undefined;
   storeTestHooks.beforeCommit = async (file) => {
     if (fired || !file.startsWith(path.dirname(docFile))) return;
     fired = true;
-    const r = await call("POST", "/api/update", { file: docFile, id: target, props: { fill: "#FF0000" } }, { "x-canvas-source": "mcp", "x-canvas-session": "gap-agent" });
+    pending = call("POST", "/api/update", { file: docFile, id: target, props: { fill: "#FF0000" } }, { "x-canvas-source": "mcp", "x-canvas-session": "gap-agent" });
+  };
+  return async () => {
+    assert.ok(fired, "the agent request started in the gap");
+    const r = await pending!;
     assert.equal(r.status, 200, JSON.stringify(r.body));
   };
-  return () => fired;
 }
 
-describe("a structure op and its page-list write are one undo step, whatever lands between them", () => {
+describe("a structure op and its page-list write stay one undo step with competing edits", () => {
   for (const op of ["duplicate", "delete"] as const) {
-    test(`${op} on page 2 with an agent's write in the gap: one step for the op and its listing, one for the agent`, async () => {
+    test(`${op} on page 2 with an agent's write queued in the gap: one step for the op and its listing, one for the agent`, async () => {
       const { docFile, q, sidecar } = await setup(`gap-${op}`);
       const sidecarBefore = fs.readFileSync(sidecar, "utf8");
       const docBefore = JSON.stringify(currentDoc(docFile).doc);
@@ -87,7 +89,7 @@ describe("a structure op and its page-list write are one undo step, whatever lan
       const r = await call("POST", "/api/structure", { file: docFile, op, ids: ["c"], page: "p2" });
       storeTestHooks.beforeCommit = undefined;
       assert.equal(r.status, 200, JSON.stringify(r.body));
-      assert.ok(fired(), "the agent's write landed in the gap");
+      await fired();
       const steps = history.entries(docFile).undo;
       assert.deepEqual(steps.map((e) => e.label), [op === "duplicate" ? "Duplicate" : "Delete", "Agent Edits"], "the op (with its page list) and the agent's edit: two steps, nothing labelled like the op on its own");
       assert.ok(steps[0].ops.some((o) => o.t === "pages"), "the page list rides on the op's step");

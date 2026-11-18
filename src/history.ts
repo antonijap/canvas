@@ -101,7 +101,7 @@ export type Entry = {
 export type StepFile = { path: string; stash?: string };
 
 /** Who made an edit and how it merges. */
-export type RecordMeta = { label: string; source?: "user" | "mcp"; session?: string; mergeKey?: string; mergeMs?: number; /** editDoc's write.edit */ edit?: string; /** the layers selected before the step (a duplicate's originals) */ selBefore?: string[]; /** the selection the step was made with */ sel?: string[]; /** join the step with this seq (joinTop), even when other steps landed on top of it since */ into?: number };
+export type RecordMeta = { writers?: Writers; docOrders?: { b: string[]; a: string[] }; label: string; source?: "user" | "mcp"; session?: string; mergeKey?: string; mergeMs?: number; /** editDoc's write.edit */ edit?: string; /** the layers selected before the step (a duplicate's originals) */ selBefore?: string[]; /** the selection the step was made with */ sel?: string[]; /** join the step with this seq (joinTop), even when other steps landed on top of it since */ into?: number };
 
 export class HistoryError extends Error {
   status: number;
@@ -377,7 +377,9 @@ function trim(s: Stacks) {
 
 /** Record one edit that already happened. Clears redo. Merges per the rules at the top of this file. */
 export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: string): void {
-  ops = ops.map((op) => op.t === "doc" && !op.keys && lastDocOrders(docFile) ? { ...op, keys: lastDocOrders(docFile) } : op);
+  const writers = meta.writers ?? lastActionWrites(docFile);
+  const orders = meta.docOrders ?? lastDocOrders(docFile);
+  ops = ops.map((op) => op.t === "doc" && !op.keys && orders ? { ...op, keys: orders } : op);
   ops = mergeOps([], ops);
   if (!ops.length) return;
   const part = { edit: meta.edit, ops: clone(ops), at: Date.now() };
@@ -402,7 +404,7 @@ export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: 
     const e = s.undo[at];
     if (e && continuous(e.ops, ops) && !touchedAbove(s.undo.slice(at + 1), ops)) {
       e.ops = mergeOps(e.ops, ops);
-      e.writers = { ...e.writers, ...lastActionWrites(docFile) };
+      e.writers = { ...e.writers, ...writers };
       e.parts?.push(part);
       if (at === s.undo.length - 1) e.at = t;
       compact(docFile, e);
@@ -422,7 +424,7 @@ export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: 
     // starts a new step, so undo stops at that value instead of erasing it.
     if (top?.agent?.open && top.agent.session === session && !breaks(top.ops, ops)) {
       top.ops = mergeOps(top.ops, ops);
-      top.writers = { ...top.writers, ...lastActionWrites(docFile) };
+      top.writers = { ...top.writers, ...writers };
       top.parts?.push(part);
       top.agent.edits++;
       top.at = t;
@@ -437,7 +439,7 @@ export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: 
   } else {
     if (top && !top.agent && meta.mergeKey && top.mergeKey === meta.mergeKey && t - top.at < (meta.mergeMs ?? MERGE_MS) && continuous(top.ops, ops)) {
       top.ops = mergeOps(top.ops, ops);
-      top.writers = { ...top.writers, ...lastActionWrites(docFile) };
+      top.writers = { ...top.writers, ...writers };
       top.parts?.push(part);
       top.at = t;
       if (revision) top.revision = revision;
@@ -447,7 +449,7 @@ export function record(docFile: string, ops: Op[], meta: RecordMeta, revision?: 
     } else s.undo.push({ seq: ++seq, label: meta.label, ops, revision, at: t, mergeKey: meta.mergeKey, bytes: bytesOf({ ops, parts: [part] }), parts: [part], ...(meta.selBefore?.length ? { selBefore: [...meta.selBefore] } : {}), ...(meta.sel?.length ? { sel: [...meta.sel] } : {}) });
   }
   const recorded = s.undo.at(-1);
-  if (recorded && !recorded.writers) recorded.writers = lastActionWrites(docFile);
+  if (recorded && !recorded.writers) recorded.writers = writers;
   trim(s);
   notify(docFile);
 }
@@ -934,8 +936,11 @@ export function replayOps(doc: Doc, ops: Op[]): Op[] {
         if (!sameVal(b, d.a)) props[k] = { b, a: d.a === null ? null : { v: clone(d.a.v) } };
       }
       const keysBefore = Object.keys(node);
-      orderKeys(updateNode(doc as any, op.id, set, remove), op.keys?.a);
-      if (Object.keys(props).length) out.push({ t: "node", id: op.id, props, ...(op.keys ? { keys: { b: keysBefore, a: op.keys.a.slice() } } : {}) });
+      const updated = updateNode(doc as any, op.id, set, remove);
+      orderKeys(updated, op.keys?.a);
+      const keysAfter = Object.keys(updated);
+      const reordered = keysBefore.length !== keysAfter.length || keysBefore.some((k, i) => k !== keysAfter[i]);
+      if (Object.keys(props).length || reordered) out.push({ t: "node", id: op.id, props, ...(reordered ? { keys: { b: keysBefore, a: keysAfter } } : {}) });
     } else if (op.t === "doc") {
       const b = valOf(doc as unknown as Record<string, unknown>, op.key);
       const keys = op.keys ? { b: Object.keys(doc), a: op.keys.a.slice() } : undefined;
@@ -1027,7 +1032,7 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
     else if (o.t === "move") touches.add(o.id).add(o.b.parent).add(o.a.parent);
   }
   /** The design file's half of the step, run in direction `d` (the other way puts it back when the cards' half fails). */
-  const writeLayers = (d: Dir): string | undefined => {
+  const writeLayers = async (d: Dir): Promise<string | undefined> => {
     for (let attempt = 0; ; attempt++) {
       const loaded = currentDoc(docFile);
       const c = seqOps ? [] : [...docConflicts(loaded.doc, nodeOps, d), ...docKeyConflicts(loaded.doc, docOps, d)];
@@ -1035,7 +1040,7 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
       try {
         // What the step does, as ops that run forward (the crash journal keeps them): redo as recorded, undo inverted.
         const recorded = seqOps ? () => { const now = e.ops.filter(layerOp); return d === "redo" ? clone(now) : invertOps(now); } : undefined;
-        const { write } = editDoc(docFile, { expectedRevision: loaded.revision, touches, deep: !!seqOps, urgent: !!seqOps, recorded }, (doc) => {
+        const { write } = await editDoc(docFile, { expectedRevision: loaded.revision, touches, deep: !!seqOps, urgent: !!seqOps, recorded }, (doc) => {
           // The step's ops as they are when this runs: a replay after an outside save may have rebased them.
           if (d === dir) unsplit();
           const seqNow = seqOps ? e.ops.filter(layerOp) : null;
@@ -1067,7 +1072,7 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
     }
   };
   const layers = !!(nodeOps.length || docOps.length || seqOps);
-  if (layers) revision = writeLayers(dir);
+  if (layers) revision = await writeLayers(dir);
   if (store) {
     try {
       await store.mutateEnvelope((widgets, extra) => {
@@ -1082,7 +1087,7 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
       // (on its stack, where it was) and can run again, instead of half reversed and refusing every retry.
       if (layers) {
         try {
-          writeLayers(dir === "undo" ? "redo" : "undo");
+          await writeLayers(dir === "undo" ? "redo" : "undo");
         } catch (back) {
           console.error(`[canvas] ${dir}: the cards could not be changed and the layers could not be put back: ${(back as Error).message}`);
           if (err instanceof Error) err.message += " The layers were changed but the cards were not.";

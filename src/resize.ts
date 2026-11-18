@@ -67,14 +67,14 @@ export function validateResize(b: ResizeBody): void {
 }
 
 /** Resize one node (and shift its children) in a document on disk, and record one undo step. */
-export function resizeNode(docFile: string, b: ResizeBody, who: { source: "user" | "mcp"; session?: string }) {
+export async function resizeNode(docFile: string, b: ResizeBody, who: { source: "user" | "mcp"; session?: string }) {
   validateResize(b);
   const id = b.id!;
   const ops: NodeOp[] = [];
   // The groups around it fit their layers again after (groupfit.ts).
   const fit = groupsOf(docFile, [id]);
   // The node and each child it shifts are changed (cowDoc copies exactly those).
-  const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [id, ...(b.children ?? []).map((c) => c.id), ...fit.touches] }, (doc) => {
+  const { write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [id, ...(b.children ?? []).map((c) => c.id), ...fit.touches] }, (doc) => {
     ops.length = 0; // the change may run twice (a replay after an outside save)
     const mode = moveModeOf(doc as { children: DocNode[] }, id);
     const props = { ...(b.props ?? {}) };
@@ -104,7 +104,7 @@ export function resizeNode(docFile: string, b: ResizeBody, who: { source: "user"
   });
   if (ops.length) {
     const label = resizeLabel(b.label);
-    record(docFile, ops, { label, source: who.source, session: who.session, mergeKey: b.gesture ? `resize:${id}#${String(b.gesture).slice(0, 64)}` : undefined, edit: write.edit }, write.revision);
+    record(docFile, ops, { label, source: who.source, session: who.session, mergeKey: b.gesture ? `resize:${id}#${String(b.gesture).slice(0, 64)}` : undefined, edit: write.edit, ...write.history }, write.revision);
   }
   return { ok: true as const, id, revision: write.revision, changed: ops.map((o) => o.id) };
 }
@@ -121,12 +121,12 @@ export function resizeLabel(label: unknown): string {
  * page scales each layer's box and sends each node's new geometry). Same rules per node as one resize:
  * geometry only, and x/y only for a node that places itself.
  */
-export function resizeNodes(docFile: string, items: ResizeItem[], label: string | undefined, who: { source: "user" | "mcp"; session?: string }, select?: unknown) {
+export async function resizeNodes(docFile: string, items: ResizeItem[], label: string | undefined, who: { source: "user" | "mcp"; session?: string }, select?: unknown) {
   if (!Array.isArray(items) || !items.length || items.length > 2000) throw new ResizeError(400, "invalid", "items must list 1 to 2000 nodes");
   for (const it of items) validateResize({ id: it && it.id, props: it && it.props });
   const ops: NodeOp[] = [];
   const fit = groupsOf(docFile, items.map((it) => it.id));
-  const { write } = editDoc(docFile, { touches: [...items.map((it) => it.id), ...fit.touches] }, (doc) => {
+  const { write } = await editDoc(docFile, { touches: [...items.map((it) => it.id), ...fit.touches] }, (doc) => {
     ops.length = 0; // the change may run twice (a replay after an outside save)
     for (const it of items) {
       const mode = moveModeOf(doc as { children: DocNode[] }, it.id);
@@ -144,7 +144,7 @@ export function resizeNodes(docFile: string, items: ResizeItem[], label: string 
   });
   // The selection the resize was made with (a group, not the layers it scaled) comes back on undo and redo.
   const sel = Array.isArray(select) ? select.filter((x): x is string => typeof x === "string").slice(0, 2000) : [];
-  if (ops.length) record(docFile, ops, { label: resizeLabel(label), source: who.source, session: who.session, edit: write.edit, ...(sel.length ? { sel } : {}) }, write.revision);
+  if (ops.length) record(docFile, ops, { label: resizeLabel(label), source: who.source, session: who.session, edit: write.edit, ...write.history, ...(sel.length ? { sel } : {}) }, write.revision);
   return { ok: true as const, revision: write.revision, changed: ops.map((o) => o.id) };
 }
 
@@ -173,7 +173,7 @@ export async function handleResizeRoute(req: http.IncomingMessage, res: http.Ser
       const docFile = deps.docFileOf(b.file);
       const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
       const session = String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined;
-      const r = resizeNodes(docFile, b.items, b.label, { source: by === "mcp" ? "mcp" : "user", session }, b.select);
+      const r = await resizeNodes(docFile, b.items, b.label, { source: by === "mcp" ? "mcp" : "user", session }, b.select);
       deps.written(docFile, r.revision, by, r.changed.length ? r.changed : [b.items[0].id]);
       return reply(200, r), true;
     }
@@ -182,7 +182,7 @@ export async function handleResizeRoute(req: http.IncomingMessage, res: http.Ser
     const docFile = deps.docFileOf(b.file);
     const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
     const session = String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined;
-    const r = resizeNode(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
+    const r = await resizeNode(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
     deps.written(docFile, r.revision, by, r.changed.length ? r.changed : [b.id!]);
     return reply(200, r), true;
   } catch (e) {
