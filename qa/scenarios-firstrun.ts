@@ -56,13 +56,27 @@ sc("first-run", "the welcome card has a row per agent, its menu copies the canva
   t.ok(/^codex mcp add canvas -- \S+ \S+\/mcp\/server\.ts$/.test(codex), `the Codex command: ${codex}`);
   const after = t.widgets().widgets.find((x: any) => x.id === w.id);
   t.eq([after.x, after.y], [w.x, w.y], "the menu clicks do not drag the card");
-  // An agent connects: canvas-mcp's hello, as mcp/client.ts sends it. Its row shows the green dot and Connected.
-  await fetch(`${t.srv.base}/api/mcp/hello`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": "mcp-qa-1", "x-canvas-agent": "claude-code" }, body: "{}" });
+  // An agent connects: canvas-mcp's hello, as mcp/client.ts sends it, with its code version (the server's: current).
+  // Its row shows the green dot and Connected.
+  const version = (await (await fetch(`${t.srv.base}/health`)).json()).version;
+  await fetch(`${t.srv.base}/api/mcp/hello`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": "mcp-qa-1", "x-canvas-agent": "claude-code", "x-canvas-mcp-version": version }, body: "{}" });
   await t.waitFor(`document.querySelector('${row("claude")} .wc-on').hidden === false`, "Connected", 6000);
   t.eq(await t.ev(`document.querySelector('${row("claude")} .wc-on').textContent`), "Connected", "the Claude Code row says Connected");
   t.eq(await t.ev(`document.querySelector('${row("claude")} .wc-btn').hidden`), true, "and has no button");
+  t.eq(await t.ev("document.querySelector('.wc .wc-hint').textContent"), "Then select a layer and ask for a change. ⌘Z undoes its work.", "a current MCP: the usual footer");
   const r = await rectOf(t, `.wd[data-id="widget:${w.id}"]`);
   await shot(t, "web-welcome-connected", { x: r.x - 20, y: r.y - 20, w: r.w + 40, h: r.h + 40 });
+  // Only an MCP from before an update talking (test/onboarding.test.ts has the server's side): the footer says to
+  // restart that agent session (GitHub issue 9).
+  await t.ev(`(() => { const real = window.__realFetch = window.fetch; window.fetch = async (u, o) => { const r = await real(u, o); if (!String(u).includes("/api/mcp/setup")) return r; const j = await r.json(); return new Response(JSON.stringify({ ...j, connected: true, outdated: true, client: "Claude" })); }; })()`);
+  await t.waitFor("document.querySelector('.wc .wc-hint').textContent === 'Connected (older version, restart your agent session)'", "the older version line", 6000);
+  t.eq(await t.ev(`document.querySelector('${row("claude")} .wc-on').hidden`), false, "the row stays Connected");
+  await shot(t, "web-welcome-outdated", { x: r.x - 20, y: r.y - 20, w: r.w + 40, h: r.h + 40 });
+  const fit = await t.ev<number[]>("(() => { const c = document.querySelector('.wc').getBoundingClientRect(), h = document.querySelector('.wc .wc-hint'), b = h.getBoundingClientRect(); return [b.bottom, c.bottom, h.scrollWidth, h.clientWidth, b.height]; })()");
+  t.ok(fit[0] <= fit[1] && fit[2] <= fit[3], `the line fits on the card (${fit})`);
+  // The current MCP's hello is what the server has: the usual footer again.
+  await t.ev("window.fetch = window.__realFetch");
+  await t.waitFor("document.querySelector('.wc .wc-hint').textContent.startsWith('Then select')", "the usual footer again", 6000);
 });
 
 sc("first-run", "Connect on the welcome card registers an agent, says the next step, and shows an error with Copy command still in the menu", { covers: ["first-run:connect"], skip: { visual: "the commands name this checkout's folder (~/Code/canvas or a worktree), which differs per clone", reopen: "Connected comes from the live page's stubbed connect answer; the reopened tab reads the scratch agent config, where nothing is registered" } }, async (t: T) => {
@@ -81,7 +95,7 @@ sc("first-run", "Connect on the welcome card registers an agent, says the next s
         await new Promise((r) => setTimeout(r, 400));
         if (b.agent === "codex") return new Response(JSON.stringify({ ok: false, agent: "codex", code: "failed", error: "Error: could not write config.toml" }), { status: 502 });
         window.__reg[b.agent] = true;
-        return new Response(JSON.stringify({ ok: true, agent: b.agent, registered: true, message: "Added. Start a new Claude Code session." }));
+        return new Response(JSON.stringify({ ok: true, agent: b.agent, registered: true, message: "Added. New Claude Code sessions use it; restart any that are open." }));
       }
       const r = await real(u, o);
       if (!url.includes("/api/mcp/setup")) return r;
@@ -100,7 +114,8 @@ sc("first-run", "Connect on the welcome card registers an agent, says the next s
   await t.waitFor(`document.querySelector('${btn("claude")}').textContent === 'Connecting…'`, "Connecting…");
   await t.waitFor(`document.querySelector('${on("claude")}').hidden === false`, "Connected");
   t.eq(await t.ev(`document.querySelector('${btn("claude")}').hidden`), true, "Connect gives way to Connected");
-  t.eq(await t.ev("document.querySelector('.wc .wc-hint').textContent"), "Added. Start a new Claude Code session.", "the next step");
+  t.eq(await t.ev("document.querySelector('.wc .wc-hint').textContent"), "Added. New Claude Code sessions use it; restart any that are open.", "the next step");
+  t.ok(await t.ev("(() => { const c = document.querySelector('.wc').getBoundingClientRect(), h = document.querySelector('.wc .wc-hint'), b = h.getBoundingClientRect(); return b.bottom <= c.bottom && h.scrollHeight <= h.clientHeight + 1; })()"), "the next step fits on the card, nothing cut");
   t.eq(await t.ev("window.__connects"), [{ agent: "claude", method: "POST", header: "1" }], "one POST with the x-canvas header");
   // Still Connected after the next poll: the setup answer says registered.
   await new Promise((res) => setTimeout(res, 2500));

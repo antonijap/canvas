@@ -10,7 +10,9 @@
 //                         welcome card on it; made once, answered again as it is after that
 //
 // Any request canvas-mcp makes (x-canvas-source: mcp on writes, x-canvas-mcp on reads) counts as it talking. Runs Canvas starts itself (src/agent-run.ts,
-// sessions "run-...") do not: they say nothing about whether the person registered the server.
+// sessions "run-...") do not: they say nothing about whether the person registered the server. An MCP whose
+// x-canvas-mcp-version is not this server's code version (or that sends none: one from before an update) counts as
+// Connected, older version: `outdated` in the setup answer.
 
 import fs from "node:fs";
 import type http from "node:http";
@@ -22,6 +24,7 @@ import { DESIGN_FILE } from "./docpath.ts";
 import { kindOf, validateWidget } from "./widgets/registry.ts";
 import { countUsage } from "./usage-counts.ts";
 import { handleConnectRoute, installedState, registeredState, temporaryServer } from "./mcp-connect.ts";
+import { version as codeVersion } from "./version.ts";
 
 export const MCP_NAME = "canvas";
 /** canvas-mcp says hello every 20 s (HEARTBEAT_MS in mcp/client.ts); the indicator goes off after OFF_AFTER_MS of silence. */
@@ -72,6 +75,15 @@ export function setupCommands(node = stableNode(), script = MCP_SCRIPT, home = u
 // ---------- who is talking ----------
 
 let seen: { at: number; client: string } | null = null;
+/**
+ * The last request from an MCP of other code than this server's: one from before an update (it sends no
+ * x-canvas-mcp-version, often only x-canvas-source on its writes), or one whose code differs. Agent sessions that were
+ * open during an update keep running it until they restart.
+ */
+let seenOld: { at: number; client: string } | null = null;
+let serverVersion: string | undefined;
+/** This server's code version (src/version.ts), worked out once: the code it runs does not change under it. */
+const ownVersion = () => (serverVersion ??= codeVersion());
 /** MCP sessions already counted as a connection (usage counts): one per session, not one per heartbeat. */
 const counted = new Set<string>();
 
@@ -87,24 +99,37 @@ export function noteMcp(req: http.IncomingMessage, now = Date.now()): boolean {
   const mcpRead = req.headers["x-canvas-mcp"];
   if (req.headers["x-canvas-source"] !== "mcp" && typeof mcpRead !== "string") return false;
   const session = String(req.headers["x-canvas-session"] ?? mcpRead ?? "");
-  if (!session || session.startsWith("run-")) return false;
+  // An MCP from before sessions were sent has none: it still counts, as an older version.
+  if (session.startsWith("run-")) return false;
   const agent = req.headers["x-canvas-agent"];
-  if (!counted.has(session)) {
+  if (session && !counted.has(session)) {
     if (counted.size > 500) counted.clear();
     counted.add(session);
     countUsage(connectedEvent(agent));
   }
-  seen = { at: now, client: typeof agent === "string" && agent ? agentLabel(agent.slice(0, 80)) : seen?.client ?? "An agent" };
+  const v = req.headers["x-canvas-mcp-version"];
+  const old = typeof v !== "string" || v !== ownVersion();
+  const was = old ? seenOld : seen;
+  const next = { at: now, client: typeof agent === "string" && agent ? agentLabel(agent.slice(0, 80)) : was?.client ?? "An agent" };
+  if (old) seenOld = next;
+  else seen = next;
   return true;
 }
 
+/**
+ * connected: an MCP talked within OFF_AFTER_MS. outdated: only an older one did (no MCP of this version), so the
+ * agent sessions running it must restart to get the current tools.
+ */
 export function mcpStatus(now = Date.now()) {
   const on = !!seen && now - seen.at < OFF_AFTER_MS;
-  return { connected: on, client: on ? seen!.client : null, seenMs: seen ? now - seen.at : null };
+  const oldOn = !on && !!seenOld && now - seenOld.at < OFF_AFTER_MS;
+  const last = on ? seen : oldOn ? seenOld : null;
+  const any = [seen, seenOld].filter((s) => !!s).map((s) => now - s!.at);
+  return { connected: on || oldOn, outdated: oldOn, client: last ? last.client : null, seenMs: any.length ? Math.min(...any) : null };
 }
 
 /** Tests: forget who talked. */
-export const resetMcpSeen = () => { seen = null; counted.clear(); };
+export const resetMcpSeen = () => { seen = null; seenOld = null; counted.clear(); };
 
 // ---------- the Welcome file ----------
 

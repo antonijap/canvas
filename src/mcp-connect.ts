@@ -122,8 +122,15 @@ async function connectNow(id: Agent, o: { node: string; server: string; dirs?: s
   }
   forgetRegistered();
   if (r.code !== 0) return failed(r);
-  return { ok: true, agent: id, registered: true, message: `Added. Start a new ${label} session.` };
+  return { ok: true, agent: id, registered: true, message: addedMessage(label) };
 }
+
+/**
+ * What Connect says once it worked. Agent sessions already open keep the MCP they started with (an older one after an
+ * update) until they restart, so it says that too. The welcome card (src/page/widget-kinds.js welcomeAdded) and
+ * Settings > Agents (apps/macos/SettingsLogic.swift ConnectCopy.added) say the same.
+ */
+export const addedMessage = (label: string) => `Added. New ${label} sessions use it; restart any that are open.`;
 
 // ---------- registered or not ----------
 

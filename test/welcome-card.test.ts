@@ -3,8 +3,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 // @ts-ignore: a plain ES module the page imports too
-import { WELCOME_HINT, WELCOME_TEMPORARY, WELCOME_TITLE, welcomeHint, welcomeRow } from "../src/page/widget-kinds.js";
-import { TEMPORARY_SERVER } from "../src/mcp-connect.ts";
+import { WELCOME_HINT, WELCOME_OUTDATED, WELCOME_TEMPORARY, WELCOME_TITLE, welcomeAdded, welcomeHint, welcomeRow } from "../src/page/widget-kinds.js";
+import { TEMPORARY_SERVER, addedMessage } from "../src/mcp-connect.ts";
 
 describe("welcome card rows", () => {
   test("the card's words", () => {
@@ -35,6 +35,20 @@ describe("welcome card rows", () => {
     assert.equal(WELCOME_TEMPORARY, TEMPORARY_SERVER, "the page's copy of the server's words");
     assert.equal(welcomeHint({ temporary: false }), WELCOME_HINT);
     assert.equal(welcomeHint(null), WELCOME_HINT);
+  });
+
+  test("an MCP from before an update: Connected, and the footer says to restart the agent session (GitHub issue 9)", () => {
+    const s = { installed: { claude: true }, registered: { claude: false }, connected: true, outdated: true, client: "Claude" };
+    assert.deepEqual(welcomeRow(s, "claude"), { connected: true, button: null }, "it talks to Canvas, so the row is Connected");
+    assert.equal(welcomeHint(s), "Connected (older version, restart your agent session)");
+    assert.equal(WELCOME_OUTDATED, "Connected (older version, restart your agent session)");
+    assert.equal(welcomeHint({ ...s, outdated: false }), WELCOME_HINT);
+  });
+
+  test("Connect's next step says that sessions already open must restart", () => {
+    assert.equal(welcomeAdded("Claude Code"), "Added. New Claude Code sessions use it; restart any that are open.");
+    assert.equal(welcomeAdded("Codex"), addedMessage("Codex"), "the page's copy of the server's words");
+    assert.ok(![welcomeAdded("Codex"), WELCOME_OUTDATED].some((t) => /[—·]/.test(t)), "no em dash or middot");
   });
 
   test("registered, or the client talking now, shows Connected and no button", () => {
