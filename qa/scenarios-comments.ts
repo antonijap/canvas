@@ -31,6 +31,38 @@ async function comment(t: T, x: number, y: number, text: string) {
   await t.io.key("Enter");
 }
 const mode = (t: T) => t.ev<boolean>("window.canvasHost.comments.mode");
+
+sc("comments", "Comment hint follows the zoom corner at every window size", { covers: ["comments:light", "comments:dark"], skip: { visual: "Hint placement is measured in both themes and at three viewport sizes; no document pixels change." } }, async (t: T) => {
+  await t.open({ native: true });
+  await t.waitFor("!!window.canvasHost.comments", "comments loaded");
+  await t.ev(`window.canvasCmd({cmd:'comment'})`);
+  for (const theme of ["light", "dark"]) {
+    await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }, { name: "prefers-reduced-motion", value: "reduce" }] });
+    for (const [width, height] of [[720, 420], [1280, 800], [1800, 1000]]) {
+      await t.page.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+      // Stand in for the measured native island. Clearance insets deliberately differ from chrome spacing.
+      await t.ev(`(() => {
+        let e = document.getElementById('qa-zoom-corner');
+        if (!e) { e = document.createElement('div'); e.id = 'qa-zoom-corner'; document.body.append(e); }
+        e.style.cssText = 'position:fixed;right:24px;bottom:18px;width:124px;height:var(--c-pill)';
+        window.canvasCmd({cmd:'insets',l:60,t:60,r:304,b:60});
+        const r = e.getBoundingClientRect();
+        window.canvasCmd({cmd:'zoomCorner',left:r.left,bottom:r.bottom});
+      })()`);
+      await t.settle();
+      const boxes = await t.ev<any>(`(() => {
+        const h = document.querySelector('.cm-hint').getBoundingClientRect(), z = document.getElementById('qa-zoom-corner').getBoundingClientRect();
+        return { bottom:h.bottom, zoomBottom:z.bottom, right:h.right, zoomLeft:z.left, left:h.left,
+          gap:parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) };
+      })()`);
+      t.near(boxes.bottom, boxes.zoomBottom, 1, `${theme} ${width}: bottom edges align`);
+      t.near(boxes.right + boxes.gap, boxes.zoomLeft, 1, `${theme} ${width}: island gap`);
+      t.ok(boxes.left >= 0, `${theme} ${width}: hint fits the window`);
+    }
+  }
+  await t.ev(`document.getElementById('qa-zoom-corner').remove(); window.canvasCmd({cmd:'comment'})`);
+  await t.open({ native: true });
+});
 const openThread = async (t: T, id?: string) => { const p = await pinOf(t, id); await t.io.click(p.x + p.w / 2, p.y + p.h / 2); await t.waitFor(`!!document.querySelector(".cm-pop:not([hidden]) .cm-field")`, "the thread"); };
 
 sc("comments", "C then a click pins a thread on the layer under the pointer; Return posts, Esc leaves", { covers: ["comments:pin", "comments:keyboard", "comments:page-point"] }, async (t: T) => {

@@ -1,6 +1,6 @@
 // Tests for HomeLogic.swift: the recents list, comment summaries, card order, filter, search, empty lines, labels, thumbnail keys.
 // Run from apps/macos:
-//   swiftc -parse-as-library HomeLogic.swift Tests/HomeLogicTests.swift -o /tmp/home-tests && /tmp/home-tests
+//   swiftc -parse-as-library ShellLogic.swift SettingsLogic.swift HomeLogic.swift Tests/HomeLogicTests.swift -o /tmp/home-tests && /tmp/home-tests
 
 import Foundation
 
@@ -98,14 +98,22 @@ struct HomeLogicTests {
         check(HomeLogic.search(all, "brand zzz").isEmpty && HomeLogic.search(all, "refresh brand").map(\.name) == ["Brand refresh"], "every word must match, in any order")
         check(HomeLogic.search(all, "zzz").isEmpty, "no match")
         check(HomeLogic.onServer(all, "https://STUDIO.workers.dev/").count == 2 && HomeLogic.onServer(all, "https://other.example.com").isEmpty, "a server's files")
+        // A Cloud's page compares canonical addresses, port included: two development servers on one host are two Clouds.
+        let dev1 = card("/a/One.canvas", opened: 1, server: "http://localhost:8787"), dev2 = card("/a/Two.canvas", opened: 2, server: "http://localhost:8788")
+        let unsafe = card("/a/Three.canvas", opened: 3, server: "http://localhost.example.com:8787")
+        check(HomeLogic.onServer([dev1, dev2, unsafe], "http://localhost:8787").map(\.name) == ["One"], "one port, one Cloud; an unsafe address is on no Cloud's page")
+        check(HomeLogic.onServer([dev1], "nonsense").isEmpty, "no page for an address Canvas cannot use")
+        let hostedId = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b"
+        let joined = card("/a/Four.canvas", opened: 4, server: "canvas-cloud://\(hostedId.uppercased())")
+        check(HomeLogic.onServer([joined], "canvas-cloud://\(hostedId)").count == 1, "a hosted Cloud by its id, any case")
         check(gone.shared == false && a.shared, "shared follows the server")
     }
 
     static func empty() {
         check(HomeLogic.emptyLine(query: "", onServer: false, files: 0) == "Files you open show up here", "no files at all: a first launch")
         check(HomeLogic.emptyLine(query: "", onServer: false, files: 3) == "Nothing here yet", "a view whose files are all elsewhere")
-        check(HomeLogic.emptyLine(query: "", onServer: true, files: 3) == "No files shared to this server yet", "a server with nothing shared")
-        check(HomeLogic.emptyLine(query: "", onServer: true, files: 0) == "No files shared to this server yet", "a server, even before the first file")
+        check(HomeLogic.emptyLine(query: "", onServer: true, files: 3) == "No files shared to this Cloud yet", "a Cloud with nothing shared")
+        check(HomeLogic.emptyLine(query: "", onServer: true, files: 0) == "No files shared to this Cloud yet", "a Cloud, even before the first file")
         check(HomeLogic.emptyLine(query: "brand", onServer: true, files: 3) == "No files match \u{201C}brand\u{201D}", "a search that matched nothing wins")
         check(HomeLogic.emptyLine(query: "q", onServer: false, files: 0) == "No files match \u{201C}q\u{201D}", "a search with no files says so too")
         check(!HomeLogic.showsSearch(files: 0, query: ""), "no search field before the first file")
@@ -117,8 +125,17 @@ struct HomeLogicTests {
         check(HomeLogic.whereLabel(server: nil) == ("This Mac", "laptopcomputer"), "a local file")
         check(HomeLogic.whereLabel(server: "") == ("This Mac", "laptopcomputer"), "an empty address is local")
         check(HomeLogic.whereLabel(server: "https://studio-canvas.workers.dev") == ("studio-canvas", "cloud"), "a shared file names its server")
-        check(HomeLogic.whereLabel(server: "https://studio-canvas.workers.dev", current: "https://Studio-Canvas.workers.dev/", name: "Studio team") == ("Studio team", "cloud"), "a file on the set server takes its name")
-        check(HomeLogic.whereLabel(server: "https://other.workers.dev", current: "https://studio-canvas.workers.dev", name: "Studio team") == ("other", "cloud"), "a file on another server keeps that server's host")
+        let clouds = [CloudEntry(url: "https://studio-canvas.workers.dev", name: "Studio team", kind: .server), CloudEntry(url: "https://ben.workers.dev", name: "Ben's", kind: .server)]
+        check(HomeLogic.whereLabel(server: "https://Studio-Canvas.workers.dev/", clouds: clouds) == ("Studio team", "cloud"), "a file on one of the Clouds takes its name")
+        check(HomeLogic.whereLabel(server: "https://ben.workers.dev", clouds: clouds) == ("Ben's", "cloud"), "each Cloud its own name")
+        check(HomeLogic.whereLabel(server: "https://other.workers.dev", clouds: clouds) == ("other", "cloud"), "a file on a Cloud not in the list keeps that address's host")
+        check(HomeLogic.word(status: "connected") == nil && HomeLogic.word(status: nil) == nil, "a Cloud that works, or is not asked yet, says nothing: no green dots")
+        check(HomeLogic.word(status: "signedOut")! == ("Sign in", .attention) && HomeLogic.word(status: "signInAgain")!.text == "Sign in", "Sign in, in amber")
+        check(HomeLogic.word(status: "down")! == ("Down", .muted) && HomeLogic.word(status: "offline")!.tone == .muted, "Down and Offline, grey")
+        check(HomeLogic.word(status: "removed")!.tone == .attention && HomeLogic.word(status: "forbidden")!.text == "No access", "the rest that needs the person")
+        check(HomeLogic.rowSymbol(kind: .server) == "cloud" && HomeLogic.rowSymbol(kind: .joined) == "laptopcomputer" && HomeLogic.rowSymbol(kind: .hosted) == "laptopcomputer",
+              "the glyph says where a Cloud lives: on a server, or on a Mac")
+        check(HomeLogic.cloudName(CloudEntry(url: "https://studio-canvas.workers.dev", kind: .server)) == "studio-canvas", "no name: the host")
         let cal = Calendar(identifier: .gregorian)
         let now = DateComponents(calendar: cal, year: 2026, month: 11, day: 17, hour: 15).date!.timeIntervalSince1970
         func ago(_ s: Double) -> String { HomeLogic.ago(now - s, now: now, calendar: cal) }

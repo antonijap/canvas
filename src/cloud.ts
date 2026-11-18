@@ -1,12 +1,20 @@
-// Talking to a team's own Canvas server (cloud/cloudflare): who we are there, one room socket per open shared file,
-// sharing a file, and the routes the app and the page use. What the messages mean for comments.json is in
-// src/cloud-sync.ts; this file only moves them.
+// Talking to the Clouds this Canvas was given (cloud/cloudflare servers, Clouds hosted on a Mac): who we are at each,
+// one room socket per open shared file, sharing a file, and the routes the app and the page use. What the messages
+// mean for comments.json is in src/cloud-sync.ts; this file only moves them.
 //
-//   GET  /api/cloud/status                 { configured, url, host, status, email, role, ... }  (asks the server, at most every 3 s)
+//   GET  /api/cloud/status?url=            one Cloud: { url, host, status, email, role, ... } (asks it at most every 3 s);
+//                                          404 for an address that is not one of this Canvas's Clouds
+//   GET  /api/cloud/status                 { clouds: [ the same, for each Cloud ] }
 //   POST /api/cloud/token  { url, token }  the Access token the app got from its sign-in window. Kept in MEMORY only.
-//   POST /api/cloud/signout { url }        forget it
-//   POST /api/cloud/share?file=            share the open file's comments to the configured server
+//   POST /api/cloud/signout { url }        forget it (memory and Keychain), and do not read the Keychain again until a new one
+//   POST /api/cloud/remove { url }         stop talking to that Cloud: sockets, tunnel, token, invite all go at once
+//   POST /api/cloud/share?file=&url=       share the open file's comments to that Cloud (the only one when there is one)
 //   POST /api/comments/retry|discard?file= { opId }  for a comment the server refused
+//
+// Every request, socket and Keychain read goes through `target`, which refuses any address that is not, exactly, one
+// of the Clouds in src/cloud-config.ts. A file's comments.json names its Cloud; a file whose Cloud is not in the list
+// (or whose address is not a safe one, like http to another host) is never connected: its status is "notAdded" and its
+// comments wait in the outbox until the Cloud is added again.
 //
 // The token: the shell (apps/macos/CloudSettings.swift) reads the `CF_Authorization` cookie of the sign-in window and
 // writes it to the Keychain; it also posts it here so this process need not ask the Keychain for every request. After
@@ -20,40 +28,63 @@
 // 127.0.0.1 when it is the host, with `authorization: Bearer <device token>`. When it cannot be reached at all the
 // status is "down": the host's Mac is asleep, closed or offline; comments wait in the outbox.
 
+import { createHash } from "node:crypto";
+import fs from "node:fs";
 import type http from "node:http";
+import path from "node:path";
 import { PROTOCOL_VERSION, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread } from "../cloud/protocol.ts";
 import { readBodyText } from "./body.ts";
-import { cloudConfig, hostedId, hostedUrl, hostOf, isLocalDev, parseInvite, setJoined } from "./cloud-config.ts";
-import { hostStatus, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
+import { addCloud, bump, cleanServerUrl, cloudConfigs, devEmailFor, generation, hostedId, hostedUrl, hostOf, isConfigured, isLocalDev, onCloudsChanged, parseInvite, removeCloud } from "./cloud-config.ts";
+import { hostsHere, hostStatus, hostStatusAll, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
 import { deleteJoined, readJoined, writeJoined, type JoinedSecrets } from "./cloud-secrets.ts";
 import { forward, genkey, helperPath, hostIdFor, type Helper } from "./cloud-tunnel.ts";
 import { newSecret } from "../cloud/node/host.ts";
 import { acknowledge, confirm, discard, hooks, isShared, opsForShare, pendingStates, reject, retry, shareLocal, snapshot, viewOf, type SyncFile } from "./cloud-sync.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
 import { localName, packageOf } from "./comments.ts";
+import { stateDir } from "./usage-counts.ts";
 import { clearSecret, getSecret } from "./widgets/keychain.ts";
 
-export type Status = "signedOut" | "connected" | "offline" | "signInAgain" | "forbidden" | "tooOld" | "tooNew" | "down" | "removed" | "unavailable";
+export type Status = "signedOut" | "connected" | "offline" | "signInAgain" | "forbidden" | "tooOld" | "tooNew" | "down" | "removed" | "unavailable" | "notAdded";
+
+/**
+ * Test seams for races: called right after `target` answered (before anything is sent), and after a join's answer
+ * (before anything is saved), or just before a join request. Tests remove a Cloud there to prove nothing goes out
+ * or is kept. Never set otherwise.
+ */
+export const testHooks: { afterTarget?: (url: string) => void; beforeJoinRequest?: (url: string) => void | Promise<void>; afterJoinAnswer?: (url: string) => void | Promise<void> } = {};
+
+/** Thrown inside a Cloud's work when it was removed or signed out of meanwhile: nothing more happens for it. */
+const outdated = () => Object.assign(new Error("This Cloud was removed"), { status: "notAdded" as Status });
 
 // ---------- hosted Clouds: where they are reached ----------
 
 const joinedCache = new Map<string, JoinedSecrets | null>();
 const forwards = new Map<string, { helper: Helper; origin: string } | Promise<{ helper: Helper; origin: string }>>();
 
-async function joinedSecrets(id: string): Promise<JoinedSecrets | null> {
+async function joinedSecrets(id: string, url: string, g: number): Promise<JoinedSecrets | null> {
   // Only a found item is kept: a Cloud joined later (or by the shell) is read again.
-  if (!joinedCache.get(id)) joinedCache.set(id, await readJoined(id));
-  return joinedCache.get(id) ?? null;
+  if (joinedCache.get(id)) return joinedCache.get(id)!;
+  const s = await readJoined(id);
+  if (generation(url) !== g) throw outdated(); // left or removed while the Keychain answered: nothing is kept
+  if (s) joinedCache.set(id, s);
+  return s;
 }
 
 /** The local origin of a joined Cloud's tunnel: this Mac's helper, started once and again when it dies. */
-async function tunnelOrigin(id: string, s: JoinedSecrets): Promise<string> {
+async function tunnelOrigin(id: string, s: JoinedSecrets, url: string, g: number): Promise<string> {
   const known = forwards.get(id);
   if (known && !(known instanceof Promise) && known.helper.alive) return known.origin;
-  if (known instanceof Promise) return (await known).origin;
+  if (known instanceof Promise) {
+    const f = await known;
+    if (generation(url) !== g) throw outdated();
+    return f.origin;
+  }
   const bin = helperPath();
   if (!bin) throw Object.assign(new Error("no helper"), { status: "unavailable" });
   const p = forward(bin, s.key, s.addr).then((f) => {
+    // Removed while the helper started (closeTunnel found only this promise): the helper goes now, unused.
+    if (generation(url) !== g) { f.helper.stop(); throw outdated(); }
     // The tunnel must reach the member key pinned when this Mac joined; anything else gets no token.
     if (s.memberKey && f.server !== s.memberKey) { f.helper.stop(); throw Object.assign(new Error("The Cloud's key changed"), { status: "down" }); }
     return f;
@@ -61,34 +92,44 @@ async function tunnelOrigin(id: string, s: JoinedSecrets): Promise<string> {
   forwards.set(id, p);
   try {
     const f = await p;
+    // Closed meanwhile (a request through it failed, or the Cloud was left): this helper is not used.
+    if (forwards.get(id) !== p) { f.helper.stop(); throw generation(url) !== g ? outdated() : Object.assign(new Error("The tunnel closed"), { status: "down" as Status }); }
     forwards.set(id, f);
     f.helper.onExit = () => { if (forwards.get(id) === f) forwards.delete(id); };
     return f.origin;
   } catch (e) {
-    forwards.delete(id);
+    if (forwards.get(id) === p) forwards.delete(id);
     throw e;
   }
 }
 
-/** Where to send a request for a Cloud address, and as whom. For a hosted Cloud this starts its tunnel if needed. */
+/**
+ * Where to send a request for a Cloud address, and as whom. Only for an address that is exactly one of this Canvas's
+ * Clouds: anything else (an address a file names but the person removed, http to another host) is refused before
+ * any Keychain read. For a hosted Cloud this starts its tunnel if needed.
+ */
 export async function target(url: string): Promise<{ base: string; headers: Record<string, string>; hosted: boolean } | { fail: Status }> {
+  if (!isConfigured(url)) return { fail: "notAdded" };
+  const g = generation(url);
   const id = hostedId(url);
   if (!id) {
     const headers = await authHeaders(url);
+    if (generation(url) !== g || !isConfigured(url)) return { fail: "notAdded" };
     return headers ? { base: url, headers, hosted: false } : { fail: "signedOut" };
   }
-  const self = localHost();
-  if (self && self.hostId === id) return { base: self.origin, headers: { authorization: `Bearer ${self.token}` }, hosted: true };
-  const s = await joinedSecrets(id);
-  if (!s) return { fail: "signedOut" };
+  const self = localHost(id);
+  if (self) return { base: self.origin, headers: { authorization: `Bearer ${self.token}` }, hosted: true };
   try {
-    return { base: await tunnelOrigin(id, s), headers: { authorization: `Bearer ${s.token}` }, hosted: true };
+    const s = await joinedSecrets(id, url, g);
+    if (!s) return { fail: "signedOut" };
+    const base = await tunnelOrigin(id, s, url, g);
+    if (generation(url) !== g || !isConfigured(url)) return { fail: "notAdded" };
+    return { base, headers: { authorization: `Bearer ${s.token}` }, hosted: true };
   } catch (e) {
     return { fail: (e as { status?: Status }).status ?? "down" };
   }
 }
 
-/** Stops a joined Cloud's tunnel helper (leaving, or a test). */
 /** How a joined Cloud's traffic goes now: "direct" between the two Macs, "relay", or null (unknown, or not a tunnel). */
 export function tunnelPath(url: string): "direct" | "relay" | null {
   const id = hostedId(url);
@@ -97,16 +138,20 @@ export function tunnelPath(url: string): "direct" | "relay" | null {
   return e ? (e.direct ? "direct" : "relay") : null;
 }
 
+/** Stops a joined Cloud's tunnel helper (leaving, removing, or a test). A helper still starting is stopped once it has. */
 export function closeTunnel(id: string): void {
   const f = forwards.get(id);
   forwards.delete(id);
-  if (f && !(f instanceof Promise)) f.helper.stop();
+  if (f instanceof Promise) f.then((x) => x.helper.stop(), () => {});
+  else f?.helper.stop();
 }
 
 /** The Keychain item the shell writes the token to (account: the server's host). The service is overridable for tests. */
 export const keychainService = () => process.env.CANVAS_CLOUD_KEYCHAIN_SERVICE || "cc.getcanvas.canvas.cloud";
 
 const tokens = new Map<string, string>();
+/** Hosts signed out of in this run: the Keychain is not read for them again until a new token arrives. */
+const signedOut = new Set<string>();
 
 /** What a response means for the person: fine, or why not. Pure, so the 401 rules are tested without a network. */
 export function classify(r: { status: number; type?: string; contentType?: string | null; code?: string }): "ok" | Status {
@@ -119,32 +164,50 @@ export function classify(r: { status: number; type?: string; contentType?: strin
   return "ok";
 }
 
-/** The headers that say who we are to `origin`: a dev email for a local development server, else the Access token. */
+/**
+ * The headers that say who we are to `origin`, one of this Canvas's Clouds: the development email given for exactly
+ * that address (port included) for a local development server, else the Access token. Null for anything else.
+ */
 export async function authHeaders(origin: string): Promise<Record<string, string> | null> {
+  if (!isConfigured(origin) || hostedId(origin)) return null;
   if (isLocalDev(origin)) {
-    const email = cloudConfig().devEmail;
+    const email = devEmailFor(origin);
     return email ? { "x-canvas-dev-email": email } : null;
   }
   const host = hostOf(origin);
+  if (signedOut.has(host)) return null;
   let t = tokens.get(host);
   if (!t) {
+    const g = generation(origin);
     try {
       t = (await getSecret({ service: keychainService(), account: host })).trim();
     } catch {
       return null;
     }
+    // Signed out or removed while the Keychain answered: that answer is not used, nor kept.
+    if (generation(origin) !== g || signedOut.has(host) || !isConfigured(origin)) { clearSecret({ service: keychainService(), account: host }); return null; }
     if (t) tokens.set(host, t);
   }
   return t ? { "cf-access-token": t } : null;
 }
 
+/** A new token (signed in), or none (signed out: memory, the Keychain item and the status go together). */
 export function setToken(url: string, token: string | null): void {
   const host = hostOf(url);
-  if (token) tokens.set(host, token);
-  else tokens.delete(host);
   clearSecret({ service: keychainService(), account: host });
   servers.delete(url);
-  for (const s of sessions.values()) if (s.origin === url) { if (!token) setStatus(s, "signedOut"); reconnectNow(s); }
+  if (token) {
+    tokens.set(host, token);
+    signedOut.delete(host);
+    for (const s of sessions.values()) if (s.origin === url) reconnectNow(s);
+    return;
+  }
+  // The shell deleted the Keychain item before it said so (it is the item's only writer, so a sign-in right after
+  // cannot race a delete from here). A Keychain read still under way is dropped by the generation.
+  tokens.delete(host);
+  signedOut.add(host);
+  bump(url);
+  for (const s of sessions.values()) if (s.origin === url) { setStatus(s, "signedOut"); reconnectNow(s); }
 }
 
 // ---------- the server ----------
@@ -162,8 +225,12 @@ const servers = new Map<string, ServerState>();
 type Reply = { fail: Status } | { fail?: undefined; res: Response; json: any };
 
 async function request(origin: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<Reply> {
+  const g = generation(origin);
   const t = await target(origin);
   if ("fail" in t) return { fail: t.fail };
+  testHooks.afterTarget?.(origin);
+  // Removed or signed out of after `target` answered: its headers are not sent.
+  if (generation(origin) !== g || !isConfigured(origin)) return { fail: "notAdded" };
   let res: Response;
   try {
     res = await fetch(t.base + path, {
@@ -197,7 +264,9 @@ async function request(origin: string, path: string, init: { method?: string; bo
 
 /** Asks the server who we are and whether it speaks our protocol, reusing a recent answer (STATUS_REUSE_MS). */
 export async function checkServer(origin: string, force = false, fresh = false): Promise<ServerState> {
-  const devEmail = cloudConfig().devEmail;
+  const devEmail = devEmailFor(origin);
+  if (!isConfigured(origin)) return { status: "notAdded", at: Date.now(), devEmail };
+  const g = generation(origin);
   const known = servers.get(origin);
   if (!force && known && known.devEmail === devEmail) {
     const age = Date.now() - known.at;
@@ -210,7 +279,13 @@ export async function checkServer(origin: string, force = false, fresh = false):
     }
   }
   // Once a hosted Cloud said this Mac was removed, its tunnel stops letting it in, which looks like "down": it stays "removed".
-  const set = (s: Omit<ServerState, "at" | "devEmail">) => { const v = { ...s, status: s.status === "down" && known?.status === "removed" ? "removed" as Status : s.status, at: Date.now(), devEmail }; servers.set(origin, v); return v; };
+  const set = (s: Omit<ServerState, "at" | "devEmail">): ServerState => {
+    // Removed or signed out of while it answered: the answer is not kept, and says so.
+    if (generation(origin) !== g || !isConfigured(origin)) return { status: isConfigured(origin) ? "signedOut" : "notAdded", at: Date.now(), devEmail };
+    const v = { ...s, status: s.status === "down" && known?.status === "removed" ? "removed" as Status : s.status, at: Date.now(), devEmail };
+    servers.set(origin, v);
+    return v;
+  };
   const info = await request(origin, "/v1/info");
   if (info.fail) return set({ status: info.fail });
   const protocol = Number(info.json?.protocol);
@@ -299,8 +374,14 @@ function reconnectNow(s: Session): void {
 
 async function connect(s: Session): Promise<void> {
   if (s.stopped || s.ws) return;
+  const g = generation(s.origin);
   const t = await target(s.origin);
   if (s.stopped || s.ws) return;
+  if (!("fail" in t)) testHooks.afterTarget?.(s.origin);
+  // Removed, signed out of, or its development email changed after `target` answered: no socket with those headers.
+  if (!("fail" in t) && (generation(s.origin) !== g || !isConfigured(s.origin))) { if (isConfigured(s.origin)) schedule(s); else park(s); return; }
+  // Not one of this Canvas's Clouds (any more): no socket, no retry; it wakes when the Cloud is added again.
+  if ("fail" in t && t.fail === "notAdded" && !isConfigured(s.origin)) { park(s); return; }
   if ("fail" in t) { setStatus(s, t.fail); schedule(s); return; }
   let ws: WebSocket;
   try {
@@ -313,8 +394,11 @@ async function connect(s: Session): Promise<void> {
   }
   s.ws = ws;
   if (t.hosted) watch(s, ws);
-  ws.onopen = () => send(s, { type: "hello", protocol: PROTOCOL_VERSION, doc: s.doc, since: seqOf(s) });
-  ws.onmessage = (ev) => { try { onMessage(s, JSON.parse(String(ev.data)) as ServerMessage); } catch { /* a bad message is skipped */ } };
+  ws.onopen = () => { if (s.ws === ws && !s.stopped) send(s, { type: "hello", protocol: PROTOCOL_VERSION, doc: s.doc, since: seqOf(s) }); };
+  ws.onmessage = (ev) => {
+    if (s.ws !== ws || s.stopped) return; // a socket this session no longer owns (removed, signed out) says nothing
+    try { onMessage(s, JSON.parse(String(ev.data)) as ServerMessage); } catch { /* a bad message is skipped */ }
+  };
   ws.onerror = () => { /* the close that follows decides */ };
   ws.onclose = () => void closed(s, ws);
 }
@@ -349,6 +433,7 @@ async function closed(s: Session, ws: WebSocket): Promise<void> {
   // Why: offline, signed out of Access, or no longer allowed. One cheap question tells them apart.
   const st = await checkServer(s.origin, true);
   if (s.stopped) return;
+  if (!isConfigured(s.origin)) { park(s); return; }
   setStatus(s, st.status === "connected" ? "offline" : st.status);
   schedule(s);
 }
@@ -395,7 +480,7 @@ function onMessage(s: Session, m: ServerMessage): void {
       else if (m.code === "unauthenticated" && hostedId(s.origin)) {
         // A hosted Cloud says this Mac was removed, just before its tunnel shuts the Mac out: kept, so it never reads "down".
         const known = servers.get(s.origin);
-        servers.set(s.origin, { ...(known ?? { devEmail: cloudConfig().devEmail }), status: "removed", at: Date.now() });
+        if (isConfigured(s.origin)) servers.set(s.origin, { ...(known ?? { devEmail: devEmailFor(s.origin) }), status: "removed", at: Date.now() });
         setStatus(s, "removed");
       } else if (m.code === "unauthenticated") setStatus(s, "signInAgain");
       else if (m.code === "forbidden") setStatus(s, "forbidden");
@@ -437,11 +522,42 @@ function stop(s: Session): void {
   sessions.delete(s.pkg);
 }
 
+/**
+ * Files whose Cloud is not one of this Canvas's Clouds now: never connected, their comments wait in the outbox. When
+ * that Cloud is added again they connect (onCloudsChanged below).
+ */
+const parked = new Map<string, string | null>();
+function park(s: Session): void {
+  stop(s);
+  parked.set(s.pkg, s.display);
+  notify(s);
+}
+
+/** Everything that belonged to a Cloud that is gone: sockets, timers, tunnel, cached answers and secrets in memory. */
+function forget(url: string): void {
+  servers.delete(url);
+  for (const s of [...sessions.values()]) if (s.origin === url) park(s);
+  const id = hostedId(url);
+  if (id) { closeTunnel(id); joinedCache.delete(id); }
+  else { tokens.delete(hostOf(url)); clearSecret({ service: keychainService(), account: hostOf(url) }); }
+}
+
+onCloudsChanged((removed, back) => {
+  for (const url of removed) forget(url);
+  if (!back.length) return;
+  for (const [pkg, display] of [...parked]) {
+    let f: SyncFile | null = null;
+    try { f = readCommentsFile(pkg) as SyncFile | null; } catch { /* unreadable: stays parked */ }
+    if (f?.server?.url && back.includes(f.server.url)) { parked.delete(pkg); touch(pkg, display); }
+  }
+});
+
 /** Closes every room socket and joined Cloud tunnel (a test, or the server shutting down). */
 export function stopAll(): void {
   for (const s of [...sessions.values()]) stop(s);
   for (const id of [...forwards.keys()]) closeTunnel(id);
   servers.clear();
+  parked.clear();
 }
 
 /** Closes one file's socket without unsharing it (a test of offline; the app uses it for nothing else). */
@@ -453,12 +569,57 @@ export function disconnect(pkg: string): boolean {
 }
 
 /** A shared file was opened or changed here: its room is connected (once) and what waits is sent. */
+// ---------- files this Mac vouches for ----------
+//
+// A comments.json can come from anyone (a copy, a sync folder, a download) and name one of this person's Clouds, with
+// ops waiting in its outbox. Those must never go out as this person without them saying so. So the first time a
+// shared file (its folder, doc and Cloud) is seen here, whatever waits in its outbox moves to the refused list with a
+// plain reason: Retry sends it as them, Discard drops it. A file shared from this Mac is vouched for when it is shared.
+// <state>/cloud-known.json keeps hashes of (folder, doc, Cloud), never a path or a name in clear.
+
+const UNVOUCHED = "This file arrived with it waiting to be sent. Retry sends it as you";
+const KNOWN_MAX = 5000;
+const knownFile = () => path.join(stateDir(), "cloud-known.json");
+function knownKey(pkg: string, f: SyncFile): string {
+  let real = pkg;
+  try { real = fs.realpathSync(pkg); } catch { /* as given */ }
+  return createHash("sha256").update(`${real}\n${f.doc}\n${f.server?.url ?? ""}`).digest("hex").slice(0, 32);
+}
+function readKnown(): string[] {
+  try { const a = JSON.parse(fs.readFileSync(knownFile(), "utf8")); return Array.isArray(a) ? a.filter((x) => typeof x === "string") : []; } catch { return []; }
+}
+function markKnown(key: string): void {
+  const list = readKnown().filter((k) => k !== key);
+  list.push(key);
+  try {
+    fs.mkdirSync(stateDir(), { recursive: true });
+    const tmp = `${knownFile()}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(list.slice(-KNOWN_MAX)), { mode: 0o600 });
+    fs.renameSync(tmp, knownFile());
+  } catch { /* not kept: the next look holds back again, which only asks once more */ }
+}
+export function vouch(pkg: string, f: SyncFile): boolean {
+  if (!isShared(f)) return false;
+  const key = knownKey(pkg, f);
+  if (readKnown().includes(key)) return false;
+  markKnown(key);
+  if (!f.outbox.length) return false;
+  f.rejected = [...(f.rejected ?? []), ...f.outbox.map((envelope) => ({ envelope, code: "forbidden" as const, message: UNVOUCHED }))];
+  f.outbox = [];
+  return true;
+}
+hooks.vouch = vouch;
+
 function touch(pkg: string, display: string | null): void {
   let f: SyncFile | null;
   try { f = readCommentsFile(pkg) as SyncFile | null; } catch { return; }
   const live = sessions.get(pkg);
-  if (!f || !isShared(f)) { if (live) stop(live); return; }
+  if (!f || !isShared(f)) { if (live) stop(live); parked.delete(pkg); return; }
+  if (vouch(pkg, f)) { try { writeCommentsFile(pkg, f); } catch { return; } notifier(display, pkg); }
   if (live && (live.doc !== f.doc || live.origin !== f.server!.url)) stop(live);
+  // A Cloud this Canvas does not have (removed, never added, or an address that is not safe): nothing connects.
+  if (!isConfigured(f.server!.url)) { const l = sessions.get(pkg); if (l) stop(l); parked.set(pkg, display ?? parked.get(pkg) ?? null); return; }
+  parked.delete(pkg);
   let s = sessions.get(pkg);
   if (!s) {
     s = { pkg, display, origin: f.server!.url, doc: f.doc, status: "offline", ready: false, attempt: 0, inflight: new Set(), sentAt: [], stopped: false };
@@ -477,7 +638,7 @@ function info(pkg: string, f: SyncFile): unknown {
   return {
     url: f.server!.url,
     host: hostOf(f.server!.url),
-    status: s?.status ?? "offline",
+    status: s?.status ?? (isConfigured(f.server!.url) ? "offline" : "notAdded"),
     connected: !!s?.ready,
     role: s?.role,
     me: f.me ?? null,
@@ -493,7 +654,8 @@ hooks.info = info;
 export class CloudError extends CommentsError {}
 
 const WHY: Record<string, string> = {
-  signedOut: "Sign in to your team's server in Settings > Cloud first.",
+  signedOut: "Sign in to this Cloud in Settings > Cloud first.",
+  notAdded: "That Cloud is not one of your Clouds. Add it in Home > Add Cloud.",
   down: "The Cloud isn't open right now. Its Mac may be asleep or closed.",
   removed: "The host removed this Mac from the Cloud. Ask them for a new invite.",
   unavailable: "This Canvas has no tunnel helper, so it cannot reach a Cloud hosted on a Mac.",
@@ -504,29 +666,84 @@ const WHY: Record<string, string> = {
   tooNew: "The team's server is newer than this Canvas. Update Canvas.",
 };
 
+/** Shares run one at a time per file: two at once (to two Clouds, or twice) could both register and both write. */
+const sharing = new Map<string, Promise<unknown>>();
+
 /**
- * Shares the file's comments to the configured server: registers its doc, turns its threads into ops sent from this
- * person, and links the file (`server` in comments.json). A file already shared only connects.
+ * Shares the file's comments to `url`, one of this Canvas's Clouds (with none given: the only one, when there is
+ * exactly one): registers its doc, turns its threads into ops sent from this person, and links the file (`server` in
+ * comments.json). A file already shared keeps its Cloud and only connects; the answer names that Cloud.
  */
-export async function shareFile(pkg: string, display: string | null): Promise<{ doc: string; url: string; already: boolean; ops: number }> {
+export function shareFile(pkg: string, display: string | null, to?: string | null): Promise<{ doc: string; url: string; already: boolean; ops: number }> {
+  const prev = sharing.get(pkg) ?? Promise.resolve();
+  const run = prev.catch(() => {}).then(() => shareOnce(pkg, display, to));
+  sharing.set(pkg, run);
+  void run.catch(() => {}).finally(() => { if (sharing.get(pkg) === run) sharing.delete(pkg); });
+  return run;
+}
+
+const failStatus = (s: Status) => (s === "offline" || s === "down" ? 502 : s === "notAdded" ? 404 : 401);
+
+async function shareOnce(pkg: string, display: string | null, to?: string | null): Promise<{ doc: string; url: string; already: boolean; ops: number }> {
   const existing = readCommentsFile(pkg) as SyncFile | null;
   if (existing && isShared(existing)) { touch(pkg, display); return { doc: existing.doc, url: existing.server!.url, already: true, ops: 0 }; }
-  const { url } = cloudConfig();
-  if (!url) throw new CloudError(400, "invalid", "Set your team's server address in Settings > Cloud first.");
+  let url: string;
+  if (to) {
+    const clean = cleanServerUrl(to);
+    if (!clean || !isConfigured(clean)) throw new CloudError(404, "not_found", WHY.notAdded);
+    url = clean;
+  } else {
+    const all = cloudConfigs();
+    if (!all.length) throw new CloudError(400, "invalid", "Add a Cloud first: Home > Add Cloud.");
+    if (all.length > 1) throw new CloudError(400, "invalid", "Choose which Cloud to share to.");
+    url = all[0].url;
+  }
+  const g = generation(url);
+  const gone = () => generation(url) !== g || !isConfigured(url);
   const st = await checkServer(url, true);
-  if (st.status !== "connected") throw new CloudError(st.status === "offline" || st.status === "down" ? 502 : 401, st.status, WHY[st.status] ?? "Could not reach the server.");
-  if (st.role !== "owner" && st.role !== "editor") throw new CloudError(403, "forbidden", "Only an owner or an editor can share a file to the server.");
+  if (gone()) throw new CloudError(404, "not_found", WHY.notAdded);
+  if (st.status !== "connected") throw new CloudError(failStatus(st.status), st.status, WHY[st.status] ?? "Could not reach the Cloud.");
+  if (st.role !== "owner" && st.role !== "editor") throw new CloudError(403, "forbidden", "Only an owner or an editor can share a file to this Cloud.");
   const file = (readCommentsFile(pkg) as SyncFile | null) ?? emptyComments();
   const reg = await request(url, "/v1/docs", { method: "POST", body: { doc: file.doc } });
-  if (reg.fail) throw new CloudError(reg.fail === "offline" || reg.fail === "down" ? 502 : 401, reg.fail, WHY[reg.fail] ?? "Could not register the file.");
-  if (!reg.res.ok) throw new CloudError(reg.res.status === 409 ? 409 : 403, "quota", String(reg.json?.message ?? "The server refused to register this file."));
-  // Read again: a comment may have been made while the server answered.
+  if (gone()) throw new CloudError(404, "not_found", WHY.notAdded);
+  if (reg.fail) throw new CloudError(failStatus(reg.fail), reg.fail, WHY[reg.fail] ?? "Could not register the file.");
+  if (!reg.res.ok) throw new CloudError(reg.res.status === 409 ? 409 : 403, "quota", String(reg.json?.message ?? "The Cloud refused to register this file."));
+  // Read again: a comment may have been made while the Cloud answered, and the file may have been linked meanwhile
+  // (another Canvas process, or a copy put in place): a file already shared keeps its Cloud.
   const fresh = (readCommentsFile(pkg) as SyncFile | null) ?? file;
+  if (isShared(fresh)) { touch(pkg, display); return { doc: fresh.doc, url: fresh.server!.url, already: true, ops: 0 }; }
+  if (fresh.doc !== file.doc) throw new CloudError(409, "conflict", "The file's comments changed while sharing. Try again.");
   const me: Author = { email: st.email, name: st.name ?? localName() };
   const ops = opsForShare(fresh);
-  writeCommentsFile(pkg, shareLocal(fresh, url, me, ops));
+  const shared = shareLocal(fresh, url, me, ops);
+  markKnown(knownKey(pkg, shared)); // shared from this Mac: its ops are this person's
+  writeCommentsFile(pkg, shared);
   touch(pkg, display);
   return { doc: fresh.doc, url, already: false, ops: ops.length };
+}
+
+/** What Settings and Home show for one Cloud. */
+async function cloudStatus(origin: string, fresh: boolean): Promise<Record<string, unknown>> {
+  const st = await checkServer(origin, false, fresh);
+  const id = hostedId(origin);
+  return {
+    url: origin, host: hostOf(origin), dev: isLocalDev(origin), hosted: !!id, hostedHere: !!id && !!localHost(id),
+    via: tunnelPath(origin), status: st.status, email: st.email ?? null, name: st.name ?? null, role: st.role ?? null, server: st.server ?? null,
+  };
+}
+
+/**
+ * Removes a Cloud from this process: nothing goes to it from now on (src/cloud-config.ts removeCloud holds it back
+ * until a newer list from the shell names it again). Its sockets, timers, tunnel and cached answers go, and the
+ * invite of a joined Cloud is deleted from the Keychain. The shell deletes an Access token's Keychain item itself.
+ * Files shared there keep their comments here; nothing is deleted on the Cloud.
+ */
+export async function removeCloudHere(url: string): Promise<void> {
+  removeCloud(url); // bumps the generation and runs forget(): sockets, tunnel, caches
+  const id = hostedId(url);
+  if (id && !(await hostsHere(id))) await deleteJoined(id);
+  if (id) joinedCache.delete(id);
 }
 
 // ---------- routes ----------
@@ -542,12 +759,19 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
   try {
     if (p === "/api/cloud/status") {
       if (req.method !== "GET") return out(405, { error: "method not allowed" });
-      const cfg = cloudConfig();
-      if (!cfg.url) return out(200, { configured: false, url: "", host: "", status: "signedOut", dev: false });
-      const st = await checkServer(cfg.url, false, url.searchParams.get("fresh") === "1");
-      return out(200, { configured: true, url: cfg.url, host: hostOf(cfg.url), dev: isLocalDev(cfg.url), hosted: !!hostedId(cfg.url), via: tunnelPath(cfg.url), status: st.status, email: st.email ?? null, name: st.name ?? null, role: st.role ?? null, server: st.server ?? null });
+      const fresh = url.searchParams.get("fresh") === "1";
+      const one = url.searchParams.get("url");
+      if (one !== null) {
+        // Only one of this Canvas's Clouds is ever asked: any other address is not looked up at all.
+        if (!isConfigured(one)) return out(404, { error: "That is not one of your Clouds", code: "not_found" });
+        return out(200, await cloudStatus(one, fresh));
+      }
+      return out(200, { clouds: await Promise.all(cloudConfigs().map((c) => cloudStatus(c.url, fresh))) });
     }
-    if (p === "/api/cloud/host" && req.method === "GET") return out(200, await hostStatus());
+    if (p === "/api/cloud/host" && req.method === "GET") {
+      const id = url.searchParams.get("hostId");
+      return out(200, id ? await hostStatus(hostIdArg({ hostId: id }) ?? "00000000-0000-0000-0000-000000000000") : await hostStatusAll());
+    }
     if (req.method !== "POST") return out(405, { error: "method not allowed" });
     if (req.headers["x-canvas"] !== "1") return out(403, { error: "forbidden", code: "forbidden" });
     if (!String(req.headers["content-type"] ?? "").startsWith("application/json")) return out(415, { error: "The request body must be JSON" });
@@ -558,20 +782,26 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
     const host = await hostRoute(p, body);
     if (host) return out(host[0], host[1]);
     if (p === "/api/cloud/token" || p === "/api/cloud/signout") {
-      const target = typeof body.url === "string" ? body.url : "";
-      const origin = safeOrigin(target);
-      if (!origin || origin !== cloudConfig().url) return out(400, { error: "That is not the configured server" });
+      const origin = cleanServerUrl(body.url);
+      if (!origin || !isConfigured(origin) || hostedId(origin)) return out(400, { error: "That is not one of your Clouds" });
       if (p === "/api/cloud/signout") { setToken(origin, null); return out(200, { ok: true }); }
       const t = body.token;
-      if (typeof t !== "string" || !/^[A-Za-z0-9._~+/=-]{8,8192}$/.test(t) || isLocalDev(origin)) return out(400, { error: "That is not an Access token for this server" });
+      if (typeof t !== "string" || !/^[A-Za-z0-9._~+/=-]{8,8192}$/.test(t) || isLocalDev(origin)) return out(400, { error: "That is not an Access token for this Cloud" });
       setToken(origin, t);
+      return out(200, { ok: true });
+    }
+    if (p === "/api/cloud/remove") {
+      const origin = cleanServerUrl(body.url);
+      if (!origin) return out(400, { error: "That is not a Cloud address" });
+      await removeCloudHere(origin);
       return out(200, { ok: true });
     }
     const file = url.searchParams.get("file");
     if (!file) return out(400, { error: "file is required" });
     const pkg = packageOf(file);
     if (p === "/api/cloud/share") {
-      const r = await shareFile(pkg, file);
+      const to = url.searchParams.get("url");
+      const r = await shareFile(pkg, file, to);
       changed?.(file, pkg);
       return out(200, r);
     }
@@ -591,45 +821,51 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
   }
 }
 
-function safeOrigin(u: string): string {
-  try { return new URL(u).origin; } catch { return ""; }
-}
-
 // ---------- hosting and joining (Settings > Cloud) ----------
 
 const text = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, max) : "");
+/** The hosted Cloud a host route is for (`hostId`, an id), or null: the only one running. */
+const hostIdArg = (body: Record<string, unknown>): string | null => (typeof body.hostId === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.hostId) ? body.hostId.toLowerCase() : null);
 
 /** The host and join routes, or null for another path. Errors never carry a secret. */
 async function hostRoute(p: string, body: Record<string, unknown>): Promise<[number, unknown] | null> {
   const fail = (e: unknown, status = 400): [number, unknown] => [status, { error: (e as Error).message }];
   try {
     switch (p) {
-      case "/api/cloud/host/start":
-        await startHosting({ name: text(body.name, 60), label: text(body.label, 120) || "Host" });
-        // The hosting Canvas is a member of its own Cloud, on loopback, from now on.
-        { const self = localHost(); if (self) { setJoined(hostedUrl(self.hostId)); servers.delete(hostedUrl(self.hostId)); } }
-        return [200, await hostStatus()];
-      case "/api/cloud/host/stop":
-        await stopHosting();
-        return [200, await hostStatus()];
-      case "/api/cloud/host/wipe":
-        await wipeHosting();
-        return [200, await hostStatus()];
+      case "/api/cloud/host/start": {
+        // A host id: that Cloud again. None: a new Cloud (this Mac may host several, one per team).
+        const id = await startHosting({ name: text(body.name, 60), label: text(body.label, 120) || "Host", hostId: hostIdArg(body) });
+        // The hosting Canvas is a member of its own Cloud, on loopback, from now on. The shell adds the entry it gets
+        // back (`url`); until its next list, this process counts it as added (src/cloud-config.ts addCloud).
+        addCloud(hostedUrl(id));
+        servers.delete(hostedUrl(id));
+        return [200, { ...(await hostStatus(id)), url: hostedUrl(id) }];
+      }
+      case "/api/cloud/host/stop": {
+        const id = hostIdArg(body);
+        await stopHosting(id);
+        if (id) servers.delete(hostedUrl(id));
+        return [200, await hostStatus(id)];
+      }
+      case "/api/cloud/host/wipe": {
+        const id = hostIdArg(body);
+        await wipeHosting(id);
+        return [200, await hostStatus(id)];
+      }
       case "/api/cloud/host/invite":
-        return [200, { link: await invite(text(body.label, 120), text(body.role, 20) || undefined) }];
-      case "/api/cloud/host/remove":
-        await removePerson(text(body.personId, 64));
-        return [200, await hostStatus()];
+        return [200, { link: await invite(text(body.label, 120), text(body.role, 20) || undefined, hostIdArg(body)) }];
+      case "/api/cloud/host/remove": {
+        const id = hostIdArg(body);
+        await removePerson(text(body.personId, 64), id);
+        return [200, await hostStatus(id)];
+      }
       case "/api/cloud/join":
         return [200, await join(body.link, text(body.device, 60) || "A Mac")];
       case "/api/cloud/leave": {
         const id = hostedId(text(body.url, 100));
         if (!id) return [400, { error: "That is not a hosted Cloud" }];
-        closeTunnel(id);
-        joinedCache.delete(id);
-        await deleteJoined(id);
-        servers.delete(hostedUrl(id));
-        for (const s of sessions.values()) if (s.origin === hostedUrl(id)) { setStatus(s, "signedOut"); reconnectNow(s); }
+        // Leaving is removing: the tunnel stops, the invite is deleted, and nothing goes to that Cloud any more.
+        await removeCloudHere(hostedUrl(id));
         return [200, { ok: true }];
       }
       default: return null;
@@ -644,19 +880,44 @@ async function hostRoute(p: string, body: Record<string, unknown>): Promise<[num
  * through the invite's tunnel address (which pins the host's key), redeems the single-use code, and checks the answer
  * comes from the Cloud the link names. Only then is anything saved (Keychain). The shell asked the person first.
  */
-export async function join(link: unknown, device: string): Promise<{ url: string; hostId: string; name: string; me: unknown }> {
+export function join(link: unknown, device: string): Promise<{ url: string; hostId: string; name: string; me: unknown }> {
+  // One join at a time: two at once into the same Cloud would both redeem a code and the second Keychain write would
+  // orphan the first device token.
+  const inv = parseInvite(link);
+  const g = inv ? generation(hostedUrl(inv.hostId)) : 0;
+  const run = joining.catch(() => {}).then(() => joinOnce(link, device, g));
+  joining = run;
+  return run;
+}
+let joining: Promise<unknown> = Promise.resolve();
+
+async function joinOnce(link: unknown, device: string, g: number): Promise<{ url: string; hostId: string; name: string; me: unknown }> {
   const inv = parseInvite(link);
   if (!inv) throw new CloudError(400, "invalid", "That is not a Canvas invite link");
+  // Removed while this join waited for the Cloud: nothing is saved, and the removal stands.
+  const url = hostedUrl(inv.hostId);
+  const removedMeanwhile = () => generation(url) !== g;
+  const check = () => { if (removedMeanwhile()) throw new CloudError(409, "conflict", "That Cloud was removed while joining. Nothing was saved."); };
+  check();
+  // Never twice into the same Cloud, and never into the one this Mac hosts: the invite would be spent for nothing.
+  const here = await hostsHere(inv.hostId);
+  check();
+  if (here) throw new CloudError(409, "conflict", "This Mac hosts that Cloud.");
+  if (isConfigured(hostedUrl(inv.hostId))) throw new CloudError(409, "conflict", "This Mac is already in that Cloud.");
   const bin = helperPath();
   if (!bin) throw new CloudError(400, "invalid", WHY.unavailable);
   const key = await genkey(bin, "client");
+  check();
   let f: { helper: Helper; origin: string; server: string } | null = null;
   try {
     f = await forward(bin, key.key, inv.addr);
+    check();
     // The Cloud's id comes from the public key its tunnel reached, not from anything the other side says: an invite
     // that names one Cloud and leads to another (a member passing his own Cloud off as the host's) stops here.
     if (hostIdFor(f.server) !== inv.hostId) throw new CloudError(409, "conflict", "This invite leads to a different Cloud than the one it names. Ask the host for a new one.");
     const existing = await readJoined(inv.hostId);
+    await testHooks.beforeJoinRequest?.(url);
+    check();
     if (existing?.hostKey && existing.hostKey !== f.server) throw new CloudError(409, "conflict", "This Mac already joined a Cloud with that id and another key. Leave it first.");
     const token = newSecret("ccd");
     let res: Response;
@@ -671,13 +932,15 @@ export async function join(link: unknown, device: string): Promise<{ url: string
       throw new CloudError(502, "down", "The Cloud did not answer. Its Mac may be asleep or closed; try again when it is open.");
     }
     const j = await res.json().catch(() => null) as any;
+    await testHooks.afterJoinAnswer?.(url);
+    if (removedMeanwhile()) throw new CloudError(409, "conflict", "That Cloud was removed while joining. Nothing was saved.");
     if (res.status === 401) throw new CloudError(401, "unauthenticated", "This invite was already used or has expired. Ask for a new one.");
     if (!res.ok || !j) throw new CloudError(502, "server", "The Cloud refused the invite.");
     if (j.hostId !== inv.hostId || typeof j.member !== "string" || typeof j.memberKey !== "string" || !/^nodekey:[0-9a-f]{64}$/.test(j.memberKey)) throw new CloudError(409, "conflict", "The Cloud that answered is not the one in the invite.");
     if (!(await writeJoined(inv.hostId, { token, addr: j.member, key: key.key, hostKey: f.server, memberKey: j.memberKey }))) throw new CloudError(500, "server", "Could not save the invite to the Keychain.");
+    if (removedMeanwhile()) { await deleteJoined(inv.hostId); throw new CloudError(409, "conflict", "That Cloud was removed while joining. Nothing was saved."); }
     joinedCache.delete(inv.hostId);
-    const url = hostedUrl(inv.hostId);
-    setJoined(url);
+    addCloud(url); // until the shell's next list, which has it (it adds the entry this answer gives it)
     servers.delete(url);
     return { url, hostId: inv.hostId, name: inv.name, me: j.me };
   } finally {
