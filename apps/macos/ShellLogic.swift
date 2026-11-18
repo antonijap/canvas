@@ -135,6 +135,10 @@ enum TabOrder {
     /// A press that moves less than this (points) is a click, never a drag.
     static let dragThreshold: CGFloat = 4
 
+    static func canDrag(button: Int, clicks: Int, editing: Bool) -> Bool {
+        button == 0 && clicks == 1 && !editing
+    }
+
     static func isDrag(_ dx: CGFloat) -> Bool { dx.isFinite && abs(dx) >= dragThreshold }
 
     /// `files` with the tab at `from` taken out and put at index `to` (both clamped to the list).
@@ -561,10 +565,24 @@ enum TipPlacement {
     }
 }
 
+/// A visible package name typed into a file tab.
+enum TabRename {
+    static func name(_ raw: String) -> String? {
+        let n = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, !n.hasPrefix("."), !n.contains("/"), !n.contains("\0") else { return nil }
+        return n.hasSuffix(".canvas") ? n : n + ".canvas"
+    }
+}
+
 /// The right-click menu's edit commands, in order, with shortcuts. Each names a selector of the Edit menu's
 /// target (StructureActions in main.swift), so the two menus run the same code; test/context-menu.test.ts
 /// checks every selector exists there and that the Edit menu shows the same keys.
 enum ContextMenuLayout {
+    static func fileTab(cloud: Bool) -> [[String]] {
+        [["Rename...", "Show in Finder", "Duplicate"] + (cloud ? ["Move to Cloud..."] : []) + ["Copy Link"],
+         ["Close", "Close Other Tabs"]]
+    }
+
     struct Entry: Equatable {
         let title: String
         let selector: String

@@ -317,8 +317,8 @@ final class CloudAccount: ObservableObject {
     }
 
     /// File > Share Comments to Server...: the open file's comments go to the configured server.
-    func shareOpenFile(_ model: CanvasModel) {
-        guard let file = model.currentFile else { model.flash("Open a Canvas file first"); return }
+    func shareOpenFile(_ model: CanvasModel, file selectedFile: String? = nil) {
+        guard let file = selectedFile ?? model.currentFile else { model.flash("Open a Canvas file first"); return }
         guard CloudURL.clean(model.prefs.cloudUrl) != nil else {
             model.flash("Set your team's server address in Settings > Cloud first")
             SettingsWindow.shared.show(model, tab: .cloud)
