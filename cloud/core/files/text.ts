@@ -29,7 +29,71 @@ export function transformSplice(op: Pick<TextOp, "from" | "del" | "spans" | "lis
   return { from, del };
 }
 
-const textNodes = (n: DocNode, out: string[]) => {
+/**
+ * Every text op of one action moved over what others did to its layer since its base. Splices of one action on one
+ * layer follow each other (the second is in the text the first left), so each remote edit is first moved over the
+ * action's earlier splices: the matrix of an inclusion transform, with the same tie rule both ways (at one point, the
+ * remote insert goes first). A write of a layer's whole text in the action ends the transform for that layer.
+ * Returns the ops (others unchanged), or why the action conflicts or is malformed.
+ */
+export function transformTextOps(ops: readonly FileOp[], editsFor: (node: string, since: number) => TextEdit[]): FileOp[] | { conflict: string } | { invalid: string } {
+  const remote = new Map<string, { base: number; edits: TextEdit[] | null }>();
+  const out: FileOp[] = [];
+  for (const op of ops) {
+    if (op && typeof op === "object" && op.k === "text" && typeof op.id === "string") {
+      let r = remote.get(op.id);
+      if (!r) {
+        r = { base: op.baseSeq, edits: editsFor(op.id, op.baseSeq) };
+        remote.set(op.id, r);
+      } else if (r.edits === null) {
+        // The action wrote this layer's whole text before: the splice is on that text, nothing to move over.
+        out.push(op);
+        continue;
+      } else if (r.base !== op.baseSeq) return { invalid: "text: the splices of one action on one layer share their base" };
+      const edits = r.edits!;
+      const t = transformSplice(op, edits);
+      if ("conflict" in t) return t;
+      // The remote edits as they look after this splice, for the next one.
+      r.edits = shiftOver(edits, op.from, op.del, typeof op.ins === "string" ? op.ins.length : 0);
+      out.push({ ...op, from: t.from, del: t.del });
+      continue;
+    }
+    if (op && typeof op === "object" && (op.k === "set" || op.k === "insert")) {
+      const ids = op.k === "set" ? (["content", "spans", "lists"].some((k) => Object.hasOwn(op.props ?? {}, k)) ? [op.id] : []) : textNodes(op.node as DocNode, []);
+      for (const id of ids) {
+        const r = remote.get(id);
+        if (r) r.edits = null;
+        else remote.set(id, { base: -1, edits: null });
+      }
+    }
+    out.push(op);
+  }
+  return out;
+}
+
+/** Remote edits (in sequence, from the base) as they look after a local splice at (from, del, ins) of the base text. */
+function shiftOver(edits: TextEdit[], from: number, del: number, ins: number): TextEdit[] {
+  // Walk the remote edits in order, keeping the local splice in each edit's coordinates.
+  let lf = from;
+  const out: TextEdit[] = [];
+  for (const e of edits) {
+    if (e.whole) {
+      out.push(e);
+      continue;
+    }
+    if (e.from + e.del <= lf) {
+      // The remote edit lies before the local one (ties: remote first): it stays, the local moves.
+      out.push(e);
+      lf += e.ins - e.del;
+    } else {
+      // After it: the remote edit moves by the local splice.
+      out.push({ ...e, from: e.from + ins - del });
+    }
+  }
+  return out;
+}
+
+const textNodes =(n: DocNode, out: string[]) => {
   if (typeof n.content === "string" && typeof n.id === "string") out.push(n.id);
   for (const c of Array.isArray(n.children) ? n.children : []) textNodes(c, out);
   return out;

@@ -135,7 +135,9 @@ export function compact(room: FileRoom): { versionsDropped: number; logDropped: 
       store.sql.exec("UPDATE file_meta SET log_floor = MAX(log_floor, ?) WHERE id = 1", oldest);
       tree.forget();
       tree.bytesDelta = 0;
+      tree.boardDelta.clear();
       rowsPurged = tree.purgeRemoved(oldest);
+      tree.flushBoardBytes();
       store.sql.exec("UPDATE file_meta SET node_bytes = MAX(0, node_bytes + ?) WHERE id = 1", tree.bytesDelta);
     }
     const cutoff = now - RECEIPT_DAYS * DAY_MS;

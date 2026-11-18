@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS receipts (action TEXT PRIMARY KEY, by_id TEXT NOT NUL
   first INTEGER NOT NULL, last INTEGER NOT NULL, at_ms INTEGER NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS receipts_last ON receipts(last);
 CREATE TABLE IF NOT EXISTS dirty_boards (board TEXT PRIMARY KEY) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS board_bytes (board TEXT PRIMARY KEY, bytes INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS snapshots (seq INTEGER PRIMARY KEY, manifest TEXT NOT NULL, at_ms INTEGER NOT NULL, by_id TEXT,
   label TEXT, pinned INTEGER NOT NULL DEFAULT 0, bytes INTEGER NOT NULL, state TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS uploads (id TEXT PRIMARY KEY, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, type TEXT NOT NULL,
@@ -51,7 +52,7 @@ CREATE TABLE IF NOT EXISTS usage_days (day TEXT PRIMARY KEY, messages INTEGER NO
 `;
 
 /** Every table the room keeps, for tests that check a crash left nothing half written. */
-export const FILE_ROOM_TABLES = ["file_meta", "nodes", "refs", "vers", "kv", "widgets", "blobs", "log", "text_edits", "receipts", "dirty_boards", "snapshots", "uploads", "usage_days"] as const;
+export const FILE_ROOM_TABLES = ["file_meta", "nodes", "refs", "vers", "kv", "widgets", "blobs", "log", "text_edits", "receipts", "dirty_boards", "board_bytes", "snapshots", "uploads", "usage_days"] as const;
 
 /** Create the tables (idempotent). The first open also writes the meta row for `file`. */
 export function initFileRoomSchema(store: SqlStore, file: string): void {

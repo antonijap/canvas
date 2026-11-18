@@ -8,7 +8,7 @@
 
 import { MemoryTree } from "./tree-memory.ts";
 import { treeFromManifest } from "./snapshots.ts";
-import { textEditsOf, transformSplice, type TextEdit } from "./text.ts";
+import { textEditsOf, transformTextOps, type TextEdit } from "./text.ts";
 import { actionSha, type FileRejectCode, type FileServerMessage, type Hello } from "./messages.ts";
 import { applyAction, isReject, FILE_LIMITS, type Action, type AppliedAction, type ApplyFn, type Author, type FileOp, type Reject } from "./seam.ts";
 import type { ObjectStore } from "./objects.ts";
@@ -48,6 +48,8 @@ export class Replica {
   needHello = true;
   private readonly apply: ApplyFn;
   readonly newId: () => string;
+  /** Pending actions a hello names (the room reads at most 500). */
+  helloWindow = 500;
 
   constructor(author: Author, state: FileState, seq: number, epoch: number, o: { apply?: ApplyFn; newId?: () => string } = {}) {
     this.author = author;
@@ -75,19 +77,18 @@ export class Replica {
   }
 
   /** A text op of a pending action moved over what the room confirmed since its baseSeq (for the view only). */
-  private local(op: FileOp): FileOp | null {
-    if (op.k !== "text") return op;
-    const t = transformSplice(op, this.textEdits.filter((e) => e.node === op.id && e.seq > op.baseSeq));
-    return "conflict" in t ? null : { ...op, from: t.from, del: t.del };
+  private local(ops: FileOp[]): FileOp[] | null {
+    const t = transformTextOps(ops, (node, since) => this.textEdits.filter((e) => e.node === node && e.seq > since));
+    return Array.isArray(t) ? t : null;
   }
 
   /** Confirmed + pending, as the person sees it. A pending action that no longer fits is left out ("waiting"). */
   view(): MemoryTree {
     const v = this.tree.copy();
     for (const p of this.pending) {
-      const ops = p.action.ops.map((op) => this.local(op));
-      if (ops.some((o) => o === null)) continue;
-      this.apply(v, { ...p.action, ops: ops as FileOp[] }, this.ctx(0));
+      const ops = this.local(p.action.ops);
+      if (!ops) continue;
+      this.apply(v, { ...p.action, ops }, this.ctx(0));
     }
     return v;
   }
@@ -117,7 +118,7 @@ export class Replica {
   hello(file: string): Hello {
     this.joined = false;
     this.needHello = false;
-    return { type: "hello", protocol: 2, file, since: this.seq, epoch: this.epoch, pending: this.pending.slice(0, 500).map((p) => ({ id: p.action.id, sha: p.sha })) };
+    return { type: "hello", protocol: 2, file, since: this.seq, epoch: this.epoch, pending: this.pending.slice(0, this.helloWindow).map((p) => ({ id: p.action.id, sha: p.sha })) };
   }
 
   /** Actions to send now, in order, at most `maxOps` ops in all; they are marked sent. */
@@ -197,6 +198,9 @@ export class Replica {
         if (!this.joined) return "ok";
         return this.confirm(msg.actions);
       case "ack":
+        // An ack at or below what this Mac holds confirmed: the action is in its copy already (a resend past the
+        // hello's window, after a snapshot that covered it). It waits no more.
+        if (msg.last <= this.seq) this.pending = this.pending.filter((p) => p.action.id !== msg.id);
         return "ok";
       case "reject":
         if (msg.code === "reset") {

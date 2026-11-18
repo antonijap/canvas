@@ -370,19 +370,39 @@ class Run {
       if (this.depthOf(op.parent) + depth > this.limits.treeDepth) this.fail("invalid", `insert: the tree would be over ${this.limits.treeDepth} levels deep`);
     }
     this.tree.insert(op.parent, index, clone(node as DocNode));
-    for (const id of ids) this.tree.setVer(`t:${id}`, this.id);
+    for (const id of ids) {
+      this.tree.setVer(`t:${id}`, this.id);
+      // An id brought back (undo) starts a fresh subtree version, not the one it had before it was removed.
+      if (this.tree.ver(`s:${id}`) !== 0) this.tree.setVer(`s:${id}`, this.id);
+    }
+    this.touchUp(op.parent);
     return { ...op, index };
   }
 
+  /**
+   * A subtree's structure version, what a remove's `if` names: the last action that inserted, removed or moved
+   * anything inside it, or moved it (`s:<id>`, written on every ancestor of such a change); until one did, the node's
+   * own place version. So an undo of an insert refuses when someone added, moved or removed a layer inside since.
+   */
+  private structVer(id: string): Ver {
+    const s = this.tree.ver(`s:${id}`);
+    return s === 0 ? this.tree.ver(`t:${id}`) : s;
+  }
+  private touchUp(parent: string | null): void {
+    if (parent === null) return;
+    for (const a of [parent, ...this.tree.ancestors(parent, (this.limits?.treeDepth ?? 1024) + 1)]) this.tree.setVer(`s:${a}`, this.id);
+  }
+
   private remove(op: Extract<FileOp, { k: "remove" }>): AppliedOp {
-    this.live(op.id);
-    this.checkIf(`t:${op.id}`, op.if);
+    const n = this.live(op.id);
+    if (op.if !== undefined && this.structVer(n.id) !== op.if) this.fail("conflict", `t:${n.id} was changed by another action since`);
     const sub = this.tree.subtree(op.id)!;
     walk(sub, (x) => {
       if (x.reusable === true && typeof x.id === "string") this.removedComponents.push(x.id);
     });
     this.tree.remove(op.id);
     this.tree.setVer(`t:${op.id}`, this.id);
+    this.touchUp(n.parent);
     return op;
   }
 
@@ -403,6 +423,11 @@ class Run {
     }
     this.tree.move(n.id, op.parent, index);
     this.tree.setVer(`t:${n.id}`, this.id);
+    this.tree.setVer(`s:${n.id}`, this.id);
+    this.touchUp(n.parent);
+    this.touchUp(op.parent);
+    // A move can put an instance inside its own component (or a component inside one it holds an instance of).
+    this.cycleSeeds.push(n.id);
     return { ...op, index };
   }
 
