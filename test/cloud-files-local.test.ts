@@ -28,7 +28,7 @@ test("test mode checks edits and refuses unrecorded inserts before writing", asy
   assert.equal(actionChecks.enabled, true);
   await withFile(async (file, actions) => {
     const before = fs.readFileSync(file, "utf8");
-    assert.throws(() => editDoc(file, { touches: [null] }, (doc) => {
+    await assert.rejects(() => editDoc(file, { touches: [null] }, (doc) => {
       doc.children.push({ id: "new", type: "rectangle" });
     }), /incomplete/);
     assert.equal(fs.readFileSync(file, "utf8"), before);
@@ -41,7 +41,7 @@ test("merged property edits restore exact key order through undo and redo", asyn
     const original = JSON.parse(fs.readFileSync(file, "utf8"));
     for (const [k, value] of [["fill", "#ffffff"], ["name", "Shape"]] as const) {
       let op: ReturnType<typeof nodeDiff>;
-      editDoc(file, { touches: ["node"] }, (doc) => {
+      await editDoc(file, { touches: ["node"] }, (doc) => {
         const n = doc.children[0], before = propsOf(n);
         n[k] = value;
         op = nodeDiff("node", before, propsOf(n));
@@ -80,7 +80,7 @@ test("document keys produce undo and redo actions", async () => {
     const original = { ...initial(), variables: { accent: { type: "color", value: "#ffffff" } }, themes: { mode: ["light"] } };
     fs.writeFileSync(file, JSON.stringify(original));
     const next = { accent: { type: "color", value: "#000000" } };
-    editDoc(file, { touches: [] }, (doc) => { doc.variables = next; });
+    await editDoc(file, { touches: [] }, (doc) => { doc.variables = next; });
     record(file, [{ t: "doc", key: "variables", b: { v: original.variables }, a: { v: next } }], { label: "Variable" });
     await undo(file);
     await redo(file);
@@ -97,7 +97,7 @@ test("document values stay isolated in a copy on write edit", async () => {
   const { cowDoc } = await import("../src/docwriter.ts");
   const before = { ...initial(), variables: { accent: { type: "color", value: "#ffffff" } }, themes: { mode: ["light"] }, fonts: [{ family: "Example" }] };
   const bytes = JSON.stringify(before);
-  const next = cowDoc(before, []);
+  const next = cowDoc(before, [], false, ["variables", "themes", "fonts"]);
   (next.variables as typeof before.variables).accent.value = "#000000";
   (next.themes as typeof before.themes).mode.push("dark");
   (next.fonts as typeof before.fonts)[0].family = "Other";
@@ -108,7 +108,7 @@ test("first variable creation and empty container transitions undo byte for byte
   await withFile(async (file, actions) => {
     const original = initial();
     const vars = { accent: { type: "color", value: "#ffffff" } };
-    editDoc(file, { touches: [] }, (doc) => { doc.variables = vars; });
+    await editDoc(file, { touches: [] }, (doc) => { doc.variables = vars; });
     record(file, [{ t: "doc", key: "variables", b: null, a: { v: vars } }], { label: "Variable" });
     await undo(file);
     assert.equal(fs.readFileSync(file, "utf8"), JSON.stringify(original));
@@ -123,7 +123,7 @@ test("document key deletion restores its original place on undo", async () => {
   await withFile(async (file, actions) => {
     const original = { themes: { mode: ["light"] }, ...initial(), fonts: [] };
     fs.writeFileSync(file, JSON.stringify(original));
-    editDoc(file, { touches: [] }, (doc) => { delete doc.themes; });
+    await editDoc(file, { touches: [] }, (doc) => { delete doc.themes; });
     record(file, [{ t: "doc", key: "themes", b: { v: original.themes }, a: null }], { label: "Themes" });
     await undo(file);
     assert.equal(fs.readFileSync(file, "utf8"), JSON.stringify(original));
@@ -151,8 +151,8 @@ test("new document keys keep edit order in the client and the room", async () =>
 test("a failed compound edit still publishes changes it committed", async () => {
   const { asOneAction } = await import("../src/cloud-files-ops.ts");
   await withFile(async (file, actions) => {
-    await assert.rejects(asOneAction(file, () => {
-      editDoc(file, { touches: ["node"] }, (doc) => { doc.children[0].x = 1; });
+    await assert.rejects(asOneAction(file, async () => {
+      await editDoc(file, { touches: ["node"] }, (doc) => { doc.children[0].x = 1; });
       throw new Error("sidecar failed");
     }), /sidecar failed/);
     assert.equal(actions.length, 1);
@@ -170,14 +170,14 @@ test("an async compound action is delivered before edits that depend on its inse
     const started = new Promise<void>((r) => { entered = r; });
     const node = { id: "added", type: "rectangle", x: 0 };
     const pending = asOneAction(file, async () => {
-      editDoc(file, { touches: [null], recorded: () => [{ t: "tree", kind: "insert", node, parent: null, index: 1 }] }, (doc) => { doc.children.push(node); });
+      await editDoc(file, { touches: [null], recorded: () => [{ t: "tree", kind: "insert", node, parent: null, index: 1 }] }, (doc) => { doc.children.push(node); });
       entered();
       await gate;
     });
     await started;
-    editDoc(file, { touches: ["added"] }, (doc) => { doc.children[1].x = 2; });
+    const standalone = editDoc(file, { touches: ["added"] }, (doc) => { doc.children[1].x = 2; });
     release();
-    await pending;
+    await Promise.all([pending, standalone]);
     assert.equal(actions.length, 2);
     const tree = new DocTree(initial());
     for (const action of actions) assert.ok(!isReject(applyAction(tree, action)), JSON.stringify(action));
@@ -217,7 +217,7 @@ test("variable key reordering survives edit, undo and redo", async () => {
     const original = { ...initial(), variables: { a, b } };
     const next = { b, a };
     fs.writeFileSync(file, JSON.stringify(original));
-    editDoc(file, { touches: [] }, (doc) => { doc.variables = next; });
+    await editDoc(file, { touches: [] }, (doc) => { doc.variables = next; });
     record(file, [{ t: "doc", key: "variables", b: { v: original.variables }, a: { v: next } }], { label: "Variables" });
     await undo(file);
     assert.equal(fs.readFileSync(file, "utf8"), JSON.stringify(original));
@@ -226,5 +226,25 @@ test("variable key reordering survives edit, undo and redo", async () => {
     const tree = new DocTree(original);
     for (const action of actions) assert.ok(!isReject(applyAction(tree, action)), JSON.stringify(action));
     assert.equal(JSON.stringify(tree.doc), fs.readFileSync(file, "utf8"));
+  });
+});
+
+
+test("concurrent standalone edits keep their own history writers", async () => {
+  const { entries } = await import("../src/history.ts");
+  await withFile(async (file, actions) => {
+    await Promise.all([1, 2].map(async (x) => {
+      let op: ReturnType<typeof nodeDiff>;
+      const { write } = await editDoc(file, { touches: ["node"] }, (doc) => {
+        const n = doc.children[0], before = propsOf(n);
+        n.x = x;
+        op = nodeDiff("node", before, propsOf(n));
+      });
+      record(file, [op!], { label: "Position", mergeKey: `position-${x}`, edit: write.edit, ...write.history });
+    }));
+    const steps = entries(file).undo;
+    assert.equal(steps.length, 2);
+    assert.equal(steps[0].writers?.["n:node:x"], actions[0].id);
+    assert.equal(steps[1].writers?.["n:node:x"], actions[1].id);
   });
 });

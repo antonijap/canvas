@@ -225,8 +225,8 @@ const clone = <T>(v: T): T => (v === undefined ? v : (JSON.parse(JSON.stringify(
 const val = (v: unknown): Val => (v === undefined ? null : { v: clone(v) as Json });
 
 /** Run `op` on the working tree as the next op of the translation; a refusal names the op. */
-function stepper(tree: DocTree) {
-  const run = opRunner(tree, "translate", { limits: null });
+function stepper(tree: DocTree, id = "translate") {
+  const run = opRunner(tree, id, { limits: null });
   const out: FileOp[] = [];
   const push = (op: FileOp) => {
     try {
@@ -236,7 +236,7 @@ function stepper(tree: DocTree) {
     }
     out.push(op);
   };
-  return { out, push };
+  return { out, push, finish: () => run.finish() };
 }
 
 /** The sibling a place's index comes right after in `list` (null: first). */
@@ -263,8 +263,12 @@ function overridePaths(before: Json | undefined, after: Json | undefined): Recor
  * goes out and comes back whole.
  */
 export function docFileOps(before: DocLike, ops: Op[]): FileOp[] {
-  const tree = new DocTree(before);
-  const { out, push } = stepper(tree);
+  return translateDoc(new DocTree(before), ops);
+}
+
+function translateDoc(tree: DocTree, ops: Op[], id = "translate", blobs: FileOp[] = []): FileOp[] {
+  const { out, push, finish } = stepper(tree, id);
+  for (const blob of blobs) push(blob);
   for (const op of ops) {
     if (op.t === "node") {
       const n = tree.node(op.id);
@@ -317,6 +321,7 @@ export function docFileOps(before: DocLike, ops: Op[]): FileOp[] {
       }
     } else throw new TranslateError(`a ${op.t} op in a design-file edit`);
   }
+  finish();
   return out;
 }
 
@@ -541,6 +546,9 @@ const short = (v: unknown) => {
   return s === undefined ? "absent" : s.length > 80 ? `${s.slice(0, 77)}...` : s;
 };
 
+// Indexed state follows immutable snapshots. An outside save has a different snapshot and builds fresh indexes.
+const translationTrees = new WeakMap<DocLike, { file: string; tree: DocTree }>();
+
 /**
  * A design-file edit made: `before` became `after` with `ops` (what it recorded, or the property changes it made)
  * and `media` (package files it added). Returns its file ops for the step (delivered to listeners); with checks on,
@@ -548,34 +556,39 @@ const short = (v: unknown) => {
  */
 export function docEditAction(docFile: string, before: DocLike, after: DocLike, ops: Op[] | undefined, media: string[] = [], defer = false): (() => void) | undefined {
   if (!wantActions()) return;
-  const fail = (msg: string) => {
+  const fail = (msg: string): never => {
     console.error(`[canvas] action check: ${msg}`);
     throw new ActionCheckError(`The edit's action is incomplete: ${msg}`);
   };
+  const id = activeScope()?.docFile === docFile ? activeScope()!.id : randomUUID();
+  const cached = translationTrees.get(before);
+  const tree = cached?.file === docFile ? cached.tree : new DocTree(before, undefined, [], versionEntries(docFile));
+  // This tree is being advanced. If the caller never publishes, a later edit rebuilds from its snapshot.
+  translationTrees.delete(before);
+  tree.begin();
   let fileOps: FileOp[];
   try {
     if (!ops) throw new TranslateError('the edit touches "all" and recorded no ops');
     const blobs = media.map((f) => blobOpOf(docFile, f)).filter((o): o is FileOp => !!o);
-    fileOps = [...blobs, ...docFileOps(before, ops)];
+    // Translation already runs the shared op runner. Use that same tree for checks and writer tracking.
+    fileOps = translateDoc(tree, ops, id, blobs);
+    if (actionChecks.enabled) {
+      const d = firstDifference(tree.doc, after);
+      if (d) fail(`applied to the state before, it gives another document: ${d}`);
+      countInserts(fileOps);
+      actionChecks.checked.doc++;
+    }
   } catch (e) {
+    tree.rollback();
     if (!actionChecks.enabled) return;
+    if (e instanceof ActionCheckError) throw e;
     return fail((e as Error).message);
   }
-  const id = activeScope()?.docFile === docFile ? activeScope()!.id : randomUUID();
-  const tree = new DocTree(before, undefined, [], versionEntries(docFile));
-  const r = applyAction(tree, { ...makeAction(fileOps), id }, { limits: null });
-  if (actionChecks.enabled) {
-    if (isReject(r)) return fail(`the shared apply refused it: ${r.message}`);
-    const d = firstDifference(tree.doc, after);
-    if (d) return fail(`applied to the state before, it gives another document: ${d}`);
-    countInserts(fileOps);
-    actionChecks.checked.doc++;
-  }
   const publish = () => {
-    if (!isReject(r)) {
-      remember(docFile, tree, id);
-      docOrders.set(docFile, { b: Object.keys(before), a: Object.keys(after) });
-    }
+    tree.commit();
+    translationTrees.set(after, { file: docFile, tree });
+    remember(docFile, tree, id);
+    docOrders.set(docFile, { b: Object.keys(before), a: Object.keys(after) });
     const scope = activeScope();
     if (scope?.docFile === docFile) {
       scope.before ??= before;

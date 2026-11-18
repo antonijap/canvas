@@ -324,7 +324,7 @@ function touchesOf(doc: CanvasDoc, roots: string[]): string[] {
 }
 
 /** Scale layers in a document on disk, and record one undo step. */
-export function scaleNodes(docFile: string, b: ScaleBody, who: { source: "user" | "mcp"; session?: string }, metrics: Map<string, FontMetrics | undefined> = new Map()) {
+export async function scaleNodes(docFile: string, b: ScaleBody, who: { source: "user" | "mcp"; session?: string }, metrics: Map<string, FontMetrics | undefined> = new Map()) {
   validateScale(b);
   const ids = idsOf(b);
   const before = currentDoc(docFile).doc;
@@ -338,7 +338,7 @@ export function scaleNodes(docFile: string, b: ScaleBody, who: { source: "user" 
   const touches = touchesOf(before, rootsOf(before, ids));
   const ops: NodeOp[] = [];
   let kept = 0, factor = 1;
-  const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches }, (doc) => {
+  const { write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches }, (doc) => {
     ops.length = 0; // the change may run twice (a replay after an outside save)
     const roots = rootsOf(doc, ids);
     const index = buildIndex(doc);
@@ -386,7 +386,7 @@ export function scaleNodes(docFile: string, b: ScaleBody, who: { source: "user" 
       if (Object.keys(op.props).length) ops.push(op);
     }
   });
-  if (ops.length) record(docFile, ops, { label: "Scale", source: who.source, session: who.session, edit: write.edit }, write.revision);
+  if (ops.length) record(docFile, ops, { label: "Scale", source: who.source, session: who.session, edit: write.edit, ...write.history }, write.revision);
   return { ok: true as const, ids, factor, kept, revision: write.revision, changed: ops.map((o) => o.id) };
 }
 
@@ -424,7 +424,7 @@ export async function handleScaleRoute(req: http.IncomingMessage, res: http.Serv
     const metrics = await prepareScaleMetrics(doc, idsOf(b));
     const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
     const session = String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined;
-    const r = scaleNodes(docFile, b, { source: by === "mcp" ? "mcp" : "user", session }, metrics);
+    const r = await scaleNodes(docFile, b, { source: by === "mcp" ? "mcp" : "user", session }, metrics);
     deps.written(docFile, r.revision, by, r.changed.length ? r.changed : r.ids);
     return reply(200, r), true;
   } catch (e) {

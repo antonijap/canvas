@@ -216,13 +216,13 @@ export function applyAction(tree: TreeAccess, action: Pick<Action, "id" | "ops">
 export const isReject = (r: AppliedAction | Reject): r is Reject => "reject" in r;
 
 /**
- * Ops applied one at a time, with no transaction and none of the checks that wait for the end of an action: a
- * working copy that follows an edit op by op (src/cloud-files-ops.ts uses it to place each op against the tree the
- * ops before it left). Throws ApplyError for an op that does not fit.
+ * Ops applied one at a time, without a transaction. Call finish() after the last op for the final checks.
+ * A working copy follows an edit op by op (src/cloud-files-ops.ts places each op against the tree the ops before
+ * it left). Throws ApplyError for an op that does not fit.
  */
-export function opRunner(tree: TreeAccess, actionId: string, ctx: ApplyCtx = {}): (op: FileOp) => AppliedOp {
+export function opRunner(tree: TreeAccess, actionId: string, ctx: ApplyCtx = {}): ((op: FileOp) => AppliedOp) & { finish(): void } {
   const run = new Run(tree, actionId, ctx, ctx.limits ?? null);
-  return (op) => run.op(op);
+  return Object.assign((op: FileOp) => run.op(op), { finish: () => run.finish() });
 }
 
 class Run {
