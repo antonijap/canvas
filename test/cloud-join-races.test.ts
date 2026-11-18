@@ -57,6 +57,16 @@ test("a Cloud removed while its join waits for the answer: nothing is saved and 
   assert.equal(await Sec.readJoined(hostId), null, "no invite saved in the Keychain");
 });
 
+test("removal before redeeming a join sends no invite or device token", async () => {
+  const link = (await call("/api/cloud/host/invite", { label: "before@studio.test" })).j.link;
+  Cl.testHooks.beforeJoinRequest = (u) => { Cfg.removeCloud(u); };
+  try {
+    await assert.rejects(Cl.join(link, "A Mac"), /removed while joining/);
+  } finally { Cl.testHooks.beforeJoinRequest = undefined; }
+  assert.equal((await people()).find((p) => p.label === "before@studio.test")?.devices.length, 0, "the invite was never redeemed");
+  assert.equal(await Sec.readJoined(hostId), null);
+});
+
 test("two joins into one Cloud at once: this Mac joins once, the other is told it is already in", async () => {
   const a = (await call("/api/cloud/host/invite", { label: "cy@studio.test" })).j.link;
   const b = (await call("/api/cloud/host/invite", { label: "dee@studio.test" })).j.link;
@@ -72,4 +82,31 @@ test("two joins into one Cloud at once: this Mac joins once, the other is told i
   assert.ok(saved, "and its token is the one saved");
   const t = await Cl.target(url);
   assert.ok(!("fail" in t), `the saved token reaches the Cloud (${JSON.stringify(t)})`);
+});
+
+test("removal while a join is queued cancels it before any invite is redeemed", async () => {
+  const make = async (name: string) => {
+    const h = await call("/api/cloud/host/start", { name, label: "Host" });
+    const link = (await call("/api/cloud/host/invite", { hostId: h.j.hostId, label: "member@studio.test" })).j.link;
+    return { id: h.j.hostId as string, url: h.j.url as string, link };
+  };
+  const first = await make("First"), next = await make("Next");
+  let reached!: () => void, release!: () => void;
+  const waiting = new Promise<void>((r) => { reached = r; });
+  const gate = new Promise<void>((r) => { release = r; });
+  Cl.testHooks.afterJoinAnswer = async (u) => { if (u === first.url) { reached(); await gate; } };
+  const a = Cl.join(first.link, "A Mac");
+  await waiting;
+  const b = Cl.join(next.link, "A Mac");
+  const refused = assert.rejects(b, /removed while joining/);
+  Cfg.removeCloud(next.url);
+  release();
+  try {
+    await a;
+    await refused;
+    const state = await (await fetch(`${host.base}/api/cloud/host?hostId=${next.id}`)).json() as any;
+    const p = state.people;
+    assert.equal(p.find((p: any) => p.label === "member@studio.test").devices.length, 0);
+    assert.equal(await Sec.readJoined(next.id), null);
+  } finally { Cl.testHooks.afterJoinAnswer = undefined; release(); }
 });

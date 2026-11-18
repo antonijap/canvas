@@ -196,7 +196,7 @@ struct TopBar: View {
 
     private func tabMenu(_ file: String, view: NSView, at: CGPoint) {
         let menu = ContextMenuBuilder(model: model, at: at)
-        for (i, group) in ContextMenuLayout.fileTab(cloud: CloudURL.clean(model.prefs.cloudUrl) != nil).enumerated() {
+        for (i, group) in ContextMenuLayout.fileTab(cloud: !model.prefs.clouds.isEmpty).enumerated() {
             if i > 0 { menu.separator() }
             for title in group {
                 menu.action(title) {

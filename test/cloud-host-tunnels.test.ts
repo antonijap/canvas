@@ -166,10 +166,21 @@ test("a tunnel start that finishes after Stop and Start again never serves the o
 test("Delete while a start of the same Cloud is under way: the start finishes first, then nothing of it is left", async () => {
   const x = await Host.startHosting({ name: "Gone", label: "Anna" });
   await Host.stopHosting(x);
-  const start = Host.startHosting({ name: "Gone", label: "Anna", hostId: x }).catch((e) => e);
-  const wipe = Host.wipeHosting(x);
-  await start;
-  await wipe;
+  const gate = path.join(tmp, "wipe-start");
+  process.env.CANVAS_FAKE_TUNNEL_GATE = gate;
+  const start = Host.startHosting({ name: "Gone", label: "Anna", hostId: x });
+  await waitFor(() => fs.readdirSync(tmp).some((f) => f.startsWith("wipe-start.waiting.")), "the start to wait for its member tunnel");
+  let deleted = false;
+  const wipe = Host.wipeHosting(x).then(() => { deleted = true; });
+  try {
+    await sleep(500);
+    assert.equal(deleted, false, "Delete waits for the in-progress start");
+  } finally {
+    fs.writeFileSync(gate, "");
+    delete process.env.CANVAS_FAKE_TUNNEL_GATE;
+    await start;
+    await wipe;
+  }
   await sleep(800);
   assert.equal(Host.localHost(x), null, "not running");
   assert.ok(!(await Host.hostsHere(x)), "not kept");
@@ -193,4 +204,35 @@ test("at most 8 Clouds on one Mac: the ninth is refused with a reason", async ()
   const again = await Host.startHosting({ name: "Room again", label: "Anna" });
   assert.ok(again);
   await Host.stopHosting();
+});
+
+test("a stopped follow run cannot repeat against the restarted process while its follow is pending", async () => {
+  // The prior limit test keeps eight stopped Clouds. Resume one by id.
+  const a = (await Host.hostStatusAll()).clouds[0]?.hostId as string || await Host.startHosting({ name: "Gate", label: "Host" });
+  await Host.startHosting({ name: "Gate", label: "Host", hostId: a });
+  const oldPort = Host.localHost(a)!.origin;
+  const oldGate = path.join(tmp, "old-run"), newGate = path.join(tmp, "new-run");
+  const waiting = (gate: string) => fs.readdirSync(tmp).filter((f) => f.startsWith(path.basename(gate) + ".waiting.")).length;
+  process.env.CANVAS_FAKE_TUNNEL_GATE = oldGate;
+  let settled = false;
+  const inv = Host.invite("next@studio.test", undefined, a).catch(() => {}).finally(() => { settled = true; });
+  await waitFor(() => waiting(oldGate) === 1, "old enrolment start");
+  const oldStatus = Host.hostStatus(a);
+  await Host.stopHosting(a);
+  process.env.CANVAS_FAKE_TUNNEL_GATE = newGate;
+  const restart = Host.startHosting({ name: "Gate", label: "Host", hostId: a });
+  await waitFor(() => waiting(newGate) === 1, "new member start");
+  const newStatus = Host.hostStatus(a); // Requests a second pass for the new process only.
+  try {
+    fs.writeFileSync(oldGate, "");
+    await waitFor(() => settled || waiting(newGate) > 1, "the old run to finish without duplicating the new helper");
+    await waitFor(() => !(served() as unknown as { port: number; pid: number }[]).some((x) => alive(x.pid) && oldPort.endsWith(`:${x.port}`)), "no helper serving the stopped process port before the new helper is ready");
+    assert.equal(settled, true, "old follow returns instead of following the new process again");
+    assert.equal(waiting(newGate), 1, "only the new run starts a member helper");
+  } finally {
+    fs.writeFileSync(newGate, "");
+    await Promise.all([inv, oldStatus, restart, newStatus]);
+    delete process.env.CANVAS_FAKE_TUNNEL_GATE;
+    await Host.stopHosting(a);
+  }
 });

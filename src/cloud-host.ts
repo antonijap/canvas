@@ -1,4 +1,4 @@
-// Host on this Mac, on the editor server's side: any number of Clouds hosted here at once (one per team), each its own
+// Host on this Mac, on the editor server's side: up to eight Clouds hosted here at once (one per team), each its own
 // process (cloud/node/main.ts) on its own 127.0.0.1 port, with its own data folder, people, invites and tunnel keys,
 // known by its host id. This Canvas joins each as its owner with a device token that never leaves this process. The
 // editor server itself stays on 127.0.0.1:5189 and is never reachable through a Cloud's port or its tunnels.
@@ -27,6 +27,7 @@ import { fork, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { deleteSecret, readSecret, writeSecret } from "./cloud-secrets.ts";
 import { fingerprint, genkey, helperPath, hostIdFor, ownsPort, serve, type Helper } from "./cloud-tunnel.ts";
@@ -80,7 +81,7 @@ class HostedCloud {
   private pending = new Map<number, (m: any) => void>();
   private seq = 0;
   private following: Promise<void> | null = null;
-  private again = false;
+  private followingRun: { child: ChildProcess | null; again: boolean } | null = null;
 
   readonly slot: string;
   constructor(slot: string) { this.slot = slot; }
@@ -113,17 +114,17 @@ class HostedCloud {
    */
   follow(): Promise<void> {
     // A run left from a process that has stopped since does not hold up the new one.
-    if (this.following && this.followingFor === this.child) { this.again = true; return this.following; }
+    if (this.following && this.followingRun?.child === this.child) { this.followingRun.again = true; return this.following; }
+    const state = { child: this.child, again: false };
+    this.followingRun = state;
     const run: Promise<void> = (async () => {
       try {
-        do { this.again = false; await this.followOnce(); } while (this.again && this.child);
+        do { state.again = false; await this.followOnce(); } while (state.again && this.child && this.child === state.child);
       } finally { if (this.following === run!) this.following = null; }
     })();
     this.following = run;
-    this.followingFor = this.child;
     return run;
   }
-  private followingFor: ChildProcess | null = null;
 
   /** The process went: whatever waited for its answer is told so at once (not after the 10 s timeout). */
   dropPending(): void {
@@ -253,11 +254,19 @@ async function freePort(): Promise<number> {
 const clouds = new Map<string, HostedCloud>();
 const cloudOf = (slot: string) => { let c = clouds.get(slot); if (!c) { c = new HostedCloud(slot); clouds.set(slot, c); } return c; };
 
-/** The host id of the first slot from its tunnel keys (a Cloud hosted before the index existed), or null. */
-async function mainIdFromKeys(): Promise<string | null> {
+/** The first slot's host id from its tunnel keys, or its kept data when no keys are available. */
+async function legacyMainId(): Promise<string | null> {
   const raw = await readSecret(keysAccount("main"));
-  if (!raw) return null;
-  try { return hostIdFor(JSON.parse(raw).enrol.public); } catch { return null; }
+  if (raw) { try { return hostIdFor(JSON.parse(raw).enrol.public); } catch { /* try the kept data */ } }
+  // Even without tunnel keys, kept data must have a row with Delete. Reading it must not create a database.
+  let db: DatabaseSync | undefined;
+  try {
+    const file = path.join(hostDir(), "team.sqlite");
+    if (!fs.existsSync(file)) return null;
+    db = new DatabaseSync(file, { readOnly: true });
+    const row = db.prepare("SELECT host_id FROM host WHERE id = 1").get();
+    return typeof row?.host_id === "string" && /^[0-9a-f-]{36}$/.test(row.host_id) ? row.host_id : null;
+  } catch { return null; } finally { db?.close(); }
 }
 
 /** The slot of a host id: one started in this run, else the index, else the first Cloud's keys (from before the index). */
@@ -265,7 +274,7 @@ async function slotOf(hostId: string): Promise<string | null> {
   const id = hostId.toLowerCase();
   for (const c of clouds.values()) if (c.hostId === id) return c.slot;
   for (const [slot, h] of Object.entries(readIndex())) if (h === id) return slot;
-  return (await mainIdFromKeys()) === id ? "main" : null;
+  return (await legacyMainId()) === id ? "main" : null;
 }
 
 /** Every slot this Mac keeps: the index, the ones started in this run, and the first one if its keys or folder exist. */
@@ -417,7 +426,7 @@ export async function hostStatusAll(): Promise<{ available: boolean; hosting: bo
   const ix = readIndex();
   for (const [slot, id] of Object.entries(ix)) { const c = cloudOf(slot); if (!c.hostId) c.hostId = id; }
   if (!ix.main) {
-    const id = await mainIdFromKeys();
+    const id = await legacyMainId();
     if (id) { const c = cloudOf("main"); if (!c.hostId) c.hostId = id; ix.main = id; writeIndex(ix); }
   }
   const list = await Promise.all([...clouds.values()].filter((c) => c.hostId).map((c) => c.status()));
