@@ -21,6 +21,7 @@ const O = await import("../src/onboarding.ts");
 const { temporaryServer } = await import("../src/mcp-connect.ts");
 const { startServer } = await import("../src/server.ts");
 const { kinds } = await import("../src/widgets.ts");
+const { codeRootId, mcpCodeVersion, version: codeVersion } = await import("../src/version.ts");
 const server = await startServer(0);
 const port = (server.address() as { port: number }).port;
 const base = `http://127.0.0.1:${port}`;
@@ -101,6 +102,66 @@ test("Connected turns on when an MCP client connects, not for Canvas's own runs,
   assert.equal((await setup()).client, "Claude");
   const s = O.mcpStatus(Date.now() + O.OFF_AFTER_MS + 1);
   assert.equal(s.connected, false, "off after OFF_AFTER_MS of silence");
+  assert.equal((await setup()).outdated, false, "an MCP of this version is not older");
+});
+
+test("an MCP from before an update counts as Connected, older version (GitHub issue 9)", async () => {
+  O.resetMcpSeen();
+  // An older MCP sends no hello and no read header: only x-canvas-source on its writes, and no version.
+  // The server notes every request before routing it, so any write path will do.
+  const write = (headers: Record<string, string>) => fetch(`${base}/api/no-such-route`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json", ...headers }, body: "{}" }).then((r) => r.body?.cancel());
+  await write({ "x-canvas-source": "mcp" });
+  let s = await setup();
+  assert.equal(s.connected, true, "any request from an MCP counts");
+  assert.equal(s.outdated, true, "it says which: an older version");
+  // An MCP of this copy whose code is no longer on disk (the app updated under it) is older.
+  O.resetMcpSeen();
+  await write({ "x-canvas-source": "mcp", "x-canvas-session": "s-old", "x-canvas-mcp-version": "000000000000", "x-canvas-mcp-root": codeRootId() });
+  s = await setup();
+  assert.equal(s.outdated, true, "this copy's MCP with code that is gone");
+  assert.equal(s.otherCopy, false);
+  // An MCP of another copy (a checkout talking to the installed app) is not older: restarting would load the same
+  // copy again. It is Connected, and says it is another copy.
+  O.resetMcpSeen();
+  await write({ "x-canvas-source": "mcp", "x-canvas-session": "s-other", "x-canvas-mcp-version": "111111111111", "x-canvas-mcp-root": "ffffffffffff" });
+  s = await setup();
+  assert.equal(s.connected, true, "another copy's MCP counts");
+  assert.equal(s.outdated, false, "and is not called older");
+  assert.equal(s.otherCopy, true, "it is another copy");
+  // An MCP of this copy with the code on disk now (src and mcp): current.
+  O.resetMcpSeen();
+  await write({ "x-canvas-source": "mcp", "x-canvas-session": "s-now", "x-canvas-mcp-version": mcpCodeVersion(), "x-canvas-mcp-root": codeRootId() });
+  s = await setup();
+  assert.deepEqual([s.connected, s.outdated, s.otherCopy], [true, false, false], "this copy's current MCP");
+  // A real canvas-mcp, while an older one also talks: it sends this copy's current version, so plain Connected wins.
+  O.resetMcpSeen();
+  await write({ "x-canvas-source": "mcp" });
+  const c = await connect({}, "claude-code");
+  assert.ok(await until(async () => (await setup()).outdated === false), "a current MCP wins");
+  s = await setup();
+  assert.equal(s.connected, true);
+  assert.equal(s.client, "Claude");
+  await c.close();
+  // Canvas's own runs never count, old or new.
+  O.resetMcpSeen();
+  await write({ "x-canvas-source": "mcp", "x-canvas-session": "run-abc" });
+  assert.equal((await setup()).connected, false, "a Canvas run does not count");
+});
+
+test("an MCP's code version covers mcp/ as well as src/, so an MCP-only change is noticed", () => {
+  const root = fs.mkdtempSync(path.join(dir, "code-"));
+  fs.mkdirSync(path.join(root, "src"));
+  fs.mkdirSync(path.join(root, "mcp"));
+  fs.writeFileSync(path.join(root, "src", "a.ts"), "one");
+  fs.writeFileSync(path.join(root, "mcp", "tools.ts"), "tools");
+  const src = path.join(root, "src");
+  const v1 = mcpCodeVersion(src), s1 = codeVersion(src);
+  assert.match(v1, /^[0-9a-f]{12}$/);
+  fs.writeFileSync(path.join(root, "mcp", "tools.ts"), "tools, changed");
+  assert.notEqual(mcpCodeVersion(src), v1, "an mcp/ change is a new MCP version");
+  assert.equal(codeVersion(src), s1, "the server's version (src only) stays");
+  fs.writeFileSync(path.join(root, "src", "a.ts"), "two");
+  assert.notEqual(codeVersion(src), s1, "a src/ change is both");
 });
 
 test("the Welcome file is a copy of the course with the welcome card, made once", async () => {
