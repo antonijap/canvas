@@ -581,7 +581,7 @@ struct CloudSettings: View {
                 }
                     SettingsDivider()
                 }
-                SettingsRow("Name", detail: "What Home calls this server") {
+                SettingsRow("Name", detail: "What Home calls this Cloud") {
                     FieldBox {
                         TextField(valid ? ServerName.display(urlText) : "Studio", text: Binding(get: { model.prefs.cloudName }, set: { model.prefs.cloudName = String($0.prefix(SettingsLimits.serverName)) }))
                             .textFieldStyle(.plain).font(Typography.body)
@@ -626,7 +626,7 @@ struct CloudSettings: View {
             }
             hostCard
             SettingsCard(title: "Comments") {
-                SettingsRow("Share the open file", detail: "Sends its comments to your server and keeps them in sync") {
+                SettingsRow("Share the open file", detail: "Sends its comments to your Cloud and keeps them in sync") {
                     FieldButton(title: "Share Comments\u{2026}", symbol: nil) { account.shareOpenFile(model) }
                         .disabled(model.currentFile == nil || account.state.status != "connected").opacity(model.currentFile == nil || account.state.status != "connected" ? 0.5 : 1)
                         .qaID("cloud-share", label: "Share Comments")
