@@ -502,7 +502,7 @@ final class CloudAccount: ObservableObject {
                     if model.prefs.clouds.isEmpty { model.showHome(); AddCloudPanel.shared.show(model) } else { SettingsWindow.shared.show(model, tab: .cloud) }
                     return
                 }
-                guard let pick = can.count == 1 ? can[0] : CloudAccount.pick(can) else { return }
+                guard let pick = can.count == 1 ? can[0] : await CloudAccount.pickOutsideTask(can) else { return }
                 to = pick
             }
             var query = [URLQueryItem(name: "file", value: file)]
@@ -526,6 +526,15 @@ final class CloudAccount: ObservableObject {
     }
 
     /// Which Cloud: a short question with the Clouds in a menu (the first one chosen). Nil when cancelled.
+    /// The question from inside a Task. Its modal loop runs from the run loop, not from this Task's main-actor job:
+    /// run from the job, the main actor stays busy until the question closes and every other main-actor job (the
+    /// bridge, the page, QA) waits, so the app stops answering.
+    static func pickOutsideTask(_ clouds: [CloudEntry]) async -> CloudEntry? {
+        await withCheckedContinuation { (done: CheckedContinuation<CloudEntry?, Never>) in
+            RunLoop.main.perform { MainActor.assumeIsolated { done.resume(returning: pick(clouds)) } }
+        }
+    }
+
     static func pick(_ clouds: [CloudEntry]) -> CloudEntry? {
         let a = NSAlert()
         a.messageText = "Share comments to which Cloud?"
