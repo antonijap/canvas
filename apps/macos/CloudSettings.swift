@@ -959,7 +959,7 @@ final class AddCloudPanel {
         route.step = step
         if sheet != nil { return }
         guard let parent = window ?? model.webView.window else { return }
-        let host = NSHostingController(rootView: AddCloudSheet(model: model, route: route) { [weak self] in self?.close() })
+        let host = ControlHostingController(rootView: AddCloudSheet(model: model, route: route) { [weak self] in self?.close() })
         host.sizingOptions = [.preferredContentSize]
         let w = NSWindow(contentViewController: host)
         w.styleMask = [.titled]

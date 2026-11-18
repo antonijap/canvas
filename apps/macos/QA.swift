@@ -70,6 +70,8 @@ enum QA {
         // The window of a QA instance is never key (it never activates), and WKWebView takes a first click in a window
         // that is not key as the click that focuses it: the page never saw the canvas's own presses and drags.
         swizzle(WKWebView.self, #selector(NSView.acceptsFirstMouse(for:)), #selector(NSView.qa_acceptsFirstMouse(for:)))
+        // Native fields must use this instance's clipboard too, including invite links pasted into a sheet.
+        swizzle(NSTextView.self, #selector(NSText.paste(_:)), #selector(NSTextView.qa_paste(_:)))
         // SwiftUI's .onDrag goes straight to the drag manager (gesture-driven), not through NSView: that entry
         // point, on every manager class that has it, starts the virtual session too.
         typealias Begin = @convention(block) (AnyObject, NSArray, NSWindow?, NSRect, NSEvent?, AnyObject?, AnyObject) -> AnyObject
@@ -338,6 +340,9 @@ enum QA {
             LayersStore.of(model).renaming = nil
             // A sign-in opens Home on the team server; the next scenario starts on Recents again.
             HomeStore.shared.section = .recents
+            HomeStore.shared.query = ""
+            CloudAccount.shared.selected = nil
+            SettingsWindow.shared.resetForQA()
             for w in NSApp.windows where w !== window && w.isVisible {
                 if w.contentViewController is SettingsTabs || w.isSheet || w is NSPanel || w.title == "About Canvas" { w.orderOut(nil) }
             }
@@ -1397,6 +1402,12 @@ extension NSView {
             return v
         }
         return MainActor.assumeIsolated { v.session }
+    }
+}
+
+extension NSTextView {
+    @objc func qa_paste(_ sender: Any?) {
+        if let text = canvasPasteboard.string(forType: .string) { insertText(text, replacementRange: selectedRange()) }
     }
 }
 
