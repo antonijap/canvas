@@ -456,6 +456,8 @@ function start(host) {
     ta.placeholder = placeholder;
     ta.setAttribute("aria-label", placeholder);
     ta.spellcheck = true;
+    // No AutoFill (macOS offers one-time codes from Mail over the controls), autocorrect or writing suggestions.
+    for (const [k, v] of [["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"], ["writingsuggestions", "false"]]) ta.setAttribute(k, v);
     ta.addEventListener("input", () => { autoGrow(ta); if (onChange) onChange(ta.value.trim() !== ""); });
     ta.addEventListener("keydown", (e) => {
       e.stopPropagation();
