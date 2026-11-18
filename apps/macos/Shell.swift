@@ -561,8 +561,7 @@ private struct TabPointer: NSViewRepresentable {
         var menuAction: (NSView, CGPoint) -> Void = { _, _ in }
         var drag: (CGFloat) -> Void = { _ in }
         private var start: CGFloat = 0
-        private var allowed = false
-        private var moved = false
+        private var press = TabPress()
         override var mouseDownCanMoveWindow: Bool { false }
         override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func hitTest(_ point: NSPoint) -> NSView? {
@@ -575,22 +574,26 @@ private struct TabPointer: NSViewRepresentable {
         }
         override func mouseDown(with event: NSEvent) {
             if event.modifierFlags.contains(.control) { rightMouseDown(with: event); return }
-            start = event.locationInWindow.x; moved = false
-            allowed = TabOrder.canDrag(button: event.buttonNumber, clicks: event.clickCount, editing: false)
-            if event.clickCount == 2 { rename() }
+            start = event.locationInWindow.x
+            perform(press.down(button: event.buttonNumber, clicks: event.clickCount))
         }
         override func mouseDragged(with event: NSEvent) {
-            guard allowed else { return }
             let dx = event.locationInWindow.x - start
-            if moved || TabOrder.isDrag(dx) { moved = true; drag(dx) }
+            if press.drag(dx) { drag(dx) }
         }
         override func mouseUp(with event: NSEvent) {
-            guard allowed else { return }
-            allowed = false
-            if moved { drop() } else { click() }
+            perform(press.up())
+        }
+        private func perform(_ action: TabPress.Action) {
+            switch action {
+            case .none: break
+            case .click: click()
+            case .rename: rename()
+            case .drop: drop()
+            }
         }
         override func rightMouseDown(with event: NSEvent) {
-            allowed = false; moved = false
+            press.cancel()
             menuAction(self, convert(event.locationInWindow, from: nil))
         }
     }

@@ -5,7 +5,7 @@ import path from "node:path";
 import { Fail, Skip, find, type AnyNode, type Rect } from "../harness.ts";
 import { api, sleep } from "../lib.ts";
 import type { QaApp } from "./app.ts";
-import { postSystemDrag } from "./system-drag.ts";
+import { postSystemClick, postSystemDrag } from "./system-drag.ts";
 
 export { Fail, Skip, find };
 export type Pt = { x: number; y: number };
@@ -57,6 +57,10 @@ export class NT {
     return this.cmd("qa.mouse", { action: o.right ? "rightClick" : "click", x: p.x, y: p.y, mods: o.mods ?? [], window: o.window ?? "main" });
   }
   doubleClick(p: Pt, o: { window?: Win } = {}) { return this.cmd("qa.mouse", { action: "doubleClick", x: p.x, y: p.y, window: o.window ?? "main" }); }
+  async systemClick(p: Pt, o: { count?: 1 | 2 } = {}) {
+    const { window: frame } = await this.state();
+    return postSystemClick({ pid: this.app.pid, at: { x: frame.x + p.x, y: frame.y + frame.height - p.y }, count: o.count ?? 1 });
+  }
   move(p: Pt) { return this.cmd("qa.mouse", { action: "move", x: p.x, y: p.y }); }
   drag(from: Pt, to: Pt, o: { mods?: Mods; steps?: number; via?: Pt[]; holdMs?: number; dwellMs?: number } = {}) {
     return this.cmd("qa.drag", { from: [from.x, from.y], to: [to.x, to.y], mods: o.mods ?? [], steps: o.steps ?? 14, via: (o.via ?? []).map((p) => [p.x, p.y]), holdMs: o.holdMs, dwellMs: o.dwellMs });

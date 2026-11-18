@@ -20,9 +20,27 @@ struct ShellLogicTests {
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
-        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func tabPress() {
+        var press = TabPress()
+        check(press.down(button: 0, clicks: 1) == .none, "first press keeps its view alive")
+        check(press.up() == .click, "single click switches immediately on release")
+        check(press.down(button: 0, clicks: 2) == .none, "second press must not insert the editor under a held mouse")
+        check(!press.drag(20), "second click cannot start reorder")
+        check(press.up() == .rename, "rename after the second release, ready to select all")
+        check(press.up() == .none, "a release is handled only once")
+        _ = press.down(button: 0, clicks: 1)
+        check(!press.drag(3), "small movement stays a click")
+        check(press.drag(12), "single press drags past threshold")
+        check(press.up() == .drop, "drag drops instead of opening or renaming")
+        _ = press.down(button: 0, clicks: 1)
+        press.cancel()
+        check(press.up() == .none, "context menu cancels the press")
+        check(press.down(button: 1, clicks: 2) == .none && press.up() == .none, "secondary double click never renames")
     }
 
     static func tabSizing() {

@@ -26,10 +26,18 @@ export function systemDragHelper(source = SOURCE, out = OUT): string {
 
 /** Coordinates are screen points with AppKit's bottom-left origin; the helper flips to CGEvent's origin. */
 export async function postSystemDrag(input: { pid: number; from: Pt; to: Pt; mods: Mods; steps: number; holdMs: number; dwellMs: number }) {
+  return postSystemInput(input);
+}
+
+export async function postSystemClick(input: { pid: number; at: Pt; count: 1 | 2 }) {
+  return postSystemInput({ mode: "click", ...input });
+}
+
+async function postSystemInput(input: object) {
   const bin = systemDragHelper();
   await new Promise<void>((resolve, reject) => {
     childProcess.execFile(bin, [JSON.stringify(input)], { timeout: 30_000, encoding: "utf8" }, (err, _stdout, stderr) => {
-      if (err) reject(new Fail(`System drag helper failed: ${stderr.trim() || err.message}`));
+      if (err) reject(new Fail(`System mouse helper failed: ${stderr.trim() || err.message}`));
       else resolve();
     });
   });
