@@ -30,6 +30,36 @@ func serverUp() -> Bool {
   return ok
 }
 
+/// The running server's /health version and root (ServerCode.health), nil when nothing answers as Canvas.
+func serverHealth() -> (version: String?, root: String?)? {
+  var req = URLRequest(url: base.appendingPathComponent("health"))
+  req.timeoutInterval = 0.6
+  var out: (version: String?, root: String?)?
+  let sem = DispatchSemaphore(value: 0)
+  URLSession.shared.dataTask(with: req) { data, response, _ in
+    if (response as? HTTPURLResponse)?.statusCode == 200, let data { out = ServerCode.health(data) }
+    sem.signal()
+  }.resume()
+  sem.wait()
+  return out
+}
+
+/// At launch: start our server, or, when a server an older Canvas left running answers on the port with other code,
+/// stop it (POST /quit: it saves every edit first) and start ours, so a new app never runs old server code.
+func startOrReplaceServer() {
+  guard let running = serverHealth() else { if !serverUp() { startServer() }; return }
+  let src = (serverScript as NSString).deletingLastPathComponent
+  let own = ServerCode.version(srcDir: src).map { (version: $0, root: ServerCode.rootId(srcDir: src)) }
+  guard ServerCode.choice(running: running, own: own) == .replace else { return }
+  NSLog("canvas: the server on port \(port) runs other code (\(running.version ?? "?") from \(running.root ?? "?"), ours \(own?.version ?? "?") from \(own?.root ?? "?")): replacing it")
+  stoppingServer = true
+  let stopped = Updater.stopServer(base)
+  stoppingServer = false
+  if stopped { startServer() } else {
+    reportServerProblem("An older Canvas server is still running and did not stop. Quit Canvas and open it again.")
+  }
+}
+
 let serverLock = NSLock()
 var serverProc: Process?
 /// Starts that did not bring the server up, in a row. After a few, the window says why instead of retrying silently.
@@ -1055,7 +1085,7 @@ func loadDesign() {
 }
 
 DispatchQueue.global(qos: .userInitiated).async {
-  if !serverUp() { startServer() }
+  startOrReplaceServer()
   for _ in 0..<200 { if serverUp() { break }; usleep(100_000) }
   // Usage counts (src/usage-counts.ts): this launch, and a crash when the last run never quit.
   if lastRunCrashed { UsageCount.send("crash", to: base) }

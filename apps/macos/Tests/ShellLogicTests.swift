@@ -16,7 +16,7 @@ struct ShellLogicTests {
     }
 
     static func main() {
-        docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); tipPlacement(); contextMenu()
+        docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); serverCode(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
@@ -294,6 +294,72 @@ struct ShellLogicTests {
         check(!EmptyPage.isEmpty(fileOpen: true, home: true, loaded: true, boards: 0, cards: 0), "Home shown: no hint")
         check(!EmptyPage.isEmpty(fileOpen: false, home: false, loaded: true, boards: 0, cards: 0), "no file: no hint")
         check(!EmptyPage.hint.contains("\u{2014}") && !EmptyPage.hint.contains("\u{00B7}"), "no em dash or middot in the hint")
+    }
+
+    // A server an older Canvas left running answers on the port: the app replaces it instead of running old code.
+    static func serverCode() {
+        typealias S = ServerCode
+        let own = (version: "aaaaaaaaaaaa", root: "rrrrrrrrrrrr")
+        check(S.choice(running: nil, own: own) == .start, "nothing answers: start ours")
+        check(S.choice(running: (own.version, own.root), own: own) == .reuse, "our own code: reuse it")
+        check(S.choice(running: ("bbbbbbbbbbbb", own.root), own: own) == .replace, "older code from the same folder (an update): replace")
+        check(S.choice(running: (own.version, "oooooooooooo"), own: own) == .replace, "another copy's server: replace")
+        check(S.choice(running: ("bbbbbbbbbbbb", "oooooooooooo"), own: own) == .replace, "another copy with other code: replace")
+        check(S.choice(running: ("bbbbbbbbbbbb", nil), own: own) == .replace, "an old server without root, other code: replace")
+        check(S.choice(running: (own.version, nil), own: own) == .reuse, "an old server without root, same code: reuse")
+        check(S.choice(running: (nil, nil), own: own) == .replace, "no version at all: replace")
+        check(S.choice(running: ("bbbbbbbbbbbb", own.root), own: nil) == .reuse, "our own code unreadable: keep what runs")
+        let h = S.health(Data(#"{"ok":true,"version":"0123456789ab","root":"ba9876543210"}"#.utf8))
+        check(h?.version == "0123456789ab" && h?.root == "ba9876543210", "the /health answer is read")
+        let old = S.health(Data(#"{"ok":true,"version":"0123456789ab"}"#.utf8))
+        check(old != nil && old?.root == nil, "an older /health without root")
+        check(S.health(Data("not json".utf8)) == nil && S.health(Data(#"{"ok":false}"#.utf8)) == nil, "not Canvas's answer")
+
+        // The hashes match src/version.ts exactly: a folder with nesting, hidden files, a symlink, sort-order traps and
+        // a non-ASCII name, reached through a symlinked path, then the repo's own src folder.
+        let fm = FileManager.default
+        let tmp = (NSTemporaryDirectory() as NSString).appendingPathComponent("canvas-servercode-\(getpid())")
+        try? fm.removeItem(atPath: tmp)
+        let src = tmp + "/real/src"
+        try? fm.createDirectory(atPath: src + "/a/b", withIntermediateDirectories: true)
+        try? fm.createDirectory(atPath: src + "/.hidden", withIntermediateDirectories: true)
+        for (f, s) in [("a.ts", "one"), ("a/b.ts", "two"), ("a/b/c.ts", "three"), ("a-b.ts", "four"), ("A.ts", "five"), (".DS_Store", "six"), (".hidden/x.js", "seven"), ("caf\u{e9}.ts", "eight"), ("empty.ts", "")] {
+            fm.createFile(atPath: src + "/" + f, contents: Data(s.utf8))
+        }
+        try? fm.createSymbolicLink(atPath: src + "/link.ts", withDestinationPath: src + "/a.ts")
+        try? fm.createSymbolicLink(atPath: src + "/linkdir", withDestinationPath: src + "/a")
+        try? fm.createSymbolicLink(atPath: tmp + "/alias", withDestinationPath: tmp + "/real")
+        defer { try? fm.removeItem(atPath: tmp) }
+        let repoSrc = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../src").standardized.path
+        guard let node = NodeLocator.find(env: ProcessInfo.processInfo.environment, home: NSHomeDirectory(), isExecutable: { fm.isExecutableFile(atPath: $0) }) else {
+            check(false, "node is needed to check the hashes against src/version.ts"); return
+        }
+        func nodeSays(_ dir: String) -> String {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: node)
+            let mod = repoSrc + "/version.ts"
+            // version() hashes the folder its module is in, so the module is copied next to the files for the folder test.
+            p.arguments = ["--input-type=module", "-e", """
+              import fs from "node:fs"; import path from "node:path"; import url from "node:url";
+              const dir = process.argv[1]; let m = \(String(reflecting: mod));
+              if (dir !== path.dirname(m)) { fs.copyFileSync(m, path.join(dir, "zz-version.ts")); m = path.join(dir, "zz-version.ts"); }
+              const v = await import(url.pathToFileURL(m).href);
+              console.log(v.version() + " " + v.codeRootId());
+              """, dir]
+            let out = Pipe()
+            p.standardOutput = out
+            do { try p.run() } catch { return "" }
+            p.waitUntilExit()
+            return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let viaAlias = tmp + "/alias/src"
+        let n = nodeSays(viaAlias)
+        let sw = "\(S.version(srcDir: viaAlias) ?? "nil") \(S.rootId(srcDir: viaAlias))"
+        check(n.count == 25 && n == sw, "the folder's version and root as src/version.ts says: node \(n), swift \(sw)")
+        let nr = nodeSays(repoSrc)
+        let swr = "\(S.version(srcDir: repoSrc) ?? "nil") \(S.rootId(srcDir: repoSrc))"
+        check(nr.count == 25 && nr == swr, "the repo's own src as its server says: node \(nr), swift \(swr)")
+        check(S.version(srcDir: tmp + "/missing") == nil, "an unreadable folder has no version")
     }
 
     static func canvasInsets() {
