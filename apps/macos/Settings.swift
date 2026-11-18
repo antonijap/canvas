@@ -41,6 +41,9 @@ final class SettingsWindow {
 
     func close() { window?.orderOut(nil) }
 
+    /// The window while it shows (a sheet opened from Settings > Cloud attaches to it).
+    var nsWindow: NSWindow? { window?.isVisible == true ? window : nil }
+
     /// A pane whose height changed while it shows (Settings > Cloud once an address is saved): the window follows.
     func refit() {
         DispatchQueue.main.async { [weak self] in (self?.window?.contentViewController as? SettingsTabs)?.fit(animated: true) }

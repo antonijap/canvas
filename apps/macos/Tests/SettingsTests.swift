@@ -23,7 +23,7 @@ struct SettingsTests {
     }
 
     static func main() {
-        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud()
+        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -157,22 +157,7 @@ struct SettingsTests {
         check(CloudSetup.next("https://studio.workers.dev", devEmail: "") == .signIn, "a team server signs in at once")
         check(CloudSetup.next("http://localhost:8787", devEmail: "") == .askEmail, "a local server asks for the development email first")
         check(CloudSetup.next("http://localhost:8787", devEmail: "anna@studio.test") == .signIn, "a local server with an email signs in")
-        var s = AppSettings()
-        s.cloudUrl = "https://studio.workers.dev/x"; s.cloudDevEmail = "anna@studio.test"
-        check(s.serverSettings["cloudUrl"] as? String == "https://studio.workers.dev", "the server gets the cleaned address")
-        check(s.serverSettings["cloudDevEmail"] as? String == "", "and no development email for a real server")
-        s.cloudUrl = "http://localhost:8787"
-        check(s.serverSettings["cloudDevEmail"] as? String == "anna@studio.test", "a local server gets it")
-        s.cloudUrl = "nonsense"
-        check(s.serverSettings["cloudUrl"] as? String == "", "a bad address is not sent")
-        let d = fresh()
-        s.cloudUrl = "https://studio.workers.dev"; s.save(d)
-        check(AppSettings.load(d).cloudUrl == "https://studio.workers.dev", "the address is stored")
-        check(AppSettings().cloudName == "" && AppSettings.load(fresh()).cloudName == "", "a server has no name until one is given")
-        s.cloudName = "Studio team"; s.save(d)
-        check(AppSettings.load(d).cloudName == "Studio team", "the server's name is stored with its address")
-        s.cloudName = String(repeating: "a", count: 200)
-        check(s.clamped.cloudName.count == SettingsLimits.serverName, "a long name is cut to \(SettingsLimits.serverName) characters")
+        clouds()
         check(CloudStatusText.line("connected", configured: true) == "Connected" && CloudStatusText.line("offline", configured: true) == "Offline", "status lines")
         check(CloudStatusText.line("signedOut", configured: true) == "Signed out" && CloudStatusText.line("signInAgain", configured: true) == "Sign in again", "signed out and sign in again")
         check(CloudStatusText.line("tooOld", configured: true) == "The server is too old", "a server too old")
@@ -213,10 +198,13 @@ extension SettingsTests {
         check(i?.name == "Studio Cloud" && i?.hostId == id && i?.addr == tc && i?.code == code, "an invite link is read")
         check(i?.fingerprint == "3956-A61F", "the fingerprint is the one the server shows (src/cloud-tunnel.ts)")
         check(CloudInvite.parse(link(good.merging(["name": ""]) { $1 }))?.name == "Cloud", "no name: Cloud")
-        let other = CloudInvite.confirmText(i!, current: "https://studio.workers.dev", currentName: "Studio team")
-        check(other.contains("This replaces Studio team as this Mac\u{2019}s Cloud.") && other.contains("3956-A61F"), "the question says plainly when an invite replaces this Mac's Cloud")
-        check(!CloudInvite.confirmText(i!, current: nil, currentName: "").contains("replaces"), "and says nothing of it when there is none")
-        check(CloudInvite.confirmText(i!, current: "canvas-cloud://\(id)", currentName: "Studio Cloud").contains("already in this Cloud"), "joining the same Cloud again says so")
+        check(i!.fingerprintLine.contains("3956-A61F"), "the fingerprint to compare is said before joining")
+        let server = CloudEntry(url: "https://studio.workers.dev", kind: .server)
+        check(CloudInvite.check(i!, list: [server]) == .ok, "joining adds a Cloud: the others stay")
+        let joined = CloudEntry(id: "j1", url: "canvas-cloud://\(id)", kind: .joined)
+        check(CloudInvite.check(i!, list: [server, joined]) == .already(id: "j1"), "never the same Cloud twice")
+        check(CloudInvite.check(i!, list: [CloudEntry(url: "canvas-cloud://\(id)", kind: .hosted)]) == .hostsIt, "never a Cloud this Mac hosts")
+        check(CloudInvite.check(i!, list: [], hostedIds: [id]) == .hostsIt, "nor one it hosts that is not in the list")
         check(CloudInvite.parse(link(good.merging(["v": "2"]) { $1 })) == nil, "another version")
         check(CloudInvite.parse(link(good.merging(["host": "studio-mac"]) { $1 })) == nil, "a host that is not an id")
         check(CloudInvite.parse(link(good.merging(["tc": "http://192.168.1.20"]) { $1 })) == nil, "an address that is not a tunnel")
@@ -225,10 +213,96 @@ extension SettingsTests {
         check(CloudStatusText.line("down", configured: true) == "Cloud down" && CloudStatusText.detail("down", name: "Studio Cloud") == "Studio Cloud isn\u{2019}t open right now", "Cloud down, in one plain line")
         check(CloudDisclosure.lines.count == 4 && CloudDisclosure.lines.allSatisfy { !$0.contains("\u{2014}") && !$0.contains("\u{00B7}") }, "the disclosure, plain")
         var s = AppSettings()
+        s.clouds = [CloudEntry(url: "canvas-cloud://\(id)", name: "Studio", devEmail: "anna@studio.test", kind: .hosted, hosting: true)]
+        let sent = s.serverSettings["clouds"] as? [[String: String]]
+        check(sent == [["url": "canvas-cloud://\(id)", "devEmail": ""]], "the server gets the hosted Cloud's id and no development email: \(String(describing: sent))")
         let d = fresh()
-        s.cloudHosting = true; s.save(d)
-        check(AppSettings.load(d).cloudHosting && !AppSettings.load(fresh()).cloudHosting, "hosting is remembered, off by default")
-        s.cloudUrl = "canvas-cloud://\(id)"
-        check(s.serverSettings["cloudUrl"] as? String == "canvas-cloud://\(id)" && s.serverSettings["cloudDevEmail"] as? String == "", "the server gets the hosted Cloud's id and no development email")
+        s.save(d)
+        check(AppSettings.load(d).clouds.first?.hosting == true, "hosting is remembered per Cloud")
+    }
+}
+
+extension SettingsTests {
+    /// The list of Clouds: what the server gets, limits, storage, and many of each kind (one per client, one per team).
+    static func clouds() {
+        var s = AppSettings()
+        s.clouds = [CloudEntry(url: "https://studio.workers.dev/x", devEmail: "anna@studio.test", kind: .server),
+                    CloudEntry(url: "http://localhost:8787", devEmail: "anna@studio.test", kind: .server),
+                    CloudEntry(url: "nonsense", kind: .server)]
+        s.cloudsRev = 7
+        let sent = s.serverSettings["clouds"] as? [[String: String]]
+        check(sent == [["url": "https://studio.workers.dev", "devEmail": ""], ["url": "http://localhost:8787", "devEmail": "anna@studio.test"]],
+              "the server gets cleaned addresses, an email only for a local server, nothing for a bad address: \(String(describing: sent))")
+        check(s.serverSettings["cloudsRev"] as? Int == 7, "with the list's revision")
+        check(s.serverSettings["cloudUrl"] == nil && s.serverSettings["cloudDevEmail"] == nil, "and none of the single-Cloud keys")
+        let d = fresh()
+        s.save(d)
+        let back = AppSettings.load(d)
+        check(back.clouds.map(\.url) == ["https://studio.workers.dev", "http://localhost:8787"] && back.cloudsRev == 7, "the list and its revision are stored")
+        check(back.clouds.map(\.id) == s.clouds.prefix(2).map(\.id), "ids survive a restart")
+        check(AppSettings().clouds.isEmpty && AppSettings.load(fresh()).clouds.isEmpty, "no Clouds until one is added")
+        // Many of each kind: 35 servers and several hosted Clouds at once.
+        var many = (0..<35).map { CloudEntry(url: "https://client\($0).example.com", kind: .server) }
+        let ids = ["3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b", "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e"]
+        many += ids.map { CloudEntry(url: "canvas-cloud://\($0)", name: "Team", kind: .hosted, hosting: true) }
+        let clean = CloudList.clean(many)
+        check(clean.count == 38 && CloudList.hosted(clean).count == 3 && CloudList.hosted(clean).allSatisfy(\.hosting), "35 servers and 3 hosted Clouds, all kept: \(clean.count)")
+        check(CloudList.clean((0..<250).map { CloudEntry(url: "https://t\($0).example.com", kind: .server) }).count == SettingsLimits.clouds, "at most \(SettingsLimits.clouds)")
+        check(CloudList.clean([CloudEntry(url: "https://a.example.com", kind: .server), CloudEntry(url: "https://A.example.com/x", kind: .server)]).count == 1, "one entry per address")
+        let fixed = CloudList.clean([CloudEntry(url: "https://a.example.com", name: String(repeating: "a", count: 200), devEmail: "anna@studio.test", kind: .hosted, hosting: true)])
+        check(fixed[0].name.count == SettingsLimits.serverName && fixed[0].devEmail == "" && fixed[0].kind == .server && !fixed[0].hosting, "names cut, no email or hosting for an https server")
+        check(CloudList.clean([CloudEntry(url: "canvas-cloud://\(ids[0])", kind: .server)])[0].kind == .joined, "a hosted address is never a server")
+        check(clean.first { $0.kind == .hosted }?.hostId == ids[0], "a hosted Cloud's id")
+        // Adding.
+        guard let (one, e) = CloudList.add([], url: "https://Studio.workers.dev/", name: "  Studio  ", kind: .server) else { check(false, "add"); return }
+        check(one.count == 1 && e.url == "https://studio.workers.dev" && e.name == "Studio", "added, cleaned")
+        let again = CloudList.add(one, url: "https://studio.workers.dev", name: "Studio team", kind: .server)
+        check(again?.list.count == 1 && again?.entry.id == e.id && again?.entry.name == "Studio team", "the same address finds the entry and takes the new name")
+        check(CloudList.add(one, url: "http://studio.example.com", kind: .server) == nil, "no plain http to another host")
+        check(CloudList.add((0..<SettingsLimits.clouds).map { CloudEntry(url: "https://t\($0).example.com", kind: .server) }, url: "https://new.example.com", kind: .server) == nil, "a full list takes no more")
+        let hosted = CloudList.add(one, url: "canvas-cloud://\(ids[0])", kind: .hosted)
+        let hosted2 = hosted.flatMap { CloudList.add($0.list, url: "canvas-cloud://\(ids[1])", kind: .hosted) }
+        check(hosted2.map { CloudList.hosted($0.list).count } == 2, "a second hosted Cloud is its own entry")
+        check(CloudList.remove(one, id: e.id).isEmpty, "removed by id")
+        // Lists by name, filtered.
+        let named = [CloudEntry(url: "https://b.example.com", name: "birch", kind: .server), CloudEntry(url: "https://a.example.com", name: "Acme", kind: .server), CloudEntry(url: "https://c.example.com", name: "Cobalt labs", kind: .server)]
+        check(CloudList.filtered(named, query: "", name: { $0.name }).map(\.name) == ["Acme", "birch", "Cobalt labs"], "by name, any case")
+        check(CloudList.filtered(named, query: "LABS co", name: { $0.name }).map(\.name) == ["Cobalt labs"], "every word, any order")
+        // Sharing: only Clouds that are connected with an owner or editor role can take a file.
+        let st: [String: (status: String, role: String?)] = ["https://b.example.com": ("connected", "editor"), "https://a.example.com": ("connected", "commenter"), "https://c.example.com": ("signedOut", nil)]
+        check(CloudShare.candidates(named, status: st).map(\.name) == ["birch"], "who can take a file")
+    }
+
+    /// The single Cloud of an older version moves into the list once, written before the old keys go.
+    static func migration() {
+        let id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b"
+        let k = { (n: String) in AppSettings.prefix + n }
+        let d = fresh()
+        d.set("https://Studio.workers.dev/x", forKey: k("cloudUrl")); d.set("Studio team", forKey: k("cloudName")); d.set("anna@studio.test", forKey: k("cloudDevEmail"))
+        let s = AppSettings.load(d)
+        check(s.clouds.count == 1 && s.clouds[0].url == "https://studio.workers.dev" && s.clouds[0].name == "Studio team" && s.clouds[0].kind == .server, "the old Cloud is in the list, its name kept")
+        check(s.clouds[0].devEmail == "", "a dev email only for a local address")
+        check(d.object(forKey: k("clouds")) != nil, "the list is written at once")
+        check(CloudList.legacyKeys.allSatisfy { d.object(forKey: k($0)) == nil }, "and only then the old keys go")
+        let restart = AppSettings.load(d)
+        check(restart.clouds == s.clouds, "a restart reads the same list, same id, nothing moved twice")
+        // An empty list is a list: the old keys coming back (an older version run in between) move nothing.
+        var none = restart
+        none.clouds = []
+        none.save(d)
+        d.set("https://other.example.com", forKey: k("cloudUrl"))
+        check(AppSettings.load(d).clouds.isEmpty, "removing every Cloud stays removed")
+        // A local server keeps its email; a hosted Cloud moves as hosted while hosting was on, else as joined.
+        let l = fresh()
+        l.set("http://localhost:8787", forKey: k("cloudUrl")); l.set("anna@studio.test", forKey: k("cloudDevEmail"))
+        check(AppSettings.load(l).clouds.first?.devEmail == "anna@studio.test", "a local server's email moves with it")
+        let h = fresh()
+        h.set("canvas-cloud://\(id)", forKey: k("cloudUrl")); h.set(true, forKey: k("cloudHosting"))
+        let hs = AppSettings.load(h).clouds
+        check(hs.first?.kind == .hosted && hs.first?.hosting == true && hs.first?.hostId == id, "the Cloud this Mac hosted, still hosting")
+        let j = fresh()
+        j.set("canvas-cloud://\(id)", forKey: k("cloudUrl"))
+        check(AppSettings.load(j).clouds.first?.kind == .joined, "a hosted address without hosting was joined")
+        check(AppSettings.load(fresh()).clouds.isEmpty, "nothing to move: no Clouds")
     }
 }
