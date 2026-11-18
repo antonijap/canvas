@@ -1,0 +1,484 @@
+// Every local edit as one action of file ops (cloud/protocol-files.ts): the design file's half from the ops an edit
+// recorded (history.ts's vocabulary: node, tree, move and doc ops), the sidecar's half from the envelope before and
+// after (cards, pages, the other kept keys), and package files the edit added as blob ops. Nothing is sent anywhere
+// yet: Phase 1 makes the actions complete, and proves it.
+//
+// The proof: with checks on (tests: NODE_TEST_CONTEXT; `pnpm qa`'s servers: CANVAS_CHECK_ACTIONS=1), every write
+// runs its action through the shared apply (cloud/core/files/apply.ts) on the state before it, and the result must
+// be the very state the edit wrote, key order included (the document's JSON, the sidecar's bytes). An edit whose
+// action falls short is refused loudly (ActionCheckError) instead of written.
+
+import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { applyAction, isReject, nextProps, opRunner, orderLike } from "../cloud/core/files/apply.ts";
+import { DESCENDANTS_PREFIX, type DocNode, type Json } from "../cloud/core/schema.ts";
+import { actionBytes, blobTypeOf, checkBlobPath, FILE_LIMITS, META_KEYS, type Action, type BlobPath, type FileOp, type MetaKey, type Val } from "../cloud/protocol-files.ts";
+import { DocTree, type DocLike, type Envelope } from "./cloud-files-tree.ts";
+import type { Op } from "./history.ts";
+
+export class ActionCheckError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ActionCheckError";
+  }
+}
+/** An edit that has no action in the file ops' terms (a document key outside the allowlist, a node gone). */
+export class TranslateError extends Error {}
+
+/** Checks on, and what they counted (for the report a test or QA run can print). */
+export const actionChecks = {
+  enabled: process.env.CANVAS_CHECK_ACTIONS === "1" || (!!process.env.NODE_TEST_CONTEXT && process.env.CANVAS_CHECK_ACTIONS !== "0"),
+  checked: { doc: 0, envelope: 0, media: 0 },
+  /** Actions over the wire limits (100 ops, 1 MB, inserts of 5,000 nodes or 64 levels): counted, not refused here. */
+  overLimit: { ops: 0, bytes: 0, insert: 0 },
+  /** Media adds whose package path a Cloud file could not take as it is (checkBlobPath): counted. */
+  blobPathRefused: 0,
+};
+
+// CANVAS_ACTION_STATS=<file>: each process appends what its checks counted there when it ends (a QA or test run's tally).
+if (process.env.CANVAS_ACTION_STATS) {
+  const file = process.env.CANVAS_ACTION_STATS;
+  process.once("exit", () => {
+    const c = actionChecks.checked;
+    if (c.doc + c.envelope + c.media) fs.appendFileSync(file, JSON.stringify({ pid: process.pid, ...actionChecks }) + "\n");
+  });
+}
+
+type Listener = (docFile: string, action: Action) => void;
+const listeners = new Set<Listener>();
+/** Hear every action a local edit makes (tests; later the Cloud outbox). */
+export function onAction(f: Listener): () => void {
+  listeners.add(f);
+  return () => listeners.delete(f);
+}
+/** Is anyone asking for actions (checks on, or a listener)? Without, edits make none: today's cost stays. */
+export const wantActions = () => actionChecks.enabled || listeners.size > 0;
+
+// ---------- one action per step ----------
+
+type Scope = { docFile: string; ops: FileOp[]; agent?: string };
+const scopes = new AsyncLocalStorage<Scope>();
+
+/**
+ * Run `fn` as one step: the document and sidecar writes it makes (an undo of layers and cards, a structure op and
+ * the page list that follows it) become one action, emitted when it ends. Writes outside any step are each one.
+ */
+export async function asOneAction<T>(docFile: string, fn: () => Promise<T> | T, agent?: string): Promise<T> {
+  if (!wantActions() || scopes.getStore()?.docFile === docFile) return fn();
+  const scope: Scope = { docFile, ops: [], agent };
+  try {
+    return await scopes.run(scope, fn);
+  } finally {
+    if (scope.ops.length) emit(docFile, makeAction(scope.ops, agent));
+  }
+}
+
+function emit(docFile: string, action: Action) {
+  if (actionChecks.enabled) {
+    if (action.ops.length > FILE_LIMITS.opsPerAction) actionChecks.overLimit.ops++;
+    if (actionBytes(action) > FILE_LIMITS.actionBytes) actionChecks.overLimit.bytes++;
+  }
+  for (const f of listeners) {
+    try {
+      f(docFile, action);
+    } catch (e) {
+      console.error(`[canvas] action listener: ${(e as Error).message}`);
+    }
+  }
+}
+
+/** Hand the ops of one write to the step it is part of, or emit them as their own action. */
+function deliver(docFile: string, ops: FileOp[]) {
+  if (!ops.length) return;
+  const scope = scopes.getStore();
+  if (scope && scope.docFile === docFile) scope.ops.push(...ops);
+  else emit(docFile, makeAction(ops));
+}
+
+export function makeAction(ops: FileOp[], agent?: string): Action {
+  return { id: randomUUID(), baseSeq: 0, epoch: 0, at: new Date().toISOString(), ops, ...(agent ? { agent } : {}) };
+}
+
+// ---------- translation: the design file ----------
+
+const isObj = (v: unknown): v is Record<string, Json> => !!v && typeof v === "object" && !Array.isArray(v);
+const clone = <T>(v: T): T => (v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T));
+const val = (v: unknown): Val => (v === undefined ? null : { v: clone(v) as Json });
+
+/** Run `op` on the working tree as the next op of the translation; a refusal names the op. */
+function stepper(tree: DocTree) {
+  const run = opRunner(tree, "translate", { limits: null });
+  const out: FileOp[] = [];
+  const push = (op: FileOp) => {
+    try {
+      run(op);
+    } catch (e) {
+      throw new TranslateError(`${op.k} ${"id" in op ? `"${op.id}"` : "key" in op ? `"${op.key}"` : ""}: ${(e as Error).message}`);
+    }
+    out.push(op);
+  };
+  return { out, push };
+}
+
+/** The sibling a place's index comes right after in `list` (null: first). */
+const anchorOf = (list: readonly string[], index: number): string | null => (index <= 0 ? null : (list[Math.min(index, list.length) - 1] ?? null));
+
+/** Per-path override ops for an instance's `descendants`, when they give exactly `after` (else the whole key). */
+function overridePaths(before: Json | undefined, after: Json | undefined): Record<string, Val> | null {
+  if (!isObj(before) || !isObj(after)) return null;
+  const set: Record<string, Val> = {};
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const a = after[k] === undefined ? null : { v: after[k] };
+    const b = before[k] === undefined ? null : { v: before[k] };
+    if (JSON.stringify(a) !== JSON.stringify(b)) set[k] = a === null ? null : { v: clone(a.v) };
+  }
+  const predicted = Object.keys(nextProps(before, set)).join("\n");
+  return predicted === Object.keys(after).filter((k) => after[k] !== undefined).join("\n") ? set : null;
+}
+
+/**
+ * The file ops of a design-file edit: `ops` as they ran on `before`, in order. Inserts and moves are placed by the
+ * sibling they go after, as the tree stands when each runs; overrides travel per path; a node whose type changes
+ * goes out and comes back whole.
+ */
+export function docFileOps(before: DocLike, ops: Op[]): FileOp[] {
+  const tree = new DocTree(before);
+  const { out, push } = stepper(tree);
+  for (const op of ops) {
+    if (op.t === "node") {
+      const n = tree.node(op.id);
+      if (!n) throw new TranslateError(`node op on "${op.id}", which is not in the document`);
+      if (["id", "type", "children"].some((k) => Object.hasOwn(op.props, k))) {
+        // Identity changes: the node goes and comes back with its children, where it was.
+        const sub = clone(tree.subtree(op.id)!) as Record<string, Json>;
+        const set: Record<string, Val> = {};
+        for (const [k, d] of Object.entries(op.props)) set[k] = d.a;
+        const next = nextProps(sub, set, op.keys?.a);
+        const siblings = tree.children(n.parent);
+        const after = anchorOf(siblings, siblings.indexOf(op.id));
+        push({ k: "remove", id: op.id });
+        push({ k: "insert", parent: n.parent, after, node: next as DocNode });
+        continue;
+      }
+      const props: Record<string, Val> = {};
+      for (const [k, d] of Object.entries(op.props)) {
+        if (k === "descendants" && n.type === "ref") {
+          const paths = overridePaths(n.props.descendants, d.a?.v);
+          if (paths) {
+            for (const [p, v] of Object.entries(paths)) props[DESCENDANTS_PREFIX + p] = v;
+            continue;
+          }
+        }
+        props[k] = d.a === null ? null : { v: clone(d.a.v) };
+      }
+      if (!Object.keys(props).length) continue;
+      // The key order the edit left, when the plain rule (existing keys stay, new ones last) would not give it.
+      const plain = Object.keys(nextProps(n.props, Object.fromEntries(Object.entries(op.props).map(([k, d]) => [k, d.a]))));
+      const order = op.keys?.a && orderLike(plain, op.keys.a).join("\n") !== plain.join("\n") ? op.keys.a.slice() : undefined;
+      push({ k: "set", id: op.id, props, ...(order ? { order } : {}) });
+    } else if (op.t === "tree") {
+      if (op.kind === "insert") {
+        const list = tree.children(op.parent);
+        push({ k: "insert", parent: op.parent, after: anchorOf(list, op.index), node: clone(op.node) });
+      } else {
+        const id = String(op.node.id);
+        if (!tree.node(id)) throw new TranslateError(`remove of "${id}", which is not in the document`);
+        push({ k: "remove", id });
+      }
+    } else if (op.t === "move") {
+      const list = tree.children(op.a.parent).filter((x) => x !== op.id);
+      push({ k: "move", id: op.id, parent: op.a.parent, after: anchorOf(list, op.a.index) });
+    } else if (op.t === "doc") {
+      for (const d of docKeyOps(tree, op.key, op.a)) push(d);
+    } else throw new TranslateError(`a ${op.t} op in a design-file edit`);
+  }
+  return out;
+}
+
+/** Doc ops that take the document's `key` to `after`: variables one by one, themes and fonts whole. */
+function docKeyOps(tree: DocTree, key: string, after: Val): FileOp[] {
+  if (key === "themes" || key === "fonts") return [{ k: "doc", key, value: after === null ? null : { v: clone(after.v) } }];
+  if (key !== "variables") throw new TranslateError(`the document key "${key}" is not one an edit may change (variables, themes, fonts)`);
+  const b = tree.docValue("variables"), a = after?.v;
+  if ((b !== undefined && !isObj(b)) || (a !== undefined && !isObj(a))) throw new TranslateError("the variables are not an object");
+  if (a === undefined && b !== undefined) throw new TranslateError("an edit took the variables key away (no variables op says that)");
+  const set: Record<string, Val> = {};
+  for (const name of new Set([...Object.keys(b ?? {}), ...Object.keys(a ?? {})])) {
+    const x = b?.[name], y = a?.[name];
+    if (JSON.stringify(x) !== JSON.stringify(y)) set[name] = val(y);
+  }
+  const predicted = Object.keys(nextProps(b ?? {}, set)).join("\n");
+  if (predicted !== Object.keys(a ?? {}).join("\n")) throw new TranslateError("the variables changed order (variable ops add new ones last)");
+  return Object.entries(set).map(([name, v]): FileOp => ({ k: "doc", key: `variables/${name}`, value: v }));
+}
+
+// ---------- translation: the sidecar ----------
+
+/**
+ * Items of `cur` that keep their place on the way to `target` (a longest run in the same order), and the others,
+ * each to be placed after the item before it in `target`.
+ */
+export function placements(cur: readonly string[], target: readonly string[]): { id: string; after: string | null }[] {
+  const pos = new Map(target.map((id, i) => [id, i]));
+  const seq = cur.filter((id) => pos.has(id)).map((id) => pos.get(id)!);
+  // Longest increasing run of target positions (patience), so the fewest items move.
+  const tails: number[] = [], prev = new Array<number>(seq.length).fill(-1);
+  for (let i = 0; i < seq.length; i++) {
+    let lo = 0, hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (seq[tails[mid]] < seq[i]) lo = mid + 1;
+      else hi = mid;
+    }
+    prev[i] = lo > 0 ? tails[lo - 1] : -1;
+    tails[lo] = i;
+  }
+  const keep = new Set<number>();
+  for (let i = tails.length ? tails[tails.length - 1] : -1; i >= 0; i = prev[i]) keep.add(seq[i]);
+  const out: { id: string; after: string | null }[] = [];
+  target.forEach((id, i) => {
+    if (!keep.has(i)) out.push({ id, after: i > 0 ? target[i - 1] : null });
+  });
+  return out;
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** A page list in the shape page ops describe: {id, name, boards} each, ids unique, every board on one page. */
+export function pagesInShape(v: unknown): v is { id: string; name: string; boards: string[] }[] {
+  if (!Array.isArray(v)) return false;
+  const ids = new Set<string>(), boards = new Set<string>();
+  for (const p of v) {
+    if (!isObj(p) || Object.keys(p).join(",") !== "id,name,boards" || typeof p.id !== "string" || !p.id || ids.has(p.id) || typeof p.name !== "string" || !p.name || !Array.isArray(p.boards)) return false;
+    ids.add(p.id);
+    for (const b of p.boards) {
+      if (typeof b !== "string" || !b || boards.has(b)) return false;
+      boards.add(b);
+    }
+  }
+  return true;
+}
+
+/** The file ops that take the sidecar from `before` to `after`: cards, pages and the other kept keys. */
+export function envelopeFileOps(before: Envelope, after: Envelope): FileOp[] {
+  const tree = new DocTree({ children: [] }, before);
+  const { out, push } = stepper(tree);
+  // Cards: gone ones go, then each one placed (or changed in place) in the order `after` has them.
+  const ids = after.widgets.map((w) => String(w.id));
+  const keepIds = new Set(ids);
+  for (const w of before.widgets) if (!keepIds.has(String(w.id))) push({ k: "widget", id: String(w.id), value: null });
+  const moves = new Map(placements(tree.widgetIds(), ids).map((p) => [p.id, p.after]));
+  const old = new Map(before.widgets.map((w) => [String(w.id), w]));
+  for (const w of after.widgets) {
+    const id = String(w.id);
+    if (moves.has(id)) push({ k: "widget", id, value: val(w), after: moves.get(id)! });
+    else if (!same(old.get(id), w)) push({ k: "widget", id, value: val(w) });
+  }
+  // Pages.
+  const bp = before.extra.pages, ap = after.extra.pages;
+  if (!same(bp, ap)) {
+    if ((bp === undefined || pagesInShape(bp)) && pagesInShape(ap) && ap.length) {
+      // New and moved pages first, gone ones last: a file is never without a page on the way.
+      const pm = new Map(placements((tree.pages() ?? []).map((p) => p.id), ap.map((p) => p.id)).map((p) => [p.id, p.after]));
+      for (const p of ap) {
+        const was = (tree.pages() ?? []).find((x) => x.id === p.id);
+        if (pm.has(p.id)) push({ k: "page", id: p.id, value: { v: { name: p.name } }, after: pm.get(p.id)! });
+        else if (was && was.name !== p.name) push({ k: "page", id: p.id, value: { v: { name: p.name } } });
+      }
+      const listed = new Set(ap.flatMap((p) => p.boards));
+      for (const p of tree.pages() ?? []) for (const b of p.boards) if (!listed.has(b)) push({ k: "pageOf", board: b, page: null });
+      for (const p of ap) {
+        const now = (tree.pages() ?? []).find((x) => x.id === p.id)!.boards;
+        for (const m of placements(now, p.boards)) push({ k: "pageOf", board: m.id, page: p.id, after: m.after });
+      }
+      for (const p of (bp ?? []) as { id: string }[]) if (!ap.some((q) => q.id === p.id)) push({ k: "page", id: p.id, value: null });
+    } else push({ k: "meta", key: "pages", value: val(ap) });
+  }
+  // The other kept keys, whole.
+  for (const k of new Set([...Object.keys(before.extra), ...Object.keys(after.extra)])) {
+    if (k === "pages" || same(before.extra[k], after.extra[k])) continue;
+    if (!META_KEYS.includes(k as MetaKey)) throw new TranslateError(`the sidecar key "${k}" is not one a file keeps (${META_KEYS.join(", ")})`);
+    push({ k: "meta", key: k as MetaKey, value: val(after.extra[k]) });
+  }
+  return out;
+}
+
+// ---------- media ----------
+
+/**
+ * The package path a media file of `docFile` takes in a Cloud file: `media/<name>` or `shaders/<name>`. A plain
+ * foo.canvas.json keeps them in foo.media and foo.shaders; those map to the same names. Null: not one of those folders.
+ */
+export function blobPathOf(docFile: string, abs: string): string | null {
+  const base = path.dirname(docFile);
+  const rel = path.relative(base, abs).split(path.sep).join("/");
+  const stem = path.basename(docFile).endsWith(".canvas.json") ? path.basename(docFile, ".canvas.json") : null;
+  const m = rel.match(/^([^/]+)\/([^/]+)$/);
+  if (!m) return null;
+  const dir = m[1] === "media" || (stem && m[1] === `${stem}.media`) ? "media" : m[1] === "shaders" || (stem && m[1] === `${stem}.shaders`) ? "shaders" : null;
+  return dir ? `${dir}/${m[2]}` : null;
+}
+
+/** The blob op for a file just added to a document's package (null: not a package file a blob can name). */
+export function blobOpOf(docFile: string, abs: string): FileOp | null {
+  const p = blobPathOf(docFile, abs);
+  if (!p || checkBlobPath(p)) {
+    // Media a Cloud file could not name as it is (a paste's assets/ or linked/ copy, a video name with spaces):
+    // counted, and left to the Cloud import to rename.
+    if (actionChecks.enabled) actionChecks.blobPathRefused++;
+    return null;
+  }
+  const bytes = fs.readFileSync(abs);
+  return { k: "blob", path: p as BlobPath, sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length, type: blobTypeOf(p as BlobPath) };
+}
+
+/**
+ * A media file was added to `docFile`'s package (an image dropped or pasted, a video copied in, a shader source):
+ * its blob op goes with the step it is part of, or as an action of its own (an image upload comes before the edit
+ * that names it). Checked like every action: the blob row it adds must be there after.
+ */
+export function mediaAdded(docFile: string, abs: string): void {
+  if (!wantActions()) return;
+  let op: FileOp | null;
+  try {
+    op = blobOpOf(docFile, abs);
+  } catch (e) {
+    if (actionChecks.enabled) throw new ActionCheckError(`media add ${abs}: ${(e as Error).message}`);
+    return;
+  }
+  if (!op || op.k !== "blob") return;
+  if (actionChecks.enabled) {
+    const tree = new DocTree({ children: [] });
+    const r = applyAction(tree, makeAction([op]), { limits: null });
+    if (isReject(r) || tree.blob(op.path)?.sha256 !== op.sha256) throw new ActionCheckError(`media add ${op.path}: the action does not add it${isReject(r) ? ` (${r.message})` : ""}`);
+    actionChecks.checked.media++;
+  }
+  deliver(docFile, [op]);
+}
+
+/** Refuse a package file a Cloud file names when it is a symlink or sits under one (lstat on every part). */
+export function confinedFile(pkgDir: string, blobPath: string): string | null {
+  const bad = checkBlobPath(blobPath);
+  if (bad) throw new Error(bad);
+  let at = pkgDir;
+  for (const part of blobPath.split("/")) {
+    at = path.join(at, part);
+    const st = fs.lstatSync(at, { throwIfNoEntry: false });
+    if (!st) return null;
+    if (st.isSymbolicLink()) throw new Error(`${blobPath} is a symlink; a Cloud file only reads its own files`);
+  }
+  return at;
+}
+
+// ---------- the checks ----------
+
+/** Where two JSON values first differ (key order included), or null when they serialize the same. */
+export function firstDifference(a: unknown, b: unknown, where = ""): string | null {
+  if (a === b) return null;
+  const ja = typeof a === "number" || typeof a === "string" || typeof a === "boolean" || a === null || a === undefined;
+  if (ja || b === null || typeof b !== "object") return JSON.stringify(a) === JSON.stringify(b) ? null : `${where || "(root)"}: ${short(a)} vs ${short(b)}`;
+  if (Array.isArray(a) !== Array.isArray(b)) return `${where}: one is a list`;
+  if (Array.isArray(a)) {
+    const bb = b as unknown[];
+    if (a.length !== bb.length) return `${where}: ${a.length} vs ${bb.length} items`;
+    for (let i = 0; i < a.length; i++) {
+      const id = isObj(a[i]) && typeof (a[i] as Record<string, unknown>).id === "string" ? `#${(a[i] as Record<string, unknown>).id}` : `[${i}]`;
+      const d = firstDifference(a[i] ?? null, bb[i] ?? null, `${where}${id}`);
+      if (d) return d;
+    }
+    return null;
+  }
+  const ka = Object.keys(a as object).filter((k) => (a as Record<string, unknown>)[k] !== undefined);
+  const kb = Object.keys(b as object).filter((k) => (b as Record<string, unknown>)[k] !== undefined);
+  if (ka.join("\n") !== kb.join("\n")) return `${where || "(root)"}: keys ${ka.join(",")} vs ${kb.join(",")}`;
+  for (const k of ka) {
+    const d = firstDifference((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${where}.${k}`);
+    if (d) return d;
+  }
+  return null;
+}
+const short = (v: unknown) => {
+  const s = JSON.stringify(v);
+  return s === undefined ? "absent" : s.length > 80 ? `${s.slice(0, 77)}...` : s;
+};
+
+/**
+ * A design-file edit made: `before` became `after` with `ops` (what it recorded, or the property changes it made)
+ * and `media` (package files it added). Returns its file ops for the step (delivered to listeners); with checks on,
+ * refuses an edit whose ops, applied by the shared apply to `before`, do not give `after`.
+ */
+export function docEditAction(docFile: string, before: DocLike, after: DocLike, ops: Op[] | undefined, media: string[] = []): void {
+  if (!wantActions()) return;
+  const fail = (msg: string) => {
+    console.error(`[canvas] action check: ${msg}`);
+    throw new ActionCheckError(`The edit's action is incomplete: ${msg}`);
+  };
+  let fileOps: FileOp[];
+  try {
+    if (!ops) throw new TranslateError('the edit touches "all" and recorded no ops');
+    const blobs = media.map((f) => blobOpOf(docFile, f)).filter((o): o is FileOp => !!o);
+    fileOps = [...blobs, ...docFileOps(before, ops)];
+  } catch (e) {
+    if (!actionChecks.enabled) return;
+    return fail((e as Error).message);
+  }
+  if (actionChecks.enabled) {
+    const tree = new DocTree(before);
+    const r = applyAction(tree, makeAction(fileOps), { limits: null });
+    if (isReject(r)) return fail(`the shared apply refused it: ${r.message}`);
+    const d = firstDifference(tree.doc, after);
+    if (d) return fail(`applied to the state before, it gives another document: ${d}`);
+    countInserts(fileOps);
+    actionChecks.checked.doc++;
+  }
+  deliver(docFile, fileOps);
+}
+
+/**
+ * The sidecar edit counterpart of docEditAction: `bytes` is what the store is about to write, `serialize` how it
+ * writes. Returns the ops for deliverOps once the write landed (the store may retry on newer bytes), or null.
+ */
+export function envelopeEditAction(before: Envelope, after: Envelope, bytes: string, serialize: (widgets: never[], extra: Record<string, unknown>) => string): FileOp[] | null {
+  if (!wantActions()) return null;
+  const fail = (msg: string) => {
+    console.error(`[canvas] action check (cards and pages): ${msg}`);
+    throw new ActionCheckError(`The edit's action is incomplete: ${msg}`);
+  };
+  let fileOps: FileOp[];
+  try {
+    fileOps = envelopeFileOps(before, after);
+  } catch (e) {
+    if (!actionChecks.enabled) return null;
+    return fail((e as Error).message);
+  }
+  if (actionChecks.enabled) {
+    const tree = new DocTree({ children: [] }, before);
+    const r = applyAction(tree, makeAction(fileOps), { limits: null });
+    if (isReject(r)) return fail(`the shared apply refused it: ${r.message}`);
+    const got = serialize(tree.envelope.widgets as never[], tree.envelope.extra);
+    if (got !== bytes) return fail(`applied to the state before, it gives other bytes: ${firstDifference(JSON.parse(got), JSON.parse(bytes))}`);
+    actionChecks.checked.envelope++;
+  }
+  return fileOps;
+}
+
+/** A write's ops, once it landed: to the step it is part of, or as an action of its own. */
+export function deliverOps(docFile: string, ops: FileOp[] | null): void {
+  if (ops) deliver(docFile, ops);
+}
+
+function countInserts(ops: FileOp[]) {
+  for (const op of ops) {
+    if (op.k !== "insert") continue;
+    let n = 0, depth = 0;
+    const walk = (x: DocNode, d: number) => {
+      n++;
+      depth = Math.max(depth, d);
+      for (const c of Array.isArray(x.children) ? (x.children as DocNode[]) : []) walk(c, d + 1);
+    };
+    walk(op.node, 1);
+    if (n > FILE_LIMITS.insertNodes || depth > FILE_LIMITS.insertDepth) actionChecks.overLimit.insert++;
+  }
+}

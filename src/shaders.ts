@@ -13,6 +13,7 @@ import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { mediaAdded } from "./cloud-files-ops.ts";
 import { inPackage, resolveDoc } from "./docpath.ts";
 import { htmlSnippet, listPresets, packUniforms, PaperError, paperShader, presetsOf, reactSnippet, resolveParams, type PaperConfig } from "./paper.ts";
 import { addWidget, getWidget, listWidgets, docFileFor, updateWidget, WidgetError } from "./widgets.ts";
@@ -114,6 +115,9 @@ async function writeSource(docFile: string, id: string, source: string, old: str
   if (old !== null) await snapshot(docFile, id, old);
   await snapshot(docFile, id, source);
   await writeAtomic(sourcePath(docFile, id), source);
+  // A media add: the source's content-addressed copy is the file a Cloud file keeps (the card's own <id>.wgsl
+  // changes in place, a blob never does).
+  mediaAdded(docFile, snapPath(docFile, id, revOf(source)));
 }
 
 /** A pasted shader card's source, written under its new id before the card that names it (src/clipcards.ts). */
