@@ -1,5 +1,3 @@
-// SNAPSHOT of Phase 1's file (cloud/protocol-files.ts, cloud/core/schema.ts, cloud/core/files/apply.ts) so Phase 2 builds
-// and tests against the real apply. Delete this folder when Phase 1 merges and re-point ../seam.ts.
 // The one shared pure apply: what an action does to a design file. A Cloud's file room runs it on its SQL rows
 // (Phase 2, tree-sql.ts) and the Mac runs it on a copy on write document (src/cloud-files-tree.ts), so both end with
 // the same bytes. An action applies whole or not at all: the first op that does not fit rejects it, and the tree
@@ -12,10 +10,10 @@
 // A component that live instances use is never removed; an instance names a live component, and no component holds
 // an instance of itself. `if` preconditions name the action that must have written a key last (0: none since load).
 
-import { docKeyError, setKeyError, validateNode, validateVariable, DESCENDANTS_PREFIX, PROTO_KEYS, type DocNode, type Json } from "./schema.ts";
-import { shift as shiftSpans } from "../../../../src/page/text-spans.js";
-import { shiftLists, type ListItem } from "../../../../src/page/text-paras.js";
-import { checkBlobPath, blobTypeOf, FILE_LIMITS, META_KEYS, type Action, type AppliedAction, type AppliedOp, type Author, type BlobPath, type FileOp, type Reject, type RejectCode, type Val } from "./protocol-files.ts";
+import { docKeyError, setKeyError, validateNode, validateVariable, DESCENDANTS_PREFIX, PROTO_KEYS, type DocNode, type Json } from "../schema.ts";
+import { shift as shiftSpans } from "../../../src/page/text-spans.js";
+import { shiftLists, type ListItem } from "../../../src/page/text-paras.js";
+import { checkBlobPath, blobTypeOf, FILE_LIMITS, META_KEYS, type Action, type AppliedAction, type AppliedOp, type Author, type BlobPath, type FileOp, type Reject, type RejectCode, type Val } from "../../protocol-files.ts";
 
 /** A version: the id of the action that wrote something last, or 0 when nothing did since the state was loaded. */
 export type Ver = string | 0;
@@ -61,6 +59,7 @@ export interface TreeAccess {
   remove(id: string): void;
   move(id: string, parent: string | null, index: number): void;
   writeDocValue(key: "variables" | "themes" | "fonts", value: Json | undefined): void;
+  orderDocKeys(order: string[]): void;
   writeWidget(id: string, value: Json | undefined, index: number | undefined): void;
   writePages(list: PageRow[] | null): void;
   writeMeta(key: string, value: Json | undefined): void;
@@ -217,13 +216,13 @@ export function applyAction(tree: TreeAccess, action: Pick<Action, "id" | "ops">
 export const isReject = (r: AppliedAction | Reject): r is Reject => "reject" in r;
 
 /**
- * Ops applied one at a time, with no transaction and none of the checks that wait for the end of an action: a
- * working copy that follows an edit op by op (src/cloud-files-ops.ts uses it to place each op against the tree the
- * ops before it left). Throws ApplyError for an op that does not fit.
+ * Ops applied one at a time, without a transaction. Call finish() after the last op for the final checks.
+ * A working copy follows an edit op by op (src/cloud-files-ops.ts places each op against the tree the ops before
+ * it left). Throws ApplyError for an op that does not fit.
  */
-export function opRunner(tree: TreeAccess, actionId: string, ctx: ApplyCtx = {}): (op: FileOp) => AppliedOp {
+export function opRunner(tree: TreeAccess, actionId: string, ctx: ApplyCtx = {}): ((op: FileOp) => AppliedOp) & { finish(): void } {
   const run = new Run(tree, actionId, ctx, ctx.limits ?? null);
-  return (op) => run.op(op);
+  return Object.assign((op: FileOp) => run.op(op), { finish: () => run.finish() });
 }
 
 class Run {
@@ -302,7 +301,7 @@ class Run {
     const n = this.live(op.id);
     if (!isObj(op.props)) this.fail("invalid", "set: props must be an object");
     const keys = Object.keys(op.props);
-    if (!keys.length) this.fail("invalid", "set: nothing to set");
+    if (!keys.length && op.order === undefined) this.fail("invalid", "set: nothing to set");
     if (op.order !== undefined && (!Array.isArray(op.order) || op.order.some((k) => typeof k !== "string"))) this.fail("invalid", "set: order must be a list of keys");
     const whole: Record<string, Val> = {};
     const paths: Record<string, Val> = {};
@@ -340,6 +339,12 @@ class Run {
     if (Object.hasOwn(n.props, "reusable") && n.props.reusable === true && whole.reusable !== undefined && (whole.reusable === null || whole.reusable.v !== true)) this.removedComponents.push(n.id);
     this.tree.writeProps(n.id, props);
     for (const k of keys) this.tree.setVer(`n:${n.id}:${k}`, this.id);
+    // A whole reset also writes each path it removes or replaces. A path write changes the whole override value,
+    // but leaves other paths' writers alone so independent overrides still commute.
+    if (Object.hasOwn(whole, "descendants")) {
+      for (const p of new Set([...Object.keys(isObj(n.props.descendants) ? n.props.descendants : {}), ...Object.keys(isObj(props.descendants) ? props.descendants : {})])) this.tree.setVer(`n:${n.id}:${DESCENDANTS_PREFIX}${p}`, this.id);
+    }
+    if (Object.keys(paths).length) this.tree.setVer(`n:${n.id}:descendants`, this.id);
     return op;
   }
 
@@ -451,6 +456,7 @@ class Run {
     const bad = docKeyError(op.key);
     if (bad) this.fail(PROTO_KEYS.has(String(op.key)) || op.key === ("children" as never) ? "forbidden" : "invalid", `doc: ${bad}`);
     if (!isVal(op.value)) this.fail("invalid", "doc: value must be {v: value} or null");
+    if (op.order !== undefined && (!Array.isArray(op.order) || op.order.some((k) => typeof k !== "string"))) this.fail("invalid", "doc: order must be a list of keys");
     this.checkIf(`d:${op.key}`, op.if);
     if (op.key.startsWith("variables/")) {
       const name = op.key.slice("variables/".length);
@@ -462,6 +468,11 @@ class Run {
       }
       if (cur === undefined && op.value === null) return op;
       this.tree.writeDocValue("variables", nextProps(cur ?? {}, { [name]: clone(op.value) }));
+      this.tree.setVer("d:variables", this.id);
+    } else if (op.key === "variables") {
+      const cur = this.tree.docValue("variables");
+      if ((isObj(cur) && Object.keys(cur).length) || (op.value && (!isObj(op.value.v) || Object.keys(op.value.v).length))) this.fail("invalid", "doc: variables only changes an empty container; write values per variable");
+      this.tree.writeDocValue("variables", op.value === null ? undefined : {});
     } else {
       if (op.key === "themes" && op.value && !isObj(op.value.v)) this.fail("invalid", "doc: themes must be an object");
       if (op.key === "fonts" && op.value && !Array.isArray(op.value.v)) this.fail("invalid", "doc: fonts must be a list");
@@ -469,6 +480,7 @@ class Run {
       this.tree.writeDocValue(op.key as "themes" | "fonts", op.value === null ? undefined : clone(op.value.v));
     }
     this.tree.setVer(`d:${op.key}`, this.id);
+    if (op.order) this.tree.orderDocKeys(op.order);
     return op;
   }
 

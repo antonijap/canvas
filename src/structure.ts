@@ -24,6 +24,7 @@
 // copy. The server also keeps the last payload (one slot, in memory), so a tab or file in the same server can
 // paste even when the system clipboard only holds the marker (see src/page/structure.js).
 
+import { asOneAction } from "./cloud-files-ops.ts";
 import { fitAround, groupsAround, turnedBox } from "./groupfit.ts";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
@@ -1273,7 +1274,7 @@ export const serverClipboard = () => lastCopy;
 export const setServerClipboard = (p: ClipPayload | null) => void (lastCopy = p);
 
 /** Run one structure op on a document on disk: one write, one undo step. */
-export function runStructure(docFile: string, b: StructureBody, who: Who): { ok: true; op: StructureOp; label?: string; select: string[]; revision?: string; payload?: ClipPayload; warnings?: string[]; placed?: Placed[]; note?: string } {
+export async function runStructure(docFile: string, b: StructureBody, who: Who): Promise<{ ok: true; op: StructureOp; label?: string; select: string[]; revision?: string; payload?: ClipPayload; warnings?: string[]; placed?: Placed[]; note?: string }> {
   const op = b.op;
   const rects = b.rects && typeof b.rects === "object" ? b.rects : {};
   if (op === "copy") {
@@ -1313,7 +1314,7 @@ export function runStructure(docFile: string, b: StructureBody, who: Who): { ok:
   // Replayed on someone else's bytes (before it reached the disk), the edit makes no new ids: it applies the ops it
   // made the first time, so the duplicate, the pasted layers or the new group keep the ids everyone already holds.
   const replay = (doc: CanvasDoc) => replayOps(doc as unknown as Doc, out!.ops);
-  const edit = () => editDoc(docFile, { expectedRevision: b.expectedRevision, touches, deep: true, urgent: true, replay, recorded: () => out?.ops ?? [] }, (doc) => {
+  const edit = () => editDoc(docFile, { expectedRevision: b.expectedRevision, touches, deep: true, urgent: true, replay, recorded: () => out?.ops ?? [], media: created }, (doc) => {
     // The change may run twice (a replay after an outside save); the last run is the one written.
     const d = doc as unknown as Doc;
     switch (op) {
@@ -1358,9 +1359,9 @@ export function runStructure(docFile: string, b: StructureBody, who: Who): { ok:
     }
     if (!out.ops.length) throw new StructureError(409, "no_change", `${out.label}: nothing moved`);
   });
-  let write: ReturnType<typeof edit>["write"];
+  let write: Awaited<ReturnType<typeof edit>>["write"];
   try {
-    write = edit().write;
+    write = (await edit()).write;
   } catch (e) {
     // Nothing was pasted: the files copied in for it go again.
     for (const f of created) fs.rmSync(f, { force: true });
@@ -1369,7 +1370,7 @@ export function runStructure(docFile: string, b: StructureBody, who: Who): { ok:
   const r = out!;
   // A mixed selection deleted, or Option-dragged (its cards' writes join this step): one Undo for all.
   const group = (op === "delete" || op === "duplicate") && isGroupMerge(b.merge);
-  record(docFile, r.ops, { label: r.label, source: who.source, session: who.session, mergeKey: group ? b.merge : `structure:${Date.now()}:${Math.random()}`, ...(group ? { mergeMs: GROUP_MERGE_MS } : {}), edit: write.edit, ...(op === "delete" || op === "cut" ? { sel: (b.ids ?? []).filter((x): x is string => typeof x === "string").slice(0, 2000) } : {}), ...(op === "duplicate" ? { selBefore: b.ids ?? [] } : op === "paste" && Array.isArray(b.selBefore) ? { selBefore: b.selBefore.filter((x): x is string => typeof x === "string").slice(0, 2000) } : {}) }, write.revision);
+  record(docFile, r.ops, { label: r.label, source: who.source, session: who.session, mergeKey: group ? b.merge : `structure:${Date.now()}:${Math.random()}`, ...(group ? { mergeMs: GROUP_MERGE_MS } : {}), edit: write.edit, ...write.history, ...(op === "delete" || op === "cut" ? { sel: (b.ids ?? []).filter((x): x is string => typeof x === "string").slice(0, 2000) } : {}), ...(op === "duplicate" ? { selBefore: b.ids ?? [] } : op === "paste" && Array.isArray(b.selBefore) ? { selBefore: b.selBefore.filter((x): x is string => typeof x === "string").slice(0, 2000) } : {}) }, write.revision);
   // Files copied in for a paste from another file: its undo takes them back when nothing else uses them.
   addStepFiles(docFile, topSeq(docFile), created);
   if (r.payload) lastCopy = r.payload;
@@ -1450,6 +1451,10 @@ function cardPage(docFile: string, page: string | undefined): string | undefined
  * joins the layers' step). The answer of a paste lists the new cards (`widgets`) so the page can show them at once.
  */
 async function clipboardOp(docFile: string, b: StructureBody, who: Who, deps: StructureDeps, by: "mcp" | "inspector") {
+  return asOneAction(docFile, () => clipboardOpNow(docFile, b, who, deps, by));
+}
+
+async function clipboardOpNow(docFile: string, b: StructureBody, who: Who, deps: StructureDeps, by: "mcp" | "inspector") {
   const rects = b.rects && typeof b.rects === "object" ? b.rects : {};
   const ids = (b.ids ?? []).filter((x): x is string => typeof x === "string");
   const step = () => ({ label: b.op === "cut" ? "Cut" : "Paste", source: who.source, session: who.session, mergeKey: `structure:${Date.now()}:${Math.random()}` });
@@ -1460,10 +1465,10 @@ async function clipboardOp(docFile: string, b: StructureBody, who: Who, deps: St
     // Read before a cut removes them.
     const cards = await copyCards(docFile, cardIds, rects);
     if (!layers.length && !cards.length) throw invalid("nothing to copy: the selection holds no layers or cards");
-    let r: ReturnType<typeof runStructure> | null = null;
+    let r: Awaited<ReturnType<typeof runStructure>> | null = null;
     let join: RecordMeta | null = null;
     if (layers.length) {
-      r = runStructure(docFile, { ...b, ids: layers }, who);
+      r = await runStructure(docFile, { ...b, ids: layers }, who);
       join = joinTop(docFile);
       await keepOnPage(docFile, b, before, join);
     }
@@ -1483,10 +1488,10 @@ async function clipboardOp(docFile: string, b: StructureBody, who: Who, deps: St
   const { payload, dropped } = b.fromServer ? { payload: given, dropped: 0 } : screenPayload(given, docFile);
   const replace = Array.isArray(b.replace);
   if (replace && !payload.nodes.length) throw invalid("Paste to replace takes layers: the clipboard holds only cards");
-  let r: ReturnType<typeof runStructure> | null = null;
+  let r: Awaited<ReturnType<typeof runStructure>> | null = null;
   let join: RecordMeta | null = null;
   if (payload.nodes.length) {
-    r = runStructure(docFile, { ...b, fromServer: false, payload }, who);
+    r = await runStructure(docFile, { ...b, fromServer: false, payload }, who);
     join = joinTop(docFile);
     await keepOnPage(docFile, b, before, join);
   }
@@ -1557,8 +1562,11 @@ export async function handleStructureRoute(req: http.IncomingMessage, res: http.
       const ids = unsizedOnPage(docFile, doc, { page: b.page, board: first }).filter((id) => !(b.rects && b.rects[id]));
       if (ids.length) b.rects = { ...(await deps.measure(docFile, ids).catch(() => ({}))), ...(b.rects ?? {}) };
     }
-    const r = runStructure(docFile, b, who);
-    await keepOnPage(docFile, b, before);
+    const r = await asOneAction(docFile, async () => {
+      const result = await runStructure(docFile, b, who);
+      await keepOnPage(docFile, b, before);
+      return result;
+    });
     deps.written(docFile, r.revision, by, r.select, r.label ?? r.op);
     return reply(200, r), true;
   } catch (e) {

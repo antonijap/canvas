@@ -40,7 +40,8 @@ import { boardLacks } from "./doc/boardindex.ts";
 import { applyRecords, chainOf, encodeRecord, headerOf, holdsLogLock, LOG_VERSION, lockConfig, lockLog, lockLogSync, logLockable, logPathOf, logSig, logSigSync, markFold, parseLog, readLogSync, removeLogSync, tieCtimeOf, tryLockLog, type LogInfo } from "./doc/doclog.ts";
 import { boardDigestStale, snapshotOfDoc, type Snapshot } from "./boards.ts";
 import { backupDirFor, findNode, loadDoc, loadDocAsync, revisionOf, sha, StaleFileError, writeDoc, type LoadedDoc, type CanvasDoc, type DocNode } from "./engine.ts";
-import type { NodeOp, Op } from "./history.ts";
+import type { DocOp, NodeOp, Op, RecordMeta } from "./history.ts";
+import { asOneAction, docEditAction, lastActionWrites, lastDocOrders, wantActions } from "./cloud-files-ops.ts";
 import { countUsage } from "./usage-counts.ts";
 
 /** What the writer needs from the snapshot cache (server.ts wires it). Without a host, edits go straight to writeDoc. */
@@ -127,6 +128,8 @@ type Pending = {
   replay?: (doc: CanvasDoc) => Op[];
   touches: EditOpts["touches"];
   deep?: boolean;
+  /** Document values the change mutates in place. Replacing a whole value needs no copy. */
+  docKeys?: ("variables" | "themes" | "fonts")[];
   /** What the edit did, as ops: the structure ops it recorded, or the property changes it made (its last replay's). */
   ops?: Op[];
   /** `ops` came from the edit itself (structure, undo/redo): a replay never swaps them for a property diff. */
@@ -836,18 +839,29 @@ function same(a: unknown, b: unknown): boolean {
   if (Array.isArray(a)) return a.length === (b as unknown[]).length && a.every((x, i) => same(x, (b as unknown[])[i]));
   const ka = Object.keys(a as object).filter((k) => (a as any)[k] !== undefined);
   const kb = Object.keys(b as object).filter((k) => (b as any)[k] !== undefined);
-  return ka.length === kb.length && ka.every((k) => Object.hasOwn(b as object, k) && same((a as any)[k], (b as any)[k]));
+  return ka.length === kb.length && ka.every((k, i) => k === kb[i] && same((a as any)[k], (b as any)[k]));
 }
 
 const valOf = (n: DocNode, k: string) => (n[k] === undefined ? null : { v: structuredClone(n[k]) as any });
 function nodeDiffOf(id: string, b: DocNode, a: DocNode): NodeOp | undefined {
   const props: NodeOp["props"] = {};
   for (const k of new Set([...Object.keys(b), ...Object.keys(a)])) if (k !== "children" && !same(b[k], a[k])) props[k] = { b: valOf(b, k), a: valOf(a, k) };
-  if (!Object.keys(props).length) return undefined;
-  // A key added or removed: keep both key orders, so undo and redo write the node back byte for byte (history.ts orderKeys).
+  // A key added, removed or moved: keep both key orders, so undo, redo and the file ops write the node back byte for
+  // byte (history.ts orderKeys).
   const kb = Object.keys(b).filter((k) => b[k] !== undefined), ka = Object.keys(a).filter((k) => a[k] !== undefined);
-  const sameKeys = kb.length === ka.length && kb.every((k) => a[k] !== undefined);
+  const sameKeys = kb.length === ka.length && kb.every((k, i) => ka[i] === k);
+  if (!Object.keys(props).length && sameKeys) return undefined;
   return sameKeys ? { t: "node", id, props } : { t: "node", id, props, keys: { b: kb, a: ka } };
+}
+
+/** The document-level keys (variables, themes, fonts, anything but the boards) a change set, added or removed. */
+function docKeysEffect(before: CanvasDoc, after: CanvasDoc): DocOp[] {
+  const ops: DocOp[] = [];
+  for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (k === "children" || before[k] === after[k] || same(before[k], after[k])) continue;
+    ops.push({ t: "doc", key: k, b: valOf(before as DocNode, k), a: valOf(after as DocNode, k), keys: { b: Object.keys(before), a: Object.keys(after) } });
+  }
+  return ops;
 }
 
 /**
@@ -859,11 +873,11 @@ function effectOf(before: CanvasDoc, after: CanvasDoc, touches: EditOpts["touche
   if (touches === "all") return undefined;
   const want = new Set<string>();
   for (const id of touches) if (id) want.add(id);
-  const ops: NodeOp[] = [];
+  const ops: Op[] = docKeysEffect(before, after);
   const met = new Set<string>();
   const walk = (a: DocNode[], b: DocNode[]) => {
-    if (a === b || !Array.isArray(a) || !Array.isArray(b)) return;
-    for (let i = 0; i < a.length; i++) {
+    if (met.size === want.size || a === b || !Array.isArray(a) || !Array.isArray(b)) return;
+    for (let i = 0; i < a.length && met.size < want.size; i++) {
       const n = a[i], o = b[i];
       if (n === o || !n || typeof n !== "object" || !o || typeof o !== "object" || n.id !== o.id) continue;
       const id = String(n.id);
@@ -929,10 +943,10 @@ function replayOne(doc: CanvasDoc, p: Pending): { doc: CanvasDoc; ops?: Op[] } |
       // Copy everything the recorded ops name, wherever it sits in these bytes, so a replay that stops halfway
       // leaves `doc` as it was.
       const touches = p.touches === "all" ? "all" : new Set([...p.touches, ...opIds(p.ops ?? [])]);
-      const next = cowDoc(doc, touches, p.deep);
+      const next = cowDoc(doc, touches, p.deep, p.docKeys);
       return { doc: next, ops: p.replay(next) };
     }
-    const next = cowDoc(doc, p.touches, p.deep);
+    const next = cowDoc(doc, p.touches, p.deep, p.docKeys);
     p.change(next);
     const ops = effectOf(doc, next, p.touches);
     const miss = missingEffect(p.accepted ?? p.ops, ops, next);
@@ -1277,8 +1291,10 @@ function accepts(st: FileState, snap: Snapshot, expected: string): boolean {
  * own children list), and every other object is shared with `doc`. `deep` copies a touched node's whole subtree,
  * for changes that rewrite its descendants too (structure ops). One walk, which stops once every id was found.
  */
-export function cowDoc(doc: CanvasDoc, ids: Iterable<string | null | undefined> | "all", deep = false): CanvasDoc {
+export function cowDoc(doc: CanvasDoc, ids: Iterable<string | null | undefined> | "all", deep = false, docKeys: Iterable<"variables" | "themes" | "fonts"> = ids === "all" ? ["variables", "themes", "fonts"] : []): CanvasDoc {
   const next = { ...doc, children: doc.children.slice() } as CanvasDoc;
+  // Only explicitly touched document values need isolation for in-place changes.
+  for (const key of docKeys) if (doc[key] !== undefined) (next as Record<string, unknown>)[key] = structuredClone(doc[key]);
   if (ids === "all") {
     next.children = structuredClone(doc.children);
     return next;
@@ -1318,6 +1334,8 @@ export type EditOpts = {
   touches: Iterable<string | null | undefined> | "all";
   /** The change also edits nodes below the touched ones (ungroup moves a group's children): copy whole subtrees. */
   deep?: boolean;
+  /** Document values the change mutates in place. Replacing a whole value needs no copy. */
+  docKeys?: ("variables" | "themes" | "fonts")[];
   /** Write without waiting for more edits. */
   urgent?: boolean;
   /**
@@ -1327,17 +1345,35 @@ export type EditOpts = {
   replay?: (doc: CanvasDoc) => Op[];
   /** The ops the change made (structure edits record them as they go): the crash journal keeps them. */
   recorded?: () => Op[];
+  /** Package files the edit added (a paste's images from another file): their blob ops go first in its action. */
+  media?: string[];
 };
-export type EditResult<T> = { result: T; write: { revision?: string; note?: string; edit?: string } };
+export type EditResult<T> = { result: T; write: { revision?: string; note?: string; edit?: string; history?: Pick<RecordMeta, "writers" | "docOrders"> } };
 
 /**
  * Apply `change` to the document in memory and write the file in the background. Same contract as store.ts
  * writeDoc: StaleFileError when `expectedRevision` is not the current state, the change may run again (a replay
  * after an outside save), and a change that throws changes nothing. `write.edit` names the edit for history.ts.
  */
-export function editDoc<T>(docFile: string, opts: EditOpts, change: (doc: CanvasDoc) => T): EditResult<T> {
+export async function editDoc<T>(docFile: string, opts: EditOpts, change: (doc: CanvasDoc) => T): Promise<EditResult<T>> {
+  return asOneAction(docFile, () => editDocNow(docFile, opts, change));
+}
+
+function editDocNow<T>(docFile: string, opts: EditOpts, change: (doc: CanvasDoc) => T): EditResult<T> {
   if (closing) throw new Error("Canvas is quitting: the edit was not made");
-  if (!host) return writeDoc(docFile, { expectedRevision: opts.expectedRevision }, change);
+  if (!host) {
+    if (!wantActions()) return writeDoc(docFile, { expectedRevision: opts.expectedRevision }, change);
+    // Without the snapshot cache the change runs on the loaded document in place: a copy of it is the state before.
+    let accepted: (() => void) | undefined;
+    const written = writeDoc(docFile, { expectedRevision: opts.expectedRevision }, (doc) => {
+      const before = structuredClone(doc);
+      const result = change(doc);
+      accepted = docEditAction(docFile, before, doc, opts.recorded ? opts.recorded() : effectOf(before, doc, opts.touches), opts.media, true);
+      return result;
+    });
+    accepted?.();
+    return { ...written, write: { ...written.write, history: editHistory(docFile) } };
+  }
   // The file was moved (a Finder rename of its package) or deleted while open: an edit answered here could never be
   // saved. It is refused, and every page showing the file is told.
   if (!fs.existsSync(docFile)) {
@@ -1360,12 +1396,14 @@ export function editDoc<T>(docFile: string, opts: EditOpts, change: (doc: Canvas
   if (opts.expectedRevision && !accepts(st, snap, opts.expectedRevision)) {
     throw new StaleFileError(`${docFile} is at revision ${snap.revision}, not ${opts.expectedRevision}. It changed; read it again before editing.`);
   }
-  const next = cowDoc(snap.doc, opts.touches, opts.deep);
+  const next = cowDoc(snap.doc, opts.touches, opts.deep, opts.docKeys);
   const result = change(next);
+  const ops = opts.recorded ? opts.recorded() : effectOf(snap.doc, next, opts.touches);
+  // The edit as one action of file ops (src/cloud-files-ops.ts); with checks on, an incomplete one is refused here.
+  const accepted = wantActions() ? docEditAction(docFile, snap.doc, next, ops, opts.media, true) : undefined;
   st.version++;
   const edit = token();
-  const ops = opts.recorded ? opts.recorded() : effectOf(snap.doc, next, opts.touches);
-  const pending: Pending = { version: st.version, edit, change, replay: opts.replay, touches: opts.touches, deep: opts.deep, ops, fixedOps: !!opts.recorded, accepted: ops, recorded: opts.recorded };
+  const pending: Pending = { version: st.version, edit, change, replay: opts.replay, touches: opts.touches, deep: opts.deep, docKeys: opts.docKeys, ops, fixedOps: !!opts.recorded, accepted: ops, recorded: opts.recorded };
   st.pending.push(pending);
   const format = snap.format ?? DEFAULT_FORMAT;
   const small = !st.writing && !st.dirty && st.bytes <= writeConfig.syncBytes && st.diskVersion === st.version - 1 && st.saved === st.version - 1;
@@ -1376,6 +1414,7 @@ export function editDoc<T>(docFile: string, opts: EditOpts, change: (doc: Canvas
   }
   snap = snapshotOfDoc(docFile, next, hash ? revisionOf(hash) : token(), format);
   host.adopt(docFile, snap);
+  accepted?.();
   // Journaled first, also when the save happens right now: if that save cannot be made durable, the journal stays.
   journalEdit(st, pending);
   if (buf && hash && writeSmall(st, format, buf, hash)) {
@@ -1390,7 +1429,12 @@ export function editDoc<T>(docFile: string, opts: EditOpts, change: (doc: Canvas
     scheduleWrite(st);
   }
   scheduleVerify(st);
-  return { result, write: { revision: snap.revision, edit } };
+  return { result, write: { revision: snap.revision, edit, history: editHistory(docFile) } };
+}
+
+/** Capture action metadata before the queue can advance to another edit. */
+function editHistory(file: string): EditResult<unknown>["write"]["history"] {
+  return wantActions() ? { writers: lastActionWrites(file), docOrders: lastDocOrders(file) } : undefined;
 }
 
 /** The document an edit would start from: memory when the server holds it, else the file. */

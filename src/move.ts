@@ -74,7 +74,7 @@ export class MoveError extends Error {
 }
 
 /** Move one node in a document (in memory, written in the background: docwriter.ts) and record the undo step. Returns where it landed. */
-export function moveNode(docFile: string, b: MoveBody, who: { source: "user" | "mcp"; session?: string }) {
+export async function moveNode(docFile: string, b: MoveBody, who: { source: "user" | "mcp"; session?: string }) {
   const id = b.id!;
   const x = num(b.x), y = num(b.y), dx = num(b.dx), dy = num(b.dy);
   if (x === undefined && y === undefined && dx === undefined && dy === undefined) throw new MoveError(400, "invalid", "give x and/or y, or dx and/or dy");
@@ -89,7 +89,7 @@ export function moveNode(docFile: string, b: MoveBody, who: { source: "user" | "
   const avoid = who.source === "mcp" && b.allowOverlap !== true;
   const mates = avoid ? pageMates(docFile, currentDoc(docFile).doc as Doc, { board: id }) : null;
   const cards = mates ? cardBoxes(docFile, mates.page, mates.first) : [];
-  const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [id, ...fit.touches] }, (doc) => {
+  const { write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [id, ...fit.touches] }, (doc) => {
     fitOps = [];
     mode = moveModeOf(doc as Doc, id).mode;
     if (mode === "auto") throw new MoveError(409, "auto_layout", "its auto-layout parent places this layer; reorder it (POST /api/layout op place, MCP place_nodes), change the parent's gap or padding, or make the layer absolute");
@@ -126,7 +126,7 @@ export function moveNode(docFile: string, b: MoveBody, who: { source: "user" | "
       session: who.session,
       mergeKey: nudge ? `nudge:${id}` : `move:${id}:${++drops}`,
       ...(nudge ? { mergeMs: NUDGE_MERGE_MS } : {}),
-      edit: write.edit,
+      edit: write.edit, ...write.history,
     }, write.revision);
   }
   const p = placed as Placed | undefined;
@@ -135,14 +135,14 @@ export function moveNode(docFile: string, b: MoveBody, who: { source: "user" | "
 }
 
 /** Move several nodes in one write and one undo step (see the top of this file). */
-export function moveNodes(docFile: string, b: MoveBody, who: { source: "user" | "mcp"; session?: string }) {
+export async function moveNodes(docFile: string, b: MoveBody, who: { source: "user" | "mcp"; session?: string }) {
   const items = (b.items ?? []).filter((it) => it && typeof it.id === "string" && it.id);
   if (!items.length || items.length > 2000) throw new MoveError(400, "invalid", "items must list 1 to 2000 nodes");
   const ops: NodeOp[] = [];
   const moved: { id: string; x: number; y: number }[] = [];
   const skipped: { id: string; code: string }[] = [];
   const fit = groupsOf(docFile, items.map((it) => it.id!));
-  const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [...items.map((it) => it.id), ...fit.touches] }, (doc) => {
+  const { write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [...items.map((it) => it.id), ...fit.touches] }, (doc) => {
     ops.length = 0; moved.length = 0; skipped.length = 0; // the change may run twice (a replay after an outside save)
     const ids = new Set(items.map((it) => it.id!));
     for (const it of items) {
@@ -181,7 +181,7 @@ export function moveNodes(docFile: string, b: MoveBody, who: { source: "user" | 
       session: who.session,
       mergeKey: group ? b.merge : b.merge === "nudge" ? `nudge:${moved.map((m) => m.id).sort().join(",")}` : `move:${++drops}`,
       ...(group ? { mergeMs: GROUP_MERGE_MS } : b.merge === "nudge" ? { mergeMs: NUDGE_MERGE_MS } : {}),
-      edit: write.edit,
+      edit: write.edit, ...write.history,
     }, write.revision);
   }
   return { ok: true as const, moved, skipped, revision: write.revision };
@@ -262,7 +262,7 @@ export async function handleMoveRoute(req: http.IncomingMessage, res: http.Serve
       const docFile = deps.docFileOf(b.file);
       const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
       const session = String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined;
-      const r = moveNodes(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
+      const r = await moveNodes(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
       if (r.moved.length) { deps.written(docFile, r.revision, by, r.moved[0].id); deps.moved?.(docFile, b); }
       return reply(200, r), true;
     }
@@ -275,7 +275,7 @@ export async function handleMoveRoute(req: http.IncomingMessage, res: http.Serve
       const ids = unsizedOnPage(docFile, deps.docOf(docFile) as Doc, { board: b.id }).filter((x) => !(b.rects && b.rects[x]));
       if (ids.length) b.rects = { ...(await deps.measure(docFile, ids).catch(() => ({}))), ...(b.rects ?? {}) };
     }
-    const r = moveNode(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
+    const r = await moveNode(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
     deps.written(docFile, r.revision, by, b.id);
     deps.moved?.(docFile, b);
     return reply(200, r), true;

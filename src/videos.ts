@@ -24,6 +24,7 @@ import os from "node:os";
 import type http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { asOneAction, mediaAdded } from "./cloud-files-ops.ts";
 import { inPackage, resolveDoc } from "./docpath.ts";
 import { addWidget, getWidget, listWidgets, docFileFor, updateWidget, WidgetError } from "./widgets.ts";
 import { VIDEO_TYPES } from "./widgets/kinds/video.ts";
@@ -93,6 +94,13 @@ async function checkFile(p: unknown): Promise<{ file: string; size: number }> {
  * another one with that name gets a numbered name. Returns the src (relative) and the hash.
  */
 export async function copyIn(docFile: string, file: string): Promise<{ src: string; hash: string; dest: string }> {
+  const out = await copyInOnce(docFile, file);
+  // A media add: its blob op goes with the step that adds the card (or as an action of its own).
+  mediaAdded(docFile, out.dest);
+  return out;
+}
+
+async function copyInOnce(docFile: string, file: string): Promise<{ src: string; hash: string; dest: string }> {
   const hash = await fileHash(file);
   const dir = mediaDir(docFile);
   await fs.promises.mkdir(dir, { recursive: true });
@@ -153,6 +161,10 @@ const fileConfig = async (docFile: string, input: VideoInput) => {
 
 /** A new video card: the file copied in first (or linked), then the widget that names it. */
 export async function createVideo(file: string, input: VideoInput, who: Who = {}) {
+  return asOneAction(docFileFor(file), () => createVideoNow(file, input, who));
+}
+
+async function createVideoNow(file: string, input: VideoInput, who: Who = {}) {
   const docFile = docFileFor(file);
   const f = await fileConfig(docFile, input);
   const abs = resolveSrc(docFile, f.src);
@@ -167,6 +179,10 @@ export async function createVideo(file: string, input: VideoInput, who: Who = {}
 
 /** Change a video card's file (copied in like a new one) and anything else a widget patch carries. */
 export async function updateVideo(file: string, id: string, input: VideoInput, who: Who = {}) {
+  return asOneAction(docFileFor(file), () => updateVideoNow(file, id, input, who));
+}
+
+async function updateVideoNow(file: string, id: string, input: VideoInput, who: Who = {}) {
   const docFile = docFileFor(file);
   if (!ID_RE.test(id)) throw new WidgetError(404, "no-widget", `No widget "${id}"`);
   const current = getWidget(file, id).widget;

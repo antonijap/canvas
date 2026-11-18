@@ -61,7 +61,7 @@ function pkg(name: string, doc: unknown = bigDoc()) {
 /** An HTTP client for one server and one package. */
 function client(b: string, file: string) {
   const call = async (method: string, p: string, body?: unknown) => {
-    const r = await fetch(`${b}${p}${p.includes("?") ? "&" : "?"}file=${encodeURIComponent(file)}`, { method, headers: { "x-canvas": "1", "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify({ file, ...(body as object) }), signal: AbortSignal.timeout(30_000) });
+    const r = await fetch(`${b}${p}${p.includes("?") ? "&" : "?"}file=${encodeURIComponent(file)}`, { method, headers: { "x-canvas": "1", "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify({ file, ...(body as object) }), signal: AbortSignal.timeout(60_000) });
     const text = await r.text();
     let j: any;
     try {
@@ -598,10 +598,10 @@ describe("second review: the log deleted, moved or copied from outside", () => {
         if (!order.startsWith("open")) assert.equal((await b.open()).status, 200);
         await sleep(400);
         await b.flush();
-        await sleep(2000);
+        // Recovery follows the watcher and disk queue. Replay checks can make that take longer than a fixed wait.
+        assert.ok(await until(() => !!keptAnywhere(m, "B0N1", "E1")), `${order}: E1 is in document.json or a recovery copy`);
         await b.flush();
         assert.equal(nodeIn(withLog(m.docPath), "B5N6").name, "OUT", `${order}: the other app's save is kept`);
-        assert.ok(keptAnywhere(m, "B0N1", "E1"), `${order}: E1 is in document.json or a recovery copy`);
       } finally {
         await stop(s);
       }

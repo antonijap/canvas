@@ -206,7 +206,7 @@ describe("background writes", () => {
     let wrote = 0;
     for (let round = 0; round < 4; round++) {
       const port = 5300 + Math.floor(Math.random() * 400);
-      const env: NodeJS.ProcessEnv = { ...process.env, CANVAS_PORT: String(port), CANVAS_ROOTS: dir };
+      const env: NodeJS.ProcessEnv = { ...process.env, CANVAS_PORT: String(port), CANVAS_ROOTS: dir, CANVAS_CHECK_ACTIONS: "1" };
       delete env.NODE_TEST_CONTEXT; // a plain server, not a test runner child
       const child = spawn(process.execPath, [path.join(import.meta.dirname, "..", "src", "server.ts")], {
         env,
@@ -219,6 +219,10 @@ describe("background writes", () => {
       });
       const b = `http://127.0.0.1:${port}`;
       await fetch(`${b}/api/doc?file=${encodeURIComponent(file)}`).then((r) => r.json());
+      // Start the crash window after an edit was accepted. Replay assertions on this large document can take
+      // longer than the window; killing before the first response would test startup instead of a write.
+      const accepted = await fetch(`${b}/api/update`, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ file, id: "R0_0", props: { name: `r${round}-initial` } }) });
+      assert.equal(accepted.status, 200);
       // Keep editing, and kill it at some point while writes are going on.
       let stop = false;
       const loop = (async () => {

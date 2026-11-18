@@ -458,3 +458,30 @@ test("the document keeps its top level key order and the room's copy reads back 
   assert.deepEqual(JSON.parse(room.materialize().document), s.document);
   assert.deepEqual(documentOf(new MemoryTree(stateFromFiles(s.document, s.envelope))), s.document);
 });
+
+test("empty variable containers and document key order match the local client", async () => {
+  const { DocTree } = await import("../src/cloud-files-tree.ts");
+  const { applyAction, isReject } = await import("../cloud/core/files/seam.ts");
+  const room = memoryRoom(FILE);
+  const original = { children: [] };
+  room.seed(original);
+  const local = new DocTree(original);
+  const batches: FileOp[][] = [
+    [{ k: "doc", key: "fonts", value: { v: [] } }, { k: "doc", key: "themes", value: { v: {} } }],
+    [{ k: "doc", key: "variables", value: { v: {} } }],
+    [{ k: "doc", key: "variables/accent", value: { v: { type: "color", value: "#ffffff" } } }],
+    [{ k: "doc", key: "variables/accent", value: null }, { k: "doc", key: "variables", value: null }],
+    [{ k: "doc", key: "themes", value: null }],
+    [{ k: "doc", key: "themes", value: { v: {} }, order: ["children", "fonts", "themes"] }],
+  ];
+  for (const ops of batches) {
+    const a = action(room, ops);
+    assert.ok(!isReject(applyAction(local, a)));
+    ok(send(room, anna, a).replies[0]);
+    assert.equal(JSON.stringify(local.doc), room.materialize().document);
+  }
+  refused(one(room, anna, [{ k: "doc", key: "variables", value: { v: { forbidden: { type: "number", value: 1 } } } }]), "invalid");
+  ok(one(room, anna, [{ k: "doc", key: "variables/accent", value: { v: { type: "number", value: 1 } } }]));
+  refused(one(room, anna, [{ k: "doc", key: "variables", value: null }]), "invalid");
+  refused(one(room, anna, [{ k: "doc", key: "variables", value: { v: {} } }]), "invalid");
+});

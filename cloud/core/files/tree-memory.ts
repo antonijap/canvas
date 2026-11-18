@@ -2,7 +2,7 @@
 // and the fuzz run, and the cross check for the room's SQL rows. Removed nodes leave the tree here (the SQL rows keep a
 // tombstone instead); both read the same through TreeAccess.
 
-import { refsOfNode, type BlobRow, type DocNode, type Json, type NodeView, type PageRow, type Ver } from "./seam.ts";
+import { nextProps, refsOfNode, type BlobRow, type DocNode, type Json, type NodeView, type PageRow, type Ver } from "./seam.ts";
 import type { DocValueKey, FileState, RoomTree } from "./state.ts";
 
 type Slot = { node: DocNode; parent: string | null };
@@ -155,8 +155,11 @@ export class MemoryTree implements RoomTree {
     slot.parent = parent;
   }
   writeDocValue(key: DocValueKey, value: Json | undefined): void {
-    if (value === undefined) delete this.s.doc[key];
-    else this.s.doc[key] = value;
+    if (value === undefined) { delete this.s.doc[key]; delete this.s.top[key]; }
+    else { this.s.doc[key] = value; this.s.top[key] = null; }
+  }
+  orderDocKeys(order: string[]): void {
+    this.s.top = nextProps(this.s.top, {}, order);
   }
   writeWidget(id: string, value: Json | undefined, index: number | undefined): void {
     const ids = this.widgetIds();
