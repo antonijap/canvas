@@ -826,6 +826,10 @@ enum QA {
                 keep = true
                 n["kind"] = "text"; n["value"] = f.stringValue; n["placeholder"] = f.placeholderString ?? ""
                 n["editable"] = f.isEditable; n["editing"] = f.currentEditor() != nil
+                if let editor = f.currentEditor() as? NSTextView {
+                    let range = editor.selectedRange()
+                    n["selection"] = ["location": range.location, "length": range.length]
+                }
             } else if let s = v as? NSSegmentedControl {
                 keep = true
                 n["kind"] = "segmented"; n["selected"] = s.selectedSegment

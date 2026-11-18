@@ -73,6 +73,27 @@ test("systemDrag posts from a runner child using the window screen frame", async
   });
 });
 
+test("systemClick posts a counted click from the runner at screen points", async (ctx) => {
+  const exists = fs.existsSync;
+  ctx.mock.method(fs, "existsSync", (file: fs.PathLike) => String(file).includes("/qa/out/system-drag-") || exists(file));
+  const inputs: unknown[] = [];
+  ctx.mock.method(childProcess, "execFile", (_file: string, args: string[], _options: unknown, cb: Function) => {
+    inputs.push(JSON.parse(args[0])); cb(null, "", ""); return {};
+  });
+  const ops: string[] = [];
+  const app = { pid: 123, base: "http://127.0.0.1:1", cmd: async ({ op }: { op: string }) => {
+    ops.push(op); return { window: { x: -800, y: 240, height: 700, scale: 2 } };
+  } };
+  const t = new NT(app as unknown as QaApp, "example.canvas");
+  await t.systemClick({ x: 12, y: 20 }, { count: 2 });
+  await t.systemClick({ x: 30, y: 40 });
+  assert.deepEqual(ops, ["qa.state", "qa.state"], "no synthetic input fallback");
+  assert.deepEqual(inputs, [
+    { mode: "click", pid: 123, at: { x: -788, y: 920 }, count: 2 },
+    { mode: "click", pid: 123, at: { x: -770, y: 900 }, count: 1 },
+  ]);
+});
+
 test("systemDrag fails the scenario on helper permission refusal without fallback", async (ctx) => {
   const exists = fs.existsSync;
   ctx.mock.method(fs, "existsSync", (file: fs.PathLike) => String(file).includes("/qa/out/system-drag-") || exists(file));
@@ -87,7 +108,8 @@ test("systemDrag fails the scenario on helper permission refusal without fallbac
   } };
   const t = new NT(app as unknown as QaApp, "example.canvas");
   await assert.rejects(t.systemDrag({ x: 12, y: 20 }, { x: 240, y: 20 }), /Accessibility for Terminal.app/);
-  assert.deepEqual(ops, ["qa.state"]);
+  await assert.rejects(t.systemClick({ x: 12, y: 20 }, { count: 2 }), /Accessibility for Terminal.app/);
+  assert.deepEqual(ops, ["qa.state", "qa.state"]);
 });
 
 test("system drag helper compiles once per source hash and never caches a failed build", (ctx) => {

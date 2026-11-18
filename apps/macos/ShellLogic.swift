@@ -129,9 +129,36 @@ enum TabList {
     }
 }
 
-/// Reordering the open file tabs by dragging. Home is pinned outside this list: it is never in `files`, never moves,
-/// and a tab never lands before it. Positions are in the tab strip's own space: tab i starts after the widths before
-/// it plus `gap` between neighbours.
+/// A tab keeps its pointer view through both halves of a click before replacing it with an editor.
+struct TabPress {
+    enum Action { case none, click, rename, drop }
+    private var clicks = 0
+    private(set) var moved = false
+    private var allowed = false
+    mutating func down(button: Int, clicks: Int) -> Action {
+        self.clicks = button == 0 ? clicks : 0
+        moved = false
+        allowed = TabOrder.canDrag(button: button, clicks: clicks, editing: false)
+        return .none
+    }
+    mutating func drag(_ dx: CGFloat) -> Bool {
+        guard allowed else { return false }
+        moved = moved || TabOrder.isDrag(dx)
+        return moved
+    }
+    mutating func up() -> Action {
+        // Inserting the editor on mouse-down lets the same click's release disturb its focus and selection.
+        let rename = clicks == 2
+        clicks = 0
+        if rename { allowed = false; return .rename }
+        guard allowed else { return .none }
+        allowed = false
+        return moved ? .drop : .click
+    }
+    mutating func cancel() { allowed = false; clicks = 0; moved = false }
+}
+
+/// Reordering file tabs. Home stays outside this list. Positions use the strip's widths and gaps.
 enum TabOrder {
     /// A press that moves less than this (points) is a click, never a drag.
     static let dragThreshold: CGFloat = 4
