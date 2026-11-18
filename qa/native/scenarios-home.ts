@@ -430,14 +430,32 @@ sc("comments", "Comment hint shares the zoom island bottom edge and gap", { cove
   try {
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
-      for (const [width, height] of [[720, 420], [1280, 800]]) {
+      for (const [width, height] of [[720, 420], [1280, 800], [2000, 1256]]) {
         await t.cmd("qa.window", { width, height });
         const zoom = await t.mark({ id: "zoom-island" });
-        await t.waitJs(`Math.abs(document.querySelector('.cm-hint').getBoundingClientRect().right + parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) - ${zoom.x}) <= 1`, "hint beside zoom");
+        await t.waitJs(`Math.abs(document.querySelector('.cm-hint').getBoundingClientRect().right + parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) - ${zoom.x}) <= 1`, "hint beside zoom", 8000, async () => {
+          const state = await t.state();
+          return {
+            theme, width, height, zoom, currentZoom: await t.mark({ id: "zoom-island" }),
+            window: state.window, webFrame: state.webFrame,
+            page: await t.js("const s = getComputedStyle(document.documentElement); return {hint:document.querySelector('.cm-hint').getBoundingClientRect().toJSON(),gap:s.getPropertyValue('--c-island-gap'),right:s.getPropertyValue('--cm-hint-right'),bottom:s.getPropertyValue('--cm-hint-bottom'),innerWidth,innerHeight,devicePixelRatio}"),
+          };
+        });
         const hint = await t.js<{ bottom: number; right: number }>("const r = document.querySelector('.cm-hint').getBoundingClientRect(); return {bottom:r.bottom,right:r.right}");
         t.near(hint.bottom, zoom.y + zoom.h, 1, `${theme} ${width}: bottom edges align`);
+        const state = await t.state();
+        const viewport = await t.js<{ w: number; h: number }>("return {w:innerWidth,h:innerHeight}");
+        t.near(state.webFrame.x, 0, 1, `${theme} ${width}: webview starts at window left`);
+        t.near(state.webFrame.y, 0, 1, `${theme} ${width}: webview starts at window top`);
+        t.near(viewport.w, state.window.width, 1, `${theme} ${width}: page fills window width`);
+        t.near(viewport.h, state.window.height, 1, `${theme} ${width}: page fills window height`);
       }
+      await t.settle();
+      await shot(t, `comments-island-${theme}`);
     }
+  } catch (error) {
+    await shot(t, "comments-island-failure");
+    throw error;
   } finally {
     await t.key("escape");
     await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });

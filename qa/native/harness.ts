@@ -316,14 +316,15 @@ export class NT {
     }
     throw new Fail(`timed out waiting for ${what}`);
   }
-  async waitJs(body: string, what: string, ms = 8000) {
+  async waitJs(body: string, what: string, ms = 8000, diagnose?: () => Promise<unknown>) {
     const t0 = Date.now();
     let last: unknown;
     while (Date.now() - t0 < ms) {
       try { last = await this.js(`return !!(${body});`); if (last) return; } catch (e) { last = (e as Error).message; }
       await sleep(80);
     }
-    throw new Fail(`timed out waiting for ${what} (last: ${String(last).slice(0, 200)})`);
+    const detail = diagnose ? await diagnose().catch((e) => ({ error: String(e) })) : undefined;
+    throw new Fail(`timed out waiting for ${what} (last: ${String(last).slice(0, 200)})${detail ? `\n  measured: ${JSON.stringify(detail)}` : ""}`);
   }
   async waitDisk<R>(fn: () => R | null | undefined | false, what: string, ms = 6000): Promise<R> {
     const t0 = Date.now();
