@@ -299,21 +299,24 @@ struct ShellLogicTests {
     // A server an older Canvas left running answers on the port: the app replaces it instead of running old code.
     static func serverCode() {
         typealias S = ServerCode
-        let own = (version: "aaaaaaaaaaaa", root: "rrrrrrrrrrrr")
-        check(S.choice(running: nil, own: own) == .start, "nothing answers: start ours")
-        check(S.choice(running: (own.version, own.root), own: own) == .reuse, "our own code: reuse it")
-        check(S.choice(running: ("bbbbbbbbbbbb", own.root), own: own) == .replace, "older code from the same folder (an update): replace")
-        check(S.choice(running: (own.version, "oooooooooooo"), own: own) == .replace, "another copy's server: replace")
-        check(S.choice(running: ("bbbbbbbbbbbb", "oooooooooooo"), own: own) == .replace, "another copy with other code: replace")
-        check(S.choice(running: ("bbbbbbbbbbbb", nil), own: own) == .replace, "an old server without root, other code: replace")
-        check(S.choice(running: (own.version, nil), own: own) == .reuse, "an old server without root, same code: reuse")
-        check(S.choice(running: (nil, nil), own: own) == .replace, "no version at all: replace")
-        check(S.choice(running: ("bbbbbbbbbbbb", own.root), own: nil) == .reuse, "our own code unreadable: keep what runs")
-        let h = S.health(Data(#"{"ok":true,"version":"0123456789ab","root":"ba9876543210"}"#.utf8))
-        check(h?.version == "0123456789ab" && h?.root == "ba9876543210", "the /health answer is read")
-        let old = S.health(Data(#"{"ok":true,"version":"0123456789ab"}"#.utf8))
-        check(old != nil && old?.root == nil, "an older /health without root")
-        check(S.health(Data("not json".utf8)) == nil && S.health(Data(#"{"ok":false}"#.utf8)) == nil, "not Canvas's answer")
+        let own = S.Health(version: "aaaaaaaaaaaa", root: "dddddddddddd")
+        check(S.choice(answered: false, running: nil, own: own) == .start, "nothing answers: start ours")
+        check(S.choice(answered: true, running: own, own: own) == .reuse, "our own code: reuse it")
+        check(S.choice(answered: true, running: .init(version: "bbbbbbbbbbbb", root: own.root), own: own) == .replace, "our installation, other code (an update): replace")
+        check(S.choice(answered: true, running: .init(version: own.version, root: "eeeeeeeeeeee"), own: own) == .otherCopy, "another copy's server, same code: never stopped")
+        check(S.choice(answered: true, running: .init(version: "bbbbbbbbbbbb", root: "eeeeeeeeeeee"), own: own) == .otherCopy, "another copy (a checkout, another account) with other code: never stopped")
+        check(S.choice(answered: true, running: nil, own: own) == .notCanvas, "something else answers: never stopped")
+        check(S.choice(answered: true, running: .init(version: "bbbbbbbbbbbb", root: own.root), own: nil) == .reuse, "our own code unreadable: keep what runs")
+        let h = S.health(Data(#"{"ok":true,"app":"canvas","version":"0123456789ab","root":"ba9876543210"}"#.utf8))
+        check(h == S.Health(version: "0123456789ab", root: "ba9876543210"), "a Canvas /health is read")
+        check(S.health(Data(#"{"ok":true,"version":"0123456789ab","root":"ba9876543210"}"#.utf8)) == h, "a Canvas server from before app was in /health: its exact answer")
+        for (body, why) in [(#"{"ok":true}"#, "ok alone"), (#"{"ok":true,"version":"0123456789ab"}"#, "no root"),
+                            (#"{"ok":true,"version":"old","root":"ba9876543210"}"#, "a version that is not a code hash"),
+                            (#"{"ok":true,"version":"0123456789ab","root":"ba9876543210","status":"up"}"#, "another service's extra fields, no app"),
+                            (#"{"ok":true,"app":"other","version":"0123456789ab","root":"ba9876543210"}"#, "another app"),
+                            (#"{"ok":false,"app":"canvas","version":"0123456789ab","root":"ba9876543210"}"#, "not ok"), ("not json", "not json")] {
+            check(S.health(Data(body.utf8)) == nil, "not positively Canvas (\(why)): never stopped")
+        }
 
         // The hashes match src/version.ts exactly: a folder with nesting, hidden files, a symlink, sort-order traps and
         // a non-ASCII name, reached through a symlinked path, then the repo's own src folder.

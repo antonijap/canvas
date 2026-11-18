@@ -554,31 +554,52 @@ enum EmptyPage {
 /// by an older Canvas (a quit that did not stop it, an update installed by hand) still answers on the port; the app
 /// must not attach to it and run old code, so at launch it compares that answer with its own server's code.
 enum ServerCode {
+    /// A Canvas server's /health: which code (version) of which installation (root) it runs.
+    struct Health: Equatable {
+        let version: String
+        let root: String
+    }
+
     enum Choice: Equatable {
         /// Nothing answers: start ours.
         case start
         /// It runs our code: use it.
         case reuse
-        /// It runs other code: stop it (POST /quit, it saves first) and start ours.
+        /// Our installation, other code (an update replaced the files under it): stop it (POST /quit, it saves first)
+        /// and start ours.
         case replace
+        /// Another copy of Canvas (a checkout, another installed copy, another account's Canvas) owns the port. It is
+        /// never stopped from here: its own clients rely on it. Use it, and say so.
+        case otherCopy
+        /// Something that is not Canvas answers on the port. Never stopped; ours cannot start beside it.
+        case notCanvas
     }
 
-    /// What to do with whatever answers on the port. `running`: its /health answer, nil when nothing answers.
-    /// `own`: our server's version and root, nil when they could not be read (then a running server is kept: we
-    /// cannot tell it is old).
-    static func choice(running: (version: String?, root: String?)?, own: (version: String, root: String)?) -> Choice {
-        guard let running else { return .start }
+    /// What to do with whatever is on the port. `answered`: anything answered /health over HTTP. `running`: that
+    /// answer when it is positively a Canvas server's (health(_:)). `own`: our server's version and root, nil when they
+    /// could not be read (then a running server is kept: we cannot tell it is old).
+    static func choice(answered: Bool, running: Health?, own: Health?) -> Choice {
+        guard answered else { return .start }
+        guard let running else { return .notCanvas }
         guard let own else { return .reuse }
-        guard let v = running.version, v == own.version else { return .replace }
-        // A server from before `root` was in /health: the same code, so keep it.
-        if let r = running.root, r != own.root { return .replace }
-        return .reuse
+        if running.root != own.root { return .otherCopy }
+        return running.version == own.version ? .reuse : .replace
     }
 
-    /// The /health answer's version and root, when it is Canvas's.
-    static func health(_ data: Data) -> (version: String?, root: String?)? {
-        guard let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], j["ok"] as? Bool == true else { return nil }
-        return (j["version"] as? String, j["root"] as? String)
+    private static func isId(_ v: Any?) -> Bool {
+        guard let s = v as? String, s.count == 12 else { return false }
+        return s.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+    }
+
+    /// The /health answer as a Canvas server's, or nil. Canvas names itself (`app: "canvas"`); a server from before
+    /// that is recognised only by its exact answer: ok, a 12-digit hex version and root, nothing else.
+    static func health(_ data: Data) -> Health? {
+        guard let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], j["ok"] as? Bool == true,
+              isId(j["version"]), isId(j["root"]) else { return nil }
+        let named = j["app"] as? String == "canvas"
+        let legacy = j["app"] == nil && Set(j.keys) == ["ok", "version", "root"]
+        guard named || legacy else { return nil }
+        return Health(version: j["version"] as! String, root: j["root"] as! String)
     }
 
     /// codeRootId: the first 12 hex digits of the SHA-1 of the src folder's real path (Node runs a module from its
