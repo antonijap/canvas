@@ -24,6 +24,7 @@ import os from "node:os";
 import type http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { mediaAdded } from "./cloud-files-ops.ts";
 import { inPackage, resolveDoc } from "./docpath.ts";
 import { addWidget, getWidget, listWidgets, docFileFor, updateWidget, WidgetError } from "./widgets.ts";
 import { VIDEO_TYPES } from "./widgets/kinds/video.ts";
@@ -93,6 +94,13 @@ async function checkFile(p: unknown): Promise<{ file: string; size: number }> {
  * another one with that name gets a numbered name. Returns the src (relative) and the hash.
  */
 export async function copyIn(docFile: string, file: string): Promise<{ src: string; hash: string; dest: string }> {
+  const out = await copyInOnce(docFile, file);
+  // A media add: its blob op goes with the step that adds the card (or as an action of its own).
+  mediaAdded(docFile, out.dest);
+  return out;
+}
+
+async function copyInOnce(docFile: string, file: string): Promise<{ src: string; hash: string; dest: string }> {
   const hash = await fileHash(file);
   const dir = mediaDir(docFile);
   await fs.promises.mkdir(dir, { recursive: true });

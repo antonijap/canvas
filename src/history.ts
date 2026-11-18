@@ -66,7 +66,9 @@ export type TreeOp = { t: "tree"; kind: "insert" | "remove"; parent: string | nu
 export type Place = { parent: string | null; index: number };
 /** A node that moved from one place in the tree to another (reorder, into a new group). */
 export type MoveOp = { t: "move"; id: string; b: Place; a: Place };
-export type Op = NodeOp | WidgetOp | PagesOp | TreeOp | MoveOp;
+/** A document-level key (variables, themes, fonts) before and after. */
+export type DocOp = { t: "doc"; key: string; b: Val; a: Val };
+export type Op = NodeOp | WidgetOp | PagesOp | TreeOp | MoveOp | DocOp;
 const isStructural = (o: Op): o is TreeOp | MoveOp => o.t === "tree" || o.t === "move";
 
 export type Entry = {
@@ -281,6 +283,10 @@ function mergeOps(into: Op[], ops: Op[]): Op[] {
       const at = out.findIndex((o) => o.t === "widget" && o.id === op.id);
       if (at < 0) out.push(op);
       else out[at] = { ...(out[at] as WidgetOp), a: op.a, ai: op.ai };
+    } else if (op.t === "doc") {
+      const at = out.findIndex((o) => o.t === "doc" && o.key === op.key);
+      if (at < 0) out.push(op);
+      else out[at] = { ...(out[at] as DocOp), a: op.a };
     } else {
       const at = out.findIndex((o) => o.t === "pages");
       if (at < 0) out.push(op);
@@ -295,6 +301,7 @@ function mergeOps(into: Op[], ops: Op[]): Op[] {
     if (o.t === "widget") return !same(o.b, o.a);
     if (o.t === "tree") return true;
     if (o.t === "move") return !same(o.b, o.a);
+    if (o.t === "doc") return !sameVal(o.b, o.a);
     return !same(o.b ?? null, o.a ?? null);
   });
 }
@@ -342,6 +349,9 @@ function continuous(prev: Op[], next: Op[]): boolean {
       // A structure step merges only into one that changed no layers (the cards of a mixed selection deleted with
       // their layers: one step); after layer changes its tree snapshots would no longer match on undo.
       if (prev.some((o) => o.t === "node" || isStructural(o))) return false;
+    } else if (op.t === "doc") {
+      const p = prev.findLast((o): o is DocOp => o.t === "doc" && o.key === op.key);
+      if (p && !sameVal(p.a, op.b)) return false;
     } else {
       const p = prev.find((o): o is PagesOp => o.t === "pages");
       if (p && !same(p.a ?? null, op.b ?? null)) return false;
@@ -469,6 +479,7 @@ function touchKeys(o: Op): string[] {
   if (o.t === "pages") return ["pages"];
   if (o.t === "widget") return [`w:${o.id}`];
   if (o.t === "node") return [`n:${o.id}`];
+  if (o.t === "doc") return [`d:${o.key}`];
   if (o.t === "move") return [`n:${o.id}`, `p:${o.b.parent}`, `p:${o.a.parent}`];
   return [...idsIn(o.node).map((id) => `n:${id}`), `p:${o.parent}`];
 }
@@ -659,6 +670,11 @@ function docConflicts(doc: { children: DocNode[] }, ops: NodeOp[], dir: Dir): st
   return out;
 }
 
+/** Document keys (variables, themes, fonts) that no longer hold what the step left. */
+function docKeyConflicts(doc: { children: DocNode[] }, ops: DocOp[], dir: Dir): string[] {
+  return ops.filter((op) => !sameVal(valOf(doc as unknown as Record<string, unknown>, op.key), wantOf(dir, op.b, op.a))).map((op) => `the document's ${op.key}`);
+}
+
 function envConflicts(widgets: Widget[], extra: Record<string, unknown>, ops: Op[], dir: Dir): string[] {
   const out: string[] = [];
   for (const op of ops) {
@@ -775,7 +791,10 @@ function runSequence(doc: Doc, ops: Op[], dir: Dir, e: Entry): void {
   const inserted: DocNode[] = [];
   const removed: DocNode[] = [];
   for (const op of list) {
-    if (op.t === "node") {
+    if (op.t === "doc") {
+      if (!sameVal(valOf(doc as unknown as Record<string, unknown>, op.key), wantOf(dir, op.b, op.a))) fail(`the document's ${op.key}`);
+      writeDocKey(doc, op.key, toOf(dir, op.b, op.a));
+    } else if (op.t === "node") {
       const c = docConflicts(doc, [op], dir);
       if (c.length) fail(c[0]);
       const set: Record<string, Json> = {};
@@ -855,8 +874,16 @@ export function invertOps(ops: Op[]): Op[] {
     if (o.t === "node") return { t: "node", id: o.id, props: Object.fromEntries(Object.entries(o.props).map(([k, d]) => [k, { b: clone(d.a), a: clone(d.b) }])), ...(o.keys ? { keys: { b: o.keys.a.slice(), a: o.keys.b.slice() } } : {}) };
     if (o.t === "tree") return { ...o, kind: o.kind === "insert" ? "remove" : "insert", node: clone(o.node) };
     if (o.t === "move") return { t: "move", id: o.id, b: { ...o.a }, a: { ...o.b } };
+    if (o.t === "doc") return { t: "doc", key: o.key, b: clone(o.a), a: clone(o.b) };
     return clone(o);
   });
+}
+
+/** Set a document-level key to a value (null: remove it). */
+function writeDocKey(doc: Doc, key: string, to: Val): void {
+  const d = doc as unknown as Record<string, unknown>;
+  if (to === null) delete d[key];
+  else d[key] = clone(to.v);
 }
 
 /**
@@ -888,6 +915,10 @@ export function replayOps(doc: Doc, ops: Op[]): Op[] {
       const keysBefore = Object.keys(node);
       orderKeys(updateNode(doc as any, op.id, set, remove), op.keys?.a);
       if (Object.keys(props).length) out.push({ t: "node", id: op.id, props, ...(op.keys ? { keys: { b: keysBefore, a: op.keys.a.slice() } } : {}) });
+    } else if (op.t === "doc") {
+      const b = valOf(doc as unknown as Record<string, unknown>, op.key);
+      writeDocKey(doc, op.key, op.a);
+      if (!sameVal(b, op.a)) out.push({ t: "doc", key: op.key, b, a: clone(op.a) });
     } else if (op.t === "tree") {
       if (op.kind === "insert") {
         const kids = listOf(doc, op.parent);
@@ -952,9 +983,11 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
     if ((e.parts ?? []).map((p) => p.edit).join("\n") !== picked) throw refuse(dir, e, ["the document"]);
   };
   const nodeOps = e.ops.filter((o): o is NodeOp => o.t === "node");
+  const docOps = e.ops.filter((o): o is DocOp => o.t === "doc");
   const envOps = e.ops.filter((o) => o.t === "widget" || o.t === "pages");
-  // A step with structure changes runs its tree and node ops in order (reversed for undo).
-  const seqOps = e.ops.some(isStructural) ? e.ops.filter((o) => o.t === "node" || isStructural(o)) : null;
+  const layerOp = (o: Op) => o.t === "node" || o.t === "doc" || isStructural(o);
+  // A step with structure changes runs its tree, node and document ops in order (reversed for undo).
+  const seqOps = e.ops.some(isStructural) ? e.ops.filter(layerOp) : null;
   const store = envOps.length ? await storeForAsync(docFile) : undefined;
   // Check both halves before writing either, so a refused step leaves everything as it was.
   if (store) {
@@ -975,20 +1008,22 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
   const writeLayers = (d: Dir): string | undefined => {
     for (let attempt = 0; ; attempt++) {
       const loaded = currentDoc(docFile);
-      const c = seqOps ? [] : docConflicts(loaded.doc, nodeOps, d);
+      const c = seqOps ? [] : [...docConflicts(loaded.doc, nodeOps, d), ...docKeyConflicts(loaded.doc, docOps, d)];
       if (c.length) throw refuse(d, e, c);
       try {
         // What the step does, as ops that run forward (the crash journal keeps them): redo as recorded, undo inverted.
-        const recorded = seqOps ? () => { const now = e.ops.filter((o) => o.t === "node" || isStructural(o)); return d === "redo" ? clone(now) : invertOps(now); } : undefined;
+        const recorded = seqOps ? () => { const now = e.ops.filter(layerOp); return d === "redo" ? clone(now) : invertOps(now); } : undefined;
         const { write } = editDoc(docFile, { expectedRevision: loaded.revision, touches, deep: !!seqOps, urgent: !!seqOps, recorded }, (doc) => {
           // The step's ops as they are when this runs: a replay after an outside save may have rebased them.
           if (d === dir) unsplit();
-          const seqNow = seqOps ? e.ops.filter((o) => o.t === "node" || isStructural(o)) : null;
+          const seqNow = seqOps ? e.ops.filter(layerOp) : null;
           if (seqNow) return void runSequence(doc, seqNow, d, e);
           const nodeNow = e.ops.filter((o): o is NodeOp => o.t === "node");
+          const docNow = e.ops.filter((o): o is DocOp => o.t === "doc");
           // The same check on the bytes the write is based on.
-          const c2 = docConflicts(doc, nodeNow, d);
+          const c2 = [...docConflicts(doc, nodeNow, d), ...docKeyConflicts(doc, docNow, d)];
           if (c2.length) throw refuse(d, e, c2);
+          for (const op of docNow) writeDocKey(doc as unknown as Doc, op.key, toOf(d, op.b, op.a));
           for (const op of nodeNow) {
             const set: Record<string, Json> = {};
             const remove: string[] = [];
@@ -1009,7 +1044,7 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
       }
     }
   };
-  const layers = !!(nodeOps.length || seqOps);
+  const layers = !!(nodeOps.length || docOps.length || seqOps);
   if (layers) revision = writeLayers(dir);
   if (store) {
     try {

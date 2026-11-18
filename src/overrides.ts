@@ -613,7 +613,8 @@ export function pushOverrides(docFile: string, id: string, expectedRevision: str
   if (!dry) return { changed: false, pushed: 0, kept: [] };
   let ops: NodeOp[] = [];
   let result = dry;
-  const { write } = editDoc(docFile, { expectedRevision, touches: [id, dry.main], deep: true }, (d) => {
+  // recorded: the push changes layers inside the main too, which a diff of the touched nodes alone would miss.
+  const { write } = editDoc(docFile, { expectedRevision, touches: [id, dry.main], deep: true, recorded: () => ops }, (d) => {
     const main = findNode(d, dry.main).node;
     const ids: string[] = [id];
     const gather = (x: DocNode) => { if (typeof x.id === "string") ids.push(x.id); for (const c of Array.isArray(x.children) ? (x.children as DocNode[]) : []) gather(c); };

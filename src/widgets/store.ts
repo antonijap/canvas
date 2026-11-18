@@ -4,6 +4,7 @@
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { deliverOps, envelopeEditAction, wantActions } from "../cloud-files-ops.ts";
 import { widgetsPathFor } from "../docpath.ts";
 import { isObject } from "./check.ts";
 import { kindOf, validateWidget } from "./registry.ts";
@@ -250,9 +251,12 @@ export class Store {
         const next = out.widgets.map((w) => (same(w, oldById.get(w.id)) ? w : validateWidget(w)));
         if (new Set(next.map((w) => w.id)).size !== next.length) throw new WidgetError(409, "id-exists", "A widget with that id already exists");
         const bytes = serialize(next, extra);
+        // The write as one action of file ops (src/cloud-files-ops.ts); with checks on, an incomplete one is refused.
+        const fileOps = wantActions() ? envelopeEditAction({ widgets: before, extra: beforeExtra }, { widgets: next, extra }, bytes, serialize) : null;
         // Another writer slipped in since refresh(): start over on top of it.
         if (base === undefined || (await this.fileHash()) !== base) continue;
         if (!(await this.commit(bytes, base))) continue;
+        deliverOps(this.docFile, fileOps);
         this.seen = sha(bytes);
         this.state = { rev: this.seen, widgets: next, invalid: false, extra };
         if (opts.record && envelopeHook.fn) {

@@ -1313,7 +1313,7 @@ export function runStructure(docFile: string, b: StructureBody, who: Who): { ok:
   // Replayed on someone else's bytes (before it reached the disk), the edit makes no new ids: it applies the ops it
   // made the first time, so the duplicate, the pasted layers or the new group keep the ids everyone already holds.
   const replay = (doc: CanvasDoc) => replayOps(doc as unknown as Doc, out!.ops);
-  const edit = () => editDoc(docFile, { expectedRevision: b.expectedRevision, touches, deep: true, urgent: true, replay, recorded: () => out?.ops ?? [] }, (doc) => {
+  const edit = () => editDoc(docFile, { expectedRevision: b.expectedRevision, touches, deep: true, urgent: true, replay, recorded: () => out?.ops ?? [], media: created }, (doc) => {
     // The change may run twice (a replay after an outside save); the last run is the one written.
     const d = doc as unknown as Doc;
     switch (op) {
