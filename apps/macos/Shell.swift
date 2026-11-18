@@ -565,7 +565,7 @@ private struct TabNameField: NSViewRepresentable {
             return event
         }
         field.font = .systemFont(ofSize: 12, weight: .medium)
-        field.drawsBackground = false
+        field.drawsBackground = true
         field.isBordered = false
         field.focusRingType = .default
         DispatchQueue.main.async { field.window?.makeFirstResponder(field); field.selectText(nil) }
