@@ -193,6 +193,25 @@ sc("comments", "reply, resolve and Show resolved", { covers: ["comments:reply", 
   await t.waitFor(`document.querySelectorAll(".cm-pin").length === 0`, "no pins");
 });
 
+// GitHub issue 10: a field the system may fill gets macOS's "Fill code from Mail" offer over the comment controls.
+sc("comments", "the comment and reply fields opt out of AutoFill, autocorrect and writing suggestions", { covers: ["comments:keyboard", "comments:reply"] }, async (t: T) => {
+  const OFF = { autocomplete: "off", autocorrect: "off", autocapitalize: "off", writingsuggestions: "false" };
+  const attrs = (sel: string) => t.ev<Record<string, string | null>>(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); return Object.fromEntries(${JSON.stringify(Object.keys(OFF))}.map((k) => [k, e && e.getAttribute(k)])); })()`);
+  await t.focus("lay_nest");
+  const r = await t.rect("r_free");
+  await t.io.key("c");
+  await t.io.click(r.x + r.w / 2, r.y + r.h / 2);
+  await t.waitFor(`!!document.querySelector(".cm-comp:not([hidden]) textarea")`, "the composer");
+  t.eq(await attrs(".cm-comp textarea"), OFF, "the new comment field");
+  await t.io.type("Check the spacing");
+  await t.io.key("Enter");
+  await until(t, () => !!file(t)?.threads?.length, "the thread");
+  await t.io.key("Escape");
+  await openThread(t, file(t).threads[0].id);
+  t.eq(await attrs(".cm-pop .cm-field"), OFF, "the reply field");
+  t.eq(await t.ev(`[...document.querySelectorAll(".cm-comp textarea, .cm-pop textarea, .cm-pop input")].filter((e) => e.getAttribute("autocomplete") !== "off").length`), 0, "no comment field is left to AutoFill");
+});
+
 sc("comments", "a thread whose layer was deleted shows at its board's corner as Layer deleted, never on another layer", { covers: ["comments:layer-deleted"] }, async (t: T) => {
   await t.focus("lay_nest");
   const r = await t.rect("r_free");

@@ -16,13 +16,38 @@ struct ShellLogicTests {
     }
 
     static func main() {
-        docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); tipPlacement(); contextMenu()
+        docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); serverCode(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
-        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func tabSizing() {
+        let full: [CGFloat] = [340, 200, 120]
+        check(TabSizing.widths(natural: full, available: 664, minimum: 96) == full, "full names when there is room, including names over 180 pt")
+        check(TabSizing.widths(natural: [240, 200, 160], available: 484, minimum: 96) == [200, 160, 120], "all tabs lose the same width when crowded")
+        check(TabSizing.widths(natural: [300, 120, 100], available: 354, minimum: 96) == [158, 96, 96], "short tabs stop at the minimum and the rest share the remaining deficit")
+        check(TabSizing.widths(natural: full, available: 100, minimum: 96) == [96, 96, 96], "scroll when even minimum widths do not fit, including the active tab")
+        check(TabSizing.widths(natural: [], available: 100, minimum: 96).isEmpty, "no tabs")
+        check(TabSizing.widths(natural: [40, 200], available: 500, minimum: 96) == [96, 200], "short names still keep room for controls")
+    }
+
+    static func fileTabs() {
+        check(ContextMenuLayout.fileTab(cloud: false).flatMap { $0 } == ["Rename...", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab menu order")
+        check(ContextMenuLayout.fileTab(cloud: true) == [["Rename...", "Show in Finder", "Duplicate", "Move to Cloud...", "Copy Link"], ["Close", "Close Other Tabs"]], "cloud action and separator")
+        for name in ["", " ", ".hidden", "../Other", "a/b", "a\0b", ".canvas"] {
+            check(TabRename.name(name) == nil, "invalid package name")
+        }
+        check(TabRename.name("  Board  ") == "Board.canvas", "trim and add extension")
+        check(TabRename.name("Board.canvas") == "Board.canvas", "extension stays once")
+        check(TabRename.name("Plan + #1") == "Plan + #1.canvas", "ordinary punctuation")
+        check(TabOrder.canDrag(button: 0, clicks: 1, editing: false), "single left press can drag")
+        check(!TabOrder.canDrag(button: 1, clicks: 1, editing: false), "right press never drags")
+        check(!TabOrder.canDrag(button: 0, clicks: 2, editing: false), "double press never drags")
+        check(!TabOrder.canDrag(button: 0, clicks: 1, editing: true), "rename never drags")
     }
 
     // Dragging file tabs into a new order: Home stays outside the list, a short move is a click.
@@ -294,6 +319,75 @@ struct ShellLogicTests {
         check(!EmptyPage.isEmpty(fileOpen: true, home: true, loaded: true, boards: 0, cards: 0), "Home shown: no hint")
         check(!EmptyPage.isEmpty(fileOpen: false, home: false, loaded: true, boards: 0, cards: 0), "no file: no hint")
         check(!EmptyPage.hint.contains("\u{2014}") && !EmptyPage.hint.contains("\u{00B7}"), "no em dash or middot in the hint")
+    }
+
+    // A server an older Canvas left running answers on the port: the app replaces it instead of running old code.
+    static func serverCode() {
+        typealias S = ServerCode
+        let own = S.Health(version: "aaaaaaaaaaaa", root: "dddddddddddd")
+        check(S.choice(answered: false, running: nil, own: own) == .start, "nothing answers: start ours")
+        check(S.choice(answered: true, running: own, own: own) == .reuse, "our own code: reuse it")
+        check(S.choice(answered: true, running: .init(version: "bbbbbbbbbbbb", root: own.root), own: own) == .replace, "our installation, other code (an update): replace")
+        check(S.choice(answered: true, running: .init(version: own.version, root: "eeeeeeeeeeee"), own: own) == .otherCopy, "another copy's server, same code: never stopped")
+        check(S.choice(answered: true, running: .init(version: "bbbbbbbbbbbb", root: "eeeeeeeeeeee"), own: own) == .otherCopy, "another copy (a checkout, another account) with other code: never stopped")
+        check(S.choice(answered: true, running: nil, own: own) == .notCanvas, "something else answers: never stopped")
+        check(S.choice(answered: true, running: .init(version: "bbbbbbbbbbbb", root: own.root), own: nil) == .reuse, "our own code unreadable: keep what runs")
+        let h = S.health(Data(#"{"ok":true,"app":"canvas","version":"0123456789ab","root":"ba9876543210"}"#.utf8))
+        check(h == S.Health(version: "0123456789ab", root: "ba9876543210"), "a Canvas /health is read")
+        check(S.health(Data(#"{"ok":true,"version":"0123456789ab","root":"ba9876543210"}"#.utf8)) == h, "a Canvas server from before app was in /health: its exact answer")
+        for (body, why) in [(#"{"ok":true}"#, "ok alone"), (#"{"ok":true,"version":"0123456789ab"}"#, "no root"),
+                            (#"{"ok":true,"version":"old","root":"ba9876543210"}"#, "a version that is not a code hash"),
+                            (#"{"ok":true,"version":"0123456789ab","root":"ba9876543210","status":"up"}"#, "another service's extra fields, no app"),
+                            (#"{"ok":true,"app":"other","version":"0123456789ab","root":"ba9876543210"}"#, "another app"),
+                            (#"{"ok":false,"app":"canvas","version":"0123456789ab","root":"ba9876543210"}"#, "not ok"), ("not json", "not json")] {
+            check(S.health(Data(body.utf8)) == nil, "not positively Canvas (\(why)): never stopped")
+        }
+
+        // The hashes match src/version.ts exactly: a folder with nesting, hidden files, a symlink, sort-order traps and
+        // a non-ASCII name, reached through a symlinked path, then the repo's own src folder.
+        let fm = FileManager.default
+        let tmp = (NSTemporaryDirectory() as NSString).appendingPathComponent("canvas-servercode-\(getpid())")
+        try? fm.removeItem(atPath: tmp)
+        let src = tmp + "/real/src"
+        try? fm.createDirectory(atPath: src + "/a/b", withIntermediateDirectories: true)
+        try? fm.createDirectory(atPath: src + "/.hidden", withIntermediateDirectories: true)
+        for (f, s) in [("a.ts", "one"), ("a/b.ts", "two"), ("a/b/c.ts", "three"), ("a-b.ts", "four"), ("A.ts", "five"), (".DS_Store", "six"), (".hidden/x.js", "seven"), ("caf\u{e9}.ts", "eight"), ("empty.ts", "")] {
+            fm.createFile(atPath: src + "/" + f, contents: Data(s.utf8))
+        }
+        try? fm.createSymbolicLink(atPath: src + "/link.ts", withDestinationPath: src + "/a.ts")
+        try? fm.createSymbolicLink(atPath: src + "/linkdir", withDestinationPath: src + "/a")
+        try? fm.createSymbolicLink(atPath: tmp + "/alias", withDestinationPath: tmp + "/real")
+        defer { try? fm.removeItem(atPath: tmp) }
+        let repoSrc = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../../src").standardized.path
+        guard let node = NodeLocator.find(env: ProcessInfo.processInfo.environment, home: NSHomeDirectory(), isExecutable: { fm.isExecutableFile(atPath: $0) }) else {
+            check(false, "node is needed to check the hashes against src/version.ts"); return
+        }
+        func nodeSays(_ dir: String) -> String {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: node)
+            let mod = repoSrc + "/version.ts"
+            // version() hashes the folder its module is in, so the module is copied next to the files for the folder test.
+            p.arguments = ["--input-type=module", "-e", """
+              import fs from "node:fs"; import path from "node:path"; import url from "node:url";
+              const dir = process.argv[1]; let m = \(String(reflecting: mod));
+              if (dir !== path.dirname(m)) { fs.copyFileSync(m, path.join(dir, "zz-version.ts")); m = path.join(dir, "zz-version.ts"); }
+              const v = await import(url.pathToFileURL(m).href);
+              console.log(v.version() + " " + v.codeRootId());
+              """, dir]
+            let out = Pipe()
+            p.standardOutput = out
+            do { try p.run() } catch { return "" }
+            p.waitUntilExit()
+            return String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let viaAlias = tmp + "/alias/src"
+        let n = nodeSays(viaAlias)
+        let sw = "\(S.version(srcDir: viaAlias) ?? "nil") \(S.rootId(srcDir: viaAlias))"
+        check(n.count == 25 && n == sw, "the folder's version and root as src/version.ts says: node \(n), swift \(sw)")
+        let nr = nodeSays(repoSrc)
+        let swr = "\(S.version(srcDir: repoSrc) ?? "nil") \(S.rootId(srcDir: repoSrc))"
+        check(nr.count == 25 && nr == swr, "the repo's own src as its server says: node \(nr), swift \(swr)")
+        check(S.version(srcDir: tmp + "/missing") == nil, "an unreadable folder has no version")
     }
 
     static func canvasInsets() {

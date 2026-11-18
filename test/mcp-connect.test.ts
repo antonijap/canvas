@@ -93,7 +93,7 @@ describe("connectAgent", () => {
     install("claude");
     const r = await C.connectAgent("claude", { node: NODE, server: APP_SCRIPT });
     assert.equal(r.ok, true, JSON.stringify(r));
-    assert.deepEqual(r, { ok: true, agent: "claude", registered: true, message: "Added. Start a new Claude Code session." });
+    assert.deepEqual(r, { ok: true, agent: "claude", registered: true, message: "Added. New Claude Code sessions use it; restart any that are open." });
     assert.deepEqual(calls(), [["claude", "mcp", "add", "canvas", "--scope", "user", "--", NODE, APP_SCRIPT]]);
     assert.deepEqual(JSON.parse(fs.readFileSync(claudeJson, "utf8")).mcpServers.canvas.args, [APP_SCRIPT]);
   });
@@ -101,7 +101,7 @@ describe("connectAgent", () => {
   test("Codex: adds canvas with the same paths", async () => {
     install("codex");
     const r = await C.connectAgent("codex", { node: NODE, server: APP_SCRIPT });
-    assert.deepEqual(r, { ok: true, agent: "codex", registered: true, message: "Added. Start a new Codex session." });
+    assert.deepEqual(r, { ok: true, agent: "codex", registered: true, message: "Added. New Codex sessions use it; restart any that are open." });
     assert.deepEqual(calls(), [["codex", "mcp", "add", "canvas", "--", NODE, APP_SCRIPT]]);
   });
 
@@ -212,7 +212,7 @@ describe("POST /api/mcp/connect", async () => {
     assert.deepEqual(before.installed, { claude: true, codex: true });
     const r = await post({ agent: "claude" });
     assert.equal(r.status, 200);
-    assert.deepEqual(await r.json(), { ok: true, agent: "claude", registered: true, message: "Added. Start a new Claude Code session." });
+    assert.deepEqual(await r.json(), { ok: true, agent: "claude", registered: true, message: "Added. New Claude Code sessions use it; restart any that are open." });
     const c = calls()[0];
     assert.deepEqual(c.slice(0, 7), ["claude", "mcp", "add", "canvas", "--scope", "user", "--"]);
     assert.deepEqual(c.slice(7), [setupCommands().node, MCP_SCRIPT], "the absolute paths setupCommands shows");

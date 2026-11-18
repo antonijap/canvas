@@ -475,8 +475,8 @@ final class CloudAccount: ObservableObject {
 
     /// File > Share Comments: the open file's comments go to a Cloud. A file already shared stays where it is; with
     /// more than one Cloud that can take it, Canvas asks which.
-    func shareOpenFile(_ model: CanvasModel) {
-        guard let file = model.currentFile else { model.flash("Open a Canvas file first"); return }
+    func shareOpenFile(_ model: CanvasModel, file selectedFile: String? = nil) {
+        guard let file = selectedFile ?? model.currentFile else { model.flash("Open a Canvas file first"); return }
         Task {
             await refresh(model, fresh: true)
             let summary = CommentsRead.summary(try? Data(contentsOf: URL(fileURLWithPath: file + "/comments.json")))

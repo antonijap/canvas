@@ -10,7 +10,9 @@
 //                         welcome card on it; made once, answered again as it is after that
 //
 // Any request canvas-mcp makes (x-canvas-source: mcp on writes, x-canvas-mcp on reads) counts as it talking. Runs Canvas starts itself (src/agent-run.ts,
-// sessions "run-...") do not: they say nothing about whether the person registered the server.
+// sessions "run-...") do not: they say nothing about whether the person registered the server. An MCP of this copy
+// whose x-canvas-mcp-version is not the code on disk (or that sends none: one from before an update) counts as
+// Connected, older version (`outdated`); one of another copy of Canvas (x-canvas-mcp-root) as `otherCopy`.
 
 import fs from "node:fs";
 import type http from "node:http";
@@ -22,6 +24,7 @@ import { DESIGN_FILE } from "./docpath.ts";
 import { kindOf, validateWidget } from "./widgets/registry.ts";
 import { countUsage } from "./usage-counts.ts";
 import { handleConnectRoute, installedState, registeredState, temporaryServer } from "./mcp-connect.ts";
+import { codeRootId, mcpCodeVersion } from "./version.ts";
 
 export const MCP_NAME = "canvas";
 /** canvas-mcp says hello every 20 s (HEARTBEAT_MS in mcp/client.ts); the indicator goes off after OFF_AFTER_MS of silence. */
@@ -71,7 +74,20 @@ export function setupCommands(node = stableNode(), script = MCP_SCRIPT, home = u
 
 // ---------- who is talking ----------
 
-let seen: { at: number; client: string } | null = null;
+type Seen = { at: number; client: string };
+/**
+ * Who talked last, by kind. current: an MCP of this copy of Canvas running the code on disk now. old: an MCP of this
+ * copy whose code is gone (an update replaced it; its agent session must restart), or one from before MCPs sent their
+ * version (it often sends only x-canvas-source on its writes). other: an MCP of another copy of Canvas (a checkout
+ * talking to the installed app): not older, restarting would load the same copy again.
+ */
+const seenBy: Record<"current" | "old" | "other", Seen | null> = { current: null, old: null, other: null };
+/** The MCP code on disk now (src and mcp, src/version.ts mcpCodeVersion), worked out again at most every 10 s. */
+let onDisk: { at: number; v: string } | null = null;
+const diskVersion = (now: number) => {
+  if (!onDisk || now - onDisk.at > 10_000) onDisk = { at: now, v: mcpCodeVersion() };
+  return onDisk.v;
+};
 /** MCP sessions already counted as a connection (usage counts): one per session, not one per heartbeat. */
 const counted = new Set<string>();
 
@@ -87,24 +103,36 @@ export function noteMcp(req: http.IncomingMessage, now = Date.now()): boolean {
   const mcpRead = req.headers["x-canvas-mcp"];
   if (req.headers["x-canvas-source"] !== "mcp" && typeof mcpRead !== "string") return false;
   const session = String(req.headers["x-canvas-session"] ?? mcpRead ?? "");
-  if (!session || session.startsWith("run-")) return false;
+  // An MCP from before sessions were sent has none: it still counts, as an older version.
+  if (session.startsWith("run-")) return false;
   const agent = req.headers["x-canvas-agent"];
-  if (!counted.has(session)) {
+  if (session && !counted.has(session)) {
     if (counted.size > 500) counted.clear();
     counted.add(session);
     countUsage(connectedEvent(agent));
   }
-  seen = { at: now, client: typeof agent === "string" && agent ? agentLabel(agent.slice(0, 80)) : seen?.client ?? "An agent" };
+  const v = req.headers["x-canvas-mcp-version"], root = req.headers["x-canvas-mcp-root"];
+  const kind = typeof v !== "string" ? "old" : typeof root === "string" && root !== codeRootId() ? "other" : v === diskVersion(now) ? "current" : "old";
+  seenBy[kind] = { at: now, client: typeof agent === "string" && agent ? agentLabel(agent.slice(0, 80)) : seenBy[kind]?.client ?? "An agent" };
   return true;
 }
 
+/**
+ * connected: an MCP talked within OFF_AFTER_MS. outdated: none of this copy's current code did, but an older one of
+ * this copy did, so the agent sessions running it must restart. otherCopy: only MCPs of another copy of Canvas did.
+ */
 export function mcpStatus(now = Date.now()) {
-  const on = !!seen && now - seen.at < OFF_AFTER_MS;
-  return { connected: on, client: on ? seen!.client : null, seenMs: seen ? now - seen.at : null };
+  const on = (s: Seen | null) => !!s && now - s.at < OFF_AFTER_MS;
+  const kind = on(seenBy.current) ? "current" : on(seenBy.old) ? "old" : on(seenBy.other) ? "other" : null;
+  const any = Object.values(seenBy).filter((s): s is Seen => !!s).map((s) => now - s.at);
+  return {
+    connected: !!kind, outdated: kind === "old", otherCopy: kind === "other",
+    client: kind ? seenBy[kind]!.client : null, seenMs: any.length ? Math.min(...any) : null,
+  };
 }
 
 /** Tests: forget who talked. */
-export const resetMcpSeen = () => { seen = null; counted.clear(); };
+export const resetMcpSeen = () => { seenBy.current = seenBy.old = seenBy.other = null; onDisk = null; counted.clear(); };
 
 // ---------- the Welcome file ----------
 

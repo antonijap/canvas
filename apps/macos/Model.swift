@@ -745,6 +745,60 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         open(url.path)
     }
 
+    func renameFile(_ file: String, to raw: String) {
+        guard let name = TabRename.name(raw) else { flash("Choose a name without slashes or a leading dot"); return }
+        flushTextEdit { ok in
+            guard ok else { return }
+            self.afterWrites {
+                self.post("api/canvas/rename", ["file": file, "name": name]) { renamed, error in
+                    guard let renamed else { self.flash(error ?? "Could not rename the file"); return }
+                    guard renamed != file else { return }
+                    if self.openFiles.contains(file) {
+                        self.openFiles = TabList.replacing(self.openFiles, file, with: renamed)
+                        UserDefaults.standard.set(self.openFiles, forKey: "canvas.openFiles")
+                    }
+                    self.allFiles = self.allFiles.map { $0.file == file ? FileEntry(name: URL(fileURLWithPath: renamed).deletingPathExtension().lastPathComponent, file: renamed) : $0 }
+                    self.sectionByFile[renamed] = self.sectionByFile.removeValue(forKey: file)
+                    MainActor.assumeIsolated { HomeStore.shared.replace(file, with: renamed) }
+                    if self.currentFile == file {
+                        self.currentFile = renamed
+                        self.fileName = URL(fileURLWithPath: renamed).deletingPathExtension().lastPathComponent
+                        UserDefaults.standard.set(renamed, forKey: "canvas.lastFile")
+                        self.live[renamed] = self.live.removeValue(forKey: file)
+                        self.liveOrder = self.liveOrder.map { $0 == file ? renamed : $0 }
+                        self.activeKey = renamed
+                        if let url = DocURL.page(base: self.base, file: renamed) { self.webView.load(URLRequest(url: url)) }
+                    } else { self.drop(file) }
+                }
+            }
+        }
+    }
+
+    func duplicateFile(_ file: String) {
+        let source = URL(fileURLWithPath: file)
+        let stem = source.deletingPathExtension().lastPathComponent + " copy"
+        var n = 1
+        var target: URL
+        repeat {
+            target = source.deletingLastPathComponent().appendingPathComponent(stem + (n == 1 ? "" : " \(n)") + ".canvas")
+            n += 1
+        } while FileManager.default.fileExists(atPath: target.path)
+        let path = target.path
+        flushTextEdit { ok in
+            guard ok else { return }
+            self.afterWrites {
+                self.post("api/canvas/save-as", ["file": file, "target": path]) { saved, error in
+                    if let saved { self.open(saved) } else { self.flash(error ?? "Could not duplicate the file") }
+                }
+            }
+        }
+    }
+
+    func closeOtherTabs(_ file: String) {
+        for other in openFiles where other != file { close(other) }
+        openTab(file)
+    }
+
     func saveAsCanvas() {
         guard let file = currentFile else { flash("Open a design first."); return }
         guard let url = savePanel(title: "Save as Canvas", name: name(of: file) + ".canvas") else { return }

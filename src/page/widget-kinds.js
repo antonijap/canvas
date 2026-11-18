@@ -612,8 +612,19 @@ export function welcomeRow(s, key, busy = false) {
   return { connected: false, button: s.installed && s.installed[key] && !s.temporary ? "Connect" : "Copy command" };
 }
 
-/** The footer line with no Connect answer to report: why Connect is missing on a temporary worktree, else the next step. */
-export const welcomeHint = (s) => (s && s.temporary ? WELCOME_TEMPORARY : WELCOME_HINT);
+/** An MCP from before an update is talking (src/onboarding.ts `outdated`): its agent session must restart. */
+export const WELCOME_OUTDATED = "Connected (older version, restart your agent session)";
+/** addedMessage in src/mcp-connect.ts: Connect worked, and sessions already open must restart to use it. */
+export const welcomeAdded = (label) => "Added. New " + label + " sessions use it; restart any that are open.";
+
+/** Only an MCP of another copy of Canvas talks (src/onboarding.ts `otherCopy`): not older, so no restart advice. */
+export const WELCOME_OTHER_COPY = "Connected (an agent runs another copy of Canvas)";
+
+/**
+ * The footer line with no Connect answer to report: an older MCP talking (restart that session), another copy's MCP,
+ * why Connect is missing on a temporary worktree, else the next step.
+ */
+export const welcomeHint = (s) => (s && s.outdated ? WELCOME_OUTDATED : s && s.otherCopy ? WELCOME_OTHER_COPY : s && s.temporary ? WELCOME_TEMPORARY : WELCOME_HINT);
 
 function welcomeCard(ctx) {
   const root = h("div", "wc");
@@ -692,7 +703,7 @@ function welcomeCard(ctx) {
     }
     r.busy = false;
     if (j && j.ok) {
-      note = { text: j.message || "Added. Start a new " + AGENT_LABEL[key] + " session.", err: false };
+      note = { text: j.message || welcomeAdded(AGENT_LABEL[key]), err: false };
       last = { ...last, registered: { ...(last.registered || {}), [key]: true } };
     } else {
       const e = String((j && j.error) || "Something went wrong.");
@@ -721,7 +732,8 @@ function welcomeCard(ctx) {
     }
     root.classList.toggle("on", last.connected === true);
     hint.classList.toggle("err", !!(note && note.err));
-    hint.classList.toggle("long", !note && !!last.temporary);
+    // Two lines at most for the longer ones: an error, Connect's next step, why Connect is missing here.
+    hint.classList.toggle("long", note ? !note.err : !!last.temporary && !last.outdated && !last.otherCopy);
     setText(hint, note ? note.text : welcomeHint(last));
     hint.title = note && note.err ? note.text : "";
   }
