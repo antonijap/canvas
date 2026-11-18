@@ -13,6 +13,7 @@ import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
+import { mediaAdded } from "./cloud-files-ops.ts";
 import { inPackage, resolveDoc } from "./docpath.ts";
 
 export const MAX_IMAGE = 50 * 1024 * 1024;
@@ -125,6 +126,8 @@ export async function saveImage(file: string, bytes: Buffer, name: string): Prom
     await fs.promises.writeFile(tmp, bytes);
     await fs.promises.rename(tmp, dest);
   }
+  // A media add: its blob op is an action of its own, before the edit that names the file.
+  mediaAdded(resolveDoc(file).docFilePath, dest);
   return { url: `${where.rel}/${fname}`, ...size, bytes: bytes.length };
 }
 

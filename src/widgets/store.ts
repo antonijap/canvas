@@ -4,6 +4,7 @@
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { asOneAction, deliverOps, envelopeEditAction, wantActions } from "../cloud-files-ops.ts";
 import { widgetsPathFor } from "../docpath.ts";
 import { isObject } from "./check.ts";
 import { kindOf, validateWidget } from "./registry.ts";
@@ -234,6 +235,10 @@ export class Store {
    * (pages live there) and returns both. One lock, one atomic write, one rebase rule.
    */
   mutateEnvelope<T = undefined>(fn: (widgets: Widget[], extra: Record<string, unknown>) => { widgets: Widget[]; extra: Record<string, unknown>; result?: T }, opts: WriteOpts = {}): Promise<{ state: StoreState; result: T | undefined }> {
+    return asOneAction(this.docFile, () => this.mutateEnvelopeNow(fn, opts));
+  }
+
+  private mutateEnvelopeNow<T>(fn: (widgets: Widget[], extra: Record<string, unknown>) => { widgets: Widget[]; extra: Record<string, unknown>; result?: T }, opts: WriteOpts): Promise<{ state: StoreState; result: T | undefined }> {
     const run = async () => {
       for (let attempt = 0; attempt < 3; attempt++) {
         await this.refreshAsync(true);
@@ -250,9 +255,12 @@ export class Store {
         const next = out.widgets.map((w) => (same(w, oldById.get(w.id)) ? w : validateWidget(w)));
         if (new Set(next.map((w) => w.id)).size !== next.length) throw new WidgetError(409, "id-exists", "A widget with that id already exists");
         const bytes = serialize(next, extra);
+        // The write as one action of file ops (src/cloud-files-ops.ts); with checks on, an incomplete one is refused.
+        const fileOps = wantActions() ? envelopeEditAction({ widgets: before, extra: beforeExtra }, { widgets: next, extra }, bytes, serialize) : null;
         // Another writer slipped in since refresh(): start over on top of it.
         if (base === undefined || (await this.fileHash()) !== base) continue;
         if (!(await this.commit(bytes, base))) continue;
+        deliverOps(this.docFile, fileOps, { widgets: before, extra: beforeExtra }, { widgets: next, extra });
         this.seen = sha(bytes);
         this.state = { rev: this.seen, widgets: next, invalid: false, extra };
         if (opts.record && envelopeHook.fn) {

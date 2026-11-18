@@ -56,6 +56,7 @@
 // fallbacks are written beside them: gapMode "evenly" writes justifyContent "space_around", baseline writes
 // alignItems "end". Canvas keeps metadata's `type` and anyone else's keys, and removes metadata when nothing is left.
 
+import { asOneAction } from "./cloud-files-ops.ts";
 import { fitAround, groupsAround } from "./groupfit.ts";
 import type http from "node:http";
 import { allIds, findNode, newId, StaleFileError, ValidationError, type Json, type DocNode } from "./engine.ts";
@@ -828,7 +829,7 @@ function apply(doc: Doc, b: LayoutBody, rects: Record<string, Rect>): OpResult {
 }
 
 /** Run one auto layout op on a document: one write, one undo step (none when nothing changes). */
-export function runLayout(docFile: string, b: LayoutBody, who: Who): LayoutResult {
+export async function runLayout(docFile: string, b: LayoutBody, who: Who): Promise<LayoutResult> {
   const op = b.op as LayoutOp;
   const rects = isObj(b.rects) ? (b.rects as unknown as Record<string, Rect>) : {};
   const parts: PlacePart[] | null = op === "place" && Array.isArray(b.parts) ? b.parts.filter((p) => isObj(p)) : null;
@@ -859,7 +860,7 @@ export function runLayout(docFile: string, b: LayoutBody, who: Who): LayoutResul
   const replay = (doc: any) => replayOps(doc as Doc, out!.ops);
   let write;
   try {
-    ({ write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches, deep: true, urgent: true, replay, recorded: () => out?.ops ?? [] }, (doc) => {
+    ({ write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches, deep: true, urgent: true, replay, recorded: () => out?.ops ?? [] }, (doc) => {
       out = apply(doc as unknown as Doc, b, rects);
       if (mates) {
         const d = doc as unknown as Doc;
@@ -887,7 +888,7 @@ export function runLayout(docFile: string, b: LayoutBody, who: Who): LayoutResul
     : `layout:${Date.now()}:${Math.random()}`;
   // Undo of an Option-drag copy selects the originals again, as Undo of a Duplicate does.
   const selBefore = op === "place" && b.copy === true ? ids : [];
-  record(docFile, ops, { label: out!.label, source: who.source, session: who.session, mergeKey, ...(nudge ? { mergeMs: NUDGE_MERGE_MS } : group ? { mergeMs: GROUP_MERGE_MS } : {}), edit: write.edit, ...(selBefore.length ? { selBefore } : {}),
+  record(docFile, ops, { label: out!.label, source: who.source, session: who.session, mergeKey, ...(nudge ? { mergeMs: NUDGE_MERGE_MS } : group ? { mergeMs: GROUP_MERGE_MS } : {}), edit: write.edit, ...write.history, ...(selBefore.length ? { selBefore } : {}),
     // Undo of a move out of (or into) a group selects the layers that moved, not the group that refit around them.
     ...(op === "place" && b.copy !== true && ids.length ? { sel: ids } : {}) }, write.revision);
   const note = placed ? placementNote(placed) : undefined;
@@ -925,9 +926,12 @@ export async function handleLayoutRoute(req: http.IncomingMessage, res: http.Ser
     const canvasIds: string[] = (b.op !== "place" ? [] : parts ? parts.filter((p) => p.parent === null).flatMap((p) => (Array.isArray(p.ids) ? p.ids : [])) : b.parent === null ? (b.ids ?? []) : []).filter((x) => typeof x === "string");
     const toCanvas = canvasIds.length > 0;
     const from = toCanvas ? canvasIds.map((id) => { try { const f = findNode(cur as any, id); return String((f.ancestors[0] ?? f.node).id); } catch { return null; } }).filter((x): x is string => !!x) : [];
-    const r = runLayout(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
+    const r = await asOneAction(docFile, async () => {
+      const result = await runLayout(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
+      if (result.changed && (b.op === "add" || toCanvas)) await keepOnPage(docFile, { op: "group", ids: [...from, ...(toCanvas ? canvasIds : (b.ids ?? []))], page: b.page }, before);
+      return result;
+    });
     if (r.changed) {
-      if (b.op === "add" || toCanvas) await keepOnPage(docFile, { op: "group", ids: [...from, ...(toCanvas ? canvasIds : (b.ids ?? []))], page: b.page }, before);
       deps.written(docFile, r.revision, by, r.select, r.label);
     }
     return reply(200, r), true;

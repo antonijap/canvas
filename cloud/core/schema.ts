@@ -1,12 +1,10 @@
-// SNAPSHOT of Phase 1's file (cloud/protocol-files.ts, cloud/core/schema.ts, cloud/core/files/apply.ts) so Phase 2 builds
-// and tests against the real apply. Delete this folder when Phase 1 merges and re-point ../seam.ts.
 // Node validation for Canvas documents: the node types and properties of the document format, version 2.21/2.22.
 // Only new or changed properties are checked. Keys that already sit in a file are never touched.
 // Pure (no Node APIs): the Canvas server (src/doc/schema.ts re-exports it) and a Cloud's shared apply
 // (cloud/core/files/apply.ts) use the same rules. The span and list checks are the page's own pure modules.
 
-import { spanErrors } from "../../../../src/page/text-spans.js";
-import { listErrors, paragraphCount } from "../../../../src/page/text-paras.js";
+import { spanErrors } from "../../src/page/text-spans.js";
+import { listErrors, paragraphCount } from "../../src/page/text-paras.js";
 
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export type DocNode = { [k: string]: Json } & { id?: string; type?: string; children?: DocNode[] };
@@ -263,7 +261,7 @@ export function setKeyError(type: string, key: string): string | null {
 
 /** Document-level keys an edit may change: one variable at a time, the themes, the font list. Nothing else. */
 export function docKeyError(key: string): string | null {
-  if (key === "themes" || key === "fonts") return null;
+  if (key === "variables" || key === "themes" || key === "fonts") return null;
   if (typeof key === "string" && key.startsWith("variables/")) {
     const name = key.slice("variables/".length);
     if (!name || PROTO_KEYS.has(name)) return `"${key}" is not a variable`;

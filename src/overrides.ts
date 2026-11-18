@@ -244,12 +244,12 @@ export function followRename(doc: CanvasDoc, ids: string[]): NodeOp[] {
 export type UpdateBody = { file?: string; id?: string; ids?: string[]; props?: Record<string, Json>; remove?: string[]; expectedRevision?: string; gesture?: string };
 
 /** One write and one undo step for an update that names a layer inside an instance (plain ids may come along). */
-export function updateWithOverrides(docFile: string, b: UpdateBody, who: { source: "user" | "mcp"; session?: string }): { revision?: string; ids: string[] } {
+export async function updateWithOverrides(docFile: string, b: UpdateBody, who: { source: "user" | "mcp"; session?: string }): Promise<{ revision?: string; ids: string[] }> {
   const ids = (b.id ? [b.id] : (b.ids ?? [])).filter((i) => typeof i === "string" && i && !i.startsWith("widget:"));
   if (!ids.length || !isObj(b.props)) throw new OverrideError(400, "invalid", "file, ids and props are required");
   const props = b.props as Record<string, Json>, remove = Array.isArray(b.remove) ? b.remove : [];
   let ops: NodeOp[] = [];
-  const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches: ids.map((i) => i.split("/")[0]) }, (doc) => {
+  const { write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches: ids.map((i) => i.split("/")[0]) }, (doc) => {
     // The change may run twice (a replay after an outside save); the last run is the one written.
     const before = new Map<string, Record<string, unknown>>();
     const touched: string[] = [];
@@ -261,24 +261,24 @@ export function updateWithOverrides(docFile: string, b: UpdateBody, who: { sourc
     ops = touched.map((a) => nodeDiff(a, before.get(a)!, propsOf(findNode(doc, a).node))).filter((o) => Object.keys(o.props).length);
   });
   const keys = [...new Set([...Object.keys(props), ...remove])].sort();
-  if (ops.length) record(docFile, ops, { label: nodeLabel(keys), source: who.source, session: who.session, mergeKey: `nodes:${[...ids].sort().join(",")}:${keys.join(",")}${typeof b.gesture === "string" && b.gesture ? `#gesture:${b.gesture.slice(0, 64)}` : ""}`, ...(b.gesture ? { mergeMs: 60_000 } : {}), edit: write.edit }, write.revision);
+  if (ops.length) record(docFile, ops, { label: nodeLabel(keys), source: who.source, session: who.session, mergeKey: `nodes:${[...ids].sort().join(",")}:${keys.join(",")}${typeof b.gesture === "string" && b.gesture ? `#gesture:${b.gesture.slice(0, 64)}` : ""}`, ...(b.gesture ? { mergeMs: 60_000 } : {}), edit: write.edit, ...write.history }, write.revision);
   return { revision: write.revision, ids };
 }
 
 /** Reset overrides: one write, one undo step ("Reset Overrides"). No overrides: no write. */
-export function resetOverrides(docFile: string, id: string, expectedRevision: string | undefined, who: { source: "user" | "mcp"; session?: string }, keys?: string[]): { changed: boolean; revision?: string } {
+export async function resetOverrides(docFile: string, id: string, expectedRevision: string | undefined, who: { source: "user" | "mcp"; session?: string }, keys?: string[]): Promise<{ changed: boolean; revision?: string }> {
   const doc = currentDoc(docFile).doc;
   const probe = clone(doc);
   if (!applyReset(probe, id, keys)) return { changed: false };
   let op: NodeOp | undefined;
-  const { write } = editDoc(docFile, { expectedRevision, touches: [id.split("/")[0]] }, (d) => {
+  const { write } = await editDoc(docFile, { expectedRevision, touches: [id.split("/")[0]] }, (d) => {
     const t = targetOf(d, id);
     const anchor = t.kind === "node" ? t.id : t.inst;
     const before = propsOf(findNode(d, anchor).node);
     applyReset(d, id, keys);
     op = nodeDiff(anchor, before, propsOf(findNode(d, anchor).node));
   });
-  if (op && Object.keys(op.props).length) record(docFile, [op], { label: keys?.length ? "Reset Override" : "Reset Overrides", source: who.source, session: who.session, mergeKey: `reset:${Date.now()}:${Math.random()}`, edit: write.edit }, write.revision);
+  if (op && Object.keys(op.props).length) record(docFile, [op], { label: keys?.length ? "Reset Override" : "Reset Overrides", source: who.source, session: who.session, mergeKey: `reset:${Date.now()}:${Math.random()}`, edit: write.edit, ...write.history }, write.revision);
   return { changed: true, revision: write.revision };
 }
 
@@ -517,14 +517,14 @@ function resetNestedSwap(doc: CanvasDoc, id: string, t: Extract<TextTarget, { ki
 }
 
 /** Swap instances: one write, one undo step ("Swap Instance"). Top-level and nested instances alike. */
-export function swapInstances(docFile: string, ids: string[], component: string, expectedRevision: string | undefined, who: { source: "user" | "mcp"; session?: string }): { changed: boolean; kept: number; dropped: string[]; revision?: string } {
+export async function swapInstances(docFile: string, ids: string[], component: string, expectedRevision: string | undefined, who: { source: "user" | "mcp"; session?: string }): Promise<{ changed: boolean; kept: number; dropped: string[]; revision?: string }> {
   const probe = clone(currentDoc(docFile).doc);
   let any = false;
   for (const id of ids) if (applySwap(probe, id, component)) any = true;
   if (!any) return { changed: false, kept: 0, dropped: [] };
   let ops: NodeOp[] = [];
   let kept = 0, dropped: string[] = [];
-  const { write } = editDoc(docFile, { expectedRevision, touches: [...new Set(ids.map((i) => i.split("/")[0]))] }, (d) => {
+  const { write } = await editDoc(docFile, { expectedRevision, touches: [...new Set(ids.map((i) => i.split("/")[0]))] }, (d) => {
     ops = []; kept = 0; dropped = [];
     const before = new Map<string, Record<string, unknown>>();
     for (const id of ids) {
@@ -540,7 +540,7 @@ export function swapInstances(docFile: string, ids: string[], component: string,
     for (const a of before.keys()) expand(buildIndex(d), findNode(d, a).node, []);
   });
   ops = ops.filter((o) => Object.keys(o.props).length);
-  if (ops.length) record(docFile, ops, { label: "Swap Instance", source: who.source, session: who.session, mergeKey: `swap:${Date.now()}:${Math.random()}`, edit: write.edit }, write.revision);
+  if (ops.length) record(docFile, ops, { label: "Swap Instance", source: who.source, session: who.session, mergeKey: `swap:${Date.now()}:${Math.random()}`, edit: write.edit, ...write.history }, write.revision);
   return { changed: true, kept, dropped: [...new Set(dropped)], revision: write.revision };
 }
 
@@ -607,13 +607,14 @@ export function applyPush(doc: CanvasDoc, id: string): { main: string; pushed: n
 }
 
 /** Push changes to main: one write, one undo step ("Push Changes to Main"). */
-export function pushOverrides(docFile: string, id: string, expectedRevision: string | undefined, who: { source: "user" | "mcp"; session?: string }): { changed: boolean; pushed: number; kept: string[]; main?: string; revision?: string } {
+export async function pushOverrides(docFile: string, id: string, expectedRevision: string | undefined, who: { source: "user" | "mcp"; session?: string }): Promise<{ changed: boolean; pushed: number; kept: string[]; main?: string; revision?: string }> {
   const probe = clone(currentDoc(docFile).doc);
   const dry = applyPush(probe, id);
   if (!dry) return { changed: false, pushed: 0, kept: [] };
   let ops: NodeOp[] = [];
   let result = dry;
-  const { write } = editDoc(docFile, { expectedRevision, touches: [id, dry.main], deep: true }, (d) => {
+  // recorded: the push changes layers inside the main too, which a diff of the touched nodes alone would miss.
+  const { write } = await editDoc(docFile, { expectedRevision, touches: [id, dry.main], deep: true, recorded: () => ops }, (d) => {
     const main = findNode(d, dry.main).node;
     const ids: string[] = [id];
     const gather = (x: DocNode) => { if (typeof x.id === "string") ids.push(x.id); for (const c of Array.isArray(x.children) ? (x.children as DocNode[]) : []) gather(c); };
@@ -622,7 +623,7 @@ export function pushOverrides(docFile: string, id: string, expectedRevision: str
     result = applyPush(d, id) ?? dry;
     ops = ids.map((i) => nodeDiff(i, before.get(i)!, propsOf(findNode(d, i).node))).filter((o) => Object.keys(o.props).length);
   });
-  if (ops.length) record(docFile, ops, { label: "Push Changes to Main", source: who.source, session: who.session, mergeKey: `push:${Date.now()}:${Math.random()}`, edit: write.edit }, write.revision);
+  if (ops.length) record(docFile, ops, { label: "Push Changes to Main", source: who.source, session: who.session, mergeKey: `push:${Date.now()}:${Math.random()}`, edit: write.edit, ...write.history }, write.revision);
   return { changed: true, pushed: result.pushed, kept: result.kept, main: result.main, revision: write.revision };
 }
 
@@ -654,17 +655,17 @@ export async function handleOverrideRoute(req: http.IncomingMessage, res: http.S
     const who = { source: by === "mcp" ? "mcp" as const : "user" as const, session: String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined };
     if (url.pathname === "/api/overrides/swap") {
       if (typeof b.component !== "string" || !b.component) return reply(400, { error: "component is required", code: "invalid" }), true;
-      const r = swapInstances(docFile, [...new Set(ids)], b.component, b.expectedRevision, who);
+      const r = await swapInstances(docFile, [...new Set(ids)], b.component, b.expectedRevision, who);
       if (r.changed) deps.written(docFile, r.revision, by, ids[0]);
       return reply(200, { ok: true, ...r }), true;
     }
     if (url.pathname === "/api/overrides/push") {
-      const r = pushOverrides(docFile, ids[0], b.expectedRevision, who);
+      const r = await pushOverrides(docFile, ids[0], b.expectedRevision, who);
       if (r.changed) deps.written(docFile, r.revision, by, ids[0]);
       return reply(200, { ok: true, ...r }), true;
     }
     const keys = Array.isArray(b.keys) ? b.keys.filter((k): k is string => typeof k === "string" && !!k) : undefined;
-    const r = resetOverrides(docFile, ids[0], b.expectedRevision, who, keys);
+    const r = await resetOverrides(docFile, ids[0], b.expectedRevision, who, keys);
     if (r.changed) deps.written(docFile, r.revision, by, ids[0]);
     return reply(200, { ok: true, ...r }), true;
   } catch (e) {

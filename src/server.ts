@@ -4,6 +4,7 @@
 // redraws the changed boards in place. Pan by drag or scroll, zoom by pinch or Cmd+scroll,
 // click a node to see its properties, left rail lists boards, components, text styles and variables.
 
+import { asOneAction } from "./cloud-files-ops.ts";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -393,7 +394,7 @@ type UpdateBody = { file?: string; id?: string; ids?: string[]; props?: Record<s
 async function updateMany(file: string, b: UpdateBody & { ids: string[] }, by: "mcp" | "inspector", session?: string): Promise<{ revision?: string; changed: boolean }> {
   const metrics = await Promise.all(b.ids.map((id) => prepareAutoTracking(watched(file).doc, id, { ...(b.props ?? {}), ...(b.each?.[id] ?? {}) }, b.remove ?? [])));
   let ops: NodeOp[] = [];
-  const { write } = editDoc(file, { expectedRevision: b.expectedRevision, touches: b.ids }, (doc) => {
+  const { write } = await editDoc(file, { expectedRevision: b.expectedRevision, touches: b.ids }, (doc) => {
     ops = b.ids.map((id, i) => {
       const found = findNode(doc, id);
       const before = propsOf(found.node);
@@ -404,7 +405,7 @@ async function updateMany(file: string, b: UpdateBody & { ids: string[] }, by: "
     });
   });
   const keys = [...new Set([...Object.keys(b.props ?? {}), ...Object.values(b.each ?? {}).flatMap((p) => Object.keys(p ?? {})), ...(b.remove ?? [])])].sort();
-  record(file, ops, { label: nodeLabel(keys), source: by === "mcp" ? "mcp" : "user", session, ...updateMerge(b, `nodes:${[...b.ids].sort().join(",")}:${keys.join(",")}`), edit: write.edit }, write.revision);
+  record(file, ops, { label: nodeLabel(keys), source: by === "mcp" ? "mcp" : "user", session, ...updateMerge(b, `nodes:${[...b.ids].sort().join(",")}:${keys.join(",")}`), edit: write.edit, ...write.history }, write.revision);
   if (write.revision) docChanged(file, write.revision, by, { id: b.ids[0] });
   if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: b.ids[0], ids: b.ids, props: keys.filter((k) => !(b.remove ?? []).includes(k)), remove: b.remove ?? [] });
   return { revision: write.revision, changed: ops.some((o) => Object.keys(o.props).length > 0) };
@@ -424,7 +425,7 @@ async function repeatEdit(b: { file?: string; ids?: unknown; round?: unknown }, 
   const ids = [...new Set(b.ids.filter((i): i is string => typeof i === "string" && !!i && !i.startsWith("widget:")))].slice(0, 2000);
   if (!ids.length) return { status: 400, body: { error: "Select layers to repeat " + e.label + " on", code: "invalid" } };
   if (e.kind === "move" && e.move) {
-    const r = moveNodes(file, { items: ids.map((id) => ({ id, dx: e.move!.dx, dy: e.move!.dy })), round: b.round !== false }, { source: by === "mcp" ? "mcp" : "user", session });
+    const r = await moveNodes(file, { items: ids.map((id) => ({ id, dx: e.move!.dx, dy: e.move!.dy })), round: b.round !== false }, { source: by === "mcp" ? "mcp" : "user", session });
     if (r.moved.length) {
       if (r.revision) docChanged(file, r.revision, by, { id: r.moved[0].id });
       if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: r.moved[0].id, ids: r.moved.map((m) => m.id), props: ["x", "y"], remove: [] });
@@ -447,7 +448,7 @@ async function repeatEdit(b: { file?: string; ids?: unknown; round?: unknown }, 
   let skipped = plan.skipped.length;
   if (paths.length && (relative || targets.length)) skipped += paths.length;
   if (paths.length && !relative && !targets.length) {
-    const r = updateWithOverrides(file, { file, ids: paths, props: e.props, remove: e.remove, gesture }, { source: by === "mcp" ? "mcp" : "user", session });
+    const r = await updateWithOverrides(file, { file, ids: paths, props: e.props, remove: e.remove, gesture }, { source: by === "mcp" ? "mcp" : "user", session });
     if (r.revision) docChanged(file, r.revision, by, { id: r.ids[0] });
     if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: r.ids[0], ids: r.ids, props: Object.keys(e.props), remove: e.remove });
     return { status: 200, body: { ok: true, label: e.label, changed: r.ids.length, ids: r.ids, each: {}, toast: repeatToast(e, r.ids.length, plan.skipped.length) } };
@@ -516,8 +517,11 @@ export function startServer(port = PORT()): Promise<http.Server> {
       await prime(file);
       const docFile = resolveDocPath(file);
       const before = currentDoc(docFile).doc.children.map((n) => String(n.id));
-      const r = runStructure(docFile, b, who);
-      await keepOnPage(docFile, b, before);
+      const r = await asOneAction(docFile, async () => {
+        const result = await runStructure(docFile, b, who);
+        await keepOnPage(docFile, b, before);
+        return result;
+      });
       const by = who.source === "mcp" ? "mcp" : "inspector";
       if (r.revision) docChanged(docFile, r.revision, by, { id: r.select[0] ?? null, structure: r.label ?? r.op });
       if (by === "mcp") for (const id of r.select.slice(0, 20)) trackChange(docFile, id, bridgeCtx);
@@ -538,7 +542,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
     layout: async (file, b, who) => {
       await prime(file);
       const docFile = resolveDocPath(file);
-      const r = runLayout(docFile, b, who);
+      const r = await runLayout(docFile, b, who);
       const by = who.source === "mcp" ? "mcp" : "inspector";
       if (r.revision) docChanged(docFile, r.revision, by, { id: r.select[0] ?? null, structure: r.label });
       return { select: r.select, revision: r.revision };
@@ -577,13 +581,13 @@ export function startServer(port = PORT()): Promise<http.Server> {
       if (await handleVariationsRoute(req, res, url, varCtx)) return;
       if (await handleBridge(req, res, url, bridgeCtx)) return;
       // Deleting a page deletes its boards: one structure step that the page's own removal joins (src/pages.ts).
-      if (await handlePagesRoute(req, res, url, (docFile) => watched(docFile).boards.map((b) => b.id), (docFile, ids, merge, rec) => {
+      if (await handlePagesRoute(req, res, url, (docFile) => watched(docFile).boards.map((b) => b.id), async (docFile, ids, merge, rec) => {
         // Hidden boards listed on the page go too; the hidden "Deleted components" holder never does.
         const top = new Map(currentDoc(docFile).doc.children.map((n) => [String(n.id), n as DocNode]));
         const boards = ids.filter((id) => top.has(id) && !isDeletedHolder(top.get(id)));
         if (!boards.length) return 0;
         const by = rec.source === "mcp" ? "mcp" : "inspector";
-        const r = runStructure(docFile, { op: "delete", ids: boards, merge }, { source: rec.source ?? "user", session: rec.session });
+        const r = await runStructure(docFile, { op: "delete", ids: boards, merge }, { source: rec.source ?? "user", session: rec.session });
         if (r.revision) docChanged(docFile, r.revision, by, { id: null, structure: "Delete" });
         if (by !== "mcp") bridgeEmit("user_edit", { file: displayPath(docFile), id: null, ids: boards, structure: "Delete", props: [], remove: [] });
         return boards.length;
@@ -740,7 +744,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
             await prime(b.file);
             const file = resolveDocPath(b.file);
             const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
-            const r = updateWithOverrides(file, b, { source: by === "mcp" ? "mcp" : "user", session: String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined });
+            const r = await updateWithOverrides(file, b, { source: by === "mcp" ? "mcp" : "user", session: String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined });
             noteEdit(file, fromUpdate(b));
             if (r.revision) docChanged(file, r.revision, by, { id: r.ids[0] });
             if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: r.ids[0], ids: r.ids, props: Object.keys(b.props ?? {}), remove: b.remove ?? [] });
@@ -780,7 +784,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
           // A main component renamed: instances still named after it follow, in the same step.
           const followers = renameFollowers(watched(file).doc, b.id, b.props ?? {});
           let follow: NodeOp[] = [];
-          const { result, write } = editDoc(file, { expectedRevision: b.expectedRevision, touches: [b.id, ...followers] }, (doc) => {
+          const { result, write } = await editDoc(file, { expectedRevision: b.expectedRevision, touches: [b.id, ...followers] }, (doc) => {
             // The node before the change, for undo. editDoc may run this twice (a replay after an outside
             // save); the last run is the one written.
             const found = findNode(doc, b.id!);
@@ -797,7 +801,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
           noteEdit(file, fromUpdate(b));
           if (op) {
             const keys = [...new Set([...Object.keys(b.props ?? {}), ...(b.remove ?? [])])].sort();
-            record(file, [op, ...follow], { label: nodeLabel(keys), source: by === "mcp" ? "mcp" : "user", session: String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined, ...updateMerge(b, `node:${b.id}:${keys.join(",")}`), edit: write.edit }, write.revision);
+            record(file, [op, ...follow], { label: nodeLabel(keys), source: by === "mcp" ? "mcp" : "user", session: String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined, ...updateMerge(b, `node:${b.id}:${keys.join(",")}`), edit: write.edit, ...write.history }, write.revision);
           }
           if (write.revision) docChanged(file, write.revision, by, { id: b.id });
           if (by === "mcp") trackChange(file, b.id, bridgeCtx);

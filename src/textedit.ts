@@ -155,7 +155,7 @@ function listsOf(b: TextBody, content: string): ListItem[] | undefined {
 export type TextResult = { ok: true; id: string; changed: boolean; deleted?: boolean; revision?: string; select?: string[] };
 
 /** Write one text edit and record one undo step. */
-export function editText(docFile: string, b: TextBody, who: { source: "user" | "mcp"; session?: string }): TextResult {
+export async function editText(docFile: string, b: TextBody, who: { source: "user" | "mcp"; session?: string }): Promise<TextResult> {
   const id = typeof b.id === "string" ? b.id : "";
   if (!id) throw new TextEditError(400, "invalid", "id is required");
   if (typeof b.content !== "string") throw new TextEditError(400, "invalid", "content must be a string");
@@ -185,7 +185,7 @@ export function editText(docFile: string, b: TextBody, who: { source: "user" | "
   const others = also.map(resolve);
   // Empty: the layer goes. One structure step, the same as Delete.
   if (content === "" && t.kind === "node" && others.every((o) => o.t.kind === "node")) {
-    const r = runStructure(docFile, { op: "delete", ids: [id, ...also], expectedRevision: b.expectedRevision }, who);
+    const r = await runStructure(docFile, { op: "delete", ids: [id, ...also], expectedRevision: b.expectedRevision }, who);
     return { ok: true, id, changed: true, deleted: true, revision: r.revision, select: r.select };
   }
   if (others.length) return editMany(docFile, b, [{ id, t, drawn }, ...others], content, who);
@@ -202,7 +202,7 @@ export function editText(docFile: string, b: TextBody, who: { source: "user" | "
   if (typeof drawn.content === "string" && drawn.content === content && sameSpans && sameLists) return { ok: true, id, changed: false };
   const anchor = t.kind === "node" ? t.id : t.inst;
   let op: NodeOp | undefined;
-  const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [anchor] }, (d) => {
+  const { write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches: [anchor] }, (d) => {
     // The change may run twice (a replay after an outside save); the last run is the one written.
     const before = propsOf(findNode(d, anchor).node);
     applyContent(d, t, content, spans, lists);
@@ -210,13 +210,13 @@ export function editText(docFile: string, b: TextBody, who: { source: "user" | "
   });
   if (op && Object.keys(op.props).length) {
     // Never merged: two edits of the same layer a moment apart are two steps.
-    record(docFile, [op], { label: "Edit Text", source: who.source, session: who.session, mergeKey: `text:${Date.now()}:${Math.random()}`, edit: write.edit }, write.revision);
+    record(docFile, [op], { label: "Edit Text", source: who.source, session: who.session, mergeKey: `text:${Date.now()}:${Math.random()}`, edit: write.edit, ...write.history }, write.revision);
   }
   return { ok: true, id, changed: true, revision: write.revision };
 }
 
 /** Multi-edit: the same content (and ranges, when sent) on every layer, one write, one undo step ("Edit Text"). */
-function editMany(docFile: string, b: TextBody, targets: { id: string; t: TextTarget; drawn: DocNode }[], content: string, who: { source: "user" | "mcp"; session?: string }): TextResult {
+async function editMany(docFile: string, b: TextBody, targets: { id: string; t: TextTarget; drawn: DocNode }[], content: string, who: { source: "user" | "mcp"; session?: string }): Promise<TextResult> {
   let spans: Span[] | undefined;
   if (b.spans !== undefined) {
     const errs = spanErrors(b.spans, content.length);
@@ -226,7 +226,7 @@ function editMany(docFile: string, b: TextBody, targets: { id: string; t: TextTa
   const lists = listsOf(b, content);
   const anchors = [...new Set(targets.map((x) => (x.t.kind === "node" ? x.t.id : x.t.inst)))];
   const ops: NodeOp[] = [];
-  const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches: anchors }, (d) => {
+  const { write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches: anchors }, (d) => {
     ops.length = 0;
     const before = new Map(anchors.map((a) => [a, propsOf(findNode(d, a).node)]));
     // The edited layer takes the ranges and lists the edit sent; each other one keeps its own styling, mapped to the
@@ -242,7 +242,7 @@ function editMany(docFile: string, b: TextBody, targets: { id: string; t: TextTa
   });
   const real = ops.filter((op) => Object.keys(op.props).length);
   if (!real.length) return { ok: true, id: targets[0].id, changed: false };
-  record(docFile, real, { label: "Edit Text", source: who.source, session: who.session, mergeKey: `text:${Date.now()}:${Math.random()}`, edit: write.edit }, write.revision);
+  record(docFile, real, { label: "Edit Text", source: who.source, session: who.session, mergeKey: `text:${Date.now()}:${Math.random()}`, edit: write.edit, ...write.history }, write.revision);
   return { ok: true, id: targets[0].id, changed: true, revision: write.revision };
 }
 
@@ -255,7 +255,7 @@ export type ReplaceResult = { ok: true; replaced: number; layers: number; ids: s
  * ranges follow (the new words take the style of the letter before them). Text bound to a variable is left alone;
  * text inside instances follows its component, so the component's text is what changes.
  */
-export function replaceText(docFile: string, b: ReplaceBody, who: { source: "user" | "mcp"; session?: string }): ReplaceResult {
+export async function replaceText(docFile: string, b: ReplaceBody, who: { source: "user" | "mcp"; session?: string }): Promise<ReplaceResult> {
   const query = typeof b.query === "string" ? b.query : "";
   if (!query) throw new TextEditError(400, "invalid", "query is required");
   if (query.length > 500) throw new TextEditError(400, "invalid", "query is too long");
@@ -279,7 +279,7 @@ export function replaceText(docFile: string, b: ReplaceBody, who: { source: "use
   if (onlyId !== null && !targets.length) throw new TextEditError(409, "stale_revision", "that match is gone: the text changed; find again");
   if (!targets.length) return { ok: true, replaced: 0, layers: 0, ids: [] };
   const ops: NodeOp[] = [];
-  const { write } = editDoc(docFile, { expectedRevision: b.expectedRevision, touches: targets.map((t) => t.id) }, (d) => {
+  const { write } = await editDoc(docFile, { expectedRevision: b.expectedRevision, touches: targets.map((t) => t.id) }, (d) => {
     ops.length = 0;
     for (const t of targets) {
       const node = findNode(d, t.id).node;
@@ -297,7 +297,7 @@ export function replaceText(docFile: string, b: ReplaceBody, who: { source: "use
     }
   });
   const real = ops.filter((op) => Object.keys(op.props).length);
-  if (real.length) record(docFile, real, { label: "Replace Text", source: who.source, session: who.session, mergeKey: `replace:${Date.now()}:${Math.random()}`, edit: write.edit }, write.revision);
+  if (real.length) record(docFile, real, { label: "Replace Text", source: who.source, session: who.session, mergeKey: `replace:${Date.now()}:${Math.random()}`, edit: write.edit, ...write.history }, write.revision);
   return { ok: true, replaced: targets.reduce((s, t) => s + t.at.length, 0), layers: targets.length, ids: targets.map((t) => t.id), revision: write.revision };
 }
 
@@ -325,11 +325,11 @@ export async function handleTextRoute(req: http.IncomingMessage, res: http.Serve
     const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
     const session = String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined;
     if (url.pathname === "/api/replace") {
-      const r = replaceText(docFile, b as ReplaceBody, { source: by === "mcp" ? "mcp" : "user", session });
+      const r = await replaceText(docFile, b as ReplaceBody, { source: by === "mcp" ? "mcp" : "user", session });
       if (r.replaced) deps.written(docFile, r.revision, by, r.ids[0], false);
       return reply(200, r), true;
     }
-    const r = editText(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
+    const r = await editText(docFile, b, { source: by === "mcp" ? "mcp" : "user", session });
     if (r.changed) deps.written(docFile, r.revision, by, r.id, !!r.deleted);
     return reply(200, r), true;
   } catch (e) {

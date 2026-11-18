@@ -7,6 +7,7 @@
 // `pages` has one implicit page holding every board. Which page a viewer looks at is theirs (with the
 // camera, in the page's localStorage), never stored here.
 
+import { asOneAction } from "./cloud-files-ops.ts";
 import { randomBytes } from "node:crypto";
 import type http from "node:http";
 import { relabelTop } from "./history.ts";
@@ -192,7 +193,7 @@ export async function updatePage(file: string, id: string, patch: { name?: unkno
  * page's own removal joins it: one undo brings back the boards, their layers, the page and its cards. The server
  * passes it; without one (tests of the sidecar alone) the boards are left in the document, unlisted.
  */
-export type DeleteBoards = (docFile: string, ids: string[], merge: string, record: NonNullable<WriteOpts["record"]>) => number;
+export type DeleteBoards = (docFile: string, ids: string[], merge: string, record: NonNullable<WriteOpts["record"]>) => number | Promise<number>;
 
 /** How long the board half and the page half of a page delete may be apart and still be one undo step. */
 export const PAGE_DELETE_MERGE_MS = 3000;
@@ -205,7 +206,7 @@ export const PAGE_DELETE_MERGE_MS = 3000;
 export function deletePage(file: string, id: string, boardIds: BoardIds, opts: Opts = {}, deleteBoards?: DeleteBoards) {
   // One delete at a time per file: the last-page rule and the boards that go are read after the one before finished.
   const docFile = docFileFor(file);
-  const run = (deleteChains.get(docFile) ?? Promise.resolve()).then(() => deletePageNow(file, id, boardIds, opts, deleteBoards));
+  const run = (deleteChains.get(docFile) ?? Promise.resolve()).then(() => asOneAction(docFile, () => deletePageNow(file, id, boardIds, opts, deleteBoards)));
   const tail = run.catch(() => {});
   deleteChains.set(docFile, tail);
   void tail.then(() => { if (deleteChains.get(docFile) === tail) deleteChains.delete(docFile); });
@@ -227,7 +228,7 @@ async function deletePageNow(file: string, id: string, boardIds: BoardIds, opts:
   // The boards it shows, and hidden ones it lists (the view leaves those out).
   const listed = storedOf(storeFor(docFile).snapshot().extra).find((p) => p.id === id)?.boards ?? [];
   const ids = [...new Set([...page.boards, ...listed])];
-  const boards = ids.length && deleteBoards ? deleteBoards(docFile, ids, merge, record) : 0;
+  const boards = ids.length && deleteBoards ? await deleteBoards(docFile, ids, merge, record) : 0;
   const out = await change(file, boardIds, { record: { ...record, mergeKey: merge, mergeMs: PAGE_DELETE_MERGE_MS } }, (pages, widgets) => {
     const p = pageAt(pages, id);
     pages.splice(pages.indexOf(p), 1);

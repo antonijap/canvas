@@ -1,12 +1,12 @@
-// SNAPSHOT of Phase 1's file (cloud/protocol-files.ts, cloud/core/schema.ts, cloud/core/files/apply.ts) so Phase 2 builds
-// and tests against the real apply. Delete this folder when Phase 1 merges and re-point ../seam.ts.
 // The files protocol: what one user step does to a design file, as an action of ops, on the wire between a Mac and a
-// Cloud's file room. Plain types and pure checks, no imports, so the Canvas server, the Mac adapter and the Worker
+// Cloud's file room. Plain types and pure checks, no platform imports, so the Canvas server, the Mac adapter and the Worker
 // share this file as it is. The shared apply (cloud/core/files/apply.ts) gives every op its meaning.
 //
 // Values: `{v: x}` is a value (a JSON null included), `null` is "absent". Keys of a node keep their order: existing
 // keys keep their place, new keys go last, removed keys go; a set's `order` (the node's key order after the edit)
 // overrides that when present. Children lists are addressed by the sibling an item goes after (null: first).
+
+import { sha256Hex } from "./core/files/sha256.ts";
 
 export const FILES_PROTOCOL = 2;
 
@@ -17,7 +17,7 @@ export type Val = { v: Json } | null;
 export type DocNode = { [k: string]: Json };
 
 /** Document keys an op may change, one variable at a time. Nothing else at the document's top level. */
-export type DocKey = `variables/${string}` | "themes" | "fonts";
+export type DocKey = `variables/${string}` | "variables" | "themes" | "fonts";
 /** A file in the design's package: `media/<name>.<ext>` or `shaders/<name>.wgsl` (checkBlobPath). */
 export type BlobPath = `media/${string}` | `shaders/${string}`;
 export type BlobType = (typeof BLOB_TYPES)[keyof typeof BLOB_TYPES];
@@ -37,7 +37,9 @@ export type FileOp =
   | { k: "move"; id: string; parent: string | null; after: string | null; if?: Uuid | 0 }
   /** A splice of a text layer's content written after `baseSeq` (the room transforms it over later splices). */
   | { k: "text"; id: string; baseSeq: number; from: number; del: number; ins: string; spans?: Json; lists?: Json }
-  | { k: "doc"; key: DocKey; value: Val; if?: Uuid | 0 }
+  /** `variables` itself only creates an empty container or removes an empty one; values travel per variable.
+   *  `order` restores the document's own key order, like a property's set order. */
+  | { k: "doc"; key: DocKey; value: Val; order?: string[]; if?: Uuid | 0 }
   /** A card. `after`: where it goes among the cards (undefined: an existing one stays, a new one goes last). */
   | { k: "widget"; id: string; value: Val; after?: string | null; if?: Uuid | 0 }
   /** A page and its name (null: the page goes, and its boards are listed on none). */
@@ -91,6 +93,12 @@ export const BLOB_TYPES = {
   gif: "image/gif",
   webp: "image/webp",
   svg: "image/svg+xml",
+  avif: "image/avif",
+  heic: "image/heic",
+  heif: "image/heif",
+  bmp: "image/bmp",
+  tif: "image/tiff",
+  tiff: "image/tiff",
   mp4: "video/mp4",
   m4v: "video/mp4",
   mov: "video/quicktime",
@@ -100,7 +108,7 @@ export const BLOB_TYPES = {
   woff2: "font/woff2",
   wgsl: "text/wgsl",
 } as const;
-const MEDIA_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "mp4", "m4v", "mov", "webm", "ttf", "otf", "woff2"]);
+const MEDIA_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "heic", "heif", "bmp", "tif", "tiff", "mp4", "m4v", "mov", "webm", "ttf", "otf", "woff2"]);
 const NAME_RE = /^[A-Za-z0-9._-]{1,120}$/;
 
 /**
@@ -131,5 +139,55 @@ export function blobTypeOf(p: BlobPath): BlobType {
 
 /** Ops of one action, the payload's size as it goes on the wire. */
 export function actionBytes(a: Pick<Action, "ops">): number {
-  return JSON.stringify(a.ops).length;
+  return new TextEncoder().encode(JSON.stringify(a.ops)).byteLength;
 }
+
+export type Role = "owner" | "editor" | "commenter" | "viewer";
+export const CAN_EDIT: Record<Role, boolean> = { owner: true, editor: true, commenter: false, viewer: false };
+export type FileRejectCode = RejectCode | "expired" | "reset";
+
+export interface Hello {
+  type: "hello";
+  protocol: 2;
+  file: Uuid;
+  /** The last seq this Mac holds confirmed (0: none). */
+  since: number;
+  /** The epoch it holds (0: none yet). */
+  epoch: number;
+  /** Actions it may have sent before; the room answers which it applied. At most 500. */
+  pending: { id: Uuid; sha: string }[];
+}
+export interface ActionsMessage {
+  type: "actions";
+  epoch: number;
+  actions: Action[];
+}
+export interface Welcome {
+  type: "welcome";
+  protocol: 2;
+  role: Role;
+  me: Author;
+  epoch: number;
+  seq: number;
+  /** Present when the Mac must start from a snapshot: its manifest, then the tail after `seq`. */
+  snapshot?: { seq: number; manifest: string };
+  known: { id: Uuid; first: number; last: number }[];
+  limits: { opsPerMessage: number; actionBytes: number };
+}
+export type FileServerMessage =
+  | Welcome
+  | { type: "applied"; actions: AppliedAction[] }
+  | { type: "ack"; id: Uuid; first: number; last: number }
+  | { type: "reject"; id: Uuid; code: FileRejectCode; message: string }
+  | { type: "reset"; epoch: number; reason: "restored" }
+  | { type: "error"; code: RejectCode; message: string };
+
+/**
+ * The payload hash a receipt binds: the action exactly as sent (id, base, epoch, time, ops, label). A resend is byte
+ * for byte, so it hashes the same; anything else with that id is another action.
+ */
+export function actionSha(a: Action): string {
+  return sha256Hex(JSON.stringify([a.id, a.baseSeq, a.epoch, a.at ?? null, a.ops, a.agent ?? null]));
+}
+
+export type FileClientMessage = Hello | ActionsMessage | { type: "ping" };
