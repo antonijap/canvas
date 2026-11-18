@@ -10041,12 +10041,13 @@
       "height": 760,
       "fill": "#FFFFFF",
       "cornerRadius": 20,
+      "layout": "none",
       "children": [
         {
           "type": "text",
           "id": "tdj",
-          "name": "Your board. Make something, or ask your ",
-          "content": "Your board. Make something, or ask your agent to.",
+          "name": "Make something, or ask your agent to.",
+          "content": "Make something, or ask your agent to.",
           "fill": "#8E8E93",
           "fontFamily": "SF Pro",
           "fontSize": 15,

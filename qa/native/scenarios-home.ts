@@ -355,7 +355,10 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   // Drag the last tab to the front: the others slide aside, the drop saves the order.
   const home0 = await t.mark({ id: "home-tab" });
   tb = await tabs();
-  await t.drag(mid(tb[2]), { x: tb[0].x + 6, y: mid(tb[2]).y }, { steps: 24 });
+  const frame0 = (await t.state()).window;
+  await t.systemDrag(mid(tb[2]), { x: tb[0].x + 6, y: mid(tb[2]).y }, { steps: 3 });
+  const frame1 = (await t.state()).window;
+  t.eq([frame1.x, frame1.y, frame1.width, frame1.height], [frame0.x, frame0.y, frame0.width, frame0.height], "a fast tab drag never moves the window");
   await sleep(500);
   t.eq(await order(), [c, t.file, b], "the dragged tab took the first place");
   t.eq(stored(), [c, t.file, b], "the order is saved in preferences");
@@ -369,10 +372,21 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
 
   // Home is not draggable: pulling it right changes nothing.
   const l1 = await last();
-  await t.drag(center(home1), { x: l1.x + l1.w, y: center(home1).y }, { steps: 24 });
+  await t.systemDrag(center(home1), { x: l1.x + l1.w, y: center(home1).y }, { steps: 4 });
+  const homeFrame = (await t.state()).window;
+  t.eq([homeFrame.x, homeFrame.y], [frame0.x, frame0.y], "Home never drags the window");
   await sleep(400);
   t.eq(await order(), [c, t.file, b], "dragging Home reorders nothing");
   t.ok(Math.abs((await t.mark({ id: "home-tab" })).x - home0.x) < 0.5, "Home stays first");
+
+  for (const control of [await t.mark({ id: "tab-open" }), await t.mark({ id: "tab-close", label: baseName(c) })]) {
+    const from = center(control);
+    await t.systemDrag(from, { x: from.x, y: from.y + 80 }, { steps: 4 });
+    const frame = (await t.state()).window;
+    t.eq([frame.x, frame.y], [frame0.x, frame0.y], "tab buttons never drag the window");
+    t.eq(await order(), [c, t.file, b], "dragging off a tab button leaves the tabs open");
+    if ((await t.state()).menu) await t.cmd("qa.menu", { cancel: true });
+  }
 
   // A tab dragged right, to the end.
   tb = await tabs();
@@ -400,4 +414,67 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   await t.waitState((s) => !s.homeShown && s.file === t.file, "Shift+Cmd+[ from Home to the last tab");
   await t.key("[", ["cmd", "shift"]);
   await t.waitState((s) => s.file === c, "Shift+Cmd+[ to the tab before");
+});
+
+sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["tabs:context-menu", "tabs:rename-menu", "tabs:rename-double-click", "tabs:close-others", "tabs:drag-after-rename"] }, async (t: NT) => {
+  const original = path.join(t.app.docs, "tab-actions.canvas");
+  copyDir(PLAYGROUND, original);
+  await t.app.cmd({ op: "open", args: { file: original } });
+  await t.waitState((s) => s.file === original, "the action tab to open");
+  const tab = (name: string) => t.mark({ id: "file-tab", label: name });
+  const point = (r: { x: number; y: number; w: number; h: number }) => ({ x: r.x + r.w * 0.4, y: r.y + r.h / 2 });
+  const order = [...(await t.state()).openFiles];
+  const prefs = (await t.state()).prefs;
+  await t.cmd("qa.cloud", { url: "" });
+  await t.click(point(await tab("tab-actions")), { right: true });
+  await t.waitState((s) => s.menu, "tab context menu");
+  const items = (await t.state()).menu.items as string[];
+  t.eq(items, ["Rename...", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab actions in order");
+  await t.cmd("qa.menu", { cancel: true });
+  await t.cmd("qa.cloud", { url: "http://127.0.0.1:1" });
+  await t.click(point(await tab("tab-actions")), { right: true });
+  await t.waitState((s) => s.menu, "configured Cloud tab menu");
+  t.eq((await t.state()).menu.items, ["Rename...", "Show in Finder", "Duplicate", "Move to Cloud...", "Copy Link", "Close", "Close Other Tabs"], "Cloud adds its share action");
+  await t.cmd("qa.cloud", { url: prefs.cloudUrl, devEmail: prefs.cloudDevEmail, name: prefs.cloudName });
+  t.eq((await t.state()).openFiles, order, "right click leaves the tab order alone");
+  await t.pickMenu("Rename...");
+  await t.mark({ id: "tab-rename" });
+  await t.type("tab-menu-renamed");
+  await t.key("return");
+  const renamed = path.join(t.app.docs, "tab-menu-renamed.canvas");
+  await t.waitState((s) => s.file === renamed, "menu rename to update the current file");
+  t.ok(fs.existsSync(renamed) && !fs.existsSync(original), "menu rename moved the package on disk");
+  t.ok((await t.state()).recents.includes(renamed) && !(await t.state()).recents.includes(original), "Home recents follow the renamed file");
+  await t.doubleClick(point(await tab("tab-menu-renamed")));
+  await t.mark({ id: "tab-rename" });
+  await t.type("tab-double-renamed");
+  await t.key("return");
+  const final = path.join(t.app.docs, "tab-double-renamed.canvas");
+  await t.waitState((s) => s.file === final, "double click rename");
+  t.ok(fs.existsSync(final) && !fs.existsSync(renamed), "double click rename moved the package on disk");
+  t.eq((await t.state()).openFiles, order.map((f: string) => f === original ? final : f), "double click never reorders");
+  await t.doubleClick(point(await tab("tab-double-renamed")));
+  await t.mark({ id: "tab-rename" });
+  await t.type("cancelled-name");
+  await t.key("escape");
+  t.ok(fs.existsSync(final), "Escape cancels rename");
+  await t.doubleClick(point(await tab("tab-double-renamed")));
+  await t.mark({ id: "tab-rename" });
+  await t.type("tab-away-renamed");
+  await t.click(center(await t.mark({ id: "home-tab" })));
+  const away = path.join(t.app.docs, "tab-away-renamed.canvas");
+  await t.waitState((s) => s.openFiles.includes(away), "click away commits rename");
+  t.ok(fs.existsSync(away) && !fs.existsSync(final), "click away moved the package");
+  const before = (await t.state()).openFiles as string[];
+  const first = (await t.marks({ id: "file-tab" })).sort((a, b) => a.x - b.x)[0];
+  await t.drag(point(await tab("tab-away-renamed")), { x: first.x + 6, y: first.y + first.h / 2 }, { steps: 24 });
+  await sleep(500);
+  t.eq((await t.state()).openFiles, [away, ...before.filter((f) => f !== away)], "drag reorder still works after renaming");
+  await t.click(point(await tab("tab-away-renamed")), { right: true });
+  await t.pickMenu("Close Other Tabs");
+  await t.waitState((s) => s.openFiles.length === 1 && s.file === away, "close other tabs");
+  t.eq((await t.state()).openFiles, [away], "only the target file tab remains");
+  await t.app.cmd({ op: "open", args: { file: t.file } });
+  await t.waitState((s) => s.file === t.file, "restore the scenario file");
+  await t.app.cmd({ op: "close", args: { file: away } });
 });

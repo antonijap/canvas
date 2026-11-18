@@ -177,6 +177,33 @@ sc("render", "a board with a shader fill and an image fill opens on the engine w
   await t.settle();
 });
 
+// An agent adds a layer whose picture it writes a moment later: the first fetch was a 404, and the engine marked the
+// image gone for good, so the layer stayed empty until the file was opened again.
+sc("render", "an image fill whose file is written after the file opened appears without reopening", { covers: ["image-fill:image"], skip: { visual: "checks the renderer of another file; the scenario's own file is unchanged" } }, async (t: T) => {
+  const file = path.join(path.dirname(t.file), "Late image.canvas");
+  fs.mkdirSync(path.join(file, "images"), { recursive: true });
+  const doc = { version: "2.21", children: [
+    { type: "frame", id: "qa_late", name: "Late", x: 0, y: 0, width: 400, height: 300, fill: "#FFFFFF", children: [
+      { type: "rectangle", id: "qa_late_img", name: "Picture", x: 20, y: 20, width: 300, height: 200, fill: { type: "image", url: "images/late.png", mode: "fill" } },
+    ] },
+  ] };
+  fs.writeFileSync(path.join(file, "document.json"), JSON.stringify(doc, null, 1));
+  fs.writeFileSync(path.join(file, "widgets.json"), JSON.stringify({ version: 1, pages: [{ id: "page-1", name: "Page 1", boards: ["qa_late"] }], widgets: [] }, null, 2));
+  const tab = await openTab(t.chromePort);
+  try {
+    await tab.page.send("Page.bringToFront");
+    const o = new T(tab.page, file, { ...t.srv, base: t.srv.base.replace("127.0.0.1", "localhost") });
+    await o.open();
+    await o.waitFor("window.__canvas.renderer === 'engine'", "the engine", 15000);
+    await sleep(800);
+    t.eq(await o.ev<number>("window.canvasHost.engineView.imageStats().decodedBytes"), 0, "nothing to draw while the picture is missing");
+    fs.writeFileSync(path.join(file, "images", "late.png"), gradientPng(320, 200));
+    await o.waitFor("window.canvasHost.engineView.imageStats().decodedBytes > 0", "the picture to be drawn once it is on disk", 12000);
+  } finally { await tab.close(); }
+  await t.page.send("Page.bringToFront");
+  await t.settle();
+});
+
 // A frame that traps leaves its wasm instance unusable: a new engine started in it never came up and the renderer
 // stayed "pending". The restart must start in a fresh instance (or fall back to the DOM, never wait forever).
 sc("render", "after the engine traps, a new engine starts in a fresh wasm instance", { covers: ["renderer-fallback:engine-restart"], skip: { visual: "the playground as the other scenarios draw it" } }, async (t: T) => {
