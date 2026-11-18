@@ -1,6 +1,7 @@
 // The scenario harness for qa/native/run.ts: one QA app instance, one document, real input through the bridge
 // (qa.* ops), state from the app (qa.state), the page (qa.js) and the disk.
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { Fail, Skip, find, type AnyNode, type Rect } from "../harness.ts";
 import { api, sleep } from "../lib.ts";
@@ -371,3 +372,9 @@ export const scenarios: NativeScenario[] = [];
 export const sc = (area: string, name: string, opts: { covers: string[] }, run: (t: NT) => Promise<void>) => { scenarios.push({ area, name, run, ...opts, kind: "native" }); };
 /** The scenario's id in results and coverage: "native-" + the page runner's slug, so the two never collide. */
 export const nativeSlug = (s: { area: string; name: string }) => `native-${s.area}-${s.name}`.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+
+/** Bounded ASCII filenames; the suffix keeps scenarios with a long common prefix distinct. */
+export function nativeFileStem(s: { area: string; name: string }): string {
+  const slug = nativeSlug(s).replace(/^native-/, "");
+  return slug.length <= 160 ? slug : `${slug.slice(0, 147)}-${createHash("sha256").update(slug).digest("hex").slice(0, 12)}`;
+}
