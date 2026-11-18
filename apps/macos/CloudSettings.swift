@@ -273,6 +273,11 @@ final class CloudAccount: ObservableObject {
 
     /// Canvas started: every Cloud this Mac hosted when it quit starts again, quietly.
     func resumeHosting(_ model: CanvasModel) {
+        // Migration cannot identify the old hosted Cloud from its saved address. Discover it at launch first.
+        if UserDefaults.standard.bool(forKey: AppSettings.prefix + CloudList.legacyHostingKey) {
+            Task { await refreshHost(model) }
+            return
+        }
         let list = model.prefs.clouds.filter { $0.kind == .hosted && $0.hosting }
         guard !list.isEmpty else { return }
         Task {
