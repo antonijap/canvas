@@ -19,7 +19,7 @@ extension Color {
 
 /// Sized for comfortable reading at arm's length: 11 for captions, 12 for labels, 13 for rows.
 enum Typography {
-    static let badge = Font.system(size: 10, weight: .semibold)
+    static let chip = Font.system(size: ChipMetric.fontSize, weight: .medium)
     static let micro = Font.system(size: 11, weight: .regular)
     static let label = Font.system(size: 12, weight: .medium)
     static let body = Font.system(size: 13)
@@ -76,4 +76,14 @@ extension Animation {
 enum BadgeInk {
     static let amber = Color(light: 0x92400E, dark: 0x92400E)
     static let amberFill = Color(light: 0xF59E0B, 0.14, dark: 0xF59E0B, 0.14)
+}
+
+/// Shared geometry for adjacent maturity and status chips.
+enum ChipMetric {
+    static let height: CGFloat = 22
+    static let horizontalPadding: CGFloat = 8
+    static let cornerRadius: CGFloat = 11
+    static let fontSize: CGFloat = 12
+    static let dotSize: CGFloat = 6
+    static let dotGap: CGFloat = 5
 }
