@@ -3616,6 +3616,12 @@ window.canvasCmd = (c) => {
   } else if (c.cmd === "select") select(c.id);
   else if (c.cmd === "deselect") deselect();
   else if (c.cmd === "insets") { insets = { l: c.l, t: c.t, r: c.r, b: c.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); sizeGuides(); }
+  else if (c.cmd === "zoomCorner") {
+    // Keep geometry on the root even when the comments module has not loaded yet.
+    const width = Number.isFinite(c.width) ? Math.max(0, c.width) : 0;
+    document.documentElement.style.setProperty("--cm-zoom-width", width + "px");
+    document.documentElement.style.setProperty("--cm-zoom-gap", width ? "var(--c-island-gap)" : "0px");
+  }
   else if (c.cmd === "snap") setSnap(c, false);
   else if (c.cmd === "prefs") setPrefs(c.prefs);
   else if (c.cmd === "snapshots") snapshotsCmd(c.op);

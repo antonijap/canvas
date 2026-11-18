@@ -538,6 +538,9 @@ struct ZoomCorner: View {
         ZoomPill(percent: model.zoom, zoomOut: { model.zoomBy(0.8) }, zoomIn: { model.zoomBy(1.25) },
                  reset: { model.zoomReset() }, fitPage: { model.fitPage() }, fitSelection: { model.fit() },
                  zoomTo: { model.zoomTo($0); model.focusCanvas() }, open: $model.zoomFieldOpen)
+            .qaID("zoom-island")
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { model.setZoomCorner(width: $0) }
+            .onDisappear { model.setZoomCorner(width: 0) }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
     }
 }
