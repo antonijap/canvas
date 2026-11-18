@@ -72,6 +72,10 @@ export class Sim {
   /** Every applied action the room broadcast, in order (a double apply shows here as an id twice). */
   log: AppliedAction[] = [];
   serverCrashes = 0;
+  /** Hellos the room answered with a snapshot (a Mac behind the log floor, or after a restore). */
+  snapshotWelcomes = 0;
+  /** Rows the room wrote for the actions it applied (its meter, across room restarts). */
+  rowsWritten = 0;
   private readonly o: SimOptions;
   constructor(o: SimOptions = {}) {
     this.o = o;
@@ -130,13 +134,17 @@ export class Sim {
     const msg = c.socket?.up.shift();
     if (!msg || !c.socket) return false;
     if (msg.type === "hello") {
-      c.socket.down.push(...this.room.hello(c.conn, msg));
+      const out = this.room.hello(c.conn, msg);
+      if (out.some((x) => x.type === "welcome" && x.snapshot)) this.snapshotWelcomes++;
+      c.socket.down.push(...out);
       c.socket.joined = true;
       return true;
     }
     let res;
     try {
+      const rows = this.room.rowsWrittenTotal;
       res = this.room.submit(c.conn, msg, JSON.stringify(msg).length);
+      this.rowsWritten += this.room.rowsWrittenTotal - rows;
     } catch (e) {
       if (!String((e as Error).message).startsWith("crash")) throw e;
       this.crashServer();
@@ -219,11 +227,13 @@ export class Sim {
   /** Actions a Mac committed that are neither in the room's receipts nor refused on that Mac. */
   lost(): string[] {
     const out: string[] = [];
+    // Receipts expire after 30 days; the broadcast log of this run holds every action the room applied.
+    const applied = new Set(this.log.map((a) => a.id));
     for (const c of this.clients) {
       const refused = new Set(c.replica.refused.map((r) => r.action.id));
       for (const id of c.made.keys()) {
         if (refused.has(id)) continue;
-        if (!this.store.sql.exec("SELECT 1 FROM receipts WHERE action = ?", id).toArray().length) out.push(`${c.replica.author.id}: ${id}`);
+        if (!applied.has(id) && !this.store.sql.exec("SELECT 1 FROM receipts WHERE action = ?", id).toArray().length) out.push(`${c.replica.author.id}: ${id}`);
       }
     }
     return out;

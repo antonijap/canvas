@@ -53,13 +53,13 @@ async function buildLocked(room: FileRoom, opts: { label?: string; by?: string; 
     const prev = prevRow ? (JSON.parse(prevRow.manifest) as Manifest) : null;
     const prevBoards = new Map(prev?.boards.map((b) => [b.id, b.sha256]) ?? []);
     const dirty = new Set(store.sql.exec<{ board: string }>("SELECT board FROM dirty_boards").toArray().map((r) => r.board));
-    const state = stateOf(tree);
+    // Only boards that changed are read and written again; the rest keep their object.
+    const state = stateOf(tree, false);
     const writes: { key: string; text: string }[] = [];
-    const boards = state.children.map((b) => {
-      const id = b.id as string;
+    const boards = tree.children(null).map((id) => {
       const reuse = prevBoards.get(id);
       if (reuse && !dirty.has(id)) return { id, sha256: reuse };
-      const text = JSON.stringify(b);
+      const text = JSON.stringify(tree.subtree(id));
       const sha = sha256Hex(text);
       writes.push({ key: boardKey(file, sha), text });
       return { id, sha256: sha };
@@ -132,7 +132,9 @@ export function compact(room: FileRoom): { versionsDropped: number; logDropped: 
       store.sql.exec("DELETE FROM text_edits WHERE seq <= ?", oldest);
       store.sql.exec("UPDATE file_meta SET log_floor = MAX(log_floor, ?) WHERE id = 1", oldest);
       tree.forget();
+      tree.bytesDelta = 0;
       rowsPurged = tree.purgeRemoved(oldest);
+      store.sql.exec("UPDATE file_meta SET node_bytes = MAX(0, node_bytes + ?) WHERE id = 1", tree.bytesDelta);
     }
     const cutoff = now - RECEIPT_DAYS * DAY_MS;
     const floor = store.sql.exec<{ x: number | null }>("SELECT MAX(last) AS x FROM receipts WHERE at_ms < ?", cutoff).one().x;

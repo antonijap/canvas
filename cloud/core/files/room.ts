@@ -19,6 +19,8 @@ import type { RoomLeases } from "./leases.ts";
 
 export const ROOM_LIMITS = { ...FILE_LIMITS, opsPerMessage: 100, pendingInHello: 500, actionIdLength: 100 };
 export const RECEIPT_DAYS = 30;
+/** Node data per file (Section 3). */
+export const FILE_NODE_CAP = 500 * 1024 * 1024;
 export const DAY_MS = 86_400_000;
 
 export interface Conn {
@@ -77,6 +79,8 @@ export class FileRoom {
   usage: Usage = { messages: 0, actions: 0, rowsWritten: 0, rowsRead: 0, bytesIn: 0 };
   /** Rows written by the last applied action (the meter the plan's cost table uses). */
   lastRowsWritten = 0;
+  /** Rows written by every action this room object applied. */
+  rowsWrittenTotal = 0;
 
   constructor(o: FileRoomOptions) {
     this.store = o.store;
@@ -190,6 +194,10 @@ export class FileRoom {
     if (!msg || msg.type !== "actions" || !Array.isArray(msg.actions)) return { replies: [{ type: "error", code: "invalid", message: "an actions message holds a list of actions" }], applied };
     const total = msg.actions.reduce((n, a) => n + (a && Array.isArray(a.ops) ? a.ops.length : 0), 0);
     if (total > ROOM_LIMITS.opsPerMessage) return { replies: [{ type: "error", code: "invalid", message: `a message holds at most ${ROOM_LIMITS.opsPerMessage} ops` }], applied };
+    if (this.leases && !this.leases.take(conn.author.id, "messages", 1)) {
+      for (const a of msg.actions) replies.push({ type: "reject", id: a && typeof a.id === "string" ? a.id : "", code: "quota", message: "too many messages this minute; your edits wait and go on their own" });
+      return { replies, applied };
+    }
     for (const a of msg.actions) {
       const id = a && typeof a.id === "string" ? a.id : "";
       try {
@@ -245,6 +253,7 @@ export class FileRoom {
     try {
       this.store.transactionSync(() => {
         this.tree.seq = first;
+        this.tree.bytesDelta = 0;
         const r = this.apply(this.tree, { ...a, ops, at }, { by: conn.author, seq: first, limits: FILE_LIMITS, confine: true });
         if (isReject(r)) throw new Refusal(r.reject, (r as Reject).message);
         this.uploadsFor(ops);
@@ -259,7 +268,9 @@ export class FileRoom {
         w("INSERT INTO receipts (action, by_id, epoch, sha, first, last, at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)", a.id, conn.author.id, a.epoch, sha, first, last, this.now());
         this.fault?.("receipted");
         for (const e of textEditsOf(r)) w("INSERT INTO text_edits (node, seq, action, whole, from_, del, ins) VALUES (?, ?, ?, ?, ?, ?, ?)", e.node, e.seq, e.action, e.whole ? 1 : 0, e.from, e.del, e.ins);
-        w("UPDATE file_meta SET seq = ? WHERE id = 1", last);
+        const bytes = this.store.sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta WHERE id = 1").one().n + this.tree.bytesDelta;
+        if (this.tree.bytesDelta > 0 && bytes > FILE_NODE_CAP) throw new Refusal("quota", `this file is full: it holds at most ${FILE_NODE_CAP / 1024 / 1024} MB of layers`);
+        w("UPDATE file_meta SET seq = ?, node_bytes = ? WHERE id = 1", last, bytes);
         result = { ...r, first, last };
       });
     } catch (e) {
@@ -267,6 +278,7 @@ export class FileRoom {
       throw e;
     }
     this.lastRowsWritten = this.tree.rowsWritten - before;
+    this.rowsWrittenTotal += this.lastRowsWritten;
     this.usage.actions++;
     this.usage.rowsWritten += this.lastRowsWritten;
     return result;

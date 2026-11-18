@@ -28,6 +28,8 @@ export interface ReplicaDurable {
 }
 
 export class Divergence extends Error {}
+/** What a Mac keeps waiting before it asks the person to save a copy (Section 2.3, Offline). */
+export const PENDING_CAP = { ops: 50_000, bytes: 64 * 1024 * 1024 };
 
 let counter = 0;
 const uuid = () => (globalThis.crypto?.randomUUID?.() ?? `a-${Date.now().toString(36)}-${(counter++).toString(36)}`);
@@ -100,6 +102,8 @@ export class Replica {
 
   /** A local edit: checked on the view, then pending. Returns the action, or why it does not fit (nothing changes). */
   propose(ops: FileOp[], at = new Date().toISOString()): Action | Reject {
+    const waiting = this.pending.reduce((n, p) => n + p.action.ops.length, 0);
+    if (waiting + ops.length > PENDING_CAP.ops || this.pending.reduce((n, p) => n + JSON.stringify(p.action).length, 0) > PENDING_CAP.bytes) return { reject: "quota", message: "too many edits are waiting for the Cloud; save a copy of this file" };
     const view = this.view();
     for (const op of ops) if (op.k === "text" && !this.canType(op.id, view)) return { reject: "conflict", message: "this text has an edit waiting for the Cloud" };
     const ops2 = ops.map((op) => (op.k === "text" ? { ...op, baseSeq: this.seq } : op));
@@ -167,7 +171,7 @@ export class Replica {
     switch (msg.type) {
       case "reset":
         this.refuseAll("reset", "the file was restored; your edits are kept as a copy");
-        this.epoch = msg.epoch;
+        this.epoch = 0; // the next hello asks for the restored snapshot
         this.joined = false;
         this.needHello = true;
         return "hello";
@@ -199,6 +203,12 @@ export class Replica {
           this.refuse(msg.id, "reset", msg.message);
           this.needHello = true;
           return "hello";
+        }
+        if (msg.code === "quota") {
+          // Over a budget: the edit waits and goes again later, unchanged.
+          const p = this.pending.find((x) => x.action.id === msg.id);
+          if (p) p.sent = false;
+          return "ok";
         }
         this.refuse(msg.id, msg.code, msg.message);
         return "ok";
