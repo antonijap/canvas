@@ -79,16 +79,17 @@ export class NT {
   // ------------------------------------------------ finding things on screen
   /**
    * Views marked .qaID / .qaText in the SwiftUI chrome (QA.swift qa.marks) that show now: frame (the part a scroll
-   * view leaves visible) and label. `label` matches a substring, case-insensitive; `region` keeps marks centred in it.
+   * view leaves visible) and label. `label` matches a substring, case-insensitive; `exact` requires the whole label with matching case.
+   * `region` keeps marks centred in it.
    */
-  async marks(o: { id?: string; label?: string; region?: Rect; window?: Win } = {}): Promise<(Rect & { id: string; label: string | null })[]> {
+  async marks(o: { id?: string; label?: string; exact?: boolean; region?: Rect; window?: Win } = {}): Promise<(Rect & { id: string; label: string | null })[]> {
     const all = (await this.cmd("qa.marks", { id: o.id, label: o.label, window: o.window ?? "main" })).marks as (Rect & { id: string; label: string | null })[];
     const r = o.region;
-    return all.filter((m) => !r || (m.x + m.w / 2 >= r.x && m.x + m.w / 2 <= r.x + r.w && m.y + m.h / 2 >= r.y && m.y + m.h / 2 <= r.y + r.h))
+    return all.filter((m) => !o.exact || m.label === o.label).filter((m) => !r || (m.x + m.w / 2 >= r.x && m.x + m.w / 2 <= r.x + r.w && m.y + m.h / 2 >= r.y && m.y + m.h / 2 <= r.y + r.h))
       .sort((a, b) => a.y - b.y || a.x - b.x);
   }
   /** The mark `id` (or the first one labelled `label`), waited for; a Fail when it never shows. */
-  async mark(o: { id?: string; label?: string; region?: Rect; window?: Win }, ms = 5000): Promise<Rect & { id: string; label: string | null }> {
+  async mark(o: { id?: string; label?: string; exact?: boolean; region?: Rect; window?: Win }, ms = 5000): Promise<Rect & { id: string; label: string | null }> {
     const t0 = Date.now();
     for (;;) {
       const m = await this.marks(o);
@@ -101,7 +102,7 @@ export class NT {
    * The mark once it stops moving: a panel slides in (the inspector after a selection), and a click aimed at a
    * frame read mid-slide lands beside the control once it is in place. Two reads a beat apart must agree.
    */
-  private async settled(o: { id?: string; label?: string; region?: Rect; window?: Win }, first: Rect & { id: string; label: string | null }) {
+  private async settled(o: { id?: string; label?: string; exact?: boolean; region?: Rect; window?: Win }, first: Rect & { id: string; label: string | null }) {
     let prev = first;
     for (let i = 0; i < 40; i++) {
       await sleep(80);
@@ -306,7 +307,7 @@ export class NT {
   }
 
   // ------------------------------------------------ waiting
-  async waitState(pred: (s: any) => unknown, what: string, ms = 6000): Promise<any> {
+  async waitState(pred: (s: any) => unknown, what: string, ms = 6000, diagnose?: () => Promise<unknown>): Promise<any> {
     const t0 = Date.now();
     let s: any;
     while (Date.now() - t0 < ms) {
@@ -314,7 +315,8 @@ export class NT {
       if (pred(s)) return s;
       await sleep(60);
     }
-    throw new Fail(`timed out waiting for ${what}`);
+    const detail = diagnose ? await diagnose().catch((e) => ({ error: String(e) })) : undefined;
+    throw new Fail(`timed out waiting for ${what}\n  last state: ${JSON.stringify(s)}${detail === undefined ? "" : `\n  measured: ${JSON.stringify(detail)}`}`);
   }
   async waitJs(body: string, what: string, ms = 8000, diagnose?: () => Promise<unknown>) {
     const t0 = Date.now();

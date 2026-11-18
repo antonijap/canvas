@@ -136,3 +136,26 @@ test("system drag helper compiles once per source hash and never caches a failed
   assert.throws(() => systemDragHelper(source, out), /compile failed/);
   assert.equal(fs.readdirSync(out).length, 2, "no partial binary or cached failure");
 });
+
+test("exact tab marks exclude a scenario filename containing the same name", async () => {
+  const marks = [
+    { id: "file-tab", label: "04-tab-actions-tab-context-actions-inline-rename-and-reorder", x: 10, y: 10, w: 200, h: 30 },
+    { id: "file-tab", label: "tab-actions", x: 220, y: 10, w: 100, h: 30 },
+  ];
+  const app = { base: "http://127.0.0.1:1", cmd: async () => ({ marks }) };
+  const t = new NT(app as unknown as QaApp, "example.canvas");
+  assert.deepEqual(await t.marks({ id: "file-tab", label: "tab-actions", exact: true }), [marks[1]]);
+  assert.deepEqual(await t.mark({ id: "file-tab", label: "tab-actions", exact: true }), marks[1]);
+});
+
+test("state timeout reports the last observation and editor diagnostics", async () => {
+  const state = { file: "original.canvas", openFiles: ["original.canvas"], toast: "Rename refused" };
+  const app = { base: "http://127.0.0.1:1", cmd: async () => state };
+  const t = new NT(app as unknown as QaApp, "example.canvas");
+  await assert.rejects(t.waitState(() => false, "menu rename", 1, async () => ({ editing: false })), (error: Error) => {
+    assert.match(error.message, /timed out waiting for menu rename/);
+    assert.ok(error.message.includes(JSON.stringify(state)));
+    assert.match(error.message, /"editing":false/);
+    return true;
+  });
+});
