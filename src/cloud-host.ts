@@ -324,7 +324,7 @@ export function hostHelpers(hostId?: string): { member: number | null; enrol: nu
 }
 
 /**
- * Start, stop and delete run one at a time: two new Clouds at once must not get the same slot or port, and a Delete
+ * Discovery, start, stop and delete run one at a time: two new Clouds at once must not get the same slot or port, and a Delete
  * must not run while a start of the same Cloud is half done (the start would bring back what Delete removed).
  */
 let chain: Promise<unknown> = Promise.resolve();
@@ -407,14 +407,15 @@ export async function removePerson(personId: string, hostId?: string | null): Pr
 
 /** One hosted Cloud's status, by host id, or the only one running. */
 export async function hostStatus(hostId?: string | null): Promise<Record<string, unknown>> {
-  if (hostId) {
+  const c = await serial(async () => {
+    if (!hostId) return running(null);
     const slot = await slotOf(hostId);
     const c = slot ? cloudOf(slot) : null;
     if (c && !c.hostId) c.hostId = hostId.toLowerCase();
-    return c ? c.status() : { available: !!helperPath(), hosting: false, hostId: null, port: null, name: "", fingerprint: null, tunnel: "off", tunnelError: null, people: [] };
-  }
-  const one = running(null);
-  if (one) return one.status();
+    return c;
+  });
+  // Discovery mutates the slot map; polling tunnels does not, and must not hold up Stop or Delete.
+  if (c) return c.status();
   return { available: !!helperPath(), hosting: false, hostId: null, port: null, name: "", fingerprint: null, tunnel: helperPath() ? "off" : "unavailable", tunnelError: null, people: [] };
 }
 
@@ -423,12 +424,15 @@ export async function hostStatus(hostId?: string | null): Promise<Record<string,
  * first slot is listed from its keys too, so a Cloud hosted (or stopped) by an older version is never lost.
  */
 export async function hostStatusAll(): Promise<{ available: boolean; hosting: boolean; max: number; clouds: Record<string, unknown>[] }> {
-  const ix = readIndex();
-  for (const [slot, id] of Object.entries(ix)) { const c = cloudOf(slot); if (!c.hostId) c.hostId = id; }
-  if (!ix.main) {
-    const id = await legacyMainId();
-    if (id) { const c = cloudOf("main"); if (!c.hostId) c.hostId = id; ix.main = id; writeIndex(ix); }
-  }
-  const list = await Promise.all([...clouds.values()].filter((c) => c.hostId).map((c) => c.status()));
+  const known = await serial(async () => {
+    const ix = readIndex();
+    for (const [slot, id] of Object.entries(ix)) { const c = cloudOf(slot); if (!c.hostId) c.hostId = id; }
+    if (!ix.main) {
+      const id = await legacyMainId();
+      if (id) { const c = cloudOf("main"); if (!c.hostId) c.hostId = id; ix.main = id; writeIndex(ix); }
+    }
+    return [...clouds.values()].filter((c) => c.hostId);
+  });
+  const list = await Promise.all(known.map((c) => c.status()));
   return { available: !!helperPath(), hosting: hosting(), max: MAX_HOSTED, clouds: list };
 }
