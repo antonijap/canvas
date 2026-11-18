@@ -82,7 +82,9 @@ func send(_ type: CGEventType, _ point: CGPoint) {
 func pause(_ ms: Double) { Thread.sleep(forTimeInterval: ms / 1000) }
 app.activate(options: [])
 pause(150)
+// A person's pointer arrives before it presses: hover handlers run first, as they do for a real hand.
 send(.mouseMoved, start)
+pause(250)
 send(.leftMouseDown, start)
 pause(drag.holdMs)
 for step in 1...drag.steps {
