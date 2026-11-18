@@ -32,6 +32,18 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
+/// Control backing excludes these rectangles from the titlebar's native drag region.
+struct WindowControlArea: NSViewRepresentable {
+    final class ControlView: NSView { override var mouseDownCanMoveWindow: Bool { false } }
+    func makeNSView(context: Context) -> NSView { ControlView() }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// SwiftUI controls in the hidden titlebar must not inherit window dragging.
+final class ControlHostingView<Content: View>: NSHostingView<Content> {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
 private let barY: CGFloat = Metric.inset
 private let columnTop: CGFloat = Metric.inset + Metric.pill + Metric.islandGap
 
@@ -195,6 +207,7 @@ struct TopBar: View {
         }
         return TabChip(title: model.name(of: f), active: f == model.currentFile && !model.homeShown, missing: model.isMissing(f),
                        onClose: { model.close(f) }) { model.openTab(f) }
+            .background(WindowControlArea())
             .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
             .overlay {
                 if renaming == f {
@@ -234,6 +247,7 @@ struct TopBar: View {
                     // Home: always first, never closed. Its name shows while no file is open; the glyph alone after.
                     PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
                               help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
+                        .background(WindowControlArea())
                         .qaID("home-tab", label: "Home")
                         .padding(.trailing, model.openFiles.isEmpty ? 0 : 2)
                         .animation(Motion.island, value: model.openFiles.isEmpty)
@@ -252,6 +266,8 @@ struct TopBar: View {
                             .frame(width: Metric.control, height: Metric.control).contentShape(Circle())
                     }
                     .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().chromeHelp("Open a canvas")
+                    .background(WindowControlArea())
+                        .qaID("tab-open", label: "Open a canvas")
                 }
             }
             .background(WindowDragArea())

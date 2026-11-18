@@ -174,7 +174,7 @@ window.toolbar = NSToolbar(identifier: "canvas.titlebar")
 window.toolbarStyle = .unified
 window.titleVisibility = .hidden
 window.isMovableByWindowBackground = false
-window.contentView = NSHostingView(rootView: RootView(model: model))
+window.contentView = ControlHostingView(rootView: RootView(model: model))
 window.setFrameAutosaveName("CanvasMain")
 
 // Finder double-clicks and drops on the Dock icon arrive here as file URLs. On a cold start the server is not up

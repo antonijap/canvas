@@ -200,6 +200,7 @@ struct TabChip: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain).chromeHelp("Close tab").accessibilityLabel("Close \(title)")
+            .qaID("tab-close", label: title)
             .onHover { h in withAnimation(Motion.fast) { hoveringClose = h } }
             .padding(.trailing, 4)
         }
