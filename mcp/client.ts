@@ -3,7 +3,7 @@
 
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { codeRootId, version as codeVersion } from "../src/version.ts";
+import { codeRootId, mcpCodeVersion, version as codeVersion } from "../src/version.ts";
 
 /** How often canvas-mcp says hello; src/onboarding.ts calls it gone after OFF_AFTER_MS (50 s) of silence. */
 export const HEARTBEAT_MS = 20_000;
@@ -49,14 +49,25 @@ function seeBoot(b: unknown) {
   boot = b;
 }
 
+/**
+ * The code this process loaded (src and mcp, src/version.ts mcpCodeVersion), worked out once at start: an update that
+ * replaces the files later does not change what runs here. With the copy it comes from (codeRootId), the server tells
+ * an MCP of its own copy whose code is gone (older: its agent session must restart) from another copy's (src/onboarding.ts).
+ */
+const LOADED_VERSION = mcpCodeVersion(fileURLToPath(new URL("../src/", import.meta.url)));
+const LOADED_ROOT = codeRootId(fileURLToPath(new URL("../src/", import.meta.url)));
+/** Who asks, on every request: the agent's name and this MCP's code version and copy. */
+const who = (): Record<string, string> => ({ "x-canvas-mcp-version": LOADED_VERSION, "x-canvas-mcp-root": LOADED_ROOT, ...(AGENT ? { "x-canvas-agent": AGENT } : {}) });
 /** Reads say who asks (x-canvas-mcp: the session), so the Welcome card and Settings > Agents can show "Connected". */
-const readHeaders = (): Record<string, string> => ({ "x-canvas-mcp": SESSION, ...(AGENT ? { "x-canvas-agent": AGENT } : {}) });
+const readHeaders = (): Record<string, string> => ({ "x-canvas-mcp": SESSION, ...who() });
+/** Writes say they come from an MCP (x-canvas-source), for the undo history and the agent cursor. */
+const writeHeaders = (): Record<string, string> => ({ "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": SESSION, ...who() });
 
 /** canvas-mcp is here: on connect, then every HEARTBEAT_MS while it runs (src/onboarding.ts). Never starts a server. */
 export function sayHello(): void {
   const once = () => fetch(`${BASE()}/api/mcp/hello`, {
     method: "POST",
-    headers: { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": SESSION, ...(AGENT ? { "x-canvas-agent": AGENT } : {}) },
+    headers: writeHeaders(),
     body: "{}",
     signal: AbortSignal.timeout(1500),
   }).then((r) => r.body?.cancel(), () => {});
@@ -85,7 +96,7 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
   try {
     r = await fetch(BASE() + path, {
       method,
-      headers: method === "GET" ? readHeaders() : { "x-canvas": "1", "content-type": "application/json", "x-canvas-source": "mcp", "x-canvas-session": SESSION, ...(AGENT ? { "x-canvas-agent": AGENT } : {}) },
+      headers: method === "GET" ? readHeaders() : writeHeaders(),
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(o.timeoutMs ?? 15_000),
     });

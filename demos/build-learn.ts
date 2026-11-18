@@ -344,8 +344,10 @@ function lessons(): Node[] {
 
 function playground(): Node {
   return {
-    type: "frame", id: "playground", name: "Your board", x: 0, y: 0, width: 1200, height: 760, fill: PAPER, cornerRadius: 20,
-    children: [{ ...text("Your board. Make something, or ask your agent to.", 15, { fill: FAINT }), x: 40, y: 36 }],
+    // layout none: a frame without one is a row, which pins the hint to the board's top edge under its name label.
+    // The label already says "Your board", so the hint does not.
+    type: "frame", id: "playground", name: "Your board", x: 0, y: 0, width: 1200, height: 760, fill: PAPER, cornerRadius: 20, layout: "none",
+    children: [{ ...text("Make something, or ask your agent to.", 15, { fill: FAINT }), x: 40, y: 36 }],
   };
 }
 

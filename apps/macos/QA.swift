@@ -2,9 +2,9 @@
 // the normal app has none of this. The server forwards `qa.*` bridge ops to the shell only when it runs with
 // CANVAS_QA=1, and the shell answers them here.
 //
-// Input is real NSEvents posted into this app's own event queue (NSApp.postEvent), so they pass through local
-// monitors, the main menu's key equivalents and the window's own dispatch exactly like hardware events. Nothing is
-// posted system-wide: no Accessibility permission, no cursor movement, no other app sees anything.
+// Input normally uses NSEvents in this app's queue. qa.drag with system:true posts HID events through the
+// window server instead. In-app events pass through local monitors, menu key equivalents and window dispatch
+// without moving the system cursor. System mode needs input-posting permission and briefly fronts its window.
 //
 // Three things would reach outside the app, so a QA build keeps them in:
 // - System drag and drop (SwiftUI .onDrag) hands the drag to the window server, which follows the real cursor and
@@ -397,7 +397,7 @@ enum QA {
     }
 
     private static func windowInfo(_ w: NSWindow) -> [String: Any] {
-        ["width": w.frame.width, "height": w.frame.height, "scale": w.backingScaleFactor, "key": w.isKeyWindow,
+        ["x": w.frame.origin.x, "y": w.frame.origin.y, "width": w.frame.width, "height": w.frame.height, "scale": w.backingScaleFactor, "key": w.isKeyWindow,
          "keyWindow": NSApp.keyWindow?.title ?? NSNull(), "active": NSApp.isActive, "number": w.windowNumber,
          "firstResponder": w.firstResponder.map { String(describing: type(of: $0)) } ?? NSNull()]
     }
@@ -496,7 +496,7 @@ enum QA {
         return ["virtualDrag": VirtualDrag.current != nil]
     }
 
-    /// A press, a path of drags and a release: {from:[x,y], to:[x,y], steps?, holdMs?, mods?, via?: [[x,y]...]}.
+    /// A press, a path of drags and a release: {from:[x,y], to:[x,y], steps?, holdMs?, mods?, via?: [[x,y]...], system?}.
     /// A drag that starts system drag and drop is carried by a virtual session; the answer says so.
     private static func drag(_ a: [String: Any]) async throws -> [String: Any] {
         let w = try target(a)
@@ -507,6 +507,9 @@ enum QA {
         var path: [(Double, Double)] = [(fx, fy)]
         for v in (a["via"] as? [[NSNumber]]) ?? [] where v.count == 2 { path.append((v[0].doubleValue, v[1].doubleValue)) }
         path.append((tx, ty))
+        if a["system"] as? Bool == true {
+            return try await systemDrag(a, window: w, path: path, steps: steps, stepMs: stepMs, flags: f)
+        }
         VirtualDrag.current = nil
         var started = false
         let p0 = base(w, fx, fy)
@@ -537,6 +540,61 @@ enum QA {
         last = pt
         try await sleep((a["settleMs"] as? NSNumber)?.doubleValue ?? 150)
         return ["systemDrag": started, "drop": dropped]
+    }
+
+    /// Window-server input. Freeze the screen path before pressing so a window move cannot hide itself.
+    private static func systemDrag(_ a: [String: Any], window w: NSWindow, path: [(Double, Double)],
+                                   steps: Int, stepMs: Double, flags: NSEvent.ModifierFlags) async throws -> [String: Any] {
+        guard CGPreflightPostEventAccess() else {
+            throw QAError(code: "permission", message: "System drag requires permission to post input events")
+        }
+        let previousApp = NSWorkspace.shared.frontmostApplication
+        let previousPointer = CGEvent(source: nil)?.location
+        let source = CGEventSource(stateID: .hidSystemState)
+        let top = CGDisplayBounds(CGMainDisplayID()).maxY
+        let screenPath = path.map { x, y -> CGPoint in
+            let p = w.convertPoint(toScreen: base(w, x, y))
+            return CGPoint(x: p.x, y: top - p.y)
+        }
+        func send(_ type: CGEventType, _ p: CGPoint) {
+            QAPointer.location = NSPoint(x: p.x, y: top - p.y)
+            QAPointer.buttons = type == .leftMouseDown || type == .leftMouseDragged ? 1 : 0
+            QAPointer.mods = flags
+            let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: p, mouseButton: .left)!
+            event.flags = CGEventFlags(rawValue: UInt64(flags.rawValue))
+            event.setIntegerValueField(.mouseEventClickState, value: 1)
+            event.post(tap: .cghidEventTap)
+        }
+        w.orderFrontRegardless()
+        NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+        try await sleep(150)
+        send(.mouseMoved, screenPath[0])
+        send(.leftMouseDown, screenPath[0])
+        var released = false
+        defer {
+            if !released { send(.leftMouseUp, screenPath.last!) }
+            QAPointer.buttons = 0
+            QAPointer.mods = heldMods
+            if let previousPointer {
+                CGWarpMouseCursorPosition(previousPointer)
+                QAPointer.location = NSPoint(x: previousPointer.x, y: top - previousPointer.y)
+            }
+            previousApp?.activate(options: [.activateIgnoringOtherApps])
+        }
+        try await sleep((a["holdMs"] as? NSNumber)?.doubleValue ?? 60)
+        for seg in 1..<screenPath.count {
+            let start = screenPath[seg - 1], end = screenPath[seg]
+            for i in 1...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                send(.leftMouseDragged, CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t))
+                try await sleep(stepMs)
+            }
+        }
+        try await sleep((a["dwellMs"] as? NSNumber)?.doubleValue ?? 120)
+        send(.leftMouseUp, screenPath.last!)
+        released = true
+        try await sleep((a["settleMs"] as? NSNumber)?.doubleValue ?? 150)
+        return ["system": true]
     }
 
     /// {files: [absolute paths], from, to, mods?, steps?}: files dragged in from outside the app (Finder's drag): a
