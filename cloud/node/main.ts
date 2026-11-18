@@ -1,10 +1,10 @@
 // The hosted Cloud as its own process: `node cloud/node/main.ts`, forked by Canvas's editor server
-// (src/cloud-host.ts) while Settings > Cloud > Host on this Mac is on. It imports cloud code only (no editor route,
-// handler or proxy can reach this process), listens on 127.0.0.1:5190, and takes orders only over the IPC channel of
+// (src/cloud-host.ts), one per Cloud this Mac hosts, while hosting it is on. It imports cloud code only (no editor route,
+// handler or proxy can reach this process), listens on 127.0.0.1 (its own port), and takes orders only over the IPC channel of
 // the process that forked it. When that channel closes (Canvas quit or crashed), it stops and exits: no orphan.
 //
 //   env CANVAS_CLOUD_HOST_DIR   the data folder (required)
-//   env CANVAS_CLOUD_HOST_PORT  tests only: another port, 0 for a free one
+//   env CANVAS_CLOUD_HOST_PORT  the port (src/cloud-host.ts gives each hosted Cloud its own, 5190-5197; tests: 0, a free one)
 //
 // Orders: { id, op, ...args } -> { id, ok: true, result } | { id, ok: false, error }. Events: { event: "people" }.
 // Results that carry a secret (a join code, the host's own device token) go over IPC only, never to a log.

@@ -76,6 +76,8 @@ enum QA {
         // The window of a QA instance is never key (it never activates), and WKWebView takes a first click in a window
         // that is not key as the click that focuses it: the page never saw the canvas's own presses and drags.
         swizzle(WKWebView.self, #selector(NSView.acceptsFirstMouse(for:)), #selector(NSView.qa_acceptsFirstMouse(for:)))
+        // Native fields must use this instance's clipboard too, including invite links pasted into a sheet.
+        swizzle(NSTextView.self, #selector(NSText.paste(_:)), #selector(NSTextView.qa_paste(_:)))
         // SwiftUI's .onDrag goes straight to the drag manager (gesture-driven), not through NSView: that entry
         // point, on every manager class that has it, starts the virtual session too.
         typealias Begin = @convention(block) (AnyObject, NSArray, NSWindow?, NSRect, NSEvent?, AnyObject?, AnyObject) -> AnyObject
@@ -287,14 +289,30 @@ enum QA {
             AgentsQA.added = Set((a["added"] as? [String] ?? []).filter { $0 == "claude" || $0 == "codex" })
             return ["added": AgentsQA.added.sorted()]
         case "qa.cloud":
-            // {url, devEmail, name}: the team server address, development email and name, as Settings > Cloud types them.
-            if let u = a["url"] as? String { model.prefs.cloudUrl = u }
-            if let e = a["devEmail"] as? String { model.prefs.cloudDevEmail = e }
-            if let n = a["name"] as? String { model.prefs.cloudName = n }
-            if let h = a["hosting"] as? Bool { model.prefs.cloudHosting = h }
+            // The Clouds, as Add Cloud and Settings > Cloud leave them:
+            //   {clouds: [{url, name?, devEmail?, kind?}]}  the whole list ([] for none)
+            //   {url, devEmail?, name?}                     one server Cloud as the only one ("" for none)
+            //   {hosting}, {commentName}                    Host on this Mac's switch, the host's name (a placeholder)
+            //   {select: id | null}                        the Cloud Settings > Cloud shows; {home: id} Home's page for it
+            if let list = a["clouds"] as? [[String: Any]] {
+                model.prefs.clouds = CloudList.clean(list.compactMap { c in
+                    guard let u = c["url"] as? String else { return nil }
+                    return CloudEntry(id: c["id"] as? String ?? UUID().uuidString, url: u, name: c["name"] as? String ?? "", devEmail: c["devEmail"] as? String ?? "",
+                                      kind: (c["kind"] as? String).flatMap(CloudKind.init(rawValue:)) ?? .server, hosting: c["hosting"] as? Bool ?? false)
+                })
+            } else if let u = a["url"] as? String {
+                model.prefs.clouds = u.isEmpty ? [] : CloudList.clean([CloudEntry(url: u, name: a["name"] as? String ?? "", devEmail: a["devEmail"] as? String ?? "", kind: .server)])
+            } else if let n = a["name"] as? String, !model.prefs.clouds.isEmpty {
+                model.prefs.clouds[0].name = n
+            }
+            if let h = a["hosting"] as? Bool { for i in model.prefs.clouds.indices where model.prefs.clouds[i].kind == .hosted { model.prefs.clouds[i].hosting = h } }
             // The name the host is shown by: a placeholder in QA, never the Mac's user name.
             if let c = a["commentName"] as? String { model.prefs.commentName = c }
-            return ["url": model.prefs.cloudUrl, "devEmail": model.prefs.cloudDevEmail, "name": model.prefs.cloudName]
+            if a.keys.contains("select") { let id = a["select"] as? String; await MainActor.run { CloudAccount.shared.selected = id } }
+            if let h = a["home"] as? String { await MainActor.run { HomeStore.shared.section = .cloud(h) } }
+            let clouds = model.prefs.clouds.map { ["id": $0.id, "url": $0.url, "name": $0.name, "devEmail": $0.devEmail, "kind": $0.kind.rawValue] }
+            return ["clouds": clouds, "url": model.prefs.clouds.first?.url ?? "", "rev": model.prefs.cloudsRev,
+                    "states": await MainActor.run { CloudAccount.shared.states.mapValues { ["status": $0.status, "email": $0.email ?? ""] } }]
         case "qa.exportdir":
             // Shift+Cmd+E's folder: a QA instance never shows the open panel (it would be modal), it exports here.
             exportFolder = a["dir"] as? String
@@ -320,6 +338,7 @@ enum QA {
             if let m = openMenu { closeMenu(m) }
             if PaletteController.shared.isOpen { PaletteController.shared.close(refocus: false) }
             model.zoomFieldOpen = false
+            await MainActor.run { AddCloudPanel.shared.close() }
             // A comment name a scenario typed (a placeholder) goes back to the default: the Mac's full name.
             UserDefaults.standard.removeObject(forKey: AppSettings.prefix + "commentName")
             model.prefs.commentName = NSFullUserName()
@@ -327,6 +346,9 @@ enum QA {
             LayersStore.of(model).renaming = nil
             // A sign-in opens Home on the team server; the next scenario starts on Recents again.
             HomeStore.shared.section = .recents
+            HomeStore.shared.query = ""
+            CloudAccount.shared.selected = nil
+            SettingsWindow.shared.resetForQA()
             for w in NSApp.windows where w !== window && w.isVisible {
                 if w.contentViewController is SettingsTabs || w.isSheet || w is NSPanel || w.title == "About Canvas" { w.orderOut(nil) }
             }
@@ -737,7 +759,7 @@ enum QA {
              "x": $0.frame.minX, "y": $0.frame.minY, "alpha": $0.alphaValue, "onScreen": $0.isOnActiveSpace]
         }
         return [
-            "file": m.currentFile ?? NSNull(), "openFiles": m.openFiles, "homeShown": m.homeShown, "recents": MainActor.assumeIsolated { HomeStore.shared.recents.map(\.path) }, "homeSection": MainActor.assumeIsolated { String(describing: HomeStore.shared.section) }, "stateDir": StateFolder.path, "revision": m.revision, "zoom": m.zoom,
+            "file": m.currentFile ?? NSNull(), "openFiles": m.openFiles, "homeShown": m.homeShown, "recents": MainActor.assumeIsolated { HomeStore.shared.recents.map(\.path) }, "homeSection": MainActor.assumeIsolated { String(describing: HomeStore.shared.section) }, "homeCloud": MainActor.assumeIsolated { HomeStore.shared.section.cloudId ?? "" }, "addCloud": MainActor.assumeIsolated { AddCloudPanel.shared.isOpen }, "stateDir": StateFolder.path, "revision": m.revision, "zoom": m.zoom,
             "tabRename": ["file": tabRenameFile() as Any? ?? NSNull(), "events": tabRenameEvents],
             "section": m.section?.rawValue ?? NSNull(), "panelOpen": m.panelOpen, "sidebarWidth": Double(m.sidebarWidth), "homeSidebarWidth": Double(m.homeSidebarWidth), "inspectorOpen": m.inspectorOpen, "uiHidden": m.uiHidden,
             "pages": m.pages.map { ["id": $0.id, "name": $0.name, "count": $0.count] }, "activePage": m.activePage ?? NSNull(),
@@ -852,6 +874,7 @@ enum QA {
                     var n: [String: Any] = ["x": r.minX, "y": w.frame.height - r.maxY, "w": r.width, "h": r.height, "full": rectTL(m, in: w)]
                     n["id"] = m.qaID
                     n["label"] = m.qaLabel ?? NSNull()
+                    n["windowFrame"] = ["x": w.frame.minX, "y": w.frame.minY, "w": w.frame.width, "h": w.frame.height]
                     out.append(n)
                 }
             }
@@ -1347,6 +1370,12 @@ extension NSView {
             return v
         }
         return MainActor.assumeIsolated { v.session }
+    }
+}
+
+extension NSTextView {
+    @objc func qa_paste(_ sender: Any?) {
+        if let text = canvasPasteboard.string(forType: .string) { insertText(text, replacementRange: selectedRange()) }
     }
 }
 

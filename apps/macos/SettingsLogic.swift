@@ -40,8 +40,10 @@ enum SettingsLimits {
     static let keptTabs = 1...8
     static let snapshotMB = 50...1000
     static let snapshotStep = 50
-    /// The longest name a team server takes (Settings > Cloud).
+    /// The longest name a Cloud takes (Settings > Cloud), and the most Clouds one Canvas keeps (src/cloud-config.ts
+    /// CLOUD_LIMITS says the same).
     static let serverName = 60
+    static let clouds = 200
     static func clamp(_ v: Int, _ r: ClosedRange<Int>) -> Int { min(max(v, r.lowerBound), r.upperBound) }
     static func volume(_ v: Double) -> Double { v.isFinite ? min(max(v, 0), 1) : 0.8 }
 }
@@ -53,14 +55,10 @@ struct AppSettings: Equatable {
     var boardLabels = true
     /// The name on the comments made here (Settings > General). Starts as the Mac's full user name; empty: the server says "Me".
     var commentName = ""
-    /// Settings > Cloud: the team's own Canvas server (https, or http on this Mac for development) and, for a local
-    /// development server only, the email its DEV mode takes in place of a sign-in. The sign-in token is never a setting.
-    var cloudUrl = ""
-    var cloudDevEmail = ""
-    /// What the team server is called in Home; empty: its host.
-    var cloudName = ""
-    /// Settings > Cloud > Host on this Mac: on, the Cloud starts again with Canvas.
-    var cloudHosting = false
+    /// Settings > Cloud: every Cloud this Canvas talks to (CloudList below). The sign-in token is never a setting.
+    var clouds: [CloudEntry] = []
+    /// Bumped whenever `clouds` changes (Model.swift), so the server takes the newest list only (src/cloud-config.ts).
+    var cloudsRev = 0
     // Agents
     var harness = AgentHarness.claude
     var agentCursor = true
@@ -91,10 +89,8 @@ struct AppSettings: Equatable {
         if has("scrollZooms") { s.scrollZooms = d.bool(forKey: k("scrollZooms")) }
         if has("boardLabels") { s.boardLabels = d.bool(forKey: k("boardLabels")) }
         s.commentName = d.string(forKey: k("commentName")) ?? NSFullUserName()
-        s.cloudUrl = d.string(forKey: k("cloudUrl")) ?? ""
-        s.cloudDevEmail = d.string(forKey: k("cloudDevEmail")) ?? ""
-        s.cloudName = d.string(forKey: k("cloudName")) ?? ""
-        s.cloudHosting = d.bool(forKey: k("cloudHosting"))
+        s.clouds = CloudList.load(d)
+        s.cloudsRev = d.integer(forKey: k("cloudsRev"))
         if let v = d.string(forKey: k("harness")).flatMap(AgentHarness.init) { s.harness = v }
         if has("agentCursor") { s.agentCursor = d.bool(forKey: k("agentCursor")) }
         if let v = d.string(forKey: k("cursorSpeed")).flatMap(CursorSpeed.init) { s.cursorSpeed = v }
@@ -118,10 +114,8 @@ struct AppSettings: Equatable {
         d.set(scrollZooms, forKey: k("scrollZooms"))
         d.set(boardLabels, forKey: k("boardLabels"))
         d.set(commentName, forKey: k("commentName"))
-        d.set(cloudUrl, forKey: k("cloudUrl"))
-        d.set(cloudDevEmail, forKey: k("cloudDevEmail"))
-        d.set(cloudName, forKey: k("cloudName"))
-        d.set(cloudHosting, forKey: k("cloudHosting"))
+        d.set(CloudList.encode(clouds), forKey: k(CloudList.key))
+        d.set(cloudsRev, forKey: k("cloudsRev"))
         d.set(harness.rawValue, forKey: k("harness"))
         d.set(agentCursor, forKey: k("agentCursor"))
         d.set(cursorSpeed.rawValue, forKey: k("cursorSpeed"))
@@ -145,7 +139,7 @@ struct AppSettings: Equatable {
         s.keptTabs = SettingsLimits.clamp(keptTabs, SettingsLimits.keptTabs)
         s.snapshotMB = SettingsLimits.clamp(snapshotMB, SettingsLimits.snapshotMB)
         s.soundVolume = SettingsLimits.volume(soundVolume)
-        s.cloudName = String(cloudName.prefix(SettingsLimits.serverName))
+        s.clouds = CloudList.clean(clouds)
         return s
     }
 
@@ -163,7 +157,7 @@ struct AppSettings: Equatable {
     /// What the server reads (src/settings.ts), sent with the shell's state.
     var serverSettings: [String: Any] {
         ["harness": harness.rawValue, "runCapMin": runCapMin, "commentName": commentName,
-         "cloudUrl": CloudURL.clean(cloudUrl) ?? "", "cloudDevEmail": CloudURL.isLocal(cloudUrl) ? cloudDevEmail : "",
+         "clouds": CloudList.forServer(clouds), "cloudsRev": cloudsRev,
          "claude": ["model": claudeModel, "effort": claudeEffort], "codex": ["model": codexModel, "effort": codexEffort]]
     }
 
@@ -320,6 +314,229 @@ enum CloudURL {
     }
 }
 
+/// What kind of Cloud an entry is: a server (Cloudflare, or a local development one), a Cloud joined with an invite,
+/// or one this Mac hosts (any number, one per team).
+enum CloudKind: String, Codable, Equatable {
+    case server, joined, hosted
+}
+
+/// One Cloud in Settings > Cloud and in Home's sidebar. `id` is stable for the entry's life (Home's selection, the
+/// Settings detail); `url` is its canonical address (CloudURL.clean), the one the server and comments.json use.
+struct CloudEntry: Codable, Equatable, Identifiable {
+    var id: String
+    var url: String
+    var name: String
+    /// A local development server only: the email its DEV mode takes in place of a sign-in.
+    var devEmail: String
+    var kind: CloudKind
+    /// A Cloud this Mac hosts: whether hosting is on, so it starts again with Canvas.
+    var hosting: Bool
+
+    init(id: String = UUID().uuidString, url: String, name: String = "", devEmail: String = "", kind: CloudKind, hosting: Bool = false) {
+        self.id = id; self.url = url; self.name = name; self.devEmail = devEmail; self.kind = kind; self.hosting = hosting
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        url = try c.decode(String.self, forKey: .url)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        devEmail = try c.decodeIfPresent(String.self, forKey: .devEmail) ?? ""
+        kind = (try? c.decode(CloudKind.self, forKey: .kind)) ?? .server
+        hosting = try c.decodeIfPresent(Bool.self, forKey: .hosting) ?? false
+    }
+
+    /// The server adapter is in Alpha, including its local development mode.
+    var adapterAlpha: Bool { kind == .server && !CloudURL.isHosted(url) }
+    var adapterTooltip: String { adapterAlpha ? "Cloudflare adapter, Alpha" : "" }
+    static let alphaNotice = "The Cloudflare adapter is in Alpha: it works, but it is not yet well tested. Keep your own copies of important files."
+
+    /// A hosted Cloud's id (canvas-cloud://<id>), else nil.
+    var hostId: String? { url.hasPrefix("canvas-cloud://") ? String(url.dropFirst("canvas-cloud://".count)) : nil }
+}
+
+/// The list of Clouds: limits, cleaning, storage and the one-time move from the single Cloud of older versions.
+enum CloudList {
+    static let key = "clouds"
+    /// The settings of a version with one Cloud. Read once, moved into the list, then removed.
+    static let legacyKeys = ["cloudUrl", "cloudName", "cloudDevEmail", "cloudHosting"]
+
+    /// Every entry made safe: a canonical address (else dropped), one entry per address, at most 200, names at most
+    /// 60 characters, an email only for a local development address, hosting only for a Cloud this Mac hosts.
+    static func clean(_ list: [CloudEntry]) -> [CloudEntry] {
+        var out: [CloudEntry] = []
+        var seen = Set<String>(), ids = Set<String>()
+        for var e in list {
+            guard out.count < SettingsLimits.clouds, let url = CloudURL.clean(e.url), !seen.contains(url) else { continue }
+            e.url = url
+            if e.id.isEmpty || ids.contains(e.id) { e.id = UUID().uuidString }
+            e.name = String(e.name.prefix(SettingsLimits.serverName))
+            if !CloudURL.isLocal(url) { e.devEmail = "" } else { e.devEmail = String(e.devEmail.prefix(120)) }
+            if !CloudURL.isHosted(url) { e.kind = .server } else if e.kind == .server { e.kind = .joined }
+            if e.kind != .hosted { e.hosting = false }
+            seen.insert(url); ids.insert(e.id)
+            out.append(e)
+        }
+        return out
+    }
+
+    /// Adds a Cloud, or finds the one already at that address (a name given now names it). Nil for an address Canvas
+    /// cannot use, or a full list.
+    static func add(_ list: [CloudEntry], url raw: String, name: String = "", devEmail: String = "", kind: CloudKind) -> (list: [CloudEntry], entry: CloudEntry)? {
+        guard let url = CloudURL.clean(raw) else { return nil }
+        let trimmed = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(SettingsLimits.serverName))
+        var list = clean(list)
+        if let i = list.firstIndex(where: { $0.url == url }) {
+            if !trimmed.isEmpty { list[i].name = trimmed }
+            if kind == .hosted { list[i].kind = .hosted }
+            return (list, list[i])
+        }
+        guard list.count < SettingsLimits.clouds else { return nil }
+        let k: CloudKind = CloudURL.isHosted(url) ? (kind == .server ? .joined : kind) : .server
+        let e = CloudEntry(url: url, name: trimmed, devEmail: CloudURL.isLocal(url) ? devEmail.trimmingCharacters(in: .whitespaces) : "", kind: k)
+        list.append(e)
+        return (clean(list), e)
+    }
+
+    static func remove(_ list: [CloudEntry], id: String) -> [CloudEntry] { list.filter { $0.id != id } }
+
+    /// The Clouds this Mac hosts.
+    static func hosted(_ list: [CloudEntry]) -> [CloudEntry] { list.filter { $0.kind == .hosted } }
+
+    /// Sorted by name for the lists (Home's sidebar, Settings > Cloud), and those whose name has every word of `query`.
+    static func filtered(_ list: [CloudEntry], query: String, name: (CloudEntry) -> String) -> [CloudEntry] {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        return list.filter { e in words.allSatisfy { name(e).localizedCaseInsensitiveContains($0) } }
+            .sorted { name($0).localizedStandardCompare(name($1)) == .orderedAscending }
+    }
+
+    /// What the server gets (src/cloud-config.ts cleanCloudList): addresses, and emails for local development only.
+    static func forServer(_ list: [CloudEntry]) -> [[String: String]] {
+        clean(list).map { ["url": $0.url, "devEmail": CloudURL.isLocal($0.url) ? $0.devEmail.trimmingCharacters(in: .whitespaces) : ""] }
+    }
+
+    static func encode(_ list: [CloudEntry]) -> Data { (try? JSONEncoder().encode(list)) ?? Data("[]".utf8) }
+    static func decode(_ data: Data?) -> [CloudEntry] {
+        guard let data, let list = try? JSONDecoder().decode([CloudEntry].self, from: data) else { return [] }
+        return clean(list)
+    }
+
+    /// The old address moves as joined until the server identifies which Cloud this Mac hosted. The old hosting
+    /// flag alone cannot identify it: older versions could host one Cloud while joined to another.
+    static func migrate(url: String, name: String, devEmail: String, hosting: Bool) -> [CloudEntry] {
+        guard let clean = CloudURL.clean(url) else { return [] }
+        let kind: CloudKind = CloudURL.isHosted(clean) ? .joined : .server
+        return self.clean([CloudEntry(url: clean, name: name, devEmail: devEmail, kind: kind, hosting: kind == .hosted)])
+    }
+
+    /// The stored list. With none stored yet (a missing key, which is not an empty list), the older single Cloud is
+    /// moved into it: the list is written first, and only then are the old keys removed, so a quit in between loses
+    /// nothing and a restart never moves it twice.
+    static func load(_ d: UserDefaults) -> [CloudEntry] {
+        let k = { (name: String) in AppSettings.prefix + name }
+        if d.object(forKey: k(key)) != nil { return decode(d.data(forKey: k(key))) }
+        let list = migrate(url: d.string(forKey: k("cloudUrl")) ?? "", name: d.string(forKey: k("cloudName")) ?? "",
+                           devEmail: d.string(forKey: k("cloudDevEmail")) ?? "", hosting: d.bool(forKey: k("cloudHosting")))
+        d.set(encode(list), forKey: k(key))
+        // Hosting was on: the Cloud this Mac hosted may not be the address above (an older version kept hosting while
+        // the address named a Cloud it joined). Remembered until reconcile learns which Cloud it is from the server.
+        if d.bool(forKey: k("cloudHosting")) { d.set(true, forKey: k(legacyHostingKey)) }
+        if d.object(forKey: k(key)) != nil { for old in legacyKeys { d.removeObject(forKey: k(old)) } }
+        return list
+    }
+}
+
+/// A Cloud this Mac hosts, as GET /api/cloud/host lists it.
+struct HostedInfo: Equatable {
+    let hostId: String
+    let name: String
+    let hosting: Bool
+    /// The first slot, where the single hosted Cloud of older versions lives.
+    let legacy: Bool
+}
+
+extension CloudList {
+    /// The most Clouds one Mac hosts (src/cloud-host.ts MAX_HOSTED).
+    static let maxHosted = 8
+    static func hostLimit(_ reported: Int?) -> Int { min(max(reported ?? maxHosted, 1), maxHosted) }
+    static func hostedIds(_ list: [CloudEntry], known: Set<String>) -> Set<String> {
+        known.union(hosted(list).compactMap(\.hostId))
+    }
+    /// Set by the move from an older version when hosting was on: the Cloud this Mac hosted then starts again once the
+    /// server has said which one it is (reconcile).
+    static let legacyHostingKey = "cloudsLegacyHosting"
+
+    /// The list made to agree with what this Mac hosts: a hosted Cloud the list does not have is added (a Cloud an
+    /// older version hosted, running or stopped, is never lost), an entry this Mac hosts is a hosted one, and a
+    /// "hosted" entry this Mac does not host is one it joined. `legacyHosting`: the older version had hosting on.
+    static func reconcile(_ list: [CloudEntry], hosted: [HostedInfo], legacyHosting: Bool) -> [CloudEntry] {
+        var out = list
+        let ids = Set(hosted.map(\.hostId))
+        for i in out.indices where out[i].kind != .server {
+            guard let id = out[i].hostId else { continue }
+            if ids.contains(id) {
+                if out[i].kind != .hosted, let h = hosted.first(where: { $0.hostId == id }) {
+                    out[i].kind = .hosted
+                    out[i].hosting = h.hosting || (h.legacy && legacyHosting)
+                }
+            } else if out[i].kind == .hosted {
+                out[i].kind = .joined
+                out[i].hosting = false
+            }
+        }
+        for h in hosted where !out.contains(where: { $0.hostId == h.hostId }) {
+            let name = h.name.trimmingCharacters(in: .whitespaces)
+            out.append(CloudEntry(url: "canvas-cloud://\(h.hostId)", name: name.isEmpty ? "Cloud" : name, kind: .hosted, hosting: h.hosting || (h.legacy && legacyHosting)))
+        }
+        return clean(out)
+    }
+}
+
+/// Remove or Delete a Cloud: what went wrong, from the answers of the server's routes, or nil when it all worked.
+enum CloudRemoval {
+    /// `wipe`: the answer to deleting a hosted Cloud's data (nil when there was none to delete); `remove`: to removing it.
+    static func problem(wipe: (status: Int, error: String?)?, remove: (status: Int, error: String?)) -> String? {
+        if let wipe, wipe.status != 200 { return wipe.error ?? "Could not delete the Cloud\u{2019}s data on this Mac" }
+        if remove.status != 200 { return remove.error ?? "Could not remove the Cloud" }
+        return nil
+    }
+}
+
+/// File > Share Comments: which Clouds can take the open file now.
+enum CloudShare {
+    /// The titles of the Clouds in the question, one per Cloud and never two alike (a menu keeps only one of each
+    /// title): a repeated name gets its address, then a number.
+    static func titles(_ list: [CloudEntry], name: (CloudEntry) -> String, detail: (CloudEntry) -> String) -> [String] {
+        let names = list.map(name)
+        var out: [String] = []
+        for (i, e) in list.enumerated() {
+            var t = names[i]
+            if names.filter({ $0 == t }).count > 1 { t = "\(t) (\(detail(e)))" }
+            var n = 2
+            let base = t
+            while out.contains(t) { t = "\(base) \(n)"; n += 1 }
+            out.append(t)
+        }
+        return out
+    }
+
+    /// What the toast says after a share: where the comments went, and for a file that was already shared, whether
+    /// that Cloud is reachable now. `ok` is false when the person has something to do.
+    static func message(already: Bool, name: String, status: String?) -> (text: String, ok: Bool) {
+        if !already { return ("Comments shared to \(name)", true) }
+        if status == "connected" { return ("Already shared. Connected to \(name)", true) }
+        return ("Already shared to \(name). \(CloudStatusText.line(status ?? "offline", configured: true))", false)
+    }
+
+    /// Connected, as an owner or an editor (a viewer or commenter cannot register a file).
+    static func candidates(_ list: [CloudEntry], status: [String: (status: String, role: String?)]) -> [CloudEntry] {
+        list.filter { e in
+            guard let s = status[e.url], s.status == "connected" else { return false }
+            return s.role == "owner" || s.role == "editor"
+        }
+    }
+}
+
 /// Settings > Cloud before an address is saved: one field and Sign in (CloudSettings.swift).
 enum CloudSetup {
     enum Next: Equatable { case signIn, askEmail }
@@ -394,19 +611,19 @@ struct CloudInvite: Equatable {
         return CloudInvite(name: name.isEmpty ? "Cloud" : String(name.prefix(60)), hostId: host, addr: addr, code: code, link: t)
     }
 
-    /// What the join question says: the fingerprint to compare, plainly that it replaces the Cloud this Mac uses now
-    /// (when it would), and what being in a Cloud means.
-    static func confirmText(_ invite: CloudInvite, current: String?, currentName: String) -> String {
-        var lines = ["Fingerprint \(invite.fingerprint). Ask the host to read theirs from Settings > Cloud: they should match."]
-        if let current, !current.isEmpty {
-            if current == "canvas-cloud://\(invite.hostId)" {
-                lines.append("This Mac is already in this Cloud. Joining again adds this Mac once more.")
-            } else {
-                lines.append("This replaces \(currentName) as this Mac\u{2019}s Cloud.")
-            }
-        }
-        return lines.joined(separator: "\n\n") + "\n\n" + CloudDisclosure.lines.joined(separator: " ")
+    /// The Cloud's address once joined.
+    var url: String { "canvas-cloud://\(hostId)" }
+
+    /// Whether this Mac can join: not into a Cloud it is already in, and not into the one it hosts.
+    enum Check: Equatable { case ok, already(id: String), hostsIt }
+    static func check(_ invite: CloudInvite, list: [CloudEntry], hostedIds: Set<String> = []) -> Check {
+        if hostedIds.contains(invite.hostId) { return .hostsIt }
+        if let e = list.first(where: { $0.url == invite.url }) { return e.kind == .hosted ? .hostsIt : .already(id: e.id) }
+        return .ok
     }
+
+    /// The line to compare by eye before joining.
+    var fingerprintLine: String { "Fingerprint \(fingerprint). Ask the host to read theirs from Settings > Cloud: they should match." }
 
     /// A short fingerprint of the tunnel address to compare with the host's by eye: "3F9A-C21B" (src/cloud-tunnel.ts).
     var fingerprint: String { CloudInvite.fingerprint(addr) }

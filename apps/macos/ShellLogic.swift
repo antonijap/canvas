@@ -1265,8 +1265,8 @@ enum MenuSpec {
         Item(title: "Save as Canvas\u{2026}", command: "saveAs", key: "s", mods: [.command, .shift]),
         // Shift+Cmd+E: the selection (else every layer on the page with export settings) with its settings.
         Item(title: "Export\u{2026}", command: "exportSettings", key: "e", mods: [.command, .shift]),
-        // Sends the open file's comments to the team server set in Settings > Cloud (src/cloud.ts).
-        Item(title: "Share Comments to Server\u{2026}", command: "shareComments", mods: []),
+        // Sends the open file's comments to one of the Clouds in Settings > Cloud (src/cloud.ts).
+        Item(title: "Share Comments to Cloud\u{2026}", command: "shareComments", mods: []),
         nil,
         Item(title: "Reload Page", command: "reload", mods: []),
     ]
