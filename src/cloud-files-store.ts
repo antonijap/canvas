@@ -83,6 +83,21 @@ export class FileStateStore {
         if (this.meta.role !== 'owner' && this.meta.role !== 'editor')
             throw Object.assign(new Error('This Cloud file is read only'), { status: 403, code: 'read_only' });
         const before = this.replica.durable();
+        // Text coordinates must name confirmed text, so the room can transform another person's splice.
+        ops = ops.flatMap((op): FileOp[] => {
+            if (op.k !== 'set' || typeof op.props.content?.v !== 'string') return [op];
+            const node = this.replica.tree.node(op.id), old = node?.props.content;
+            if (typeof old !== 'string') return [op];
+            const next = op.props.content.v;
+            let from = 0, end = old.length, nextEnd = next.length;
+            while (from < end && from < nextEnd && old[from] === next[from]) from++;
+            while (end > from && nextEnd > from && old[end - 1] === next[nextEnd - 1]) { end--; nextEnd--; }
+            const { content, spans, lists, ...props } = op.props;
+            const text: FileOp = { k: 'text', id: op.id, baseSeq: this.replica.seq, from, del: end - from, ins: next.slice(from, nextEnd),
+                ...(spans !== undefined && JSON.stringify(spans?.v) !== JSON.stringify(node.props.spans) ? { spans: spans?.v ?? null } : {}),
+                ...(lists !== undefined && JSON.stringify(lists?.v) !== JSON.stringify(node.props.lists) ? { lists: lists?.v ?? null } : {}) };
+            return [text, ...(Object.keys(props).length ? [{ ...op, props }] : [])];
+        });
         const a = this.replica.propose(ops);
         if ('reject' in a) {
             if (a.reject === 'conflict') {
