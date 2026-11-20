@@ -5,6 +5,33 @@ import path from 'node:path';
 import { center, NT, sc } from './harness.ts';
 import { startServer, ROOT, type Scratch } from '../lib.ts';
 const post = async (base: string, p: string, b: unknown) => { const r = await fetch(base + p, { method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, j: await r.json() as any }; };
+sc('cloud-files', 'Usage shows uptime, messages, restarts and normal, amber, red and unavailable states', { covers: ['cloud-files:usage'] }, async (t: NT) => {
+    await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
+    const h = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Anna' });
+    try {
+        await t.cmd('qa.cloud', { clouds: [{ url: h.j.url, name: 'Studio' }] });
+        await t.key('0', ['cmd', 'shift']);
+        await t.waitState(s => s.homeShown, 'Home');
+        await t.click(center(await t.mark({ id: 'home-row', label: 'Studio' })));
+        const base = { storageBytes: 1024, freeDisk: 40*1024**3, peopleConnected: 2, uptimeMs: 7200000, messages24h: 123, restartsHour: 0, brake: 'none' };
+        for (const tone of ['normal', 'amber', 'red']) {
+            await t.cmd('qa.cloud', { usage: { ...base, tone, restartsHour: tone === 'red' ? 4 : 0 } });
+            await t.mark({ id: 'cloud-files-usage', label: tone === 'red' ? '4 restarts' : '123 messages' }, 7000);
+            await t.mark({ id: 'cloud-files-usage-' + tone }, 7000);
+            const text = (await t.mark({ id: 'cloud-files-usage' })).label ?? '';
+            t.ok(text.includes('Up 2h 0m') && text.includes('123 messages in 24h'), 'meter details');
+            if (tone === 'red') t.ok(text.includes('4 restarts') && text.includes('restarting often'), 'restart warning');
+            await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-usage-' + tone + '.png'));
+        }
+        await t.cmd('qa.cloud', { usage: { ...base, tone:'red', freeDisk: 4*1024**3, brake:'storage' } });
+        await t.mark({ id: 'cloud-files-usage', label: 'Uploads paused' }, 7000);
+        await t.cmd('qa.cloud', { usage: {} });
+        await t.mark({ id: 'cloud-files-usage', label: 'Usage unavailable' }, 7000);
+    } finally {
+        await t.cmd('qa.cloud', { usage: null, clouds: [] });
+        await post(t.app.base, '/api/cloud/host/stop', { hostId: h.j.hostId });
+    }
+});
 sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode, confinement, usage and removal', { covers: ['home:clouds', 'settings:cloud', 'cloud-files:new', 'cloud-files:open', 'cloud-files:remote', 'cloud-files:offline', 'cloud-files:confinement', 'cloud-files:usage'] }, async (t: NT) => {
     await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
     const host = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Anna' });
@@ -38,7 +65,7 @@ sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode,
         await post(t.app.base, '/api/cloud/files/disconnect', { file });
         await post(peer.base, '/api/update', { file: pf, id: 'SharedBoard', props: { name: 'Reconnected' } });
         await post(t.app.base, '/api/cloud/files/reconnect', { file });
-        await t.waitFor(async () => JSON.stringify(await t.js('return docMsg()')).includes('Reconnected'), 'offline catch-up', 8000);
+        await t.waitFor(async () => JSON.stringify(await t.js('return window.canvasHost.doc')).includes('Reconnected'), 'offline catch-up', 8000);
         await t.key('0', ['cmd', 'shift']);
         await t.click(center(await t.mark({ id: 'home-row', label: 'Studio' }, 5000)));
         await t.mark({ id: 'cloud-files-usage' }, 5000);

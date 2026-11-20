@@ -18,6 +18,9 @@ struct CloudFilesView: View {
     @State private var busy = false
 
     private func read(_ path: String) async -> [String: Any] {
+        #if CANVAS_QA
+        if path == "api/cloud/usage", let meter = QA.cloudUsage { return meter }
+        #endif
         var c = URLComponents(url: model.base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
         c?.queryItems = [URLQueryItem(name: "cloud", value: entry.url)]
         guard let url = c?.url, let (data, _) = try? await URLSession.shared.data(from: url) else { return [:] }
@@ -36,10 +39,14 @@ struct CloudFilesView: View {
         if role == "owner" {
             let u = await read("api/cloud/usage")
             if let bytes = u["storageBytes"] as? Int64, let free = u["freeDisk"] as? Int64 {
-                usage = "\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) stored, \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free on disk. \(u["peopleConnected"] as? Int ?? 0) people connected. Stays within the limits you set."
+                let seconds = max(0, (u["uptimeMs"] as? Int ?? 0) / 1000)
+                let uptime = seconds >= 3600 ? "\(seconds / 3600)h \((seconds % 3600) / 60)m" : "\(seconds / 60)m"
+                usage = "\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) stored, \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file)) free on disk. \(u["peopleConnected"] as? Int ?? 0) people connected. Up \(uptime). \(u["messages24h"] as? Int ?? 0) messages in 24h. \(u["restartsHour"] as? Int ?? 0) restarts in the last hour. Stays within the limits you set."
                 tone = u["tone"] as? String ?? "normal"
-            }
-        }
+                if u["brake"] as? String == "storage" { usage! += " Uploads paused: free disk is under 5 GB." }
+                else if (u["restartsHour"] as? Int ?? 0) > 3 { usage! += " The Cloud is restarting often." }
+            } else { usage = "Usage unavailable. Stays within the limits you set."; tone = "amber" }
+        } else { usage = nil }
     }
     private func open(_ item: CloudFileItem) {
         busy = true
@@ -70,8 +77,8 @@ struct CloudFilesView: View {
                 }.disabled(busy || (role != "owner" && role != "editor")).qaID("cloud-files-new", label: "New file")
             }
             if let usage {
-                Text(usage).font(Typography.micro).foregroundStyle(tone == "normal" ? Palette.mutedFg : CloudInk.warn)
-                    .qaID("cloud-files-usage", label: usage)
+                Text(usage).font(Typography.micro).foregroundStyle(tone == "red" ? Palette.danger : tone == "normal" ? Palette.mutedFg : CloudInk.warn)
+                    .qaID("cloud-files-usage", label: usage).qaID("cloud-files-usage-" + tone, label: tone)
             }
             if let message { Text(message).font(Typography.body).foregroundStyle(Palette.mutedFg) }
             if files.isEmpty && message == nil { Text("No files yet").font(Typography.body).foregroundStyle(Palette.mutedFg) }

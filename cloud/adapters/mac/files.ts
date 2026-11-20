@@ -5,6 +5,7 @@ import type http from "node:http";
 import type { Duplex } from "node:stream";
 import { randomUUID } from "node:crypto";
 import { SqliteStore } from "./sqlite.ts";
+import { MacUsage, macUsageTone } from './usage.ts';
 import { upgrade, type ServerSocket } from "./websocket.ts";
 import { FileRoom, type Conn } from "../../core/files/room.ts";
 import { RoleCache } from "../../core/files/access.ts";
@@ -136,8 +137,7 @@ export class MacFiles {
     private readonly current: (me: Me) => Me | null;
     private readonly role: (person: string) => Role | null;
     private readonly now: () => number;
-    private readonly started: number;
-    private messages: number[] = [];
+    private readonly meter: MacUsage;
     private cap: number;
     private inFlight = 0;
     private bodies = 0;
@@ -148,7 +148,7 @@ export class MacFiles {
         this.current = current;
         this.role = role;
         this.now = now;
-        this.started = now();
+        this.meter = new MacUsage(db, now);
         fs.mkdirSync(path.join(root, 'files'), { recursive: true, mode: 0o700 });
         this.objects = new DiskObjects(path.join(root, 'objects'), bytes => this.capacity(bytes));
         db.sql.exec(`CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY,name TEXT NOT NULL,state TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`);
@@ -248,13 +248,13 @@ export class MacFiles {
         const json = (status: number, value: unknown) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(value)); return true; };
         try {
             const p = url.pathname, method = req.method ?? 'GET';
-            this.messages.push(this.now());
-            this.messages = this.messages.filter(t => t > this.now() - 86400000);
+            this.meter.message();
             if (p === '/v1/usage') {
                 if (me.role !== 'owner')
                     return json(403, { code: 'forbidden', message: 'Owner role required' });
                 const freeDisk = this.disk(), storageBytes = diskBytes(this.root);
-                return json(200, { adapter: 'mac', storageBytes, freeDisk, peopleConnected: new Set([...this.rooms.values()].flatMap(r => [...r.sockets.values()].map(m => m.id))).size, uptimeMs: this.now() - this.started, messages24h: this.messages.length, estimated: true, tone: freeDisk < 5 * GB ? 'red' : freeDisk < 20 * GB || storageBytes > 20 * GB ? 'amber' : 'normal', brake: freeDisk < 5 * GB ? 'storage' : 'none' });
+                const stats = this.meter.read();
+                return json(200, { adapter: 'mac', storageBytes, freeDisk, peopleConnected: new Set([...this.rooms.values()].flatMap(r => [...r.sockets.values()].map(m => m.id))).size, ...stats, estimated: true, tone: macUsageTone(freeDisk, storageBytes, stats.restartsHour), brake: freeDisk < 5 * GB ? 'storage' : 'none' });
             }
             if (p === '/v1/files') {
                 if (method === 'GET')
@@ -542,8 +542,7 @@ export class MacFiles {
                 ws.on('close', () => r.sockets.delete(ws));
                 let chain = Promise.resolve(), window = this.now(), count = 0, queued = 0;
                 ws.on('message', (text: string) => {
-                    this.messages.push(this.now());
-                    this.messages = this.messages.filter(t => t > this.now() - 86400000);
+                    this.meter.message();
                     if (this.now() - window >= 60000) {
                         window = this.now();
                         count = 0;

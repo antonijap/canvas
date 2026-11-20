@@ -32,6 +32,7 @@ typealias QAError = BridgeClient.BridgeError
 
 @MainActor
 enum QA {
+    static var cloudUsage: [String: Any]?
     static var model: CanvasModel!
     static var window: NSWindow!
     static var tabRenameFile: () -> String? = { nil }
@@ -289,6 +290,7 @@ enum QA {
             AgentsQA.added = Set((a["added"] as? [String] ?? []).filter { $0 == "claude" || $0 == "codex" })
             return ["added": AgentsQA.added.sorted()]
         case "qa.cloud":
+            if a.keys.contains("usage") { cloudUsage = a["usage"] as? [String: Any] }
             // The Clouds, as Add Cloud and Settings > Cloud leave them:
             //   {clouds: [{url, name?, devEmail?, kind?}]}  the whole list ([] for none)
             //   {url, devEmail?, name?}                     one server Cloud as the only one ("" for none)
