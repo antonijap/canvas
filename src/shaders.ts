@@ -75,6 +75,7 @@ const readText = async (file: string): Promise<string | null> => {
 // them Undo of a source change restored the old rev over the new source, which then stayed for good.
 const SNAPSHOTS = 64;
 const snapPath = (docFile: string, id: string, srcRev: string) => path.join(shaderDir(docFile), `${id}.src-${srcRev}.wgsl`);
+const immutableSource = (id: string, source: string) => `shaders/${id}.src-${revOf(source)}.wgsl`;
 async function snapshot(docFile: string, id: string, source: string): Promise<void> {
   const file = snapPath(docFile, id, revOf(source));
   if (await fs.promises.stat(file).catch(() => null)) {
@@ -126,7 +127,7 @@ async function writeSource(docFile: string, id: string, source: string, old: str
 export async function writePastedSource(docFile: string, id: string, source: string): Promise<string> {
   if (!ID_RE.test(id)) throw new WidgetError(422, "invalid-widget", "id must be 1-40 letters, digits, - or _");
   await writeSource(docFile, id, checkSource(source), null);
-  return sourcePath(docFile, id);
+  return snapPath(docFile, id, revOf(source));
 }
 
 export type LintError ={ line: number; col: number; message: string };
@@ -253,7 +254,7 @@ async function createShaderNow(file: string, input: ShaderInput, who: Who = {}) 
   try {
     const { widget } = await addWidget(file, {
       kind: "shader", id, name: input.name ?? from?.name ?? (made ? `${paperShader(made.paper.shader)!.name}${made.paper.preset !== "Default" ? ` (${made.paper.preset})` : ""}` : undefined), x: input.x, y: input.y, w: input.w, h: input.h, page: input.page,
-      config: from ? { ...from.config, rev } : { rev, autoplay: input.autoplay ?? (made ? made.animated : true), quarantined: false, ...(made ? { paper: made.paper, uniforms: made.uniforms } : {}) },
+      config: from ? { ...from.config, rev, source: immutableSource(id, source) } : { rev, source: immutableSource(id, source), autoplay: input.autoplay ?? (made ? made.animated : true), quarantined: false, ...(made ? { paper: made.paper, uniforms: made.uniforms } : {}) },
     }, { record: { label: "Add Shader", ...who } });
     return { widget, rev, problems: lintWgsl(source) };
   } catch (e) {
@@ -300,6 +301,7 @@ async function updateShaderNow(file: string, id: string, patch: ShaderPatch, who
       config.paper = { ...made.paper, params };
       config.uniforms = made.uniforms;
       config.rev = cardRev(made.source, made.uniforms);
+      config.source = immutableSource(id, made.source);
       problems = lintWgsl(made.source);
     } else if (patch.source !== undefined) {
       const source = checkSource(patch.source);
@@ -310,6 +312,7 @@ async function updateShaderNow(file: string, id: string, patch: ShaderPatch, who
         restore = old === null ? () => fs.promises.rm(src, { force: true }) : () => writeAtomic(src, old);
       }
       config.rev = revOf(source);
+      config.source = immutableSource(id, source);
       // A new source runs again: the quarantine was for the old one.
       config.quarantined = false;
       problems = lintWgsl(source);
