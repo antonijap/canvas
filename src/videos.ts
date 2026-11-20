@@ -1,3 +1,5 @@
+import { bodyChunks } from "./body.ts";
+import { isCloudFile, cloudAsset, cloudDerived } from "./cloud-files-runtime.ts";
 // Video cards on disk and on the wire. A video card is a widget of kind "video" (src/widgets/kinds/video.ts)
 // whose config.src names the file:
 //   media/<name>.mp4              inside a package (copied in when the card is added), relative to the package
@@ -51,6 +53,7 @@ export function mediaDir(docFile: string): string {
 
 /** The absolute file a src names, or null when a relative src leaves the document's folder. */
 export function resolveSrc(docFile: string, src: string): string | null {
+  if (isCloudFile(docFile)) return cloudAsset(docFile, src);
   if (!src) return null;
   if (path.isAbsolute(src)) return path.normalize(src);
   const base = docBase(docFile);
@@ -94,6 +97,7 @@ async function checkFile(p: unknown): Promise<{ file: string; size: number }> {
  * another one with that name gets a numbered name. Returns the src (relative) and the hash.
  */
 export async function copyIn(docFile: string, file: string): Promise<{ src: string; hash: string; dest: string }> {
+  if (isCloudFile(docFile) && (await fs.promises.stat(file)).size > 100 * 1024 * 1024) throw new WidgetError(413, "too-large", "Cloud videos are at most 100 MB");
   const out = await copyInOnce(docFile, file);
   // A media add: its blob op goes with the step that adds the card (or as an action of its own).
   mediaAdded(docFile, out.dest);
@@ -441,6 +445,7 @@ function warmProxy(abs: string, hash: string): void {
 }
 
 const posterPath = (docFile: string, hash: string, ms: number) => {
+  if (isCloudFile(docFile)) return path.join(cloudDerived(docFile), `${hash}-${ms}.png`);
   const doc = resolveDoc(docFile);
   return doc.kind === "canvas" ? path.join(inPackage(doc.displayPath, "media", "posters"), `${hash}-${ms}.png`) : path.join(mediaDir(docFile), "posters", `${hash}-${ms}.png`);
 };
@@ -457,7 +462,7 @@ function reply(res: http.ServerResponse, status: number, body: unknown) {
 async function readBytes(req: http.IncomingMessage, max: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const c of req) {
+  for await (const c of bodyChunks(req)) {
     size += (c as Buffer).length;
     if (size > max) throw new WidgetError(413, "too-large", `The request body is larger than ${Math.round(max / 1024)} KB`);
     chunks.push(c as Buffer);

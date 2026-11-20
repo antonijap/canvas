@@ -32,6 +32,7 @@ typealias QAError = BridgeClient.BridgeError
 
 @MainActor
 enum QA {
+    static var cloudUsage: [String: Any]?
     static var model: CanvasModel!
     static var window: NSWindow!
     static var tabRenameFile: () -> String? = { nil }
@@ -289,6 +290,7 @@ enum QA {
             AgentsQA.added = Set((a["added"] as? [String] ?? []).filter { $0 == "claude" || $0 == "codex" })
             return ["added": AgentsQA.added.sorted()]
         case "qa.cloud":
+            if a.keys.contains("usage") { cloudUsage = a["usage"] as? [String: Any] }
             // The Clouds, as Add Cloud and Settings > Cloud leave them:
             //   {clouds: [{url, name?, devEmail?, kind?}]}  the whole list ([] for none)
             //   {url, devEmail?, name?}                     one server Cloud as the only one ("" for none)
@@ -679,6 +681,7 @@ enum QA {
     /// {key: "k" | "Return" | ..., mods?: ["cmd", ...], hold?: true (keep the modifiers for the next mouse ops), release?: true}
     private static func key(_ a: [String: Any]) async throws -> [String: Any] {
         let w = try target(a)
+        if w !== NSApp.modalWindow && !w.isKeyWindow { w.makeKey() }
         let f = flags(a)
         if a["release"] as? Bool == true {
             heldMods = []
@@ -693,6 +696,18 @@ enum QA {
             return ["held": true]
         }
         guard let k = a["key"] as? String, !k.isEmpty else { throw QAError(code: "invalid", message: "key needs key") }
+        // An inactive QA app has no key window. Select the requested field's text, not the canvas behind it.
+        if f.contains(.command), k.lowercased() == "a", let field = w.firstResponder as? NSTextView, field.isFieldEditor {
+            field.selectAll(nil)
+            try await sleep(80)
+            return [:]
+        }
+        // Background field editors do not publish SwiftUI changes for a synthetic clipboard insertion.
+        // Deliver the private clipboard through the same native input path as qa.type, without interleaved modifiers.
+        if f.contains(.command), k.lowercased() == "v", let field = w.firstResponder as? NSTextView, field.isFieldEditor,
+           let text = canvasPasteboard.string(forType: .string), !text.contains("\n") {
+            return try await typeText(["text": text, "window": a["window"] ?? "main"])
+        }
         let repeatN = max(1, (a["repeat"] as? NSNumber)?.intValue ?? 1)
         for _ in 0..<repeatN {
             let evs = QAKey.events(k, f, windowNumber: w.windowNumber, location: last)
@@ -710,6 +725,7 @@ enum QA {
     /// {text}: one key press per character, as typed.
     private static func typeText(_ a: [String: Any]) async throws -> [String: Any] {
         let w = try target(a)
+        if w !== NSApp.modalWindow && !w.isKeyWindow { w.makeKey() }
         guard let text = a["text"] as? String else { throw QAError(code: "invalid", message: "type needs text") }
         for ch in text {
             let evs = QAKey.events(ch == "\n" ? "Return" : String(ch), heldMods, windowNumber: w.windowNumber, location: last)
@@ -763,7 +779,7 @@ enum QA {
             "tabRename": ["file": tabRenameFile() as Any? ?? NSNull(), "events": tabRenameEvents],
             "section": m.section?.rawValue ?? NSNull(), "panelOpen": m.panelOpen, "sidebarWidth": Double(m.sidebarWidth), "homeSidebarWidth": Double(m.homeSidebarWidth), "inspectorOpen": m.inspectorOpen, "uiHidden": m.uiHidden,
             "pages": m.pages.map { ["id": $0.id, "name": $0.name, "count": $0.count] }, "activePage": m.activePage ?? NSNull(),
-            "boards": m.boards.map(\.id), "selection": sel, "selectedWidget": m.selectedWidgetId ?? NSNull(),
+            "cloudReadOnly": m.cloudReadOnly, "boards": m.boards.map(\.id), "selection": sel, "selectedWidget": m.selectedWidgetId ?? NSNull(),
             "widgets": m.widgets.map { ["id": $0.id, "kind": $0.kind] },
             "widgetKinds": m.widgetKinds.map { ["id": $0.id, "title": $0.title] },
             "paperShaders": m.paperShaders.map { ["id": $0.id, "name": $0.name] },

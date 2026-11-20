@@ -840,6 +840,7 @@ export function attach(host) {
   }
   function changed() {
     if (!te) return;
+    host.emit('presence', {editing:{id:te.id,text:te.value.slice(0,512)}});
     const typed = typedOf(te);
     // Truncated text shows whole while it is edited; the ellipsis comes back when the edit ends.
     live().pin(te.id, te.truncated ? { ...typed, textTruncation: "disabled" } : typed);
@@ -870,6 +871,7 @@ export function attach(host) {
    * all (select all the text) }.
    */
   async function enter(id, o = {}) {
+    if (host.readOnly) return false;
     if (te) { if (te.id === id) return true; commit("switch"); }
     if (host.renderer !== "engine") { tell("Editing text in place needs the GPU renderer"); return false; }
     let inf = nodeInfo(id);
@@ -1076,6 +1078,7 @@ export function attach(host) {
   }
 
   function teardown() {
+    if(te) host.emit('presence', {editing:null});
     const t = te;
     te = null;
     if (raf) { cancelAnimationFrame(raf); raf = 0; }

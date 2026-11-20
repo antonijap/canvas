@@ -1,3 +1,4 @@
+import { cloudFileHooks } from "../cloud-files-runtime.ts";
 // The sidecar: a document's widgets live in widgets.json inside its package (foo.widgets.json beside a single
 // foo.canvas.json). The server is the only writer; the design file is never touched. Every change is a pure function
 // applied under a per-file lock, on top of whatever is on disk right now, and written by renaming a temp file into place.
@@ -186,6 +187,11 @@ export class Store {
     }
   }
 
+  forget(): void {
+    fs.unwatchFile(this.file); clearTimeout(this.timer); this.listeners.clear();
+    this.state={rev:EMPTY_REV,widgets:[],invalid:false,extra:{}};this.seen=undefined;
+  }
+
   snapshot(): StoreState {
     if (Date.now() >= this.freshUntil) this.refresh();
     return this.state;
@@ -240,6 +246,7 @@ export class Store {
 
   private mutateEnvelopeNow<T>(fn: (widgets: Widget[], extra: Record<string, unknown>) => { widgets: Widget[]; extra: Record<string, unknown>; result?: T }, opts: WriteOpts): Promise<{ state: StoreState; result: T | undefined }> {
     const run = async () => {
+      cloudFileHooks.assertEdit?.(this.docFile);
       for (let attempt = 0; attempt < 3; attempt++) {
         await this.refreshAsync(true);
         // What `fn` runs on. A watcher's refresh() may move this.seen meanwhile; the swap compares against this.
@@ -405,3 +412,5 @@ export function storeFor(docFile: string): Store {
   if (!s) stores.set(docFile, (s = new Store(docFile)));
   return s;
 }
+
+export function forgetStore(docFile:string):void { const s=stores.get(docFile);s?.forget();stores.delete(docFile); }

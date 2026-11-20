@@ -15,6 +15,7 @@ export function register(server: McpServer) {
   }, async (a) => {
     const l = parseLink(a.link);
     if (!l) throw new ToolError("invalid", "That is not a Canvas link", "A link looks like canvas://open?file=/path/App.canvas&node=Id1,Id2 (Cmd+L in Canvas).");
+    if(l.cloud && l.cloudFile)l.file=(await api("POST","/api/cloud/files/open",{cloud:l.cloud,id:l.cloudFile})).file;
     if (!fs.existsSync(l.file)) throw new ToolError("not_found", `No file at ${l.file}`, "It was moved or renamed; ask for a new link.");
     await ensureServer();
     const f = enc(l.file);

@@ -48,18 +48,21 @@ if (process.env.CANVAS_ACTION_STATS) {
 
 type Listener = (docFile: string, action: Action) => void;
 const listeners = new Set<Listener>();
+const durableListeners = new Set<Listener>();
 /** Hear every action a local edit makes (tests; later the Cloud outbox). */
-export function onAction(f: Listener): () => void {
-  listeners.add(f);
-  return () => listeners.delete(f);
+export function onAction(f: Listener, durable = false): () => void {
+  const set = durable ? durableListeners : listeners;
+  set.add(f);
+  return () => set.delete(f);
 }
 /** Is anyone asking for actions (checks on, or a listener)? Without, edits make none: today's cost stays. */
-export const wantActions = () => actionChecks.enabled || listeners.size > 0;
+export const wantActions = () => actionChecks.enabled || listeners.size > 0 || durableListeners.size > 0;
 
 // ---------- one action per step ----------
 
 export type Writers = Record<string, string | 0>;
 const versions = new Map<string, Writers>();
+export function adoptWriters(file:string, writers:Writers):void { versions.set(file,{...writers}); }
 const recent = new Map<string, { id: string; writes: Writers }>();
 const docOrders = new Map<string, { b: string[]; a: string[] }>();
 export const lastDocOrders = (file: string) => docOrders.get(file);
@@ -95,6 +98,8 @@ function release(file: string, slot: Delivery, action?: Action) {
 
 type Scope = { slot?: Delivery; id: string; versions: [string, string][]; closed?: boolean; docFile: string; ops: FileOp[]; agent?: string; before?: DocLike; after?: DocLike; envelopeBefore?: Envelope; envelopeAfter?: Envelope };
 const scopes = new AsyncLocalStorage<Scope>();
+const agents = new AsyncLocalStorage<string | undefined>();
+export function withActionAgent<T>(label:string|undefined,fn:()=>T):T { return agents.run(label?.replace(/[^\p{L}\p{N} ._-]/gu,' ').trim().slice(0,80),fn); }
 const actionChains = new Map<string, Promise<void>>();
 const activeScope = () => {
   const scope = scopes.getStore();
@@ -171,6 +176,7 @@ function emit(docFile: string, action: Action) {
     if (action.ops.length > FILE_LIMITS.opsPerAction) actionChecks.overLimit.ops++;
     if (actionBytes(action) > FILE_LIMITS.actionBytes) actionChecks.overLimit.bytes++;
   }
+  for (const f of durableListeners) f(docFile, action);
   for (const f of listeners) {
     try {
       f(docFile, action);
@@ -214,7 +220,7 @@ function withPreconditions(ops: FileOp[], writers: Writers, id: string, tree: Do
   });
 }
 
-export function makeAction(ops: FileOp[], agent?: string): Action {
+export function makeAction(ops: FileOp[], agent: string | undefined = agents.getStore()): Action {
   return { id: randomUUID(), baseSeq: 0, epoch: 0, at: new Date().toISOString(), ops, ...(agent ? { agent } : {}) };
 }
 

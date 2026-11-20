@@ -13,6 +13,7 @@
 // Storage, in `dir` (0700, files 0600): team.sqlite and rooms/<doc>.sqlite (one per shared document, the Worker's room
 // schema). Comments and people only; no files, no tokens in clear.
 
+import { MacFiles } from "./files.ts";
 import { route } from "../../core/router.ts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
@@ -94,6 +95,7 @@ export interface HostOptions {
   dir: string;
   /** Tests only: another port (0 for a free one). Always on 127.0.0.1. */
   port?: number;
+  storageCap?: number;
   /** How often room sockets are pinged (tests shorten it). */
   pingMs?: number;
   now?: () => number;
@@ -111,6 +113,7 @@ export class CloudHost {
   private readonly opts: HostOptions;
   private readonly db: SqliteStore;
   readonly team: TeamStore;
+  readonly files: MacFiles;
   private readonly rooms = new Map<string, RoomState>();
   private server?: http.Server;
   private readonly conns = new Set<Socket>();
@@ -141,6 +144,7 @@ export class CloudHost {
     if (!this.db.sql.exec("SELECT 1 FROM host").toArray().length) {
       this.db.sql.exec("INSERT INTO host (id, host_id, created_at) VALUES (1, ?, ?)", crypto.randomUUID(), new Date().toISOString());
     }
+    this.files = new MacFiles(opts.dir, this.db, me => this.current(me), id => this.person(id)?.role as Role | null ?? null, () => this.now(), opts.storageCap ?? Number(process.env.CANVAS_CLOUD_STORAGE_CAP || 20 * 1024 ** 3));
     this.protect();
   }
 
@@ -313,6 +317,7 @@ export class CloudHost {
 
   /** Every open socket against the devices and roles now: a removed device or a lower role closes it. */
   private recheck(): void {
+    this.files.recheck();
     // Requests still sending their body from a device that is gone are cut off.
     for (const [req, device] of this.reading) {
       if (!this.db.sql.exec("SELECT 1 FROM devices WHERE id = ?", device).toArray().length) req.destroy();
@@ -469,7 +474,7 @@ export class CloudHost {
     const url = new URL(req.url ?? "/", "http://cloud.invalid");
     const method = req.method ?? "GET";
     const p = url.pathname;
-    if (method !== "GET") {
+    if (method !== "GET" && !(method === "PUT" && /^\/v1\/files\/[^/]+\/uploads\/[^/]+(?:\/parts\/\d+)?$/.test(p))) {
       const type = String(req.headers["content-type"] ?? "").split(";", 1)[0].trim().toLowerCase();
       if (type !== "application/json") return json(415, { code: "invalid", message: "JSON required" });
     }
@@ -489,7 +494,8 @@ export class CloudHost {
     const me = this.who(req);
     if (!me) { const [st, c, m] = this.refusal(); res.setHeader("connection", "close"); return json(st, { code: c, message: m }); }
     if (!this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
-    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted"], hostId: this.hostId() } as ServerInfo);
+    if (await this.files.route(req, res, url, me, () => this.body(req, 1024 * 1024, me.device))) return;
+    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files"], hostId: this.hostId() } as ServerInfo);
     if (p === "/v1/me" && method === "GET") return json(200, { id: me.id, email: me.email, name: me.name, role: me.role, hostId: this.hostId() });
     if (p === "/v1/docs" && method === "POST") {
       if (me.role !== "owner" && me.role !== "editor") return json(403, { code: "forbidden", message: "Owner or editor role required" });
@@ -538,9 +544,10 @@ export class CloudHost {
       // Authentication first: nothing about routes or documents is said to someone without a token.
       const me = this.who(req);
       if (!me) { const [st] = this.refusal(); return refuse(st, st === 429 ? "Too Many Requests" : "Unauthorized"); }
+      if (!this.team.allowMessage(me.device)) return refuse(429, "Too Many Requests");
+      if (this.files.upgrade(req, socket, head, url, me)) return;
       if (!m || !uuid(m[1])) return refuse(404, "Not Found");
       if (this.sockets >= MAX_SOCKETS) return refuse(503, "Service Unavailable");
-      if (!this.team.allowMessage(me.device)) return refuse(429, "Too Many Requests");
       const doc = m[1];
       if (!this.team.hasDoc(doc)) return refuse(404, "Not Found");
       const room = this.room(doc);
@@ -661,6 +668,7 @@ export class CloudHost {
       for (const c of this.conns) c.destroy();
       await new Promise<void>((r) => server.close(() => r()));
     }
+    this.files.close();
     for (const room of this.rooms.values()) room.store.close();
     this.rooms.clear();
     this.db.close();

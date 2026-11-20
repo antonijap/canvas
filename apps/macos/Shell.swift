@@ -128,7 +128,7 @@ struct RootView: View {
                     TopBar(model: model)
                     // View > Hide UI (Cmd+backslash): only the canvas and the tabs stay.
                     if !model.uiHidden && !model.homeShown { LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth, panelMax: panelMax) }
-                    if inspectorShown { Inspector(model: model, fonts: model.fonts) }
+                    if inspectorShown { Inspector(model: model, fonts: model.fonts).disabled(model.cloudReadOnly) }
                     // Nothing to zoom on an empty page: the pill comes back with the first board.
                     if !model.uiHidden && !model.homeShown && !model.pageEmpty { ZoomCorner(model: model) }
                     if let t = model.toast {
@@ -227,7 +227,7 @@ struct TopBar: View {
                     case "Rename...": beginRename(file)
                     case "Show in Finder": NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)])
                     case "Duplicate": model.duplicateFile(file)
-                    case "Move to Cloud...": CloudAccount.shared.shareOpenFile(model, file: file)
+                    case "Move to Cloud...": CloudAccount.shared.moveOpenFile(model, file: file)
                     case "Copy Link":
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString("canvas://open?file=" + DocURL.encode(file), forType: .string)

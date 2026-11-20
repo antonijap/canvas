@@ -56,12 +56,15 @@ async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: st
 sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, fingerprint and people; an invite is copied, never shown; a second Mac joins one; Stop hosting one leaves the other; Delete removes it", { covers: ["settings:cloud-host", "settings:cloud-remove"] }, async (t: NT) => {
   const cloudPids = () => pgrep(["-P", String(t.app.server!.pid), "-f", "cloud/adapters/mac/main.ts"]);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-qa-joiner-"));
+  const ownedHosts: string[] = [];
   let joiner: Scratch | null = null;
   try {
     // The host is shown by its comment name: a placeholder, never this Mac's user name in a screenshot.
     await t.cmd("qa.cloud", { clouds: [], commentName: "Anna" });
     const studio = await hostFromSheet(t, "Studio");
+    ownedHosts.push(studio.url.replace("canvas-cloud://", ""));
     const review = await hostFromSheet(t, "Client review");
+    ownedHosts.push(review.url.replace("canvas-cloud://", ""));
     t.ok(studio.url !== review.url, "two Clouds, two ids");
     await t.waitFor(async () => cloudPids().length === 2, "two Cloud processes", 15_000);
     // Both rows in Home, laptops (on a Mac), and Settings marks both Hosting.
@@ -115,7 +118,7 @@ sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, 
     // Stop hosting Client review: Studio runs on.
     await t.click(center(await t.mark({ id: "cloud-stop-hosting", window: "settings" }, 4000)), { window: "settings" });
     await t.waitState((s) => s.modal, "Stop asks first", 6000);
-    await t.key("Return", [], { window: "modal" });
+    { const button = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Stop Hosting"); t.ok(button, "Stop Hosting button"); await t.click(center(button), { window: "modal" }); }
     await t.waitText("Not hosting", undefined, 15_000, "settings");
     await t.waitFor(async () => cloudPids().length === 1, "one Cloud process left", 15_000);
     const st = (await (await fetch(`${t.app.base}/api/cloud/status?url=${encodeURIComponent(studio.url)}&fresh=1`)).json()) as any;
@@ -124,12 +127,13 @@ sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, 
     await t.click(center(await t.mark({ id: "cloud-remove-cloud", window: "settings" }, 4000)), { window: "settings" });
     await t.waitState((s) => s.modal, "Delete asks first", 6000);
     await t.shot(`${process.cwd()}/qa/out/native/cloud-delete-ask.png`, "modal");
-    await t.key("Return", [], { window: "modal" });
+    { const button = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Delete"); t.ok(button, "Delete button"); await t.click(center(button), { window: "modal" }); }
     await t.waitFor(async () => (await t.cmd("qa.cloud", {})).clouds.length === 1, "Client review to leave the list", 10_000);
     const hosts = (await (await fetch(`${t.app.base}/api/cloud/host`)).json()) as any;
     t.ok(!hosts.clouds.some((c: any) => c.hostId === review.url.replace("canvas-cloud://", "")), "this Mac no longer keeps Client review");
   } finally {
     await post(t.app.base, "/api/cloud/host/stop").catch(() => {});
+    for (const hostId of ownedHosts) await post(t.app.base, "/api/cloud/host/wipe", { hostId }).catch(() => {});
     await joiner?.stop().catch(() => {});
     await t.key("w", ["cmd"], { window: "settings" }).catch(() => {});
     await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
@@ -170,7 +174,7 @@ sc("settings", "Join with an invite: the sheet reads the link, shows the Cloud's
     await t.mark({ id: "text", label: "Team Cloud", window: SHEET }, 4000);
     await t.mark({ id: "add-cloud-fingerprint", window: SHEET });
     await t.mark({ id: "add-cloud-disclosure", window: SHEET });
-    await t.waitText("Everyone in a Cloud can read the comments", undefined, 4000, SHEET);
+    await t.waitText("Everyone in this Cloud can open its files", undefined, 4000, SHEET);
     await t.shot(`${process.cwd()}/qa/out/native/add-cloud-join.png`, SHEET);
     await t.click(center(await t.mark({ id: "add-cloud-join-go", window: SHEET })), { window: SHEET });
     await t.waitState((s) => !s.addCloud && s.homeSection === "cloud", "Team Cloud's page", 20_000);
