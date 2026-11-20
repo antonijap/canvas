@@ -360,10 +360,18 @@ export async function readShaderSource(file: string, id: string): Promise<{ sour
  */
 async function currentSource(docFile: string, id: string, w: Widget | undefined): Promise<{ text: string | null }> {
   if (isCloudFile(docFile)) {
-    const cfg = (w?.config ?? {}) as { rev?: string; source?: string };
+    const cfg = (w?.config ?? {}) as { rev?: string; source?: string; uniforms?: unknown };
     const rel = cfg.source ?? (cfg.rev ? 'shaders/' + id + '.src-' + cfg.rev + '.wgsl' : 'shaders/' + id + '.wgsl');
     const confined = cloudAsset(docFile, rel);
-    return { text: confined ? await readText(confined) : null };
+    const text = confined ? await readText(confined) : null;
+    if (text !== null || cfg.source || !cfg.rev) return { text };
+    // Cards saved before source paths were explicit can still name a source plus parameters revision.
+    for (const name of await fs.promises.readdir(shaderDir(docFile)).catch(() => [] as string[])) {
+      if (!name.startsWith(id + '.src-') || !name.endsWith('.wgsl')) continue;
+      const file = cloudAsset(docFile, 'shaders/' + name), snap = file ? await readText(file) : null;
+      if (snap !== null && cardRev(snap, cfg.uniforms) === cfg.rev) return { text: snap };
+    }
+    return { text: null };
   }
   const file = sourcePath(docFile, id);
   const text = await readText(file);
