@@ -359,6 +359,9 @@ sc('comments', 'Mentions in replies filter people and persist a picked token', {
   t.eq(await t.ev('document.querySelector(".cm-mentions:not([hidden])").innerText'), 'Ben', 'filtered local commenters');
   await t.io.key('ArrowDown'); await t.io.key('Tab');
   t.eq(await t.ev('document.querySelector(".cm-pop textarea").value'), '@Ben ', 'picked name');
+  const updated = file(t); updated.threads[0].comments[0].body = 'Updated note';
+  fs.writeFileSync(path.join(t.file, 'comments.json'), JSON.stringify(updated));
+  await t.ev('window.canvasHost.comments.reload()');
   await t.io.type('please check'); await t.io.key('Enter');
   await until(t, () => file(t)?.threads[0]?.comments.length === 2, 'mention saved');
   const reply = file(t).threads[0].comments[1];
@@ -366,6 +369,7 @@ sc('comments', 'Mentions in replies filter people and persist a picked token', {
   t.eq(reply.mentions, [{ start: 0, end: 4, name: 'Ben' }], 'mention metadata saved');
   await t.ev(`(() => { const original=window.fetch; window.fetch=async(u,o)=>{ const r=await original(u,o); if(typeof u==='string' && u.startsWith('/api/comments?file=')){const j=await r.json();j.me='Ben';return new Response(JSON.stringify(j));} return r; };return window.canvasHost.comments.reload();})()`);
   t.ok(await t.ev(`document.querySelector('.cm-pop').innerText.includes('mentioned you')`), 'recipient sees mentioned you');
+  await t.ev("document.querySelector('.cm-pop textarea').focus()");
   await t.io.type('@be');
   await t.waitFor('!!document.querySelector(".cm-mentions:not([hidden]) button")', 'suggestions again');
   await t.io.key('Escape');

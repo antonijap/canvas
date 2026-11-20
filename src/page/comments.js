@@ -229,7 +229,7 @@ function start(host) {
   function apply(j) {
     if (Array.isArray(j.people)) st.people = j.people;
     if (j.doc !== undefined) st.doc = j.doc;
-    if (Array.isArray(j.threads)) { st.threads = j.threads; st.sync = j.sync || null; }
+    if (Array.isArray(j.threads)) { st.threads = j.threads; if (j.sync !== undefined) st.sync = j.sync || null; }
     if (typeof j.me === "string") st.me = j.me;
     render();
   }
@@ -475,6 +475,7 @@ function start(host) {
     for (const [k, v] of [["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"], ["writingsuggestions", "false"]]) ta.setAttribute(k, v);
     const picked = [];
     ta.mentions = () => mentionTokens(ta.value.trim(), picked);
+    ta.restoreMentions = people => picked.push(...people);
     const menu = h("div", "cm-mentions cm-ui"); menu.hidden = true; menu.setAttribute("role", "listbox");
     let choices = [], active = 0, trigger = null;
     const close = () => { menu.hidden = true; ta.setAttribute("aria-expanded", "false"); };
@@ -564,11 +565,12 @@ function start(host) {
     }
     const where = layerLabel(t);
     const live = L.liveComments(t);
-    const key = JSON.stringify([t.id, t.resolvedAt || "", where, live.map((c) => [c.id, c.body, c.editedAt || ""]), syncKey()]);
+    const key = JSON.stringify([t.id, t.resolvedAt || "", where, live.map((c) => [c.id, c.body, c.mentions, c.editedAt || ""]), st.me, st.sync?.me, syncKey()]);
     pop.hidden = false;
     if (popFor === t.id && popKey === key) return;
     const keep = popFor === t.id ? pop.querySelector(".cm-field") : null;
     const draftText = keep ? keep.value : "";
+    const draftMentions = keep?.mentions?.() || [];
     const hadFocus = keep && document.activeElement === keep;
     popFor = t.id; popKey = key;
     pop.textContent = "";
@@ -634,6 +636,7 @@ function start(host) {
         .catch((e) => { el.disabled = false; tell(e.message); });
     }, () => openThread(null), (ready) => send.classList.toggle("ready", ready));
     ta.value = draftText;
+    ta.restoreMentions(draftMentions);
     send.classList.toggle("ready", draftText.trim() !== "");
     wrap.append(ta);
     row.append(wrap, send);
