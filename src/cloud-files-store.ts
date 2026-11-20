@@ -86,20 +86,25 @@ export class FileStateStore {
             throw Object.assign(new Error('This Cloud file is read only'), { status: 403, code: 'read_only' });
         const before = this.replica.durable();
         const textDrafts = ops.flatMap(op => op.k === 'set' && typeof op.props.content?.v === 'string' ? [{ id: op.id, content: op.props.content.v }] : []);
+        const typing = new Map<string, Record<string, unknown>>();
         // Text coordinates must name confirmed text, so the room can transform another person's splice.
         ops = ops.flatMap((op): FileOp[] => {
-            if (op.k !== 'set' || typeof op.props.content?.v !== 'string') return [op];
+            if (op.k !== 'set') return [op];
+            const node = this.replica.tree.node(op.id), previous = typing.get(op.id) ?? node?.props;
+            if (!previous) return [op];
+            typing.set(op.id, { ...previous, ...Object.fromEntries(Object.entries(op.props).map(([key, value]) => [key, value?.v])) });
+            if (typeof op.props.content?.v !== 'string') return [op];
             if (op.if && ['content', 'spans', 'lists'].some(key => Object.hasOwn(op.if!, key))) return [op];
-            const node = this.replica.tree.node(op.id), old = node?.props.content;
-            if (!node || typeof old !== 'string') return [op];
+            const old = previous.content;
+            if (typeof old !== 'string') return [op];
             const next = op.props.content.v;
             let from = 0, end = old.length, nextEnd = next.length;
             while (from < end && from < nextEnd && old[from] === next[from]) from++;
             while (end > from && nextEnd > from && old[end - 1] === next[nextEnd - 1]) { end--; nextEnd--; }
             const { content, spans, lists, ...props } = op.props;
             const ins = next.slice(from, nextEnd), del = end - from;
-            const shiftedSpans = shift((node.props.spans ?? []) as never, from, del, ins.length);
-            const shiftedLists = shiftLists((node.props.lists ?? []) as unknown as ListItem[], old, from, del, ins);
+            const shiftedSpans = shift((previous.spans ?? []) as never, from, del, ins.length);
+            const shiftedLists = shiftLists((previous.lists ?? []) as ListItem[], old, from, del, ins);
             const text: FileOp = { k: 'text', id: op.id, baseSeq: this.replica.seq, from, del: end - from, ins: next.slice(from, nextEnd),
                 ...(spans !== undefined && JSON.stringify(spans?.v ?? []) !== JSON.stringify(shiftedSpans) ? { spans: spans?.v ?? null } : {}),
                 ...(lists !== undefined && JSON.stringify(lists?.v ?? []) !== JSON.stringify(shiftedLists) ? { lists: lists?.v ?? null } : {}) };
