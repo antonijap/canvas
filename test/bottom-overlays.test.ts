@@ -10,3 +10,27 @@ test('bottom overlays center within free canvas at the zoom vertical center', ()
     assert.ok(area.x + area.width/2 < width - 148);
   }
 });
+
+test('native overlay listener requests geometry after it is ready', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { runInNewContext } = await import('node:vm');
+  const listeners = new Map<string, (c: unknown) => void>();
+  const messages: unknown[] = [];
+  const context = {
+    requestAnimationFrame: () => 1,
+    addEventListener: () => {},
+    MutationObserver: class { observe() {} },
+    document: { body: {} },
+    host: {
+      native: true,
+      on: (event: string, listener: (c: unknown) => void) => listeners.set(event, listener),
+      post: (message: unknown) => {
+        assert.ok(listeners.has('cmd'), 'commands must be heard before asking for the cached frame');
+        messages.push(message);
+      },
+    },
+  };
+  const source = readFileSync(new URL('../src/page/bottom-overlays.js', import.meta.url), 'utf8');
+  runInNewContext(source.replaceAll('export function', 'function') + '\ninstallBottomOverlays(host);', context);
+  assert.equal(JSON.stringify(messages), JSON.stringify([{ bottomOverlayReady: true }]));
+});

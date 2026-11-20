@@ -39,6 +39,8 @@ export function installBottomOverlays(host) {
     }
   }
   host.on('cmd', c => { if (c.cmd === 'zoomCorner') zoom = c; if (c.cmd === 'bottomToast') nativeToast = !!c.shown; schedule(); });
+  // The native shell may have sent its first frame before this module loaded.
+  if (host.native) host.post({ bottomOverlayReady: true });
   for (const event of ['render', 'visible', 'page']) host.on(event, schedule);
   addEventListener('resize', schedule);
   new MutationObserver(schedule).observe(document.body, { subtree: true, attributes: true, childList: true, characterData: true, attributeFilter: ['style', 'class', 'hidden'] });

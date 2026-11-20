@@ -326,6 +326,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             }
         }
         if m["snapHello"] != nil { pushSnap(); pushPrefs(); resendInsets() }
+        if m["bottomOverlayReady"] != nil {
+            setZoomCorner(frame: zoomCornerFrame)
+            run("{cmd:'bottomToast',shown:\(toast != nil)}")
+        }
         // The eyedropper key (I, src/page/shortcuts.js): sample the screen into the selection's fill (PaintEditor.swift).
         if m["eyedropper"] != nil { eyedropFill() }
         // Option+L on the canvas (src/page/shortcuts.js): the Layers panel closes every open row.
