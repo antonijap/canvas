@@ -59,6 +59,16 @@ sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode,
         const made = await post(peer.base, '/api/structure', { file: pf, op: 'add', nodes: [{ id: 'SharedBoard', type: 'frame', name: 'Shared board', width: 320, height: 240, children: [] }] });
         t.eq(made.status, 200, 'peer adds board');
         await t.waitFor(async () => (await t.state()).boards.includes('SharedBoard'), 'remote edit on the page within one second', 1000);
+        await post(t.app.base, '/api/update', { file, id:'SharedBoard', props:{opacity:0.5} });
+        await t.waitFor(async()=>fs.readFileSync(path.join(pf,'document.json'),'utf8').includes('"opacity":0.5'), 'own edit confirmed');
+        await t.key('z',['cmd']);
+        await t.waitFor(async()=>!fs.readFileSync(path.join(pf,'document.json'),'utf8').includes('"opacity"'), 'own undo');
+        await post(t.app.base, '/api/update', { file, id:'SharedBoard', props:{name:'Local title'} });
+        await t.waitFor(async()=>fs.readFileSync(path.join(pf,'document.json'),'utf8').includes('Local title'), 'local title confirmed');
+        await post(peer.base, '/api/update', { file:pf, id:'SharedBoard', props:{name:'Peer title'} });
+        await t.waitFor(async()=>JSON.stringify(await t.js('return window.canvasHost.doc')).includes('Peer title'), 'remote title');
+        await t.key('z',['cmd']);
+        await t.waitState(s=>(s.toast || '').includes('Ben changed'), 'undo refusal names the remote writer', 4000);
         await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-live.png'));
         const blocked = await post(t.app.base, '/api/update', { file, id: 'SharedBoard', props: { fill: { type: 'image', url: '../outside.png' } } });
         t.ok(blocked.status >= 400, 'foreign fill refused');

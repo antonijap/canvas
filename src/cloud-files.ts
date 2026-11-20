@@ -104,6 +104,18 @@ export function fileSession(file: string): Session | undefined {
 }
 cloudFileHooks.isCloud = f => !!fileSession(f);
 cloudFileHooks.info = fileInfo;
+cloudFileHooks.undoConflict = (file, writers) => {
+    const s=fileSession(file); if(!s)return;
+    const tree=s.store.replica.view(), names=new Set<string>();
+    let changed=false;
+    for(const [target, expected] of Object.entries(writers)) {
+        const writer=tree.ver(target); if(writer===expected)continue;
+        changed=true;
+        const row=writer ? s.store.db.prepare("SELECT action_json FROM confirmed WHERE json_extract(action_json,'$.id')=? LIMIT 1").get(writer) : null;
+        if(row) names.add(JSON.parse(String(row.action_json)).by.name || 'Someone');
+    }
+    return changed ? [...names].slice(0,3).join(', ') || 'Someone' : undefined;
+};
 cloudFileHooks.assertEdit = f => { const s = fileSession(f); if (s && !CAN_EDIT[s.store.meta.role])
     fail(403, 'read_only', 'This Cloud file is read only'); };
 export function fileInfo(file: string) { const s = fileSession(file); return s ? { name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
