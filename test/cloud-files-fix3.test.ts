@@ -46,3 +46,11 @@ test('comment quota retries and other rejected drafts survive restart',async()=>
  const saved=JSON.parse(String(store.db.prepare('SELECT json FROM comments_state').get()!.json));assert.equal(saved.commentsRejected[0].envelope.op.body,'Draft text');assert.match(fs.readFileSync(path.join(dir,'comments.json'),'utf8'),/Draft text/);
  }finally{clearTimeout(s.timer);store.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+import {prepareMove} from '../src/cloud-files-move.ts';
+test('move keeps source edits made while publication is awaited',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-move-publish-')),source=path.join(dir,'Design.canvas'),dest=path.join(dir,'Cloud.canvas');fs.mkdirSync(source);fs.writeFileSync(path.join(source,'document.json'),JSON.stringify({version:'2.21',children:[]}));
+ const oldHome=process.env.HOME;process.env.HOME=dir;
+ try{await assert.rejects(prepareMove(source,async(name,doc,env)=>{fs.mkdirSync(dest);fs.writeFileSync(path.join(dest,'document.json'),JSON.stringify(doc));fs.writeFileSync(path.join(dest,'widgets.json'),JSON.stringify(env));return{id:crypto.randomUUID(),file:dest,name,cloud:'mac://studio',role:'editor'};},async()=>{await Promise.resolve();fs.writeFileSync(path.join(source,'document.json'),JSON.stringify({version:'2.21',children:[{id:'New',type:'frame'}]}));}),/changed during the move/);assert.match(fs.readFileSync(path.join(source,'document.json'),'utf8'),/New/);
+ }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;fs.rmSync(dir,{recursive:true,force:true});}
+});
