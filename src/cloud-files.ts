@@ -76,7 +76,10 @@ interface Session {
     peers?: Map<string, PeerPresence>;
 }
 const sessions = new Map<string, Session>();
-const checkpointSession=(s:Session)=>s.store.checkpoint(path.join(os.homedir(),"Library","Caches","Canvas","cloud",cloudKey(s.store.meta.cloud),"boards"));
+const checkpointSession=(s:Session)=>{
+    s.store.checkpoint(path.join(os.homedir(),"Library","Caches","Canvas","cloud",cloudKey(s.store.meta.cloud),"boards"));
+    evictClosedPackages(root(),new Set([...sessions.values()].map(s=>s.store.pkg)));
+};
 const revoked = new Set<string>();
 export const fileEvents: {
     view?: (file: string) => void;
