@@ -1092,9 +1092,10 @@ struct AddCloudSheet: View {
         header("Join with an invite")
         FieldBox {
             Image(systemName: "link").glyph(GlyphSize.field).foregroundStyle(Palette.mutedFg)
-            if fromLink != nil {
+            if fromLink != nil || invite != nil {
                 // An invite opened from a link: the link is a secret, so the field only says where it came from.
-                Text("Invite from a link").font(Typography.body).foregroundStyle(Palette.mutedFg).lineLimit(1)
+                Text(fromLink != nil ? "Invite from a link" : "Invite ready").font(Typography.body).foregroundStyle(Palette.mutedFg).lineLimit(1)
+                if fromLink == nil { Spacer(); MiniButton(symbol: "xmark", help: "Use another invite") { link = "" } }
             } else {
                 TextField("Paste an invite link", text: Binding(get: { link }, set: { link = String($0.prefix(8192)); problem = nil }))
                     .textFieldStyle(.plain).font(Typography.body)
