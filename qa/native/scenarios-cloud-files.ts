@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { center, NT, sc } from './harness.ts';
 import { startServer, ROOT, type Scratch } from '../lib.ts';
+import { PLAYGROUND } from '../playground.ts';
+import { expectedMove } from '../cloud-files-fixture.ts';
 const post = async (base: string, p: string, b: unknown) => { const r = await fetch(base + p, { method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, j: await r.json() as any }; };
 sc('cloud-files', 'Only actionable warnings appear on files; storage and people live in host settings', { covers: ['cloud-files:usage'] }, async (t: NT) => {
     await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
@@ -186,8 +188,8 @@ sc('cloud-files', 'Empty actions, page drop confirmation, matching cards and sea
     await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
     const h = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Anna' });
     const local = path.join(t.app.docs, 'Design.canvas');
-    fs.mkdirSync(local);
-    fs.writeFileSync(path.join(local, 'document.json'), JSON.stringify({ version: '2.21', children: [] }));
+    fs.cpSync(PLAYGROUND, local, { recursive: true });
+    const { document } = expectedMove(local);
     try {
         await t.cmd('qa.cloud', { clouds: [{ url: h.j.url, name: 'Studio' }] });
         await t.key('0', ['cmd', 'shift']);
@@ -211,6 +213,8 @@ sc('cloud-files', 'Empty actions, page drop confirmation, matching cards and sea
         await t.click(center(button), { window: 'modal' });
         await t.waitState(s => !s.homeShown && typeof s.file === 'string' && s.file.includes('/cloud-files/'), 'dropped file opens in this Cloud', 15000);
         t.ok(!fs.existsSync(local), 'verified source moved to Trash');
+        const moved = (await t.state()).file!;
+        t.eq(fs.readFileSync(path.join(moved, 'document.json'), 'utf8'), document, 'playground document keeps every byte after JSON serialization');
         const listed = await (await fetch(t.app.base + '/api/cloud/files?cloud=' + encodeURIComponent(h.j.url))).json() as any;
         t.eq(listed.files.length, 1, 'one published file');
         const name = listed.files[0].name;

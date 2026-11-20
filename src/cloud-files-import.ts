@@ -1,5 +1,24 @@
 // A package can hold boards larger than one wire action. Insert parents and component definitions before users.
 import type { DocNode, FileOp, Json } from '../cloud/protocol-files.ts';
+import { stateFromFiles } from '../cloud/core/files/state.ts';
+
+/** Preserve document containers and key order when rebuilding an empty Cloud file. */
+export function importDocument(document: Record<string, Json>): FileOp[] {
+    const state = stateFromFiles(document);
+    const values: Extract<FileOp, { k: 'doc' }>[] = [];
+    for (const [key, value] of Object.entries(state.doc)) {
+        if (key === 'variables') {
+            const entries = Object.entries(value as Record<string, Json>);
+            if (!entries.length) values.push({ k: 'doc', key: 'variables', value: { v: {} } });
+            for (const [id, v] of entries) values.push({ k: 'doc', key: `variables/${id}`, value: { v } });
+        } else values.push({ k: 'doc', key: key as 'fonts' | 'themes', value: { v: value! } });
+    }
+    // Even a document without values can put children before version. Removing an absent key changes no content.
+    if (!values.length) values.push({ k: 'doc', key: 'themes', value: null });
+    values[values.length - 1].order = Object.keys(document);
+    return [...importNodes(state.children), ...values];
+}
+
 export function importNodes(children: DocNode[]): FileOp[] {
     const entries = new Map<string, {
         node: DocNode;

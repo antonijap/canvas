@@ -1,5 +1,5 @@
 import { evictClosedPackages } from "./cloud-files-cache.ts";
-import { importNodes } from "./cloud-files-import.ts";
+import { importDocument } from "./cloud-files-import.ts";
 // Open Cloud files have one durable replica and one socket. Confirmed state never contains speculative edits.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -11,7 +11,6 @@ import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump } from '.
 import { FileStateStore } from './cloud-files-store.ts';
 import { cloudFileHooks } from './cloud-files-runtime.ts';
 import { asOneAction, adoptWriters, onAction, envelopeFileOps } from './cloud-files-ops.ts';
-import { stateFromFiles } from '../cloud/core/files/state.ts';
 import { loadManifest, type Manifest } from '../cloud/core/files/snapshots.ts';
 import { type ObjectStore, fromUtf8 } from '../cloud/core/files/objects.ts';
 import { type Action, type FileServerMessage, type FileOp, CAN_EDIT, checkBlobPath } from '../cloud/protocol-files.ts';
@@ -512,12 +511,11 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                 const created = { id: randomUUID() };
                 await request(b.cloud, '/v1/files', 'POST', { id: created.id, name: b.name || name, importing: true, version: doc.version });
                 importing=created.id;
-                const state = stateFromFiles(doc, env);
                 for (const blob of blobs) {
                     const u = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/uploads`, 'POST', blob.op)) as any;
                     await request(b.cloud, `/v1/files/${created.id}/uploads/${u.id}`, 'PUT', blob.bytes);
                 }
-                const ops: FileOp[] = [...blobs.map(v => v.op), ...importNodes(state.children), ...Object.entries(state.doc).flatMap(([key, value]): FileOp[] => key === 'variables' ? Object.entries(value as Record<string, any>).map(([id, v]) => ({ k: 'doc', key: ('variables/' + id) as `variables/${string}`, value: { v } })) : [{ k: 'doc', key: key as 'fonts' | 'themes', value: { v: value! } }]), ...envelopeFileOps({ widgets: [], extra: {} }, { widgets: env.widgets as Record<string, unknown>[] ?? [], extra: Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'widgets' && k !== 'version')) })];
+                const ops: FileOp[] = [...blobs.map(v => v.op), ...importDocument(doc), ...envelopeFileOps({ widgets: [], extra: {} }, { widgets: env.widgets as Record<string, unknown>[] ?? [], extra: Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'widgets' && k !== 'version')) })];
                 const actions: Action[] = [];
                 let seq = 0;
                 for (let i = 0; i < ops.length; i += 100) {
