@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { PLAYGROUND } from '../qa/playground.ts';
 import { ROOT, startServer } from '../qa/lib.ts';
@@ -29,13 +30,14 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
     };
     try {
         fs.mkdirSync(path.join(dir, 'tunnels'), { recursive: true });
-        for (const fixture of ['playground', 'media', 'empty variables', 'children first']) {
+        for (const fixture of ['playground', 'media', 'empty variables', 'children first', 'package image folder']) {
             await t.test(fixture, async () => {
                 const host = await call('/api/cloud/host/start', { name: 'Studio', label: 'Editor' });
                 const source = path.join(dir, fixture + '.canvas');
                 if (fixture === 'playground') fs.cpSync(PLAYGROUND, source, { recursive: true });
                 else {
                     fs.mkdirSync(source);
+                    const imagePath = fixture === 'package image folder' ? 'assets/pictures/image.png' : 'media/image.png';
                     const doc = fixture === 'children first' ? { children: [], version: '2.21' } : {
                         version: '2.21',
                         themes: { mode: ['light', 'dark'] },
@@ -45,7 +47,7 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                             type: 'frame', id: 'Board', width: 200, height: 200,
                             children: Array.from({ length: 130 }, (_, i) => ({
                                 id: 'Item' + i, type: 'rectangle', width: 1, height: 1,
-                                fill: { type: 'image', url: 'media/image.png' },
+                                fill: { type: 'image', url: imagePath },
                             })),
                         }, { id: 'Empty', type: 'frame', children: [] }],
                     };
@@ -53,6 +55,10 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     fs.mkdirSync(path.join(source, 'media'));
                     fs.mkdirSync(path.join(source, 'shaders'));
                     fs.writeFileSync(path.join(source, 'media/image.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=', 'base64'));
+                    if (fixture === 'package image folder') {
+                        fs.mkdirSync(path.dirname(path.join(source, imagePath)), { recursive: true });
+                        fs.copyFileSync(path.join(source, 'media/image.png'), path.join(source, imagePath));
+                    }
                     const video = fs.readdirSync(path.join(PLAYGROUND, 'media')).find(name => name.endsWith('.mp4'))!;
                     fs.copyFileSync(path.join(PLAYGROUND, 'media', video), path.join(source, 'media/clip.mp4'));
                     fs.writeFileSync(path.join(source, 'shaders/Shader.src-123456789abc.wgsl'), 'fn shade(p:vec2<f32>)->vec4<f32>{return vec4<f32>(p,0.,1.);}');
@@ -66,7 +72,13 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                         { id: 'third', name: 'Third', boards: [] },
                     ] }));
                 }
-                const { document, images } = expectedMove(source);
+                let { document, images } = expectedMove(source);
+                if (fixture === 'package image folder') {
+                    const bytes = fs.readFileSync(path.join(source, 'assets/pictures/image.png'));
+                    const rel = `media/${createHash('sha256').update(bytes).digest('hex')}.png`;
+                    document = document.replaceAll('assets/pictures/image.png', rel);
+                    images.push({ rel, bytes });
+                }
                 const envelope = JSON.parse(fs.readFileSync(path.join(source, 'widgets.json'), 'utf8'));
                 const assets = ['media', 'shaders'].flatMap(folder => fs.readdirSync(path.join(source, folder))
                     .filter(name => fs.statSync(path.join(source, folder, name)).isFile() && !name.includes('.poster-'))
@@ -89,6 +101,25 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 check(reopened.file);
             });
         }
+        const rejectionHost = await call('/api/cloud/host/start', { name: 'Studio', label: 'Editor' });
+        for (const code of ['invalid', 'forbidden']) await t.test(`move returns the host ${code} reason and keeps the source`, async () => {
+            const source = path.join(dir, `Rejected-${code}.canvas`);
+            fs.mkdirSync(source);
+            const node = code === 'invalid' ? { id: 'Layer', type: 'unknown-kind' }
+                : { id: 'Layer', type: 'rectangle', fill: { type: 'image', url: 'media/missing.png' } };
+            const document = JSON.stringify({ version: '2.21', children: [node] });
+            fs.writeFileSync(path.join(source, 'document.json'), document);
+            const response = await fetch(server.base + '/api/cloud/files/move?file=' + encodeURIComponent(source), {
+                method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify({ cloud: rejectionHost.url }),
+            });
+            const result = await response.json() as any;
+            assert.equal(response.status, 400);
+            assert.equal(result.code, code);
+            assert.ok(result.error.startsWith(`Cloud refused import (${code}): `));
+            assert.match(result.error, code === 'invalid' ? /unknown-kind/ : /not a file of this design/);
+            assert.ok(fs.readFileSync(path.join(dir, '.canvas-logs/server.log'), 'utf8').includes(result.error));
+            assert.equal(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), document);
+        });
     } finally {
         await server.stop();
         fs.rmSync(dir, { recursive: true, force: true });

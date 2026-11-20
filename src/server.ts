@@ -114,15 +114,17 @@ writerHooks.problem = (docFile, message) => {
   for (const c of clients.get(docFile) ?? []) c.write(msg);
 };
 /** Where server.log goes: CANVAS_LOG_DIR (a QA instance's own folder), else ~/Library/Logs/Canvas. */
-const logDir = () => process.env.CANVAS_LOG_DIR || path.join(os.homedir(), "Library", "Logs", "Canvas");
+const logDir = () => process.env.CANVAS_LOG_DIR || (process.env.NODE_TEST_CONTEXT ? null : path.join(os.homedir(), "Library", "Logs", "Canvas"));
 /** A line in ~/Library/Logs/Canvas/server.log (where the app's crash lines go too). */
 function logLine(line: string): void {
   try {
     const logs = logDir();
+    if (!logs) return;
     fs.mkdirSync(logs, { recursive: true });
     fs.appendFileSync(path.join(logs, "server.log"), `${new Date().toISOString()} ${scrubSecrets(line)}\n`);
   } catch {}
 }
+fileEvents.problem = message => logLine(`[canvas] ${message}`);
 /**
  * Exit once every edit is on disk. New edits are refused from the start. Whatever could not be written in time is
  * saved as a recovery copy next to its file and reported (log, pages) first; then the exit code says it (1). When
@@ -1056,8 +1058,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.stderr.write(line);
     try {
       const logs = logDir();
-      fs.mkdirSync(logs, { recursive: true });
-      fs.appendFileSync(path.join(logs, "server.log"), line);
+      if (logs) {
+        fs.mkdirSync(logs, { recursive: true });
+        fs.appendFileSync(path.join(logs, "server.log"), line);
+      }
     } catch {}
     process.exit(1);
   });

@@ -7,6 +7,7 @@ import { readCommentsFile } from './comments-file.ts';
 import { opsForShare } from './cloud-sync.ts';
 import { openInPackage } from '../cloud/core/files/confine.ts';
 import { trashPackage } from './cloud-files-trash.ts';
+import { readMoveAsset } from './cloud-files-assets.ts';
 export interface MoveBlob {
     op: Extract<FileOp, {
         k: 'blob';
@@ -67,16 +68,32 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
             blobs.push({ op: { k: 'blob', path: rel as BlobPath, sha256, bytes: bytes.length, type: blobTypeOf(rel as BlobPath) }, bytes, source:abs });
         }
     }
+    const assetRef = (ref: string): string => {
+        if (rewrites.has(ref)) return rewrites.get(ref)!;
+        if (!checkBlobPath(ref) || /^data:/i.test(ref)) return ref;
+        const ext = path.extname(ref).toLowerCase();
+        const folder = ext === '.wgsl' ? 'shaders' : 'media';
+        if (checkBlobPath(`${folder}/import${ext}`)) throw new Error('Move refused: unsupported media type');
+        const bytes = readMoveAsset(pkg, ref), sha256 = createHash('sha256').update(bytes).digest('hex');
+        const rel = `${folder}/${sha256}${ext}` as BlobPath;
+        if (!blobs.some(b => b.op.path === rel))
+            blobs.push({ op: { k: 'blob', path: rel, sha256, bytes: bytes.length, type: blobTypeOf(rel) }, bytes, source: path.join(pkg, ref) });
+        rewrites.set(ref, rel);
+        return rel;
+    };
     // Data images become content addressed package assets; external URLs are refused without fetching them.
     const walk = (v: any) => {
         if (!v || typeof v !== 'object')
             return;
-        if(typeof v.scriptUri==='string'&&rewrites.has(v.scriptUri))v.scriptUri=rewrites.get(v.scriptUri);
-        if(v.config&&typeof v.config==='object')for(const key of ['src','source'])if(typeof v.config[key]==='string'&&rewrites.has(v.config[key]))v.config[key]=rewrites.get(v.config[key]);
+        if(typeof v.scriptUri==='string')v.scriptUri=assetRef(v.scriptUri);
+        if(v.config&&typeof v.config==='object') {
+            const key = v.kind === 'video' ? 'src' : v.kind === 'shader' ? 'source' : null;
+            if(key && typeof v.config[key]==='string')v.config[key]=assetRef(v.config[key]);
+        }
         if (v.type === 'image' && typeof v.url === 'string') {
-            v.url=rewrites.get(v.url)??v.url;
             if (/^https?:/i.test(v.url))
                 throw new Error('Cloud files refuse http(s) image fills');
+            v.url=assetRef(v.url);
             const data = /^data:image\/(png|jpeg|gif|webp|svg\+xml);base64,([A-Za-z0-9+/=\s]+)$/.exec(v.url);
             if (data) {
                 const bytes = Buffer.from(data[2], 'base64'), sha256 = createHash('sha256').update(bytes).digest('hex'), ext = ({ jpeg: 'jpg', 'svg+xml': 'svg' } as any)[data[1]] ?? data[1], rel = `media/${sha256}.${ext}` as BlobPath;
@@ -87,7 +104,7 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
         for (const child of Object.values(v))
             walk(child);
     };
-    if(Array.isArray(doc.fonts))for(const f of doc.fonts)for(const key of ["url","file","src"])if(typeof f[key]==='string'&&rewrites.has(f[key]))f[key]=rewrites.get(f[key]);
+    if(Array.isArray(doc.fonts))for(const f of doc.fonts)for(const key of ["url","file","src"])if(typeof f[key]==='string')f[key]=assetRef(f[key]);
     walk(doc);
     walk(env);
     const comments = readCommentsFile(pkg);

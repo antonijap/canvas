@@ -12,6 +12,7 @@ import { tmpDir } from "./helpers.ts";
 const dir = tmpDir("docwriter");
 process.env.CANVAS_ROOTS = dir;
 process.env.CANVAS_STATE_DIR = path.join(dir, "state-home"); // backups land here, not in the home folder
+process.env.CANVAS_LOG_DIR = path.join(dir, 'logs'); // inherited by the plain server used for crash testing
 
 const pw = await import("../src/docwriter.ts");
 const { startServer } = await import("../src/server.ts");

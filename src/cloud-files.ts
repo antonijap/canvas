@@ -81,6 +81,7 @@ const checkpointSession=(s:Session)=>{
 };
 const revoked = new Set<string>();
 export const fileEvents: {
+    problem?: (message: string) => void;
     view?: (file: string) => void;
     removed?: (file: string) => void;
     presence?: (file: string, peers: PeerPresence[]) => void;
@@ -521,8 +522,9 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                 for (let i = 0; i < ops.length; i += 100) {
                     const a = { id: randomUUID(), baseSeq: seq, epoch: 1, ops: ops.slice(i, i + 100), at: new Date().toISOString() };
                     const out = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/sync`, 'POST', { type: 'actions', epoch: 1, actions: [a] })) as any;
-                    if (out.messages.some((m: any) => m.type === 'reject' || m.type === 'error'))
-                        throw new Error('Cloud refused import');
+                    const rejected = (out.messages as FileServerMessage[]).find(m => m.type === 'reject' || m.type === 'error');
+                    if (rejected && (rejected.type === 'reject' || rejected.type === 'error'))
+                        fail(400, rejected.code, `Cloud refused import (${rejected.code}): ${rejected.message}`);
                     seq += a.ops.length;
                     actions.push(a);
                 }
@@ -537,6 +539,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             }, async dest => {await request(b.cloud, `/v1/files/${dest.id}/import/complete`, 'POST', {});});
             return out(200, moved);
             } catch(error) {
+                fileEvents.problem?.((error as Error).message);
                 if(importing) {
                     // A publication can succeed even when its response is lost. Never cancel a live file.
                     const state = await cloudJson(await request(b.cloud, `/v1/files/${importing}`));
