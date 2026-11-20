@@ -65,3 +65,10 @@ test('multipart total cannot exceed reservation and closed parts are swept',()=>
  h.files.sweepParts();assert.equal(fs.existsSync(path.join(dir,'uploads',id,up.id)),false);
  const orphan=path.join(dir,'uploads',crypto.randomUUID(),'gone');fs.mkdirSync(orphan,{recursive:true});fs.writeFileSync(path.join(orphan,'0'),'leftover');h.files.sweepParts();assert.equal(fs.existsSync(orphan),false);
 }));
+
+test('capacity uses accounted bytes between timed recounts',()=>hostTest(async(h,call,dir)=>{
+ const original=fs.readdirSync;let walks=0;(fs as any).readdirSync=(p:any,...args:any[])=>{if(String(p)===dir)walks++;return (original as any)(p,...args);};
+ try{for(let i=0;i<50;i++)(h.files as any).capacity(0);assert.equal(walks,0);const before=(h.files as any).usedBytes;
+ const key=`files/${crypto.randomUUID()}/blobs/${'b'.repeat(64)}`;await h.files.objects.putIfAbsent(key,new Uint8Array(123));assert.equal((h.files as any).usedBytes,before+123);await h.files.objects.delete(key);assert.equal((h.files as any).usedBytes,before);
+ }finally{fs.readdirSync=original;}
+}));

@@ -36,7 +36,8 @@ const error = (status: number, code: string, message: string): never => { throw 
 export class DiskObjects implements ObjectStore {
     readonly root: string;
     private check?: (bytes: number) => void;
-    constructor(root: string, check?: (bytes: number) => void) { this.check = check; this.root = root; fs.mkdirSync(root, { recursive: true, mode: 0o700 }); }
+    private changed?: (delta: number) => void;
+    constructor(root: string, check?: (bytes: number) => void, changed?: (delta: number) => void) { this.check = check; this.changed = changed; this.root = root; fs.mkdirSync(root, { recursive: true, mode: 0o700 }); }
     private at(key: string): string {
         if (!/^files\/[0-9a-f-]{36}\/(boards\/[0-9a-f]{64}\.json\.gz|vers\/[0-9a-f]{64}\.json\.gz|blobs\/[0-9a-f]{64}|manifests\/[0-9]+\.json)$/.test(key) || !UUID.test(key.split('/')[1]))
             throw new Error('Invalid object key');
@@ -65,6 +66,7 @@ export class DiskObjects implements ObjectStore {
         }
         try {
             fs.linkSync(tmp, dest);
+            this.changed?.(bytes.length);
             const dir = fs.openSync(path.dirname(dest), 'r');
             try {
                 fs.fsyncSync(dir);
@@ -92,7 +94,7 @@ export class DiskObjects implements ObjectStore {
             return null;
         throw e;
     } }
-    async delete(key: string) { fs.rmSync(this.at(key), { force: true }); }
+    async delete(key: string) { const file = this.at(key), bytes = fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0; fs.rmSync(file, { force: true }); this.changed?.(-bytes); }
     async list(prefix: string) {
         const out: string[] = [];
         const walk = (dir: string, rel: string) => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -144,6 +146,8 @@ export class MacFiles {
     private cap: number;
     private inFlight = 0;
     private bodies = 0;
+    private usedBytes = 0;
+    private readonly dbBytes = new Map<string, number>();
     private readonly partBytes = new Map<string, number>();
     private readonly activeParts = new Set<string>();
     private readonly sweepTimer: NodeJS.Timeout;
@@ -156,13 +160,28 @@ export class MacFiles {
         this.now = now;
         this.meter = new MacUsage(db, now);
         fs.mkdirSync(path.join(root, 'files'), { recursive: true, mode: 0o700 });
-        this.objects = new DiskObjects(path.join(root, 'objects'), bytes => this.capacity(bytes));
+        this.objects = new DiskObjects(path.join(root, 'objects'), bytes => this.capacity(bytes), delta => { this.usedBytes += delta; });
         db.sql.exec(`CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY,name TEXT NOT NULL,state TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`);
         this.bank = new LeaseBank(db);
         this.importBank = new LeaseBank(db, { ops: 6000, messages: 120, presence: 0 });
         this.ledger = new StorageLedger(db, cap);
         this.sweepParts();
-        this.sweepTimer = setInterval(() => this.sweepParts(), 60_000); this.sweepTimer.unref();
+        this.recount();
+        this.sweepTimer = setInterval(() => { this.sweepParts(); this.recount(); }, 60_000); this.sweepTimer.unref();
+    }
+    private accountDatabase(file: string) {
+        const bytes = ['', '-wal', '-shm'].reduce((n, suffix) => n + (fs.statSync(file + suffix, { throwIfNoEntry: false })?.size ?? 0), 0);
+        this.usedBytes += bytes - (this.dbBytes.get(file) ?? 0); this.dbBytes.set(file, bytes);
+    }
+    private recount() {
+        this.dbBytes.clear(); this.usedBytes = 0;
+        this.accountDatabase(path.join(this.root, 'team.sqlite'));
+        for (const file of fs.readdirSync(path.join(this.root, 'files'))) if (file.endsWith('.sqlite')) this.accountDatabase(path.join(this.root, 'files', file));
+        this.usedBytes = diskBytes(this.root);
+    }
+    private removeParts(folder: string) {
+        if (fs.existsSync(folder) && !fs.lstatSync(folder).isSymbolicLink()) this.usedBytes -= diskBytes(folder);
+        fs.rmSync(folder, { recursive: true, force: true }); this.partBytes.delete(folder);
     }
     sweepParts() {
         const root = path.join(this.root, 'uploads');
@@ -174,10 +193,10 @@ export class MacFiles {
             const exists = this.db.sql.exec('SELECT 1 FROM files WHERE id=?', file).toArray().length;
             for (const id of fs.readdirSync(dir)) {
                 const folder = path.join(dir, id);
-                if (this.activeParts.has(folder)) continue;
+                if ([...this.activeParts].some(p => p.startsWith(folder + path.sep))) continue;
                 const up = exists ? this.room(file).store.sql.exec<{state:string;at_ms:number}>('SELECT state,at_ms FROM uploads WHERE id=?', id).toArray()[0] : null;
                 if (!up || up.state !== 'open' || this.now() - up.at_ms >= UPLOAD_GRACE_MS) {
-                    fs.rmSync(folder, { recursive: true, force: true }); this.partBytes.delete(folder);
+                    this.removeParts(folder);
                 }
             }
         }
@@ -211,6 +230,7 @@ export class MacFiles {
                 store.sql.exec('ALTER TABLE ops ADD COLUMN by_id TEXT');
             r = { leases, store, core, roles, comments, sockets: new Map(), presence: new Map(), lastAction: 0, snapshotAt: this.now() };
             this.rooms.set(file, r);
+            this.accountDatabase(path.join(this.root, 'files', file + '.sqlite'));
         }
         return r;
     }
@@ -258,20 +278,21 @@ export class MacFiles {
             r.core.tree.forget();
             throw e;
         }
+        finally { this.accountDatabase(path.join(this.root, 'files', r.core.file + '.sqlite')); this.accountDatabase(path.join(this.root, 'team.sqlite')); }
     }
     private changed(r: Room) {
         this.db.sql.exec('UPDATE files SET updated_at=? WHERE id=?', new Date(this.now()).toISOString(), r.core.file);
         r.lastAction++;
         if (r.timer)
             clearTimeout(r.timer);
-        const take = async () => { await buildSnapshot(r.core); compact(r.core); await collectGarbage(r.core, this.ledger); r.lastAction = 0; r.snapshotAt = this.now(); };
+        const take = async () => { try { await buildSnapshot(r.core); compact(r.core); await collectGarbage(r.core, this.ledger); r.lastAction = 0; r.snapshotAt = this.now(); } finally { this.accountDatabase(path.join(this.root, 'files', r.core.file + '.sqlite')); } };
         r.timer = setTimeout(() => void take().catch(() => { }), r.lastAction >= 2000 ? 0 : 300000);
         r.timer.unref();
     }
     private edit(me: Me) { const fresh = this.current(me); if (!fresh)
         error(401, 'removed', 'This device was removed'); if (fresh!.role !== 'owner' && fresh!.role !== 'editor')
         error(403, 'read_only', 'This Cloud file is read only'); return fresh!; }
-    private capacity(bytes: number) { if (diskBytes(this.root) + bytes > this.cap)
+    private capacity(bytes: number) { if (this.usedBytes + bytes > this.cap)
         error(429, 'quota', "This Cloud storage cap is reached"); }
     private disk() { const s = fs.statfsSync(this.root); return s.bavail * s.bsize; }
     private storage(): number { return fs.readdirSync(path.join(this.root, 'files')).reduce((n, f) => n + fs.statSync(path.join(this.root, 'files', f)).size, 0) + this.ledger.held(); }
@@ -279,13 +300,14 @@ export class MacFiles {
         if (!(url.pathname === '/v1/usage' || url.pathname === '/v1/files' || url.pathname.startsWith('/v1/files/')))
             return false;
         const json = (status: number, value: unknown) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(value)); return true; };
+        let touched: string | undefined;
         try {
             const p = url.pathname, method = req.method ?? 'GET';
             this.meter.message();
             if (p === '/v1/usage') {
                 if (me.role !== 'owner')
                     return json(403, { code: 'forbidden', message: 'Owner role required' });
-                const freeDisk = this.disk(), storageBytes = diskBytes(this.root);
+                const freeDisk = this.disk(), storageBytes = this.usedBytes;
                 const stats = this.meter.read();
                 return json(200, { adapter: 'mac', storageBytes, freeDisk, peopleConnected: new Set([...this.rooms.values()].flatMap(r => [...r.sockets.values()].map(m => m.id))).size, ...stats, estimated: true, tone: macUsageTone(freeDisk, storageBytes, stats.restartsHour), brake: freeDisk < 5 * GB ? 'storage' : 'none' });
             }
@@ -305,12 +327,14 @@ export class MacFiles {
                     return json(409, { code: 'conflict', message: 'File id is taken' });
                 this.db.sql.exec("INSERT INTO files VALUES(?,?,?,?,?,?)", id, b.name, b.importing === true ? 'importing' : 'live', me.id, new Date(this.now()).toISOString(), new Date(this.now()).toISOString());
                 const r = this.room(id);
+                touched = id;
                 r.core.seedState(stateFromFiles({ version: typeof b.version === 'string' && /^2\.\d{1,3}$/.test(b.version) ? b.version : '2.21', children: [] }));
                 await buildSnapshot(r.core);
                 return json(201, { id, name: b.name });
             }
             const m = /^\/v1\/files\/([^/]+)(?:\/(.*))?$/.exec(p)!;
             const file = m[1], sub = m[2] ?? '', row = this.row(file, me);
+            touched = file;
             if (!['GET', 'HEAD'].includes(method) && sub !== 'sync' && sub !== 'comments')
                 this.edit(me);
             if (row.state === 'trash')
@@ -416,7 +440,7 @@ export class MacFiles {
                 const dest = path.join(dir, part[2]), tmp = dest + '.tmp';
                 if (fs.existsSync(dest) || fs.existsSync(tmp)) return json(409, { code: 'conflict' });
                 if (!this.partBytes.has(dir)) this.partBytes.set(dir, diskBytes(dir));
-                this.activeParts.add(dir);
+                this.activeParts.add(tmp);
                 let bytes = 0;
                 const fd = fs.openSync(tmp, 'wx', 0o600);
                 try {
@@ -427,22 +451,25 @@ export class MacFiles {
                         this.capacity(c.length);
                         fs.writeSync(fd, c);
                         bytes += c.length; this.partBytes.set(dir, this.partBytes.get(dir)! + c.length);
+                        this.usedBytes += c.length;
                     }
                     fs.fsyncSync(fd);
                 }
                 catch (e) {
                     fs.rmSync(tmp, { force: true });
                     this.partBytes.set(dir, this.partBytes.get(dir)! - bytes);
+                    this.usedBytes -= bytes;
                     throw e;
                 }
                 finally {
                     fs.closeSync(fd);
-                    this.activeParts.delete(dir);
+                    this.activeParts.delete(tmp);
                 }
                 this.edit(me);
                 if (fs.existsSync(dest)) {
                     fs.unlinkSync(tmp);
                     this.partBytes.set(dir, this.partBytes.get(dir)! - bytes);
+                    this.usedBytes -= bytes;
                     return json(409, { code: 'conflict' });
                 }
                 fs.renameSync(tmp, dest);
@@ -468,8 +495,7 @@ export class MacFiles {
                     this.edit(me);
                     const bytes = Buffer.concat(parts.map(p => fs.readFileSync(path.join(dir, p))));
                     const out = await putUpload(r.core, this.ledger, this.conn(me), complete[1], bytes);
-                    fs.rmSync(dir, { recursive: true, force: true });
-                    this.partBytes.delete(dir);
+                    this.removeParts(dir);
                     return json(200, out);
                 }
                 finally {
@@ -579,6 +605,10 @@ export class MacFiles {
         catch (e) {
             const x = e as any;
             return json(x.status ?? (x instanceof UploadError ? x.code === 'forbidden' ? 403 : x.code === 'quota' ? 429 : 400 : 500), { code: x.code ?? 'server', message: x.message });
+        }
+        finally {
+            this.accountDatabase(path.join(this.root, 'team.sqlite'));
+            if (touched) this.accountDatabase(path.join(this.root, 'files', touched + '.sqlite'));
         }
     }
     upgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer, url: URL, me: Me): boolean {
