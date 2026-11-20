@@ -305,12 +305,12 @@ catch (e) {
     render(s);
     fail(a.reject === 'forbidden' ? 403 : 409, a.reject, a.message);
 } render(s); s.chain = s.chain.then(() => send(s)).catch(() => { s.ws?.close(); }); }, true);
-export async function openCloudFile(cloud: string, id: string) {
+export async function openCloudFile(cloud: string, id: string, importingName?: string) {
     cloud = resolveCloud(cloud); const openingGeneration=generation(cloud);
     if (!UUID.test(id))
         fail(400, 'invalid', 'Invalid file id');
-    const listed = await cloudFiles(cloud) as any;
-    const item = listed.files?.find((f: any) => f.id === id);
+    const listed = importingName === undefined ? await cloudFiles(cloud) as any : null;
+    const item = importingName === undefined ? listed.files?.find((f: any) => f.id === id) : {id,name:importingName};
     if (!item)
         fail(404, 'not_found', 'No such Cloud file');
     const pkg = path.join(root(), cloudKey(cloud), id + '.canvas');
@@ -431,9 +431,12 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
         if (p === '/api/cloud/files/move') {
             if (fileInfo(url.searchParams.get('file')!))
                 return out(409, { code: 'conflict', error: 'This file already belongs to a Cloud' });
+            let importing: string | undefined;
+            try {
             const moved = await prepareMove(url.searchParams.get('file')!, async (name, doc, env, blobs, comments) => {
                 const created = { id: randomUUID() };
                 await request(b.cloud, '/v1/files', 'POST', { id: created.id, name: b.name || name, importing: true, version: doc.version });
+                importing=created.id;
                 const state = stateFromFiles(doc, env);
                 for (const blob of blobs) {
                     const u = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/uploads`, 'POST', blob.op)) as any;
@@ -456,11 +459,20 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                     if (out.rejected.length)
                         throw new Error('Cloud refused imported comments');
                 }
-                await request(b.cloud, `/v1/files/${created.id}/import/complete`, 'POST', {});
                 // Reopen from the host's verified snapshot before the local package can go to the Trash.
-                return openCloudFile(b.cloud, created.id);
-            });
+                return openCloudFile(b.cloud, created.id, b.name || name);
+            }, async dest => {await request(b.cloud, `/v1/files/${dest.id}/import/complete`, 'POST', {});});
             return out(200, moved);
+            } catch(error) {
+                if(importing) {
+                    const pkg=path.join(root(),cloudKey(resolveCloud(b.cloud)),importing+'.canvas'), file=path.join(pkg,'document.json'), s=sessions.get(file);
+                    if(s) {s.stopped=true;if(s.timer)clearTimeout(s.timer);s.ws?.close();await s.chain.catch(()=>{});s.store.close();sessions.delete(file);fileEvents.removed?.(file);}
+                    fs.rmSync(pkg,{recursive:true,force:true});
+                    try {await request(b.cloud,`/v1/files/${importing}/import`,'DELETE');}
+                    catch(cleanup) {throw new Error((error as Error).message+'; local source kept. Cloud cleanup: '+(cleanup as Error).message);}
+                }
+                throw error;
+            }
         }
         const s = fileSession(b.file ?? url.searchParams.get('file') ?? '');
         if (!s)

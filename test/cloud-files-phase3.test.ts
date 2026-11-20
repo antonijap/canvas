@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { CloudHost, newSecret } from '../cloud/adapters/mac/host.ts';
 import { FileStateStore } from '../src/cloud-files-store.ts';
 import { stateFromFiles, materialize } from '../cloud/core/files/state.ts';
@@ -10,6 +11,23 @@ import { MemoryObjects } from '../cloud/core/files/objects.ts';
 import { MUTATING_ROUTES, readOnlyRoute } from '../src/cloud-files-gate.ts';
 const doc = { version: '2.21', children: [{ id: 'Board', type: 'frame', width: 300, height: 200, children: [{ id: 'Title', type: 'text', content: 'Hello' }] }] };
 const author = { id: 'anna', name: 'Anna' };
+test('cancelled imports release room, objects and reservations', async () => {
+    const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-import-cancel-')), h=new CloudHost({dir,port:0});
+    try {
+        const token=h.ownerDevice('Anna'),base='http://127.0.0.1:'+await h.start(),id=crypto.randomUUID();
+        const call=async(p:string,method:string,body?:unknown)=>fetch(base+p,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+        assert.equal((await call('/v1/files','POST',{id,name:'Import',importing:true})).status,201);
+        await call(`/v1/files/${id}/manifest`,'GET');
+        assert.equal((await call(`/v1/files/${id}/uploads`,'POST',{sha256:'a'.repeat(64),bytes:100,type:'image/png'})).status,201);
+        assert.ok(fs.existsSync(path.join(dir,'files',id+'.sqlite')));
+        assert.equal((await call(`/v1/files/${id}/import`,'DELETE')).status,200);
+        assert.equal((await call(`/v1/files/${id}/manifest`,'GET')).status,404);
+        assert.equal(fs.existsSync(path.join(dir,'files',id+'.sqlite')),false);
+        assert.equal(fs.existsSync(path.join(dir,'objects','files',id)),false);
+        const db=new DatabaseSync(path.join(dir,'team.sqlite'),{readOnly:true});
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM storage_held').get()!.n,0);db.close();
+    } finally {await h.stop();fs.rmSync(dir,{recursive:true,force:true});}
+});
 test('state.sqlite keeps confirmed, pending and refused across a damaged view and restart', async () => {
     const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-state-'));
     try {
@@ -88,8 +106,10 @@ test('Cloud rendering refuses remote and foreign media paths', async () => {
     try {
         fs.mkdirSync(path.join(pkg, '.cloud'));
         fs.writeFileSync(path.join(pkg, '.cloud', 'state.sqlite'), '');
-        const scene = await sceneOf({ version: '2.21', children: [{ id: 'B', type: 'frame', width: 100, height: 100, fill: { type: 'image', url: 'https://example.com/pixel.png' }, children: [] }] } as any, path.join(pkg, 'document.json'), 'B');
-        assert.equal(scene.images.some(s => s.includes('example.com')), false);
+        for (const url of ['https://example.com/pixel.png','../outside.png','/Users/you/pixel.png','data:image/png;base64,AAAA']) {
+            const scene = await sceneOf({ version: '2.21', children: [{ id: 'B', type: 'frame', width: 100, height: 100, fill: { type: 'image', url }, children: [] }] } as any, path.join(pkg, 'document.json'), 'B');
+            assert.equal(scene.images.length, 0, 'foreign fill draws no image: '+url);
+        }
     }
     finally {
         fs.rmSync(pkg, { recursive: true, force: true });
