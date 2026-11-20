@@ -455,9 +455,9 @@ function start(host) {
     if (c && c.cmd === "insets") schedule();
     if (c && c.cmd === "comment") setMode(!st.mode);
   });
-  host.on("resync", () => load());
+  host.on("resync", () => { resyncPeople(); load(); });
   if (host.es) host.es.addEventListener("comments", () => load());
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { resyncPeople(); load(); } });
 
   // ---------- fields ----------
   function autoGrow(ta) {
@@ -784,6 +784,7 @@ function start(host) {
 
   /** People in this file now, using the cursor roster rather than comment history. */
   let peopleSig = null;
+  function resyncPeople() { peopleSig = null; drawShared(); }
   function drawShared() {
     const fileState = window.canvasCloudFile, sync = st.sync;
     const state = fileState || sync;
