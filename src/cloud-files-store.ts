@@ -83,11 +83,12 @@ export class FileStateStore {
         if (this.meta.role !== 'owner' && this.meta.role !== 'editor')
             throw Object.assign(new Error('This Cloud file is read only'), { status: 403, code: 'read_only' });
         const before = this.replica.durable();
+        const textDrafts = ops.flatMap(op => op.k === 'set' && typeof op.props.content?.v === 'string' ? [{ id: op.id, content: op.props.content.v }] : []);
         // Text coordinates must name confirmed text, so the room can transform another person's splice.
         ops = ops.flatMap((op): FileOp[] => {
             if (op.k !== 'set' || typeof op.props.content?.v !== 'string') return [op];
             const node = this.replica.tree.node(op.id), old = node?.props.content;
-            if (typeof old !== 'string') return [op];
+            if (!node || typeof old !== 'string') return [op];
             const next = op.props.content.v;
             let from = 0, end = old.length, nextEnd = next.length;
             while (from < end && from < nextEnd && old[from] === next[from]) from++;
@@ -119,6 +120,7 @@ export class FileStateStore {
             const p = this.replica.pending.at(-1)!;
             p.sha = actionSha(a);
         }
+        if (textDrafts.length) this.replica.pending.at(-1)!.textDrafts = textDrafts;
         try {
             this.commit();
         }

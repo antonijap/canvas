@@ -102,3 +102,13 @@ test('import budgets belong to each person and stale imports free storage',()=>h
  (h.files as any).db.sql.exec('UPDATE files SET created_at=?',new Date(Date.now()-25*60*60*1000).toISOString());
  await h.files.expireImports();assert.equal((await call(`/v1/files/${id}`)).status,404);assert.equal(fs.existsSync(path.join(dir,'files',id+'.sqlite')),false);assert.equal(fs.existsSync(path.join(dir,'objects','files',id)),false);assert.equal(fs.existsSync(folder),false);assert.equal((h.files as any).ledger.held(),0);assert.equal((await call(`/v1/files/${live}`)).status,200);
 }));
+
+test('overlapping text rejection keeps the second persons full text in the recovered copy',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-overlap-copy-')),old=process.env.HOME;process.env.HOME=dir;
+ const store=new FileStateStore(path.join(dir,'cache.canvas'),{cloud:'mac://studio',file:crypto.randomUUID(),name:'Design',role:'editor',author:{id:'ben',name:'Ben'},state:state()});
+ const a=store.propose([{k:'set',id:'Title',props:{content:{v:'aYYd'}}}]);assert.ok(!('reject'in a));store.replica.joined=true;
+ const s:any={store,status:'connected',chain:Promise.resolve(),stopped:false,offline:false,comments:[],commentsSeq:0,commentsPending:[]};
+ try{const room=memoryRoom(store.meta.file);room.seedState(state());const remote=room.submit({author:{id:'anna',name:'Anna'},role:'editor'},{type:'actions',epoch:1,actions:[{id:crypto.randomUUID(),at:'',baseSeq:0,epoch:1,ops:[{k:'text',id:'Title',baseSeq:0,from:1,del:2,ins:'XX'}]}]});await receive(s,{type:'applied',actions:remote.applied});const out=room.submit({author:store.meta.author,role:'editor'},{type:'actions',epoch:1,actions:[a]});assert.equal(out.replies[0].type,'reject');await receive(s,out.replies[0]);
+ const root=path.join(dir,'Documents','Canvas Recovered'),copy=path.join(root,fs.readdirSync(root)[0]);assert.match(fs.readFileSync(path.join(copy,'document.json'),'utf8'),/aYYd/);assert.equal(store.replica.tree.node('Title')!.props.content,'aXXd');
+ }finally{store.close();if(old===undefined)delete process.env.HOME;else process.env.HOME=old;fs.rmSync(dir,{recursive:true,force:true});}
+});
