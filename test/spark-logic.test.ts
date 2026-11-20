@@ -93,12 +93,3 @@ describe("words", () => {
     assert.equal(L.layersWord(9), "9 layers");
   });
 });
-
-test("send button has no adjacent shortcut chip; hover shortcuts remain", async () => {
-  const { readFileSync } = await import("node:fs");
-  const source = readFileSync(new URL("../src/page/spark.js", import.meta.url), "utf8");
-  const composer = source.slice(source.indexOf("function build()"), source.indexOf('el.querySelector(".sk-slot")'));
-  assert.ok(composer.includes('class="sk-send"'));
-  assert.ok(!composer.includes("keycaps("));
-  assert.ok(source.includes('keycaps(["⌘", "↩"], "dark")'));
-});

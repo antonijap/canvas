@@ -139,7 +139,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
     m = resolve(img, await measure(t, {
       hint: "b:.cm-hint", hintIcon: "b:.cm-hint > span:first-child svg", hintB: "t:.cm-hint b", hintSoft: "t:.cm-hint .cm-soft", key: "b:.cm-hint .cm-key", keyT: "t:.cm-hint .cm-key",
       comp: "b:.cm-comp", compAv: "b:.cm-compfield .cm-av", compAvT: "t:.cm-compfield .cm-av", compField: "t:.cm-compfield .cm-field",
-      chip: "b:.cm-foot .cm-chip", chipT: "t:.cm-foot .cm-chip span", chipIcon: "b:.cm-foot .cm-chip svg", retKey: "b:.cm-foot .cm-key", send: "b:.cm-foot .cm-send",
+      chip: "b:.cm-foot .cm-chip", chipT: "t:.cm-foot .cm-chip span", chipIcon: "b:.cm-foot .cm-chip svg", send: "b:.cm-foot .cm-send",
       draft: `b:${pin("draft")}`,
     }));
     k = new AlignChecker("page", th, img, K);
@@ -156,7 +156,6 @@ sc("comments", "alignment: every comment control is optically centred, light and
     k.near("add pin: the plus's middle on the teardrop's centre, x", midX(plus), m.draft ? m.draft.x + 13.5 : null);
     k.near("add pin: the plus's middle on the teardrop's centre, y", midY(plus), m.draft ? m.draft.y + 14.5 : null);
     k.near("composer: the field's cap middle on the avatar's centre line", m.compField?.cap, cy(m.compAv));
-    k.icon("composer-return-key", m.retKey, { inset: 1 });
     k.icon("composer-send", m.send);
     k.label("composer-chip", m.chip, m.chipT);
     const cIcon = k.ink("composer-chip-icon", bare(m.chipIcon), { inset: 0 });

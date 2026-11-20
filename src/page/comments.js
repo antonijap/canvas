@@ -27,7 +27,6 @@ const ICON = {
   check: svg('<path d="M2.5 7.4l3 3 6-6.4"/>'),
   trash: svg('<path d="M2.5 3.8h9M5.5 3.8V2.6h3v1.2M3.8 3.8l.5 7.6h5.4l.5-7.6M5.8 6v3.6M8.2 6v3.6"/>'),
   send: svg('<path d="M7 11.5v-9M3.2 6.2L7 2.4l3.8 3.8"/>'),
-  ret: svg('<path d="M11.5 3v4.2H3M5.8 4.6L3 7.2l2.8 2.6"/>', 11),
   bubble: svg('<path d="M7 1.8c3 0 5.2 2.1 5.2 4.7S10 11.2 7 11.2c-.7 0-1.3-.1-1.9-.3l-2.9 1.3.7-2.5C1.9 8.9 1.8 7.7 1.8 6.5 1.8 3.9 4 1.8 7 1.8z"/>'),
   layer: svg('<path d="M2 4.2V2.6A.6.6 0 012.6 2h1.6M9.8 2h1.6a.6.6 0 01.6.6v1.6M12 9.8v1.6a.6.6 0 01-.6.6H9.8M4.2 12H2.6a.6.6 0 01-.6-.6V9.8M5.4 5.4l3.9 1.6-1.6.7-.7 1.6z"/>', 12),
   ghost: svg('<path d="M2 4.2V2.6A.6.6 0 012.6 2h1.6M9.8 2h1.6a.6.6 0 01.6.6v1.6M12 9.8v1.6a.6.6 0 01-.6.6H9.8M4.2 12H2.6a.6.6 0 01-.6-.6V9.8"/>', 16),
@@ -723,8 +722,7 @@ function start(host) {
     wrap.append(ta);
     fieldRow.append(avatar({ name: st.me }), wrap);
     const foot = h("div", "cm-foot");
-    const key = h("span", "cm-key"); key.innerHTML = ICON.ret; key.title = "Return posts";
-    foot.append(chip(anchor.preview ? anchor.preview.name || "Layer" : "Canvas", !anchor.nodeId), h("span", "cm-sp"), key, send);
+    foot.append(chip(anchor.preview ? anchor.preview.name || "Layer" : "Canvas", !anchor.nodeId), h("span", "cm-sp"), send);
     comp.append(fieldRow, foot);
     comp.hidden = false;
     render();
