@@ -59,6 +59,7 @@ sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode,
         const made = await post(peer.base, '/api/structure', { file: pf, op: 'add', nodes: [{ id: 'SharedBoard', type: 'frame', name: 'Shared board', width: 320, height: 240, children: [{id:'SharedText',type:'text',x:20,y:20,content:'Shared',fontSize:16}] }] });
         t.eq(made.status, 200, 'peer adds board');
         await t.waitFor(async () => (await t.state()).boards.includes('SharedBoard'), 'remote edit on the page within one second', 1000);
+        await t.waitJs('(()=>{const h=window.canvasHost,r=h.worldRectOf("SharedBoard"),c=h.cam,i=h.insets;return r && r.x*c.z+c.x+r.w*c.z/2>i.l && r.y*c.z+c.y+r.h*c.z/2>i.t;})()', 'first remote board is visible inside the editor',1000);
         const presence = await post(peer.base, '/api/cloud/files/presence', { file: pf, p: { cursor: { x: 90, y: 60 }, sel: ['SharedBoard'], editing: { id: 'SharedBoard' } } });
         t.ok(presence.j.ok, 'peer sends presence');
         await t.waitJs('document.querySelector(".cp-cursor")?.textContent.includes("Ben") && !!document.querySelector(".cp-selection")', 'peer cursor and selection', 4000);
