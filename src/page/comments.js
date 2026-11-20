@@ -219,9 +219,10 @@ function start(host) {
   const asked = new Set();
 
   // ---------- the file ----------
-  const sendOps = (ops) => fetch("/api/comments/ops?file=" + encodeURIComponent(file), { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ ops }) })
+  const sendOps = (ops, onAccepted) => fetch("/api/comments/ops?file=" + encodeURIComponent(file), { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ ops }) })
     .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }))
     .then((j) => {
+      if (!j.rejected?.length) onAccepted?.();
       apply(j);
       for (const x of j.rejected || []) tell(`Comment not saved: ${x.message}`);
       return j;
@@ -479,6 +480,7 @@ function start(host) {
     const menu = h("div", "cm-mentions cm-ui"); menu.hidden = true; menu.setAttribute("role", "listbox");
     let choices = [], active = 0, trigger = null;
     const close = () => { menu.hidden = true; ta.setAttribute("aria-expanded", "false"); };
+    ta.clearDraft = () => { ta.value = ""; picked.length = 0; close(); autoGrow(ta); onChange?.(false); };
     const choose = (p) => {
       if (!trigger) return;
       const text = "@" + p.name + " ";
@@ -631,8 +633,8 @@ function start(host) {
     const send = sendBtn("Send reply", () => ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: false })));
     const ta = field("Reply", (v, el) => {
       el.disabled = true;
-      sendOps([env({ kind: "comment.add", thread: t.id, comment: crypto.randomUUID(), body: v, mentions: el.mentions() })])
-        .then((j) => { el.disabled = false; if (!(j.rejected && j.rejected.length)) { el.value = ""; autoGrow(el); send.classList.remove("ready"); el.focus(); } })
+      sendOps([env({ kind: "comment.add", thread: t.id, comment: crypto.randomUUID(), body: v, mentions: el.mentions() })], () => el.clearDraft())
+        .then((j) => { el.disabled = false; if (!j.rejected?.length && st.open === t.id) pop.querySelector(".cm-field")?.focus(); })
         .catch((e) => { el.disabled = false; tell(e.message); });
     }, () => openThread(null), (ready) => send.classList.toggle("ready", ready));
     ta.value = draftText;

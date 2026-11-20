@@ -7,6 +7,8 @@ import { randomUUID } from 'node:crypto';
 
 test('mention trigger, filtering and plain text token ranges', () => {
   assert.equal(mentionQuery('anna@studio.test', 9), null);
+  assert.deepEqual(mentionQuery('@', 1), { start: 0, end: 1, query: '' });
+  assert.deepEqual(mentionQuery('Again @', 7), { start: 6, end: 7, query: '' });
   assert.deepEqual(mentionQuery('Hi @be', 6), { start: 3, end: 6, query: 'be' });
   const ben = { name: 'Ben', email: 'ben@studio.test' };
   assert.deepEqual(mentionPeople([ben, ben, { name: 'Anna' }], 'BE'), [ben]);
