@@ -2005,6 +2005,7 @@ view.addEventListener("pointerleave", () => { ptr = null; clearHover(); });
 for (const n of ["pointerdown", "wheel"]) view.addEventListener(n, () => rememberPage(), { capture: true, passive: true });
 addEventListener("keydown", () => rememberPage(), true);
 function setDoc(d) {
+  const firstContent = !!doc && doc.boards.length === 0 && d.boards.length > 0;
   doc = d;
   document.getElementById("rev").textContent = d.revision || "";
   // Pages: only the active page's boards get records (titles, hit tests, the engine, overview fit).
@@ -2069,6 +2070,11 @@ function setDoc(d) {
     if (cam) { zeroFit = false; applyCam(); }
     else { cam = { x: 0, y: 0, z: 1 }; fitAll({ instant: true }); zeroFit = !view.clientWidth || !view.clientHeight; const fb = boards.get(firstBoardId()); if (fb && !fb.measured) firstFit = fb; }
   } else requestFlush();
+  // An empty Cloud file has no bounds to fit. Bring its first arriving board clear of the native panels.
+  if (firstContent && seen.size) {
+    fitAll({ instant: true });
+    const fb = boards.get(firstBoardId()); if (fb && !fb.measured) firstFit = fb;
+  }
   if (mode === "engine") loadVisible(); // changed boards reload now, not a frame later
   showSnaps();
   pruneSnaps();
