@@ -7,6 +7,7 @@ import { checkBlobPath, blobTypeOf, type BlobPath, type FileOp, type Json } from
 import { readCommentsFile } from './comments-file.ts';
 import { opsForShare } from './cloud-sync.ts';
 import { openInPackage } from '../cloud/core/files/confine.ts';
+import { trashPackage } from './cloud-files-trash.ts';
 export interface MoveBlob {
     op: Extract<FileOp, {
         k: 'blob';
@@ -101,11 +102,6 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
         if (b.source && (!fs.existsSync(b.source)||createHash('sha256').update(fs.readFileSync(b.source)).digest('hex') !== b.op.sha256))
             throw new Error('Local media changed during the move');
     if((fs.existsSync(commentsPath)?fs.readFileSync(commentsPath,'utf8'):null)!==commentsBefore)throw new Error('Local comments changed during the move; source kept');
-    const trash = path.join(os.homedir(), '.Trash');
-    fs.mkdirSync(trash, { recursive: true });
-    let to = path.join(trash, path.basename(pkg));
-    if (fs.existsSync(to))
-        to = path.join(trash, path.basename(pkg, '.canvas') + '-' + Date.now() + '.canvas');
-    fs.renameSync(pkg, to);
+    trashPackage(pkg);
     return { ...dest, verified: true };
 }
