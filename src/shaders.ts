@@ -127,7 +127,7 @@ async function writeSource(docFile: string, id: string, source: string, old: str
 export async function writePastedSource(docFile: string, id: string, source: string): Promise<string> {
   if (!ID_RE.test(id)) throw new WidgetError(422, "invalid-widget", "id must be 1-40 letters, digits, - or _");
   await writeSource(docFile, id, checkSource(source), null);
-  return snapPath(docFile, id, revOf(source));
+  return sourcePath(docFile, id);
 }
 
 export type LintError ={ line: number; col: number; message: string };
