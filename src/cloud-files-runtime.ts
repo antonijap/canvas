@@ -7,6 +7,7 @@ import { openInPackage } from '../cloud/core/files/confine.ts';
 export const cloudFileHooks: {
     isCloud?: (file: string) => boolean;
     assertEdit?: (file: string) => void;
+    undoConflict?: (file: string, writers: Record<string, string | 0>) => string | undefined;
     info?: (file: string) => {
         name: string;
     } | null;
