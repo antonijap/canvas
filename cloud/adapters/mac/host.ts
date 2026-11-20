@@ -544,10 +544,10 @@ export class CloudHost {
       // Authentication first: nothing about routes or documents is said to someone without a token.
       const me = this.who(req);
       if (!me) { const [st] = this.refusal(); return refuse(st, st === 429 ? "Too Many Requests" : "Unauthorized"); }
+      if (!this.team.allowMessage(me.device)) return refuse(429, "Too Many Requests");
       if (this.files.upgrade(req, socket, head, url, me)) return;
       if (!m || !uuid(m[1])) return refuse(404, "Not Found");
       if (this.sockets >= MAX_SOCKETS) return refuse(503, "Service Unavailable");
-      if (!this.team.allowMessage(me.device)) return refuse(429, "Too Many Requests");
       const doc = m[1];
       if (!this.team.hasDoc(doc)) return refuse(404, "Not Found");
       const room = this.room(doc);
