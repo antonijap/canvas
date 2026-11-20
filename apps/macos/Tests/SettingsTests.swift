@@ -251,6 +251,7 @@ extension SettingsTests {
         check(CloudInvite.parse(link(good).replacingOccurrences(of: "canvas://cloud/join", with: "canvas://open")) == nil, "only canvas://cloud/join")
         check(CloudStatusText.line("down", configured: true) == "Cloud down" && CloudStatusText.detail("down", name: "Studio Cloud") == "Studio Cloud isn\u{2019}t open right now", "Cloud down, in one plain line")
         check(CloudDisclosure.lines.count == 4 && CloudDisclosure.lines.allSatisfy { !$0.contains("\u{2014}") && !$0.contains("\u{00B7}") }, "the disclosure, plain")
+        check(CloudDisclosure.lines.joined(separator: " ").contains("Everyone in this Cloud can open its files"), "joining discloses file visibility")
         var s = AppSettings()
         s.clouds = [CloudEntry(url: "canvas-cloud://\(id)", name: "Studio", devEmail: "anna@studio.test", kind: .hosted, hosting: true)]
         let sent = s.serverSettings["clouds"] as? [[String: String]]

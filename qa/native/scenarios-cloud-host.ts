@@ -170,7 +170,7 @@ sc("settings", "Join with an invite: the sheet reads the link, shows the Cloud's
     await t.mark({ id: "text", label: "Team Cloud", window: SHEET }, 4000);
     await t.mark({ id: "add-cloud-fingerprint", window: SHEET });
     await t.mark({ id: "add-cloud-disclosure", window: SHEET });
-    await t.waitText("Everyone in a Cloud can read the comments", undefined, 4000, SHEET);
+    await t.waitText("Everyone in this Cloud can open its files", undefined, 4000, SHEET);
     await t.shot(`${process.cwd()}/qa/out/native/add-cloud-join.png`, SHEET);
     await t.click(center(await t.mark({ id: "add-cloud-join-go", window: SHEET })), { window: SHEET });
     await t.waitState((s) => !s.addCloud && s.homeSection === "cloud", "Team Cloud's page", 20_000);
