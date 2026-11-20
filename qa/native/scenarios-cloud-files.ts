@@ -32,7 +32,7 @@ sc('cloud-files', 'Usage shows uptime, messages, restarts and normal, amber, red
         await post(t.app.base, '/api/cloud/host/stop', { hostId: h.j.hostId });
     }
 });
-sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode, confinement, usage and removal', { covers: ['home:clouds', 'settings:cloud', 'cloud-files:new', 'cloud-files:open', 'cloud-files:remote', 'cloud-files:offline', 'cloud-files:confinement', 'cloud-files:usage'] }, async (t: NT) => {
+sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode, confinement, usage and removal', { covers: ['home:clouds', 'settings:cloud', 'cloud-files:new', 'cloud-files:open', 'cloud-files:remote', 'cloud-files:offline', 'cloud-files:confinement', 'cloud-files:usage', 'cloud-files:undo', 'cloud-files:presence'] }, async (t: NT) => {
     await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
     const host = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Anna' });
     t.eq(host.status, 200, 'host starts');
@@ -135,9 +135,10 @@ sc('cloud-files', 'Viewer opens from Home with disabled editing, then removal cl
         const file = (await t.state()).file;
         t.eq((await post(t.app.base, '/api/update', { file, id: 'Missing', props: { x: 1 } })).status, 403, 'viewer dispatch gate');
         t.eq((await t.cmd('qa.mainmenu',{title:'Paste'})).enabled,false,'viewer Paste is disabled');
+        const beforePageClick=(await t.state()).toast;
         await t.click(center(await t.mark({id:'page-add'})));
         await new Promise(r=>setTimeout(r,300));
-        t.eq((await t.state()).toast,null,'viewer Add page is disabled without sending a refused edit');
+        t.eq((await t.state()).toast,beforePageClick,'viewer Add page is disabled without sending a refused edit');
         await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-viewer.png'));
         const st = await (await fetch(host.base + '/api/cloud/host?hostId=' + started.j.hostId)).json() as any;
         await post(host.base, '/api/cloud/host/remove', { hostId: started.j.hostId, personId: st.people.find((p: any) => p.label === 'Anna').id });

@@ -764,7 +764,7 @@ features:
     name: Live files on a Mac hosted Cloud
     area: chrome
     driven: [native, mcp]
-    cases: [new, open, remote, offline, viewer, removed, confinement, usage]
+    cases: [new, open, remote, offline, viewer, removed, confinement, usage, undo, presence]
   - id: home
     name: Home, the pinned first tab (recents, files on this Mac, a team server, first launch)
     area: chrome
