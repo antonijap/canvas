@@ -714,7 +714,7 @@ struct CloudSettings: View {
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(CloudDisclosure.lines, id: \.self) { line in
-                        Text(line).font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true)
+                    Text(line).font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true).qaText(line)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -1124,7 +1124,7 @@ struct AddCloudSheet: View {
                     Text("Ask the host to read the fingerprint from Settings > Cloud: they should match.").font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true)
                 }
                 ForEach(CloudDisclosure.lines, id: \.self) { line in
-                    Text(line).font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true)
+                    Text(line).font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true).qaText(line)
                 }
             }
             .qaID("add-cloud-disclosure")

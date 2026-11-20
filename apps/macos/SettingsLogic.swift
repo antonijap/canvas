@@ -638,7 +638,7 @@ struct CloudInvite: Equatable {
 /// The plain words Settings > Cloud shows before someone hosts or joins (docs/cloud/hosting.md says the same).
 enum CloudDisclosure {
     static let lines = [
-        "Everyone in a Cloud can read the comments on every file shared to it.",
+        "Everyone in this Cloud can open its files. Exported copies and backups stay with whoever made them.",
         "A deleted comment\u{2019}s text stays in the Cloud\u{2019}s history, and each person keeps their own copy.",
         "When two Macs can\u{2019}t connect directly, traffic goes through a relay that sees who connects and when, not what is said.",
         "Invite tokens are kept in the macOS Keychain, where apps running as you can read them.",
