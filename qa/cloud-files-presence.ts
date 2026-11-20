@@ -11,7 +11,7 @@ export async function measurePresence(a: Scratch, b: Scratch, fa: string, fb: st
         await right.send('Emulation.setDeviceMetricsOverride',{width:1100,height:800,deviceScaleFactor:1,mobile:false});
         await left.goto(a.base+'/?file='+encodeURIComponent(fa));
         await right.goto(b.base+'/?file='+encodeURIComponent(fb));
-        const ready=async(p:typeof left)=>{const end=Date.now()+15000;while(!await p.eval('!!window.canvasHost?.presence && !!window.canvasHost?.boards.get("Board") && !!window.canvasCloudFile')){if(Date.now()>end)throw new Error('presence page not ready: '+p.console.slice(-3));await sleep(50);}};
+        const ready=async(p:typeof left)=>{const end=Date.now()+15000;while(!await p.eval('!!window.canvasHost?.presence && !!window.canvasHost?.worldRectOf("Board") && !!window.canvasCloudFile')){if(Date.now()>end)throw new Error('presence page not ready: '+p.console.slice(-3));await sleep(50);}};
         await ready(left);await ready(right);
         await left.send('Page.bringToFront');
         assert.equal(await left.eval('document.hidden'),false,'the moving page is in front');
