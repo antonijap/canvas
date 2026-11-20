@@ -23,3 +23,8 @@ test('existing parameterized Cloud cards resolve source snapshots without a sour
  try{const made=await createShader(pkg,{preset:'mesh-gradient',params:{speed:0.5}});await updateWidget(pkg,made.widget.id,{config:{source:null}});cloudFileHooks.isCloud=()=>true;const got=await readShaderSource(pkg,made.widget.id);assert.equal(got.template,false);assert.equal(got.rev,made.rev);
  }finally{cloudFileHooks.isCloud=old;fs.unwatchFile(doc);fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('pasted source keeps its mutable file return contract',async()=>{
+ const {writePastedSource}=await import('../src/shaders.ts');const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-shader-paste-')),pkg=path.join(dir,'Design.canvas'),doc=path.join(pkg,'document.json');fs.mkdirSync(pkg);fs.writeFileSync(doc,JSON.stringify({version:'2.21',children:[]}));
+ try{const file=await writePastedSource(doc,'Pasted','fn shade() {}');assert.equal(path.basename(file),'Pasted.wgsl');assert.equal(fs.readFileSync(file,'utf8'),'fn shade() {}');}finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

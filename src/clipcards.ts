@@ -10,7 +10,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { cardRev, readShaderSource, SHADER_TEMPLATE, writePastedSource } from "./shaders.ts";
+import { cardRev, revOf, readShaderSource, SHADER_TEMPLATE, writePastedSource } from "./shaders.ts";
 import { addWidgets, listWidgets, removeWidgets, type WidgetInput } from "./widgets.ts";
 import { kindOf } from "./widgets/registry.ts";
 import { VIDEO_TYPES } from "./widgets/kinds/video.ts";
@@ -109,7 +109,7 @@ export async function pasteCards(docFile: string, cards: ClipCard[], o: PasteCar
         const f = await writePastedSource(docFile, id, source);
         if (!keepId) written.push(f);
         config.rev = cardRev(source, config.uniforms);
-        config.source = 'shaders/' + path.basename(f);
+        config.source = `shaders/${id}.src-${revOf(source)}.wgsl`;
       } else if (c.kind === "video" && !o.sameFile && typeof config.src === "string" && config.src && !path.isAbsolute(config.src)) {
         // A video inside the source package: copied into this one. Missing: the card names the file it had.
         const file = typeof c.file === "string" && path.isAbsolute(c.file) ? c.file : null;
