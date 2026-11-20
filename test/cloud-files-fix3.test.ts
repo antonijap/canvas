@@ -82,3 +82,14 @@ test('rejected action batch creates one recovered package with every draft',asyn
  const root=path.join(dir,'Documents','Canvas Recovered'),copies=fs.readdirSync(root);assert.equal(copies.length,1);const archive=fs.readFileSync(path.join(root,copies[0],'unsent-actions.json'),'utf8');assert.ok(archive.includes(a.id)&&archive.includes(b.id));
  }finally{store.close();if(old===undefined)delete process.env.HOME;else process.env.HOME=old;fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+import net from 'node:net';
+test('file upgrades and hellos spend a shared person budget across reconnects',()=>hostTest(async(h,call)=>{
+ const id=crypto.randomUUID();await call('/v1/files','POST',{id,name:'Design'});const me=await(await call('/v1/me')).json() as any,token=h.ownerDevice('Anna'),port=(h as any).server.address().port;
+ const bank=(h.files as any).bank,now=Date.now(),ws=new WebSocket(`ws://127.0.0.1:${port}/v1/files/${id}/socket`,{headers:{authorization:'Bearer '+token}} as unknown as string[]);
+ try{await new Promise<void>((r,j)=>{ws.addEventListener('open',()=>r(),{once:true});ws.addEventListener('error',j,{once:true});});assert.equal(bank.granted(me.id,'messages',now),1);
+ const welcome=new Promise<void>((r,j)=>{const timer=setTimeout(()=>j(Error('Missing welcome')),2000);ws.addEventListener('message',e=>{if(JSON.parse(String(e.data)).type==='welcome'){clearTimeout(timer);r();}});});ws.send(JSON.stringify({type:'hello',protocol:2,file:id,since:0,epoch:1,pending:[]}));await welcome;assert.equal(bank.granted(me.id,'messages',now),2);
+ bank.grant(me.id,'messages',120,now);ws.close();
+ const status=await new Promise<string>((r,j)=>{const socket=net.connect(port,'127.0.0.1',()=>socket.write([`GET /v1/files/${id}/socket HTTP/1.1`,'Host: 127.0.0.1','Upgrade: websocket','Connection: Upgrade','Sec-WebSocket-Version: 13',`Sec-WebSocket-Key: ${Buffer.alloc(16).toString('base64')}`,`Authorization: Bearer ${token}`,'',''].join('\r\n')));socket.on('data',b=>{r(String(b).split('\r\n')[0]);socket.destroy();});socket.on('error',j);});assert.match(status,/429/);
+ }finally{ws.close();}
+}));

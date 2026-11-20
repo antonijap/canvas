@@ -402,6 +402,7 @@ export class MacFiles {
                     return json(401, { code: 'removed' });
                 r.roles.push(me.id, fresh.role);
                 if (b.type === 'hello') {
+                    if (!this.bank.grant(fresh.id, 'messages', 1, this.now())) error(429, 'quota', 'Message quota');
                     if (b.protocol !== 2)
                         return json(426, { code: 'update', message: 'Update Canvas' });
                     await buildSnapshot(r.core);
@@ -616,6 +617,7 @@ export class MacFiles {
         if (!m)
             return false;
         try {
+            if (!this.bank.grant(me.id, 'messages', 1, this.now())) error(429, 'quota', 'Message quota');
             const row = this.row(m[1], me);
             if (row.state === 'trash')
                 error(404, 'not_found', 'File is in Trash');
@@ -665,6 +667,7 @@ export class MacFiles {
                         r.roles.push(me.id, fresh.role);
                         const msg = parsed as FileClientMessage | any;
                         if (msg.type === 'hello') {
+                            if (!this.bank.grant(fresh.id, 'messages', 1, this.now())) error(429, 'quota', 'Message quota');
                             if (msg.protocol !== 2) {
                                 ws.send(JSON.stringify({ type: 'error', code: 'invalid', message: 'Update Canvas' }));
                                 ws.close(1008, 'Update Canvas');
