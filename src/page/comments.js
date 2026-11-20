@@ -14,6 +14,7 @@
 // Pins are plain DOM over the canvas. Their places are worked out in host.beforeFrame, so they cost nothing while the
 // camera and the layers stand still.
 
+import { installBottomOverlays } from "/page/bottom-overlays.js";
 import { mentionQuery, mentionPeople, mentionTokens, mentionedYou } from "/page/mentions.js";
 import * as L from "/page/comments-logic.js";
 
@@ -68,6 +69,7 @@ const cursorCss = (theme) => `cursor:${svgUrl(addPinSvg(theme))} ${ADD_HOT.x} ${
 
 function start(host) {
   const { view, file } = host;
+  installBottomOverlays(host);
   const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   /** A one-line label: its box trimmed to the capitals (an x for lowercase-only, cls "cm-t ex"), so a flex row centres the letters themselves. */
   const lbl = (text, cls = "cm-t") => h("span", cls, text);
@@ -161,7 +163,6 @@ function start(host) {
 .cm-bar svg{color:var(--c-muted-fg)}
 .cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
 .cm-hint{height:36px;padding:0 12px 0 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
-.native .cm-hint{left:auto;translate:none;bottom:var(--cm-hint-bottom,var(--c-inset));right:var(--cm-hint-right,var(--c-inset));max-width:calc(100% - var(--c-inset) - var(--cm-hint-right,var(--c-inset)));box-sizing:border-box}
 .native .cm-hint .cm-soft{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .native .cm-hint>b,.native .cm-hint>.cm-key,.native .cm-hint>span:first-child{flex-shrink:0}
 .cm-hint b{font-weight:600}
@@ -403,7 +404,6 @@ function start(host) {
 
   let raf = 0;
   const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; place(); }); };
-  const bottomOf = () => (host.native ? (host.insets && host.insets.b || 0) + 16 : 56) + "px";
 
 
   /** Where each pin and popover goes: run in every frame the canvas draws, and nowhere else. */
@@ -438,8 +438,6 @@ function start(host) {
     }
     if (st.draft && at.has("draft") && !comp.hidden) { const o = L.popoverAt(at.get("draft"), size(comp, 320, 110), vw, vh); comp.style.transform = `translate(${o.x}px,${o.y}px)`; }
 
-    bar.style.bottom = bottomOf();
-    if (!host.native) hint.style.bottom = bottomOf();
     const ins = host.insets || {};
     // In the app the shell's insets say what its islands cover; in the browser the bar sits under the page's own islands.
     let below = ins.t || 0;

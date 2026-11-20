@@ -134,8 +134,9 @@ struct RootView: View {
                     if let t = model.toast {
                         Toast(text: t, kind: model.toastKind, actions: model.toastActions,
                               onCopy: model.toastCopy == nil ? nil : { model.copyToast() }, onHover: { model.toastHovered = $0 })
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                            .padding(.bottom, Metric.inset * 2).transition(.opacity)
+                            .frame(maxWidth: model.bottomOverlay.width > 0 ? model.bottomOverlay.width : 300)
+                            .position(x: model.bottomOverlay.midX - Metric.inset, y: model.bottomOverlay.midY - Metric.inset)
+                            .transition(.opacity)
                     }
                 }
             }

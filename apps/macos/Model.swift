@@ -166,6 +166,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     /// Files the app opens on its own (the first launch's course): not recents until the person opens them.
     var quietRecents = Set<String>()
+    @Published var bottomOverlay = CGRect.zero
     @Published var toast: String?
     @Published var toastKind: Toast.Kind = .plain
     /// The toast's buttons (Undo from the page, Ask agent on an error) and what a click on it copies (ToastLogic).
@@ -290,6 +291,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
         // A toast may carry an icon (Copy Link's "link"), drawn in the text colour, and buttons (Undo) whose clicks go
         // back to the page as {cmd: "toastAction", id}.
+        if let p = m["bottomOverlay"] as? [String: Double], let x = p["x"], let y = p["y"], let width = p["width"] {
+            bottomOverlay = CGRect(x: x - width / 2, y: y, width: width, height: 0)
+        }
         if let msg = m["toast"] as? String {
             let acts = (m["toastActions"] as? [[String: Any]] ?? []).compactMap { a -> ToastAction? in
                 guard let id = a["id"] as? String, let label = a["label"] as? String else { return nil }
@@ -1131,7 +1135,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     private var zoomCornerFrame: CGRect = .zero
     func setZoomCorner(frame: CGRect) {
         zoomCornerFrame = frame
-        run("{cmd:'zoomCorner',left:\(frame.minX),bottom:\(frame.maxY)}")
+        run("{cmd:'zoomCorner',left:\(frame.minX),bottom:\(frame.maxY),height:\(frame.height)}")
     }
     func setInsets(l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
         lastInsets = (l, t, r, b)
@@ -1140,6 +1144,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func resendInsets() {
         if let i = lastInsets { setInsets(l: i.0, t: i.1, r: i.2, b: i.3) }
         setZoomCorner(frame: zoomCornerFrame)
+        run("{cmd:'bottomToast',shown:\(toast != nil)}")
     }
 
     /// Shows a toast. `durationMs` 0 keeps it until `clearToast()` (the bridge's wait prompts). A path or an error copies
@@ -1148,6 +1153,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func flash(_ text: String, durationMs: Int = 4000, level: String? = nil, actions: [ToastAction] = []) {
         toastSeq += 1
         toast = text
+        run("{cmd:'bottomToast',shown:true}")
         toastKind = level == "success" ? .success : level == "link" ? .link : (durationMs <= 0 ? .waiting : .plain)
         toastCopy = durationMs > 0 ? ToastLogic.copyText(text, level: level) : nil
         var acts = actions
@@ -1168,7 +1174,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
     }
 
-    func clearToast() { toast = nil; toastActions = []; toastCopy = nil; toastHovered = false }
+    func clearToast() { run("{cmd:'bottomToast',shown:false}"); toast = nil; toastActions = []; toastCopy = nil; toastHovered = false }
 
     /// A click on a toast with a path or an error: its text on the pasteboard, and the toast says so.
     func copyToast() {

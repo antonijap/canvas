@@ -665,7 +665,7 @@ function start(host) {
   let badge = null;
   (() => {
     const st = document.createElement("style");
-    st.textContent = "#sel.scale i{background:var(--ov)}#scaleBadge{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:4;pointer-events:none;padding:3px 10px;border-radius:999px;background:var(--c-sel);color:#fff;font-size:var(--c-size-xs,11px);font-weight:600;letter-spacing:.01em;display:none}";
+    st.textContent = "#sel.scale i{background:var(--ov)}#scaleBadge{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:4;pointer-events:none;padding:3px 10px;border-radius:999px;background:var(--c-sel);color:#fff;font-size:var(--c-size-xs,11px);font-weight:600;line-height:100%;letter-spacing:.01em;display:none}";
     document.head.appendChild(st);
   })();
   function setScaleMode(on) {

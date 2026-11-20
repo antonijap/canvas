@@ -430,7 +430,7 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   await t.waitState((s) => s.file === c, "Shift+Cmd+[ to the tab before");
 });
 
-sc("comments", "Comment hint shares the zoom island bottom edge and gap", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
+sc("comments", "Comment hint shares the canvas center and zoom center", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
   const initial = await t.state();
   await t.settle();
   await t.key("c");
@@ -441,16 +441,9 @@ sc("comments", "Comment hint shares the zoom island bottom edge and gap", { cove
       for (const [width, height] of [[720, 420], [1280, 800], [2000, 1256]]) {
         await t.cmd("qa.window", { width, height });
         const zoom = await t.mark({ id: "zoom-island" });
-        await t.waitJs(`Math.abs(document.querySelector('.cm-hint').getBoundingClientRect().right + parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) - ${zoom.x}) <= 1`, "hint beside zoom", 8000, async () => {
-          const state = await t.state();
-          return {
-            theme, width, height, zoom, currentZoom: await t.mark({ id: "zoom-island" }),
-            window: state.window, webFrame: state.webFrame,
-            page: await t.js("const s = getComputedStyle(document.documentElement); return {hint:document.querySelector('.cm-hint').getBoundingClientRect().toJSON(),gap:s.getPropertyValue('--c-island-gap'),right:s.getPropertyValue('--cm-hint-right'),bottom:s.getPropertyValue('--cm-hint-bottom'),innerWidth,innerHeight,devicePixelRatio}"),
-          };
-        });
-        const hint = await t.js<{ bottom: number; right: number }>("const r = document.querySelector('.cm-hint').getBoundingClientRect(); return {bottom:r.bottom,right:r.right}");
-        t.near(hint.bottom, zoom.y + zoom.h, 1, `${theme} ${width}: bottom edges align`);
+        await t.waitJs(`Math.abs(document.querySelector('.cm-hint').getBoundingClientRect().y + document.querySelector('.cm-hint').getBoundingClientRect().height/2 - ${zoom.y + zoom.h/2}) <= 1`, 'hint on zoom center', 8000);
+        const hint = await t.js<{ x:number; expected:number }>("const h=window.canvasHost, r=document.querySelector('.cm-hint').getBoundingClientRect(); return {x:r.x+r.width/2,expected:(h.insets.l+innerWidth-h.insets.r)/2}");
+        t.near(hint.x, hint.expected, 1, 'centered on free canvas');
         const state = await t.state();
         const viewport = await t.js<{ w: number; h: number }>("return {w:innerWidth,h:innerHeight}");
         t.near(state.webFrame.x, 0, 1, `${theme} ${width}: webview starts at window left`);
@@ -551,4 +544,23 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   await t.app.cmd({ op: "open", args: { file: t.file } });
   await t.waitState((s) => s.file === t.file, "restore the scenario file");
   await t.app.cmd({ op: "close", args: { file: away } });
+});
+
+sc('comments', 'Bottom overlays share the free canvas center and zoom center', { covers: ['comments:light', 'comments:dark'] }, async (t: NT) => {
+  await t.cmd('qa.cloud', { commentName: 'Anna' });
+  await t.settle(); await t.key('c');
+  await t.waitJs("document.querySelector('.cm-hint')?.classList.contains('on')", 'comment hint');
+  const zoom = await t.mark({ id: 'zoom-island' });
+  const g = await t.js<any>("const h = window.canvasHost, r = document.querySelector('.cm-hint').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,w:innerWidth,l:h.insets.l,r:h.insets.r}");
+  if (process.env.CANVAS_UI_SHOTS) { fs.mkdirSync(process.env.CANVAS_UI_SHOTS, { recursive: true }); await t.shot(path.join(process.env.CANVAS_UI_SHOTS, 'native-pills-' + (process.env.CANVAS_UI_BEFORE ? 'before' : 'after') + '.png')); }
+  t.near(g.x, (g.l + g.w - g.r)/2, 1, 'free canvas center');
+  t.near(g.y, zoom.y + zoom.h/2, 1, 'zoom center');
+  await t.js("window.canvasHost.post({toast:'Layer copy ready'})");
+  await t.waitState(s => s.toast === 'Layer copy ready', 'toast');
+  await t.settle();
+  const state = await t.state(); const text = state.toastFrames.text;
+  t.ok(!!text, 'native toast has a measured frame');
+  t.near(text.y + text.h/2, zoom.y + zoom.h/2, 2, 'native toast center');
+  const hint = await t.js<any>("const r = document.querySelector('.cm-hint').getBoundingClientRect(); return {bottom:r.bottom}");
+  t.ok(hint.bottom < text.y, 'hint stacks above the toast');
 });

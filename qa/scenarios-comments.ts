@@ -55,9 +55,10 @@ sc("comments", "Comment hint follows the zoom corner at every window size", { co
         return { bottom:h.bottom, zoomBottom:z.bottom, right:h.right, zoomLeft:z.left, left:h.left,
           gap:parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) };
       })()`);
-      t.near(boxes.bottom, boxes.zoomBottom, 1, `${theme} ${width}: bottom edges align`);
-      t.near(boxes.right + boxes.gap, boxes.zoomLeft, 1, `${theme} ${width}: island gap`);
-      t.ok(boxes.left >= 0, `${theme} ${width}: hint fits the window`);
+      const geometry = await t.ev<any>(`(() => { const r = document.querySelector('.cm-hint').getBoundingClientRect(), z = document.getElementById('qa-zoom-corner').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,zy:z.y+z.height/2,right:r.right}; })()`);
+      t.near(geometry.x, (60 + width - 304)/2, 1, 'canvas center');
+      t.near(geometry.y, geometry.zy, 1, 'zoom center');
+      t.ok(geometry.right < boxes.zoomLeft, 'clear of zoom');
     }
   }
   await t.ev(`document.getElementById('qa-zoom-corner').remove(); window.canvasCmd({cmd:'comment'})`);
