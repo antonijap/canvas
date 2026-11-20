@@ -214,3 +214,15 @@ test('MCP optional file arguments do not prevent fileless app commands',async()=
  const out=await callback({},{});assert.equal(out.isError,undefined);assert.match(out.content[0].text,/launched/);
  }finally{if(old===undefined)delete process.env.CANVAS_MCP_NO_SPAWN;else process.env.CANVAS_MCP_NO_SPAWN=old;if(port===undefined)delete process.env.CANVAS_PORT;else process.env.CANVAS_PORT=port;}
 });
+
+test('removing a member terminates a blob download already in progress',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-stream-remove-')),h=new CloudHost({dir,port:0});
+ try{const token=h.ownerDevice('Anna'),base=`http://127.0.0.1:${await h.start()}`,headers={authorization:`Bearer ${token}`,'content-type':'application/json'};
+ const post=async(p:string,b:unknown,t=token)=>{const r=await fetch(base+p,{method:'POST',headers:{...headers,authorization:`Bearer ${t}`},body:JSON.stringify(b)});assert.ok(r.ok);return r.json() as Promise<any>;};
+ const id=crypto.randomUUID();await post('/v1/files',{id,name:'Design'});const bytes=Buffer.alloc(12*1024*1024);bytes.set([137,80,78,71]);const sha=(await import('node:crypto')).createHash('sha256').update(bytes).digest('hex');
+ const up=await post(`/v1/files/${id}/uploads`,{sha256:sha,bytes:bytes.length,type:'image/png'});await fetch(`${base}/v1/files/${id}/uploads/${up.id}`,{method:'PUT',headers:{authorization:`Bearer ${token}`,'content-type':'application/octet-stream'},body:bytes});
+ await post(`/v1/files/${id}/sync`,{type:'actions',epoch:1,actions:[{id:crypto.randomUUID(),epoch:1,baseSeq:0,ops:[{k:'blob',path:'media/image.png',sha256:sha,bytes:bytes.length,type:'image/png'}]}]});
+ const invite=h.invite('Ben','viewer'),viewer=newSecret('ccd');await post('/v1/join',{token:viewer,device:'A Mac'},invite.code);
+ const r=await fetch(`${base}/v1/files/${id}/blobs/${sha}`,{headers:{authorization:`Bearer ${viewer}`}});h.remove(invite.personId);await assert.rejects(r.arrayBuffer());
+ }finally{await h.stop();fs.rmSync(dir,{recursive:true,force:true});}
+});
