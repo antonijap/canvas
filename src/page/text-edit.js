@@ -871,6 +871,7 @@ export function attach(host) {
    * all (select all the text) }.
    */
   async function enter(id, o = {}) {
+    if (host.readOnly) return false;
     if (te) { if (te.id === id) return true; commit("switch"); }
     if (host.renderer !== "engine") { tell("Editing text in place needs the GPU renderer"); return false; }
     let inf = nodeInfo(id);

@@ -1312,6 +1312,7 @@ const beforeFrame = []; // host.beforeFrame: run in flushCam before the engine d
 // What the widget layer (/page/widgets.js) needs from this script. Events: cam, visible, select, deselect, cmd.
 const host = {
   view, world, file, native, post, api,
+  get readOnly() { return cloudReadOnly; },
   get cam() { return cam; }, get insets() { return insets; }, get sel() { return sel && sel.id; },
   selectId: (id) => select(id), clearSel: () => deselect(), syncSel: () => syncSel(), get hand() { return space; }, setCam: (c) => { endTween(true); firstFit = null; cam = c; applyCam(); }, flushCam: () => flushNow(),
   on(n, f) { if (!bus.has(n)) bus.set(n, []); bus.get(n).push(f); },
@@ -2710,6 +2711,13 @@ function beginMove(e) {
   let b = lb ? labelBoard.get(lb) : null, kind = null;
   // A locked board's title does not pick or drag it; a locked selection does not move with the pointer.
   if (b && isLocked(b.meta.id)) return false;
+  if (cloudReadOnly) {
+    if (!b) return pressSelect(e);
+    if (down) down.title = true;
+    if (e.shiftKey) setSelection(toggled(b.meta.id));
+    else if (!sel || sel.id !== b.meta.id || multi) select(b.meta.id);
+    return true;
+  }
   if (!b && host.selection().some(isLocked)) return pressSelect(e);
   if (b && e.shiftKey) {
     if (down) down.title = true;
@@ -2763,6 +2771,7 @@ function pressSelect(e) {
   if (!id || isW(id) || boards.has(id)) return false;
   if (down) down.picked = true;
   select(id);
+  if (cloudReadOnly) return true;
   if (id.includes("/")) return true; // no pan: the press was on a layer
   if (host.autolayout && host.autolayout.beginDrag(e, [id])) return true;
   return pendingMove(e, id);
@@ -2783,6 +2792,7 @@ function shiftPress(e) {
 }
 /** A move of layer id that starts once GET /api/move says it is absolutely placed (see the pointermove below). */
 function pendingMove(e, id) {
+  if (cloudReadOnly) return true;
   const r = worldRectOf(id);
   if (!r) return true;
   mv = { kind: "node", b: null, id, r0: { x: r.x, y: r.y, w: r.w, h: r.h }, cx: e.clientX, cy: e.clientY, moved: false, pos: null, guides: [], index: null, node0: null, dup: e.altKey, shownDup: false, pending: true };
@@ -2894,6 +2904,7 @@ function groupRects(m) {
   return out;
 }
 function beginGroupMove(e) {
+  if (cloudReadOnly) return false;
   if (e.button !== 0 || space || !cam || !doc || !multi || mv) return false;
   const items = groupItems();
   if (!items.length) return false;
