@@ -1,3 +1,4 @@
+import { bodyChunks } from "./body.ts";
 // The bridge: what lets an agent see and drive the running canvas. Pages (browser or the app's
 // WKWebView) and the app's shell connect over SSE, report their state with POST /api/state and
 // execute commands the MCP queues with POST /api/bridge/cmd. The full wire format is in
@@ -79,7 +80,7 @@ const eventsSince = (since: number, types?: Set<string>, limit = 100) => ring.fi
 
 const lastDoc = new Map<string, string>();
 /** A document changed on disk. `by` is who wrote it when we know; a change nobody announced came from outside. */
-export function docChanged(docFile: string, revision: string, by?: "inspector" | "mcp", extra: Json = {}) {
+export function docChanged(docFile: string, revision: string, by?: "inspector" | "mcp" | "remote", extra: Json = {}) {
   const file = displayPath(docFile);
   if (lastDoc.get(file) === revision) return;
   lastDoc.set(file, revision);
@@ -632,7 +633,7 @@ export function originOk(req: http.IncomingMessage): boolean {
 async function readJson(req: http.IncomingMessage, max: number): Promise<Json> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const c of req) {
+  for await (const c of bodyChunks(req)) {
     size += (c as Buffer).length;
     // Keep reading (and dropping) an oversize body so the sender sees the 413, not a broken pipe.
     if (size <= max) chunks.push(c as Buffer);

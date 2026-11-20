@@ -90,6 +90,7 @@ after(async () => {
 });
 
 const TOOLS = [
+  "list_clouds", "list_cloud_files", "create_cloud_file",
   "canvas_status", "launch_canvas", "list_tabs", "open_file", "close_tab", "get_current_file", "get_theme", "set_theme",
   "get_document_summary", "get_fonts", "list_installed_fonts", "lookup_nodes", "inspect_node",
   "get_selection", "select_nodes", "clear_selection", "wait_for_selection", "highlight_nodes", "clear_highlights", "get_events",

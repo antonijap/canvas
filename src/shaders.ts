@@ -1,3 +1,5 @@
+import { bodyChunks } from "./body.ts";
+import { isCloudFile, cloudAsset, cloudDerived } from "./cloud-files-runtime.ts";
 // Shader cards on disk. A shader card is a widget of kind "shader" (src/widgets/kinds/shader.ts); its
 // WGSL lives in a file beside the widgets:
 //   Name.canvas/shaders/<id>.wgsl                  inside a package
@@ -50,7 +52,7 @@ export function shaderDir(docFile: string): string {
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const sourcePath = (docFile: string, id: string) => path.join(shaderDir(docFile), `${id}.wgsl`);
-const posterPath = (docFile: string, id: string, rev: string) => path.join(shaderDir(docFile), `${id}.poster-${rev}.png`);
+const posterPath = (docFile: string, id: string, rev: string) => path.join(isCloudFile(docFile) ? cloudDerived(docFile) : shaderDir(docFile), `${id}.poster-${rev}.png`);
 
 /** Write a file by renaming a temp file over it, so a reader sees the old bytes or the new ones. */
 async function writeAtomic(file: string, bytes: string | Buffer): Promise<void> {
@@ -73,6 +75,7 @@ const readText = async (file: string): Promise<string | null> => {
 // them Undo of a source change restored the old rev over the new source, which then stayed for good.
 const SNAPSHOTS = 64;
 const snapPath = (docFile: string, id: string, srcRev: string) => path.join(shaderDir(docFile), `${id}.src-${srcRev}.wgsl`);
+const immutableSource = (id: string, source: string) => `shaders/${id}.src-${revOf(source)}.wgsl`;
 async function snapshot(docFile: string, id: string, source: string): Promise<void> {
   const file = snapPath(docFile, id, revOf(source));
   if (await fs.promises.stat(file).catch(() => null)) {
@@ -251,7 +254,7 @@ async function createShaderNow(file: string, input: ShaderInput, who: Who = {}) 
   try {
     const { widget } = await addWidget(file, {
       kind: "shader", id, name: input.name ?? from?.name ?? (made ? `${paperShader(made.paper.shader)!.name}${made.paper.preset !== "Default" ? ` (${made.paper.preset})` : ""}` : undefined), x: input.x, y: input.y, w: input.w, h: input.h, page: input.page,
-      config: from ? { ...from.config, rev } : { rev, autoplay: input.autoplay ?? (made ? made.animated : true), quarantined: false, ...(made ? { paper: made.paper, uniforms: made.uniforms } : {}) },
+      config: from ? { ...from.config, rev, source: immutableSource(id, source) } : { rev, source: immutableSource(id, source), autoplay: input.autoplay ?? (made ? made.animated : true), quarantined: false, ...(made ? { paper: made.paper, uniforms: made.uniforms } : {}) },
     }, { record: { label: "Add Shader", ...who } });
     return { widget, rev, problems: lintWgsl(source) };
   } catch (e) {
@@ -298,6 +301,7 @@ async function updateShaderNow(file: string, id: string, patch: ShaderPatch, who
       config.paper = { ...made.paper, params };
       config.uniforms = made.uniforms;
       config.rev = cardRev(made.source, made.uniforms);
+      config.source = immutableSource(id, made.source);
       problems = lintWgsl(made.source);
     } else if (patch.source !== undefined) {
       const source = checkSource(patch.source);
@@ -308,6 +312,7 @@ async function updateShaderNow(file: string, id: string, patch: ShaderPatch, who
         restore = old === null ? () => fs.promises.rm(src, { force: true }) : () => writeAtomic(src, old);
       }
       config.rev = revOf(source);
+      config.source = immutableSource(id, source);
       // A new source runs again: the quarantine was for the old one.
       config.quarantined = false;
       problems = lintWgsl(source);
@@ -354,6 +359,20 @@ export async function readShaderSource(file: string, id: string): Promise<{ sour
  * hand: no snapshot holds it) is left as it is.
  */
 async function currentSource(docFile: string, id: string, w: Widget | undefined): Promise<{ text: string | null }> {
+  if (isCloudFile(docFile)) {
+    const cfg = (w?.config ?? {}) as { rev?: string; source?: string; uniforms?: unknown };
+    const rel = cfg.source ?? (cfg.rev ? 'shaders/' + id + '.src-' + cfg.rev + '.wgsl' : 'shaders/' + id + '.wgsl');
+    const confined = cloudAsset(docFile, rel);
+    const text = confined ? await readText(confined) : null;
+    if (text !== null || cfg.source || !cfg.rev) return { text };
+    // Cards saved before source paths were explicit can still name a source plus parameters revision.
+    for (const name of await fs.promises.readdir(shaderDir(docFile)).catch(() => [] as string[])) {
+      if (!name.startsWith(id + '.src-') || !name.endsWith('.wgsl')) continue;
+      const file = cloudAsset(docFile, 'shaders/' + name), snap = file ? await readText(file) : null;
+      if (snap !== null && cardRev(snap, cfg.uniforms) === cfg.rev) return { text: snap };
+    }
+    return { text: null };
+  }
   const file = sourcePath(docFile, id);
   const text = await readText(file);
   const cfg = (w?.config ?? {}) as { rev?: unknown; uniforms?: unknown };
@@ -417,7 +436,7 @@ function reply(res: http.ServerResponse, status: number, body: unknown) {
 async function readBytes(req: http.IncomingMessage, max: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const c of req) {
+  for await (const c of bodyChunks(req)) {
     size += (c as Buffer).length;
     if (size > max) throw new WidgetError(413, "too-large", `The request body is larger than ${Math.round(max / 1024)} KB`);
     chunks.push(c as Buffer);

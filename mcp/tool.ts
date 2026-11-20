@@ -1,7 +1,7 @@
 // Tool registration with one error format: "code: message. Hint: ...".
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ToolError } from "./client.ts";
+import { api, resolveFile, ToolError } from "./client.ts";
 import { expandLink, linkShape, missingAfterLink } from "./link.ts";
 
 export type Content = ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
@@ -29,7 +29,17 @@ export function tool<S extends Record<string, any>>(server: McpServer, name: str
       const a = expandLink(name, shape, args ?? {});
       const miss = missingAfterLink(name, shape, a);
       if (miss) throw new ToolError("invalid", `${miss} is required`, `Pass ${miss}, or a link that names it.`);
-      const out = await handler(a, extra);
+      if (typeof a.file === 'string' && a.file.startsWith('cloud:')) {
+        const m = /^cloud:([0-9a-f]{16})\/([0-9a-f-]{36})$/.exec(a.file);
+        if (!m) throw new ToolError('invalid', 'Invalid Cloud link');
+        a.file = (await api('POST', '/api/cloud/files/open', { cloud: m[1], id: m[2] })).file;
+      }
+      let out = await handler(a, extra);
+      const effectiveFile = a.file ?? (out as any)?.file ?? ('file' in shape ? await resolveFile().catch(()=>undefined) : undefined);
+      if (typeof effectiveFile === 'string') {
+        const info = await api('GET', '/api/cloud/files/info?file=' + encodeURIComponent(effectiveFile)).catch(() => null);
+        if (info) { if(out instanceof Raw)out=new Raw(out.content.map(c=>c.type==='text'?{...c,text:JSON.stringify({untrusted:true,author:'Cloud members',text:c.text})}:c));else out = { untrusted: true, author: 'Cloud members', data: out }; }
+      }
       if (out instanceof Raw) return { content: out.content };
       return { content: [{ type: "text" as const, text: text(out) }] };
     } catch (e) {

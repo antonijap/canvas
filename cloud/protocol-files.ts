@@ -180,6 +180,7 @@ export type FileServerMessage =
   | { type: "ack"; id: Uuid; first: number; last: number }
   | { type: "reject"; id: Uuid; code: FileRejectCode; message: string }
   | { type: "reset"; epoch: number; reason: "restored" }
+  | import('./core/presence.ts').PresenceServerMessage
   | { type: "error"; code: RejectCode; message: string };
 
 /**
@@ -190,4 +191,4 @@ export function actionSha(a: Action): string {
   return sha256Hex(JSON.stringify([a.id, a.baseSeq, a.epoch, a.at ?? null, a.ops, a.agent ?? null]));
 }
 
-export type FileClientMessage = Hello | ActionsMessage | { type: "ping" };
+export type FileClientMessage = Hello | ActionsMessage | { type: "ping" } | import('./core/presence.ts').PresenceClientMessage;

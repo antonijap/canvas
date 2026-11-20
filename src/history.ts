@@ -13,6 +13,7 @@
 // first, so a refused step writes nothing. Ids stay the same through undo and redo.
 
 import type http from "node:http";
+import { cloudFileHooks } from './cloud-files-runtime.ts';
 import { allIds, buildIndex, findNode, loadDoc, revisionOf, stateHashOf, StaleFileError, updateNode, type Json, type DocNode } from "./engine.ts";
 import { currentDoc, editDoc, pendingEdits, writerHooks } from "./docwriter.ts";
 import { asOneAction, lastActionWrites, lastDocOrders, type Writers } from "./cloud-files-ops.ts";
@@ -1193,6 +1194,8 @@ async function step(docFile: string, dir: Dir, hooks: ApplyHooks, opts: { skip?:
     }
     let revision: string | undefined;
     try {
+      const writer=cloudFileHooks.undoConflict?.(docFile,e.writers ?? {});
+      if(writer) throw new HistoryError(409,'conflict',`${writer} changed ${e.label} since. Nothing was changed.`);
       revision = await asOneAction(docFile, () => apply(docFile, e, dir, hooks), undefined, e.writers);
       const writes = lastActionWrites(docFile);
       // Undoing a later step restores an earlier step's value with a new writer. The next undo must name that
@@ -1270,6 +1273,7 @@ export async function handleHistoryRoute(req: http.IncomingMessage, res: http.Se
     return reply(200, { ok: true, ...r }), true;
   } catch (e) {
     if (e instanceof HistoryError) return reply(e.status, { error: e.message, code: e.code, state: safeState(url, docFileOf) }), true;
+    if ((e as any).status === 409 && (e as any).code === "conflict") return reply(409, {error:(e as Error).message,code:"conflict"}),true;
     return reply(422, { error: (e as Error).message, code: "failed" }), true;
   }
 }

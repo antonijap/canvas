@@ -1,10 +1,14 @@
 #!/usr/bin/env node
+import { forgetStore } from "./widgets/store.ts";
+import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers } from "./cloud-files.ts";
+import { readOnlyRoute } from "./cloud-files-gate.ts";
+import { applyView } from "./docwriter.ts";
 // Canvas: a lightweight local design surface for .canvas documents.
 // Agents design through Canvas MCP (it edits the file through this server); Canvas watches the file and
 // redraws the changed boards in place. Pan by drag or scroll, zoom by pinch or Cmd+scroll,
 // click a node to see its properties, left rail lists boards, components, text styles and variables.
 
-import { asOneAction } from "./cloud-files-ops.ts";
+import { asOneAction, withActionAgent } from "./cloud-files-ops.ts";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -37,7 +41,7 @@ import { handleImageRoute } from "./images.ts";
 import { handleVideoRoute } from "./videos.ts";
 import { loadBox } from "./boardbox.ts";
 import { fitCam, keepLabels, overlayNode, pickPage, retryDelay, unionRect, wheelAction, zoomAt } from "./pagelogic.ts";
-import { handleHistoryRoute, historyState, nodeDiff, nodeLabel, onAgentEdit, onHistory, propsOf, record, type NodeOp } from "./history.ts";
+import { handleHistoryRoute, historyState, nodeDiff, nodeLabel, onAgentEdit, onHistory, resetHistory, propsOf, record, type NodeOp } from "./history.ts";
 import { agentLabel, cursorActions } from "./agent-cursor.ts";
 import { GROUP_MERGE_MS, handleMoveRoute, isGroupMerge, moveModeOf, moveNodes, MoveError } from "./move.ts";
 import { handleResizeRoute } from "./resize.ts";
@@ -53,7 +57,7 @@ import { followRename, handleOverrideRoute, OverrideError, overrideInfo, renameF
 import { replaceEach, selectionColors } from "./selection-colors.ts";
 import { nodeDepth } from "./doc/tree.ts";
 import { buildIndex, defaultTheme, expand, findNode, FIT_SCRIPT, resolveDocPath, resolveVariable, StaleFileError, updateNode, type Json, type CanvasDoc, type DocNode } from "./engine.ts";
-import { readBodyText } from "./body.ts";
+import { readBodyText, cacheBody } from "./body.ts";
 import { handleAgentRoute, renderInChild, type AgentCtx } from "./agent-run.ts";
 import { handleOnboardingRoute, noteMcp } from "./onboarding.ts";
 import { countUsage, handleUsageCountsRoute, usage } from "./usage-counts.ts";
@@ -160,6 +164,20 @@ async function prime(file: string): Promise<void> {
   }
   await Promise.all([cache.ensure(docFile).catch(() => {}), storeForAsync(docFile).catch(() => {})]);
 }
+fileEvents.view = (file) => {
+  applyView(file, JSON.parse(fs.readFileSync(file, "utf8")));
+  void storeForAsync(file).then(store => store.refresh()).catch(() => {});
+  docChanged(file, watched(file).revision, "remote");
+  for (const c of clients.get(file) ?? []) c.write(sse("cloudfile", fileInfo(file)));
+  tellCommentPages(file);
+};
+fileEvents.removed = (file) => {
+  cache.drop(file); forgetStore(file); resetHistory(file);
+  for (const c of clients.get(file) ?? []) c.write(sse("cloudremoved", {}));
+};
+fileEvents.presence = (file, peers) => {
+  for (const c of clients.get(file) ?? []) c.write(sse('presence', { peers }));
+};
 widgetHooks.docOf = (docFile) => watched(docFile).doc;
 
 const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -549,7 +567,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
     },
   };
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer((req, res) => withActionAgent(req.headers["x-canvas-source"] === "mcp" ? String(req.headers["x-canvas-agent"] ?? "Agent") : undefined, async () => {
     // canvas-mcp's heartbeat (src/onboarding.ts) says an agent is connected; it is not someone using Canvas.
     if (!(req.url ?? "").startsWith("/api/mcp/hello")) lastActivity = Date.now();
     // Nothing leaves the server before the crash journal holds every edit made so far durably (docwriter.ts group
@@ -567,8 +585,19 @@ export function startServer(port = PORT()): Promise<http.Server> {
     noteAgent(req);
     noteMcp(req);
     try {
-      const fileQ = url.searchParams.get("file");
-      if (fileQ) await prime(fileQ);
+      let bodyFile: string | undefined;
+      if (readOnlyRoute(req.method ?? "GET", url.pathname) && String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+        const raw = await readBodyText(req, 20_000_000); cacheBody(req, raw);
+        try { bodyFile = JSON.parse(raw ?? "{}").file; } catch {}
+      }
+      const fileQ = url.searchParams.get("file") || bodyFile;
+      if (fileQ) {
+        const cf = fileInfo(fileQ);
+        if (cf && readOnlyRoute(req.method ?? "GET", url.pathname) && cf.role !== "owner" && cf.role !== "editor") return json(res, { error: "This Cloud file is read only", code: "read_only" }, 403);
+        await prime(fileQ);
+      }
+      if (url.pathname === "/api/cloud/files/move" && fileQ) { const source=resolveDocPath(fileQ); await flushWrites(source); await compactWrites(source); await settleShaderSources(fileQ); }
+      if (await handleCloudFiles(req, res, url)) return;
       if (await handleShaderRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
       if (await handleImageRoute(req, res, url)) return;
       if (await handleVideoRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
@@ -870,6 +899,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
         try {
           const b = JSON.parse(raw || "{}") as { file: string; name: unknown };
           if (typeof b.file !== "string" || !b.file) throw new DocError(400, "file is required");
+          if (fileInfo(b.file)) return json(res, {ok:true,file:await renameCloudFile(b.file,b.name)});
           const src = resolveDocPath(b.file);
           await flushWrites(src);
           await compactWrites(src);
@@ -988,6 +1018,8 @@ export function startServer(port = PORT()): Promise<http.Server> {
         // A page coming back (a tab shown again) says which revision it has: the same one needs no whole document.
         const since = url.searchParams.get("since");
         res.write(`retry: 1000\n${since && since === snap.revision ? sse("docsame", { revision: snap.revision }) : sse("doc", docPayload(snap))}`);
+        const cf = fileInfo(snap.path); if (cf) res.write(sse("cloudfile", cf));
+        const peers = cf ? filePeers(snap.path) : []; if (peers.length) res.write(sse('presence', { peers }));
         let set = clients.get(snap.path);
         if (!set) clients.set(snap.path, (set = new Set()));
         set.add(res);
@@ -1003,7 +1035,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
     } catch (e) {
       return json(res, { error: (e as Error).message }, 500);
     }
-  });
+}));
 
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -1280,6 +1312,7 @@ const beforeFrame = []; // host.beforeFrame: run in flushCam before the engine d
 // What the widget layer (/page/widgets.js) needs from this script. Events: cam, visible, select, deselect, cmd.
 const host = {
   view, world, file, native, post, api,
+  get readOnly() { return cloudReadOnly; },
   get cam() { return cam; }, get insets() { return insets; }, get sel() { return sel && sel.id; },
   selectId: (id) => select(id), clearSel: () => deselect(), syncSel: () => syncSel(), get hand() { return space; }, setCam: (c) => { endTween(true); firstFit = null; cam = c; applyCam(); }, flushCam: () => flushNow(),
   on(n, f) { if (!bus.has(n)) bus.set(n, []); bus.get(n).push(f); },
@@ -1973,6 +2006,7 @@ view.addEventListener("pointerleave", () => { ptr = null; clearHover(); });
 for (const n of ["pointerdown", "wheel"]) view.addEventListener(n, () => rememberPage(), { capture: true, passive: true });
 addEventListener("keydown", () => rememberPage(), true);
 function setDoc(d) {
+  const firstContent = !!doc && doc.boards.length === 0 && d.boards.length > 0;
   doc = d;
   document.getElementById("rev").textContent = d.revision || "";
   // Pages: only the active page's boards get records (titles, hit tests, the engine, overview fit).
@@ -2037,6 +2071,11 @@ function setDoc(d) {
     if (cam) { zeroFit = false; applyCam(); }
     else { cam = { x: 0, y: 0, z: 1 }; fitAll({ instant: true }); zeroFit = !view.clientWidth || !view.clientHeight; const fb = boards.get(firstBoardId()); if (fb && !fb.measured) firstFit = fb; }
   } else requestFlush();
+  // An empty Cloud file has no bounds to fit. Bring its first arriving board clear of the native panels.
+  if (firstContent && seen.size) {
+    fitAll({ instant: true });
+    const fb = boards.get(firstBoardId()); if (fb && !fb.measured) firstFit = fb;
+  }
   if (mode === "engine") loadVisible(); // changed boards reload now, not a frame later
   showSnaps();
   pruneSnaps();
@@ -2672,6 +2711,13 @@ function beginMove(e) {
   let b = lb ? labelBoard.get(lb) : null, kind = null;
   // A locked board's title does not pick or drag it; a locked selection does not move with the pointer.
   if (b && isLocked(b.meta.id)) return false;
+  if (cloudReadOnly) {
+    if (!b) return pressSelect(e);
+    if (down) down.title = true;
+    if (e.shiftKey) setSelection(toggled(b.meta.id));
+    else if (!sel || sel.id !== b.meta.id || multi) select(b.meta.id);
+    return true;
+  }
   if (!b && host.selection().some(isLocked)) return pressSelect(e);
   if (b && e.shiftKey) {
     if (down) down.title = true;
@@ -2725,6 +2771,7 @@ function pressSelect(e) {
   if (!id || isW(id) || boards.has(id)) return false;
   if (down) down.picked = true;
   select(id);
+  if (cloudReadOnly) return true;
   if (id.includes("/")) return true; // no pan: the press was on a layer
   if (host.autolayout && host.autolayout.beginDrag(e, [id])) return true;
   return pendingMove(e, id);
@@ -2745,6 +2792,7 @@ function shiftPress(e) {
 }
 /** A move of layer id that starts once GET /api/move says it is absolutely placed (see the pointermove below). */
 function pendingMove(e, id) {
+  if (cloudReadOnly) return true;
   const r = worldRectOf(id);
   if (!r) return true;
   mv = { kind: "node", b: null, id, r0: { x: r.x, y: r.y, w: r.w, h: r.h }, cx: e.clientX, cy: e.clientY, moved: false, pos: null, guides: [], index: null, node0: null, dup: e.altKey, shownDup: false, pending: true };
@@ -2856,6 +2904,7 @@ function groupRects(m) {
   return out;
 }
 function beginGroupMove(e) {
+  if (cloudReadOnly) return false;
   if (e.button !== 0 || space || !cam || !doc || !multi || mv) return false;
   const items = groupItems();
   if (!items.length) return false;
@@ -2869,6 +2918,7 @@ function beginGroupMove(e) {
 host.beginGroupMove = (e) => beginGroupMove(e); // a press on a selected widget card (/page/widgets.js)
 function groupApply(m) {
   const dx = m.pos.x - m.r0.x, dy = m.pos.y - m.r0.y;
+  host.emit('presence', { preview:{kind:'move',ids:m.items.map(i=>i.id).slice(0,20),dx,dy} });
   if (dupApply(m, dx, dy)) {
     const moved = groupRects(m);
     multiWorld = (multi || []).map((id, k) => moved.get(id) || multiWorld[k] || null);
@@ -2964,6 +3014,7 @@ function mvApply() {
   // The layer itself follows the pointer (drawn by the page), and the inspector's x and y with it. A layer inside a
   // clipping frame is lifted out for the drag (drawn unclipped, on top): a copy on the overlay board moves.
   if (m.kind === "node" && m.lift === undefined) m.lift = liftLayer(m);
+  host.emit('presence', { preview:{kind:'move',ids:[m.id],dx:m.pos.x-m.r0.x,dy:m.pos.y-m.r0.y} });
   if (host.live) {
     const p = movedTo(m);
     if (m.lift) { host.ghost.move(m.pos.x - m.r0.x, m.pos.y - m.r0.y); host.live.note(m.id, p, [], 0); }
@@ -2977,6 +3028,7 @@ function mvApply() {
 function endMove(cancel) {
   const m = mv;
   if (!m) return;
+  host.presence?.end();
   mv = null;
   mvDirty = false;
   clearGuides();
@@ -3576,6 +3628,17 @@ const isComponentish = ${isComponentish};
 let docGen = 0; // bumped by every document the stream installs, so a recovery fetch it overtook is dropped
 es.addEventListener("doc", (e) => { docGen++; onDoc(JSON.parse(e.data)); });
 // Back on a stream with the document unchanged: the shell hears it again (it may have shown another tab meanwhile).
+let cloudReadOnly = false;
+es.addEventListener("cloudfile", (e) => {
+  const info = JSON.parse(e.data); window.canvasCloudFile = info; cloudReadOnly = !!info && info.role !== "owner" && info.role !== "editor";
+  if (native) post({ cloudFile: info || { role: "editor" } });
+  document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });
+});
+es.addEventListener("cloudremoved", () => {
+  world.replaceChildren(); doc = null; es.close();
+  if (native) post({ cloudRemoved: true });
+});
+document.addEventListener("keydown", e => { if (cloudReadOnly && (e.key === "Delete" || e.key === "Backspace" || (!e.metaKey && !e.ctrlKey && e.key.length === 1) || ((e.metaKey || e.ctrlKey) && /[zvx]/i.test(e.key)))) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
 es.addEventListener("docsame", () => { if (doc && native) post({ file, doc: docMsg(), pages: pagesMsg() }); });
 const applyDocDiff = ${applyDocDiff};
 es.addEventListener("docdiff", (e) => {
@@ -3587,6 +3650,12 @@ es.addEventListener("docdiff", (e) => {
   fetch(api("/api/doc")).then((r) => r.json()).then((full) => { if (g === docGen) onDoc(full); }).catch(() => {});
 });
 host.es = es;
+host.presenceEarly = [];
+es.addEventListener('presence', e => {
+  const list = JSON.parse(e.data).peers;
+  if (host.presence) host.presence.receive(list);
+  else { host.presenceEarly.push(list); if(host.presenceEarly.length > 128) host.presenceEarly.shift(); }
+});
 // widgets.js is a deferred module; keep what the stream says before it starts listening.
 for (const n of ["hello", "widgets", "wdata"]) es.addEventListener(n, (e) => { if (host.early) host.early.push([n, e.data]); });
 es.onerror = () => {};
@@ -3760,6 +3829,7 @@ function historyStep(dir, plain) {
 <script type="module" src="/page/spark.js"></script>
 <script type="module" src="/page/variations.js"></script>
 <script type="module" src="/page/agent-cursor.js"></script>
+<script type="module" src="/page/presence.js"></script>
 <script type="module" src="/page/comments.js"></script>
 </body>
 </html>`;

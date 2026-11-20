@@ -1,3 +1,4 @@
+import { fileStorageBytes, UPLOAD_LIMITS } from "./uploads.ts";
 // A Cloud file room: orders every action, checks it against its own rows with the shared apply, applies it whole or
 // not at all, and hands back what to send. Plain logic over a SqlStore and an ObjectStore, so the Worker's Durable
 // Object and a Cloud hosted on a Mac run the same code; sockets, alarms and the Team stay with the adapter.
@@ -324,6 +325,7 @@ export class FileRoom {
 
     const first = m.seq + 1;
     const at = new Date(this.now()).toISOString();
+    const author = a.agent ? { ...conn.author, agent: true } : conn.author;
     const before = this.tree.rowsWritten;
     let result!: AppliedAction;
     try {
@@ -331,7 +333,7 @@ export class FileRoom {
         this.tree.seq = first;
         this.tree.bytesDelta = 0;
         this.tree.boardDelta.clear();
-        const r = this.apply(this.tree, { ...a, ops, at }, { by: conn.author, seq: first, limits: FILE_LIMITS, confine: true });
+        const r = this.apply(this.tree, { ...a, ops, at }, { by: author, seq: first, limits: FILE_LIMITS, confine: true });
         if (isReject(r)) throw new Refusal(r.reject, (r as Reject).message);
         this.uploadsFor(ops);
         this.faultAt("applied");
@@ -340,13 +342,14 @@ export class FileRoom {
           this.store.sql.exec(q, ...b);
           this.tree.rowsWritten++;
         };
-        w("INSERT INTO log (first, last, action, by_json, at, ops_json) VALUES (?, ?, ?, ?, ?, ?)", first, last, a.id, JSON.stringify(conn.author), at, JSON.stringify(r.ops));
+        w("INSERT INTO log (first, last, action, by_json, at, ops_json) VALUES (?, ?, ?, ?, ?, ?)", first, last, a.id, JSON.stringify(author), at, JSON.stringify(r.ops));
         this.faultAt("logged");
         w("INSERT INTO receipts (action, by_id, epoch, sha, first, last, at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)", a.id, conn.author.id, a.epoch, sha, first, last, this.now());
         this.faultAt("receipted");
         for (const e of textEditsOf(r)) w("INSERT INTO text_edits (node, seq, action, whole, from_, del, ins) VALUES (?, ?, ?, ?, ?, ?, ?)", e.node, e.seq, e.action, e.whole ? 1 : 0, e.from, e.del, e.ins);
         const bytes = this.store.sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta WHERE id = 1").one().n + this.tree.bytesDelta;
         if (this.tree.bytesDelta > 0 && bytes > FILE_NODE_CAP) throw new Refusal("quota", `this file is full: it holds at most ${FILE_NODE_CAP / 1024 / 1024} MB of layers`);
+        if(fileStorageBytes(this.store,bytes)>UPLOAD_LIMITS.file)throw new Refusal("quota","this file holds at most 1 GB in total");
         w("UPDATE file_meta SET seq = ?, node_bytes = ? WHERE id = 1", last, bytes);
         const full = this.tree.flushBoardBytes(BOARD_BYTES_CAP);
         if (full) throw new Refusal("invalid", `the board "${full}" is full: a board holds at most 32 MB of layers`);

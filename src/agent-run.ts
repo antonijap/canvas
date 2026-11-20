@@ -1,3 +1,4 @@
+import { bodyChunks } from "./body.ts";
 // Talk to the selection: the server runs the person's own local agent (Claude Code or Codex) headless on what is
 // selected, with only the Canvas MCP tools, and streams its steps to the page (src/page/spark.js).
 //
@@ -924,7 +925,7 @@ export function fallbackSymbol(name: string): string | null {
 export async function jsonBody(req: AsyncIterable<Buffer | string>, max = 64 * 1024): Promise<Record<string, any>> {
   const parts: Buffer[] = [];
   let n = 0;
-  for await (const c of req) {
+  for await (const c of bodyChunks(req)) {
     const b = typeof c === "string" ? Buffer.from(c) : c;
     n += b.length;
     if (n > max) throw new AgentError(413, "too_large", "The request is too large");

@@ -252,7 +252,7 @@ final class LayersStore: ObservableObject {
 
     /// Cmd+R (Object > Rename): the layer's row opens for editing, its parents opened and the row scrolled to.
     func startRename(_ id: String) {
-        guard !LayersLogic.insideInstance(id) else { return }
+        guard model?.cloudReadOnly != true, !LayersLogic.insideInstance(id) else { return }
         reveal([id])
         renaming = id
     }
@@ -293,7 +293,7 @@ final class LayersStore: ObservableObject {
 
     /// Lock or unlock these layers: the panel shows it at once, the server takes it in one write and one undo step.
     func setLocked(_ ids: [String], _ lock: Bool) {
-        guard let model, !ids.isEmpty else { return }
+        guard let model, !model.cloudReadOnly, !ids.isEmpty else { return }
         for id in ids { edit(id) { $0.locked = lock } }
         let fail = { for id in ids { self.edit(id) { $0.locked = !lock } } }
         if lock { model.writeNodes(ids, props: ["locked": true], failed: fail) } else { model.writeNodes(ids, remove: ["locked"], failed: fail) }
@@ -344,7 +344,7 @@ final class LayersStore: ObservableObject {
     }
 
     func setHidden(_ row: LayerRow, _ hidden: Bool) {
-        guard model != nil, !row.isBoard else { return }
+        guard model != nil, model?.cloudReadOnly != true, !row.isBoard else { return }
         edit(row.id) { $0.hidden = hidden }
         let fail = { self.edit(row.id) { $0.hidden = !hidden } }
         if hidden { post(row.id, props: ["enabled": false], failed: fail) } else { post(row.id, props: [:], remove: ["enabled"], failed: fail) }
@@ -372,7 +372,7 @@ final class LayersStore: ObservableObject {
 
     func drop(on row: LayerRow, zone: LayerDropZone) -> Bool {
         defer { dragging = []; dropMark = nil }
-        guard let model, !dragging.isEmpty, let p = place(on: row, zone: zone) else { return false }
+        guard let model, !model.cloudReadOnly, !dragging.isEmpty, let p = place(on: row, zone: zone) else { return false }
         // The layers land at the front of a frame they go into: it opens.
         if let parent = p.parent, zone == .inside { expanded.insert(parent); rebuild() }
         askedFor = nil
@@ -516,8 +516,8 @@ struct LayerRowView: View, Equatable {
             Spacer(minLength: 4)
             // The padlock's spot always takes a press (it shows on hover or while locked), so the press that locks
             // never lands on the row; the eye keeps its slot, so the padlock does not jump when the eye shows.
-            if !editing && !LayersLogic.insideInstance(row.id) { lock.opacity(hovering || lockShown || lockPressed ? 1 : 0.001) }
-            if !row.isBoard && !editing { if hovering || row.hidden { eye } else { Color.clear.frame(width: 22) } }
+            if !editing && !LayersLogic.insideInstance(row.id) { lock.opacity(hovering || lockShown || lockPressed ? 1 : 0.001).allowsHitTesting(!model.cloudReadOnly) }
+            if !row.isBoard && !editing { if hovering || row.hidden { eye.allowsHitTesting(!model.cloudReadOnly) } else { Color.clear.frame(width: 22) } }
         }
         .padding(.leading, 2).padding(.trailing, 6)
         .frame(height: Metric.row)
@@ -536,16 +536,17 @@ struct LayerRowView: View, Equatable {
             store.hover(h ? row.id : nil)
         }
         .onDrag {
+            guard !model.cloudReadOnly else { return NSItemProvider() }
             store.beginDrag(row)
             return NSItemProvider(object: row.id as NSString)
         }
         .onDrop(of: [.text], delegate: LayerDrop(store: store, row: row))
         .contextMenu {
-            Button("Rename") { startRename() }.disabled(LayersLogic.insideInstance(row.id))
-            if row.isBoard { MoveToPageMenu(model: model, board: row.id) }
-            else { Button(row.hidden ? "Show" : "Hide") { store.setHidden(row, !row.hidden) } }
+            Button("Rename") { startRename() }.disabled(model.cloudReadOnly || LayersLogic.insideInstance(row.id))
+            if row.isBoard { MoveToPageMenu(model: model, board: row.id).disabled(model.cloudReadOnly) }
+            else { Button(row.hidden ? "Show" : "Hide") { store.setHidden(row, !row.hidden) }.disabled(model.cloudReadOnly) }
             Button(row.locked ? "Unlock" : "Lock") { store.setLocked([row.id], !row.locked) }
-                .disabled(row.lockedAbove || LayersLogic.insideInstance(row.id))
+                .disabled(model.cloudReadOnly || row.lockedAbove || LayersLogic.insideInstance(row.id))
         }
         // VoiceOver: a row is a button that selects, with expand, rename and hide as its actions.
         .accessibilityElement(children: .ignore)
@@ -619,6 +620,7 @@ struct LayerRowView: View, Equatable {
     }
 
     private func startRename() {
+        guard !model.cloudReadOnly else { return }
         // Inside an instance the component names the layer.
         if LayersLogic.insideInstance(row.id) { return }
         if row.isBoard { model.renamingBoard = row.id } else { store.renaming = row.id }

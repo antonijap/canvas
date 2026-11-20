@@ -21,6 +21,9 @@ export function encodePart(s) {
 
 /** The link for {file, page?, nodes?}. Null without an absolute file path. */
 export function buildLink(o) {
+  if (o && /^[0-9a-f]{16}$/.test(o.cloud) && /^[0-9a-f-]{36}$/.test(o.cloudFile)) {
+    return PREFIX + 'cloud=' + o.cloud + '&cloudFile=' + o.cloudFile + (o.page ? '&page=' + encodePart(o.page) : '') + (o.nodes?.length ? '&node=' + o.nodes.map(encodePart).join(',') : '');
+  }
   if (!o || typeof o.file !== "string" || !o.file.startsWith("/")) return null;
   let s = PREFIX + "file=" + encodePart(o.file);
   if (typeof o.page === "string" && o.page) s += "&page=" + encodePart(o.page);
@@ -53,6 +56,8 @@ export function parseLink(text) {
       nodes = [...new Set(ids)].slice(0, MAX_NODES);
     }
   }
+  const params = new URLSearchParams(q), cloud = params.get('cloud'), cloudFile = params.get('cloudFile');
+  if (/^[0-9a-f]{16}$/.test(cloud || '') && /^[0-9a-f-]{36}$/.test(cloudFile || '')) return { file: 'cloud:' + cloud + '/' + cloudFile, cloud, cloudFile, page, nodes };
   if (!file || !file.startsWith("/") || file.includes("\0")) return null;
   return { file, page, nodes };
 }

@@ -157,3 +157,8 @@ test("a Mac keeps at most 50,000 ops waiting, then asks for a copy instead of qu
   const out = r.propose([{ k: "set", id: "r1", props: { x: { v: 2 } } }]);
   assert.ok("reject" in out && out.reject === "quota");
 });
+
+test('the file cap includes existing layer data when reserving media',()=>{
+ const cap=UPLOAD_LIMITS.file,room=memoryRoom(crypto.randomUUID());UPLOAD_LIMITS.file=400;
+ try{room.store.sql.exec('UPDATE file_meta SET node_bytes=300 WHERE id=1');assert.throws(()=>reserveUpload(room,{reserve:()=>true,release:()=>{}},{author:{id:'anna',name:'Anna'},role:'editor'},{id:crypto.randomUUID(),sha256:'a'.repeat(64),bytes:200,type:'image/png'}),/1 GB|full/);}finally{UPLOAD_LIMITS.file=cap;(room.store as NodeSqlStore).close();}
+});

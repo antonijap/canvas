@@ -12,10 +12,11 @@ import { textEditsOf, transformTextOps, type TextEdit } from "./text.ts";
 import { actionSha, type FileRejectCode, type FileServerMessage, type Hello } from "./messages.ts";
 import { applyAction, isReject, FILE_LIMITS, type Action, type AppliedAction, type ApplyFn, type Author, type FileOp, type Reject } from "./seam.ts";
 import type { ObjectStore } from "./objects.ts";
-import type { FileState } from "./state.ts";
+import type { RoomTree, FileState } from "./state.ts";
 
-export type Pending = { action: Action; sha: string; sent: boolean };
-export type Refused = { action: Action; code: FileRejectCode | "local"; message: string };
+export type TextDraft = { id: string; content: string };
+export type Pending = { action: Action; sha: string; sent: boolean; textDrafts?: TextDraft[] };
+export type Refused = { action: Action; code: FileRejectCode | "local"; message: string; textDrafts?: TextDraft[] };
 
 /** What a Mac commits durably (state.sqlite in Phase 3): enough to come back after a crash. */
 export interface ReplicaDurable {
@@ -27,6 +28,7 @@ export interface ReplicaDurable {
   refused: Refused[];
 }
 
+export interface ReplicaTree extends RoomTree { copy(): ReplicaTree; state(): FileState }
 export class Divergence extends Error {}
 /** What a Mac keeps waiting before it asks the person to save a copy (Section 2.3, Offline). */
 export const PENDING_CAP = { ops: 50_000, bytes: 64 * 1024 * 1024 };
@@ -36,7 +38,8 @@ const uuid = () => (globalThis.crypto?.randomUUID?.() ?? `a-${Date.now().toStrin
 
 export class Replica {
   readonly author: Author;
-  tree: MemoryTree;
+  tree: ReplicaTree;
+  private readonly makeTree: (state: FileState) => ReplicaTree;
   seq: number;
   epoch: number;
   textEdits: TextEdit[] = [];
@@ -51,9 +54,10 @@ export class Replica {
   /** Pending actions a hello names (the room reads at most 500). */
   helloWindow = 500;
 
-  constructor(author: Author, state: FileState, seq: number, epoch: number, o: { apply?: ApplyFn; newId?: () => string } = {}) {
+  constructor(author: Author, state: FileState, seq: number, epoch: number, o: { apply?: ApplyFn; newId?: () => string; tree?: (state: FileState) => ReplicaTree } = {}) {
     this.author = author;
-    this.tree = new MemoryTree(state);
+    this.makeTree = o.tree ?? (state => new MemoryTree(state));
+    this.tree = this.makeTree(state);
     this.seq = seq;
     this.epoch = epoch;
     this.apply = o.apply ?? applyAction;
@@ -63,7 +67,7 @@ export class Replica {
   durable(): ReplicaDurable {
     return structuredClone({ state: this.tree.state(), seq: this.seq, epoch: this.epoch, textEdits: this.textEdits, pending: this.pending, refused: this.refused });
   }
-  static restore(author: Author, d: ReplicaDurable, o: { apply?: ApplyFn; newId?: () => string } = {}): Replica {
+  static restore(author: Author, d: ReplicaDurable, o: { apply?: ApplyFn; newId?: () => string; tree?: (state: FileState) => ReplicaTree } = {}): Replica {
     const r = new Replica(author, d.state, d.seq, d.epoch, o);
     const c = structuredClone(d);
     r.textEdits = c.textEdits;
@@ -83,7 +87,7 @@ export class Replica {
   }
 
   /** Confirmed + pending, as the person sees it. A pending action that no longer fits is left out ("waiting"). */
-  view(): MemoryTree {
+  view(): ReplicaTree {
     const v = this.tree.copy();
     for (const p of this.pending) {
       const ops = this.local(p.action.ops);
@@ -95,7 +99,7 @@ export class Replica {
 
   /** May a text op on `id` be made now: the layer's text is the confirmed text (no pending action of this Mac changed
    *  it), so a splice on the view is a splice on the confirmed text at this seq. */
-  canType(id: string, view: MemoryTree = this.view()): boolean {
+  canType(id: string, view: ReplicaTree = this.view()): boolean {
     const c = this.tree.node(id), v = view.node(id);
     if (!c || !v || typeof c.props.content !== "string" || c.props.content !== v.props.content) return false;
     return !this.pending.some((p) => p.action.ops.some((op) => (op.k === "text" && op.id === id) || (op.k === "set" && op.id === id && ["content", "spans", "lists"].some((k) => Object.hasOwn(op.props, k)))));
@@ -109,6 +113,7 @@ export class Replica {
     for (const op of ops) if (op.k === "text" && !this.canType(op.id, view)) return { reject: "conflict", message: "this text has an edit waiting for the Cloud" };
     const ops2 = ops.map((op) => (op.k === "text" ? { ...op, baseSeq: this.seq } : op));
     const action: Action = { id: this.newId(), baseSeq: this.seq, epoch: this.epoch, at, ops: ops2 };
+    if (this.pending.reduce((n,p)=>n+new TextEncoder().encode(JSON.stringify(p.action)).length,0)+new TextEncoder().encode(JSON.stringify(action)).length>PENDING_CAP.bytes) return {reject:"quota",message:"Too many edits are waiting for the Cloud; save a copy"};
     const r = this.apply(view, action, this.ctx(0));
     if (isReject(r)) return r;
     this.pending.push({ action, sha: actionSha(action), sent: false });
@@ -157,19 +162,20 @@ export class Replica {
   private refuse(id: string, code: Refused["code"], message: string): void {
     const i = this.pending.findIndex((p) => p.action.id === id);
     if (i < 0) return;
-    this.refused.push({ action: this.pending[i].action, code, message });
+    this.refused.push({ action: this.pending[i].action, textDrafts: this.pending[i].textDrafts, code, message });
     this.pending.splice(i, 1);
   }
 
   /** Every pending action becomes a refused copy (the file was restored, or the edit is too old to apply). */
   private refuseAll(code: Refused["code"], message: string): void {
-    for (const p of this.pending) this.refused.push({ action: p.action, code, message });
+    for (const p of this.pending) this.refused.push({ action: p.action, textDrafts: p.textDrafts, code, message });
     this.pending = [];
   }
 
   /** One message from the room. Async only for a welcome that starts from a snapshot. */
   async receive(msg: FileServerMessage, objects: ObjectStore): Promise<"ok" | "gap" | "hello"> {
     switch (msg.type) {
+      case 'presence': return 'ok'; // Ephemeral state belongs to the page, never the replica or its journal.
       case "reset":
         this.refuseAll("reset", "the file was restored; your edits are kept as a copy");
         this.epoch = 0; // the next hello asks for the restored snapshot
@@ -183,7 +189,7 @@ export class Replica {
         }
         if (msg.snapshot) {
           const { tree, manifest } = await treeFromManifest(objects, msg.snapshot.manifest);
-          this.tree = tree;
+          this.tree = this.makeTree(tree.state());
           this.seq = manifest.seq;
           this.textEdits = [];
           this.epoch = manifest.epoch;

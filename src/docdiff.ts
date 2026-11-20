@@ -1,3 +1,4 @@
+import { cloudFileHooks } from "./cloud-files-runtime.ts";
 // The document the page lists (boards with change keys, components, text styles, variables) and the
 // compact diff between two of them. The page gets the full payload once, on connect, and a diff for
 // every change after that. applyDocDiff is plain JS under its type annotations: the page script embeds
@@ -24,7 +25,7 @@ export type DocPayload = {
 const payloads = new WeakMap<Snapshot, DocPayload>();
 export const docPayload = (s: Snapshot): DocPayload => {
   let p = payloads.get(s);
-  if (!p) payloads.set(s, (p = { name: s.name, revision: s.revision, boards: s.boards, components: s.components, styles: s.styles, variables: s.variables, themes: s.themes, tokens: tokenLibrary(s.doc, s.styles), marks: marksOf(s.doc) }));
+  if (!p) payloads.set(s, (p = { name: cloudFileHooks.info?.(s.path)?.name ?? s.name, revision: s.revision, boards: s.boards, components: s.components, styles: s.styles, variables: s.variables, themes: s.themes, tokens: tokenLibrary(s.doc, s.styles), marks: marksOf(s.doc) }));
   return p;
 };
 

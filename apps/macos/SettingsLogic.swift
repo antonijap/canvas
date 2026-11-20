@@ -600,7 +600,9 @@ struct CloudInvite: Equatable {
 
     static func parse(_ raw: String) -> CloudInvite? {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard t.count <= 8192, let u = URLComponents(string: t), u.scheme?.lowercased() == "canvas", u.host == "cloud", u.path == "/join" else { return nil }
+        guard t.count <= 8192, var u = URLComponents(string: t), u.scheme?.lowercased() == "canvas", u.host == "cloud", u.path == "/join" else { return nil }
+        // The host uses form encoding. Decode spaces before queryItems so an escaped literal plus stays a plus.
+        u.percentEncodedQuery = u.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%20")
         func q(_ k: String) -> String { u.queryItems?.first { $0.name == k }?.value ?? "" }
         let host = q("host").lowercased(), addr = q("tc"), code = q("code")
         guard q("v") == "1", UUID(uuidString: host) != nil, host.count == 36,
@@ -636,7 +638,7 @@ struct CloudInvite: Equatable {
 /// The plain words Settings > Cloud shows before someone hosts or joins (docs/cloud/hosting.md says the same).
 enum CloudDisclosure {
     static let lines = [
-        "Everyone in a Cloud can read the comments on every file shared to it.",
+        "Everyone in this Cloud can open its files. Exported copies and backups stay with whoever made them.",
         "A deleted comment\u{2019}s text stays in the Cloud\u{2019}s history, and each person keeps their own copy.",
         "When two Macs can\u{2019}t connect directly, traffic goes through a relay that sees who connects and when, not what is said.",
         "Invite tokens are kept in the macOS Keychain, where apps running as you can read them.",

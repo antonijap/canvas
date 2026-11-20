@@ -47,7 +47,7 @@ function start(host) {
       const b = boardInView(rects, viewWorld());
       nodes = b ? [b] : [];
     }
-    return buildLink({ file: host.file, page: host.pageImplicit ? null : host.page, nodes });
+    return buildLink({ ...(window.canvasCloudFile ? {cloud:window.canvasCloudFile.key,cloudFile:window.canvasCloudFile.file} : {}), file: host.file, page: host.pageImplicit ? null : host.page, nodes });
   }
 
   async function write(text) {

@@ -1,3 +1,4 @@
+import { stateOf, type FileState } from "../cloud/core/files/state.ts";
 // The Mac's side of the shared apply (cloud/core/files/apply.ts): a TreeAccess on a design file held as a copy on
 // write document, its sidecar envelope (cards, pages, the other kept keys) and the package files it holds as blobs.
 // Writes never touch the objects it was built from: each one copies the path from the root down to what it changes
@@ -46,6 +47,27 @@ export class DocTree implements TreeAccess {
     };
     for (const c of doc.children ?? []) index(c, null);
   }
+
+  static fromState(state: FileState): DocTree {
+    const doc = { ...state.top } as DocLike;
+    doc.children = state.children;
+    for(const [k,v] of Object.entries(state.doc)) doc[k] = v;
+    const extra: Record<string, unknown> = { ...state.meta };
+    if(state.pages) extra.pages = state.pages;
+    return new DocTree(doc, {widgets:state.widgets as Record<string,unknown>[],extra},Object.entries(state.blobs),Object.entries(state.vers));
+  }
+  copy(): DocTree {
+    const tree = Object.create(DocTree.prototype) as DocTree;
+    Object.assign(tree,this);
+    tree.nodes=new Map(this.nodes);tree.parents=new Map(this.parents);tree.users=new Map(this.users);
+    tree.vers=new Map(this.vers);tree.blobs=new Map(this.blobs);tree.owned=new WeakSet();tree.envOwned=false;tree.undo=null;tree.saved=null;
+    return tree;
+  }
+  topKeys(): Record<string, Json> {
+    return Object.fromEntries(Object.entries(this.doc).map(([k,v])=>[k,['children','variables','themes','fonts'].includes(k)?null:v as Json]));
+  }
+  blobPaths(): string[] { return [...this.blobs.keys()]; }
+  state(): FileState { return stateOf(this); }
 
   // ---------- journal ----------
 
