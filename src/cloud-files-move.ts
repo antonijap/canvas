@@ -24,6 +24,17 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     const pkg = path.resolve(source);
     if (!pkg.endsWith('.canvas') || fs.lstatSync(pkg).isSymbolicLink() || !fs.statSync(pkg).isDirectory())
         throw new Error('Move a local Canvas package');
+    const fingerprint = (dir: string): string => {
+        const hash = createHash('sha256');
+        for (const name of fs.readdirSync(dir).sort()) {
+            const file = path.join(dir, name), stat = fs.lstatSync(file);
+            hash.update(name).update('\0');
+            if (stat.isSymbolicLink()) throw new Error('Local file changed during the move; source kept');
+            hash.update(stat.isDirectory() ? fingerprint(file) : fs.readFileSync(file));
+        }
+        return hash.digest('hex');
+    };
+    const sourceHash = fingerprint(pkg);
     for(const name of ['document.json','widgets.json','comments.json']){const stat=fs.lstatSync(path.join(pkg,name),{throwIfNoEntry:false});if(stat&&(stat.isSymbolicLink()||stat.nlink!==1))throw new Error('Move refuses linked document files');}
     const commentsPath=path.join(pkg,'comments.json');const commentsBefore=fs.existsSync(commentsPath)?fs.readFileSync(commentsPath,'utf8'):null;
     const original = fs.readFileSync(path.join(pkg, 'document.json'), 'utf8');
@@ -102,6 +113,8 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
             throw new Error('Local media changed during the move');
     if((fs.existsSync(commentsPath)?fs.readFileSync(commentsPath,'utf8'):null)!==commentsBefore)throw new Error('Local comments changed during the move; source kept');
     await finalize?.(dest);
+    // No await between this final source check and the recoverable rename.
+    if (fingerprint(pkg) !== sourceHash) throw new Error('Local file changed during the move; source kept');
     trashPackage(pkg);
     return { ...dest, verified: true };
 }
