@@ -112,3 +112,15 @@ test('overlapping text rejection keeps the second persons full text in the recov
  const root=path.join(dir,'Documents','Canvas Recovered'),copy=path.join(root,fs.readdirSync(root)[0]);assert.match(fs.readFileSync(path.join(copy,'document.json'),'utf8'),/aYYd/);assert.equal(store.replica.tree.node('Title')!.props.content,'aXXd');
  }finally{store.close();if(old===undefined)delete process.env.HOME;else process.env.HOME=old;fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('typing splices transform automatic span shifts and empty style arrays',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-typing-style-')),stores:FileStateStore[]=[];
+ try{for(const styled of [false,true]){
+ const initial=state();if(styled)(initial.children[0] as any).children[0].spans=[{start:1,end:3,fontWeight:'700'}];
+ const room=memoryRoom(crypto.randomUUID());room.seedState(initial);
+ for(const [i,text]of ['Xabcd','abcdY'].entries()){
+ const s=new FileStateStore(path.join(dir,`${styled}-${i}`),{cloud:'mac://studio',file:room.file,name:'Design',role:'editor',author:{id:i?'ben':'anna',name:i?'Ben':'Anna'},state:initial});stores.push(s);
+ const spans=styled?[{start:i?1:2,end:i?3:4,fontWeight:'700'}]:[];const action=s.propose([{k:'set',id:'Title',props:{content:{v:text},spans:{v:spans},lists:{v:[]}}}]);assert.ok(!('reject'in action));assert.equal(room.submit({author:s.meta.author,role:'editor'},{type:'actions',epoch:1,actions:[action]}).replies[0].type,'ack');
+ }assert.equal(room.tree.node('Title')!.props.content,'XabcdY');
+ }}finally{for(const s of stores)s.close();fs.rmSync(dir,{recursive:true,force:true});}
+});

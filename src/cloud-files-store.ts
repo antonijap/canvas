@@ -10,6 +10,8 @@ import { materialize, type FileState } from '../cloud/core/files/state.ts';
 import { applyAction, isReject } from '../cloud/core/files/apply.ts';
 import { actionSha, type Action, type Author, type FileOp, type FileServerMessage, type Role } from '../cloud/protocol-files.ts';
 import type { ObjectStore } from '../cloud/core/files/objects.ts';
+import { shift } from './page/text-spans.js';
+import { shiftLists, type ListItem } from './page/text-paras.js';
 export interface FileMeta {
     cloud: string;
     file: string;
@@ -94,9 +96,12 @@ export class FileStateStore {
             while (from < end && from < nextEnd && old[from] === next[from]) from++;
             while (end > from && nextEnd > from && old[end - 1] === next[nextEnd - 1]) { end--; nextEnd--; }
             const { content, spans, lists, ...props } = op.props;
+            const ins = next.slice(from, nextEnd), del = end - from;
+            const shiftedSpans = shift((node.props.spans ?? []) as never, from, del, ins.length);
+            const shiftedLists = shiftLists((node.props.lists ?? []) as unknown as ListItem[], old, from, del, ins);
             const text: FileOp = { k: 'text', id: op.id, baseSeq: this.replica.seq, from, del: end - from, ins: next.slice(from, nextEnd),
-                ...(spans !== undefined && JSON.stringify(spans?.v) !== JSON.stringify(node.props.spans) ? { spans: spans?.v ?? null } : {}),
-                ...(lists !== undefined && JSON.stringify(lists?.v) !== JSON.stringify(node.props.lists) ? { lists: lists?.v ?? null } : {}) };
+                ...(spans !== undefined && JSON.stringify(spans?.v ?? []) !== JSON.stringify(shiftedSpans) ? { spans: spans?.v ?? null } : {}),
+                ...(lists !== undefined && JSON.stringify(lists?.v ?? []) !== JSON.stringify(shiftedLists) ? { lists: lists?.v ?? null } : {}) };
             return [text, ...(Object.keys(props).length ? [{ ...op, props }] : [])];
         });
         const a = this.replica.propose(ops);
