@@ -56,12 +56,15 @@ async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: st
 sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, fingerprint and people; an invite is copied, never shown; a second Mac joins one; Stop hosting one leaves the other; Delete removes it", { covers: ["settings:cloud-host", "settings:cloud-remove"] }, async (t: NT) => {
   const cloudPids = () => pgrep(["-P", String(t.app.server!.pid), "-f", "cloud/adapters/mac/main.ts"]);
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-qa-joiner-"));
+  const ownedHosts: string[] = [];
   let joiner: Scratch | null = null;
   try {
     // The host is shown by its comment name: a placeholder, never this Mac's user name in a screenshot.
     await t.cmd("qa.cloud", { clouds: [], commentName: "Anna" });
     const studio = await hostFromSheet(t, "Studio");
+    ownedHosts.push(studio.url.replace("canvas-cloud://", ""));
     const review = await hostFromSheet(t, "Client review");
+    ownedHosts.push(review.url.replace("canvas-cloud://", ""));
     t.ok(studio.url !== review.url, "two Clouds, two ids");
     await t.waitFor(async () => cloudPids().length === 2, "two Cloud processes", 15_000);
     // Both rows in Home, laptops (on a Mac), and Settings marks both Hosting.
@@ -130,6 +133,7 @@ sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, 
     t.ok(!hosts.clouds.some((c: any) => c.hostId === review.url.replace("canvas-cloud://", "")), "this Mac no longer keeps Client review");
   } finally {
     await post(t.app.base, "/api/cloud/host/stop").catch(() => {});
+    for (const hostId of ownedHosts) await post(t.app.base, "/api/cloud/host/wipe", { hostId }).catch(() => {});
     await joiner?.stop().catch(() => {});
     await t.key("w", ["cmd"], { window: "settings" }).catch(() => {});
     await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
