@@ -117,6 +117,7 @@ sc('cloud-files', 'Viewer opens from Home with disabled editing, then removal cl
         await t.waitState(s => s.cloudReadOnly === true && typeof s.file === 'string' && s.file.includes('/cloud-files/'), 'viewer view mode', 10000);
         const file = (await t.state()).file;
         t.eq((await post(t.app.base, '/api/update', { file, id: 'Missing', props: { x: 1 } })).status, 403, 'viewer dispatch gate');
+        t.eq((await t.cmd('qa.mainmenu',{title:'Paste'})).enabled,false,'viewer Paste is disabled');
         await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-viewer.png'));
         const st = await (await fetch(host.base + '/api/cloud/host?hostId=' + started.j.hostId)).json() as any;
         await post(host.base, '/api/cloud/host/remove', { hostId: started.j.hostId, personId: st.people.find((p: any) => p.label === 'Anna').id });

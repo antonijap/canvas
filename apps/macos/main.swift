@@ -416,6 +416,7 @@ final class EditActions: NSObject, NSMenuItemValidation {
     if item.action == #selector(copyLink(_:)) { return model.currentFile != nil && !shiftedKey }
     if item.action == #selector(copyPNG(_:)) { return model.selection != nil && !model.textEditing && !(keyWindowNow.firstResponder is NSText) }
     if item.action == #selector(findReplace(_:)) { return model.currentFile != nil && !shiftedKey }
+    if model.cloudReadOnly && textView == nil { return false }
     if item.action == #selector(repeatLast(_:)) {
       item.title = RepeatHint.title(model.repeatLabel)
       // "." typed anywhere is a key, not this item: the page handles it on the canvas, a text field types it.
@@ -608,6 +609,7 @@ final class StructureActions: NSObject, NSMenuItemValidation {
   @objc func addAutoLayout(_ s: Any?) { model.runLayout(["op": "add"]) }
   @objc func removeAutoLayout(_ s: Any?) { model.runLayout(["op": "remove"]) }
   func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    if model.cloudReadOnly && nativeText == nil && item.action != #selector(copy(_:)) && item.action != #selector(selectAll(_:)) { return false }
     switch item.action {
     case #selector(flipHorizontal(_:)), #selector(flipVertical(_:)), #selector(alignLeft(_:)), #selector(alignHCenter(_:)),
          #selector(alignRight(_:)), #selector(alignTop(_:)), #selector(alignVCenter(_:)), #selector(alignBottom(_:)):
