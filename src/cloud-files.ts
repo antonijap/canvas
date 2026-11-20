@@ -506,6 +506,9 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             return out(200, moved);
             } catch(error) {
                 if(importing) {
+                    // A publication can succeed even when its response is lost. Never cancel a live file.
+                    const state = await cloudJson(await request(b.cloud, `/v1/files/${importing}`));
+                    if (state.state !== 'importing') throw new Error((error as Error).message + '; local source kept. The Cloud file is published');
                     const pkg=path.join(root(),cloudKey(resolveCloud(b.cloud)),importing+'.canvas'), file=path.join(pkg,'document.json'), s=sessions.get(file);
                     if(s) {s.stopped=true;clearPresence(s);if(s.timer)clearTimeout(s.timer);s.ws?.close();await s.chain.catch(()=>{});s.store.close();sessions.delete(file);fileEvents.removed?.(file);}
                     fs.rmSync(pkg,{recursive:true,force:true});
