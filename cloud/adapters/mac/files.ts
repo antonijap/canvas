@@ -167,7 +167,7 @@ export class MacFiles {
         this.ledger = new StorageLedger(db, cap);
         this.sweepParts();
         this.recount();
-        this.sweepTimer = setInterval(() => { this.sweepParts(); this.recount(); }, 60_000); this.sweepTimer.unref();
+        this.sweepTimer = setInterval(() => { this.sweepParts(); void this.expireImports().catch(() => {}).finally(() => this.recount()); }, 60_000); this.sweepTimer.unref();
     }
     private accountDatabase(file: string) {
         const bytes = ['', '-wal', '-shm'].reduce((n, suffix) => n + (fs.statSync(file + suffix, { throwIfNoEntry: false })?.size ?? 0), 0);
@@ -182,6 +182,32 @@ export class MacFiles {
     private removeParts(folder: string) {
         if (fs.existsSync(folder) && !fs.lstatSync(folder).isSymbolicLink()) this.usedBytes -= diskBytes(folder);
         fs.rmSync(folder, { recursive: true, force: true }); this.partBytes.delete(folder);
+    }
+    private discardImport(file: string) {
+        const r = this.rooms.get(file);
+        if (r) {
+            if (r.timer) clearTimeout(r.timer);
+            for (const ws of r.sockets.keys()) ws.close(1008, 'Import cancelled');
+            r.presence.clear(); r.sockets.clear(); r.store.close(); this.rooms.delete(file);
+        }
+        for (const suffix of ['', '-wal', '-shm']) fs.rmSync(path.join(this.root, 'files', file + '.sqlite' + suffix), { force: true });
+        this.accountDatabase(path.join(this.root, 'files', file + '.sqlite'));
+        const objects = path.join(this.objects.root, 'files', file);
+        if (fs.existsSync(objects)) { this.usedBytes -= diskBytes(objects); fs.rmSync(objects, { recursive: true, force: true }); }
+        const parts = path.join(this.root, 'uploads', file);
+        if (fs.existsSync(parts)) { for (const id of fs.readdirSync(parts)) this.removeParts(path.join(parts, id)); fs.rmSync(parts, { recursive: true, force: true }); }
+        this.db.sql.exec('DELETE FROM storage_held WHERE key LIKE ?', `${file}/%`);
+        this.db.sql.exec('DELETE FROM files WHERE id=?', file);
+    }
+    async expireImports() {
+        const cutoff = new Date(this.now() - 24 * 60 * 60 * 1000).toISOString();
+        for (const row of this.db.sql.exec<{id:string}>("SELECT id FROM files WHERE state='importing' AND created_at<=?", cutoff).toArray()) {
+            if ([...this.activeParts].some(p => p.startsWith(path.join(this.root, 'uploads', row.id) + path.sep))) continue;
+            const r = this.room(row.id);
+            await r.core.exclusive(async () => {
+                if (this.db.sql.exec("SELECT 1 FROM files WHERE id=? AND state='importing' AND created_at<=?", row.id, cutoff).toArray().length) this.discardImport(row.id);
+            });
+        }
     }
     sweepParts() {
         const root = path.join(this.root, 'uploads');
@@ -221,7 +247,7 @@ export class MacFiles {
                     const importing = this.db.sql.exec<{
                         state: string;
                     }>('SELECT state FROM files WHERE id=?', file).toArray()[0]?.state === 'importing';
-                    return importing && kind === 'ops' ? this.importBank.grant('cloud-import', kind, want, now) : this.bank.grant(person, kind, want, now);
+                    return importing && kind === 'ops' ? this.importBank.grant('import:' + person, kind, want, now) : this.bank.grant(person, kind, want, now);
                 } }, this.now);
             const core = new FileRoom({ store, file, objects: this.objects, roles, leases, now: this.now });
             recoverSnapshots(core);
@@ -363,13 +389,10 @@ export class MacFiles {
             if (sub === 'import' && method === 'DELETE') {
                 if(row.created_by !== me.id) return json(403,{code:'forbidden'});
                 const r=this.rooms.get(file) ?? this.room(file);
-                if(r.timer)clearTimeout(r.timer);
-                for(const ws of r.sockets.keys())ws.close(1008,'Import cancelled');
-                r.presence.clear();r.sockets.clear();r.store.close();this.rooms.delete(file);
-                for(const suffix of ['', '-wal','-shm'])fs.rmSync(path.join(this.root,'files',file+'.sqlite'+suffix),{force:true});
-                fs.rmSync(path.join(this.objects.root,'files',file),{recursive:true,force:true});
-                this.db.sql.exec('DELETE FROM storage_held WHERE key LIKE ?',`${file}/%`);
-                this.db.sql.exec('DELETE FROM files WHERE id=?',file);
+                await r.core.exclusive(async () => {
+                    if (this.row(file, me).state !== 'importing' || [...this.activeParts].some(p => p.startsWith(path.join(this.root,'uploads',file)+path.sep))) error(409,'conflict','Import is published or busy');
+                    this.discardImport(file);
+                });
                 return json(200,{ok:true});
             }
             const r = this.room(file);
@@ -384,6 +407,7 @@ export class MacFiles {
                     return json(403, { code: 'forbidden' });
                 await buildSnapshot(r.core);
                 this.edit(me);
+                if (this.row(file, me).state !== 'importing') return json(409, { code: 'conflict' });
                 this.db.sql.exec("UPDATE files SET state='live' WHERE id=?", file);
                 r.leases.clear();
                 return json(200, { ok: true });

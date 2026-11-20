@@ -93,3 +93,12 @@ test('file upgrades and hellos spend a shared person budget across reconnects',(
  const status=await new Promise<string>((r,j)=>{const socket=net.connect(port,'127.0.0.1',()=>socket.write([`GET /v1/files/${id}/socket HTTP/1.1`,'Host: 127.0.0.1','Upgrade: websocket','Connection: Upgrade','Sec-WebSocket-Version: 13',`Sec-WebSocket-Key: ${Buffer.alloc(16).toString('base64')}`,`Authorization: Bearer ${token}`,'',''].join('\r\n')));socket.on('data',b=>{r(String(b).split('\r\n')[0]);socket.destroy();});socket.on('error',j);});assert.match(status,/429/);
  }finally{ws.close();}
 }));
+
+test('import budgets belong to each person and stale imports free storage',()=>hostTest(async(h,call,dir)=>{
+ const id=crypto.randomUUID(),live=crypto.randomUUID();await call('/v1/files','POST',{id,name:'Import',importing:true});await call('/v1/files','POST',{id:live,name:'Design'});
+ const room=(h.files as any).rooms.get(id);assert.equal(room.leases.take('anna','ops',6000),true);assert.equal(room.leases.take('ben','ops',1),true);
+ const up=await(await call(`/v1/files/${id}/uploads`,'POST',{bytes:8,type:'image/png',sha256:'a'.repeat(64)})).json() as any;
+ const folder=path.join(dir,'uploads',id,up.id);fs.mkdirSync(folder,{recursive:true});fs.writeFileSync(path.join(folder,'0'),'leftover');
+ (h.files as any).db.sql.exec('UPDATE files SET created_at=?',new Date(Date.now()-25*60*60*1000).toISOString());
+ await h.files.expireImports();assert.equal((await call(`/v1/files/${id}`)).status,404);assert.equal(fs.existsSync(path.join(dir,'files',id+'.sqlite')),false);assert.equal(fs.existsSync(path.join(dir,'objects','files',id)),false);assert.equal(fs.existsSync(folder),false);assert.equal((h.files as any).ledger.held(),0);assert.equal((await call(`/v1/files/${live}`)).status,200);
+}));
