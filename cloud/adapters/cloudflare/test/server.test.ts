@@ -207,3 +207,15 @@ it("rejects comment-id reuse before it can grant another author's edit permissio
   expect(result.acks).toEqual([]);
   expect(await bindings.ROOM.getByName(doc).snapshot()).toMatchObject({ seq: 1, threads: [{ comments: [{ body: "Hello", author: { email: owner } }] }] });
 });
+
+it("lists mention recipients only for members and drops revoked people", async () => {
+  expect((await call('/v1/members', '')).status).toBe(401);
+  await rules([{ match: member, role: 'editor' }]);
+  const directory = await (await call('/v1/members', member)).json() as {email:string;name:string;role:string}[];
+  expect(directory).toContainEqual({ email: member, name: 'member', role: 'editor' });
+  expect(directory).toContainEqual({ email: owner, name: 'owner', role: 'owner' });
+  expect(directory.every(p => Object.keys(p).sort().join(',') === 'email,name,role')).toBe(true);
+  await rules([{ match: member, role: 'deny' }]);
+  expect((await call('/v1/members', member)).status).toBe(403);
+  expect(await (await call('/v1/members')).json()).not.toContainEqual(expect.objectContaining({ email: member }));
+});

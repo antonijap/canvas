@@ -364,4 +364,14 @@ sc('comments', 'Mentions in replies filter people and persist a picked token', {
   const reply = file(t).threads[0].comments[1];
   t.eq(reply.body, '@Ben please check', 'older readers see text');
   t.eq(reply.mentions, [{ start: 0, end: 4, name: 'Ben' }], 'mention metadata saved');
+  await t.ev(`(() => { const original=window.fetch; window.fetch=async(u,o)=>{ const r=await original(u,o); if(typeof u==='string' && u.startsWith('/api/comments?file=')){const j=await r.json();j.me='Ben';return new Response(JSON.stringify(j));} return r; };return window.canvasHost.comments.reload();})()`);
+  t.ok(await t.ev(`document.querySelector('.cm-pop').innerText.includes('mentioned you')`), 'recipient sees mentioned you');
+  await t.io.type('@be');
+  await t.waitFor('!!document.querySelector(".cm-mentions:not([hidden]) button")', 'suggestions again');
+  await t.io.key('Escape');
+  t.eq(await t.ev(`document.querySelector('.cm-pop').hidden`), false, 'Escape closes suggestions and keeps reply open');
+  await t.io.type('n'); await t.io.key('Enter');
+  t.eq(file(t).threads[0].comments.length, 2, 'Return picked the person without posting');
+  await t.io.key('Enter');
+  await until(t, () => file(t)?.threads[0]?.comments.length === 3, 'Return posts after picking');
 });
