@@ -81,7 +81,7 @@ struct CloudFilesView: View {
                         VStack(alignment: .leading, spacing: 16) {
                             Image(systemName: "doc").font(.system(size: 28)).foregroundStyle(Palette.mutedFg)
                             Text(item.name).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(2)
-                        }.frame(maxWidth: .infinity, minHeight: 140, alignment: .leading).padding(16)
+                        }.frame(maxWidth: .infinity, minHeight: 140, alignment: .leading).padding(16).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(busy).qaID("cloud-file", label: item.name)
                 }
             }
