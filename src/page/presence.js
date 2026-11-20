@@ -41,14 +41,16 @@ function start(host) {
           el.style.cssText=`left:${at.x}px;top:${at.y-28}px;background:${p.color};color:${p.ink}`;layer.appendChild(el); }
       }
     }
+    host.emit('presencechange');
     if(peers.busy(now) && !hidden) raf=requestAnimationFrame(draw);
   }
   function frame() { if(!raf) raf=requestAnimationFrame(draw); }
   function receive(list) { peers.receive(list,performance.now());frame(); }
-  host.presence={ update, end:() => { if(enabled)sender.end({page:host.page}); }, receive, get peers(){return peers.view(performance.now(),host.page);} };
+  host.presence={ update, end:() => { if(enabled)sender.end({page:host.page}); }, receive, get peers(){return peers.view(performance.now(),host.page);}, get people(){return peers.view(performance.now(),null);} };
   for(const p of host.presenceEarly || []) receive(p);
   host.presenceEarly=null;
-  host.es.addEventListener('cloudfile',()=>{ enabled=!!window.canvasCloudFile; });
+  host.es.addEventListener('cloudfile',()=>{ enabled=!!window.canvasCloudFile; if(enabled) update({sel:host.selection().slice(0,20)}); frame(); });
+  if(enabled) update({sel:host.selection().slice(0,20)});
   host.es.addEventListener('cloudremoved',()=>{enabled=false;sender.dispose();peers.clear();frame();});
   view.addEventListener('pointermove',e=>{
     if(!host.cam) return;

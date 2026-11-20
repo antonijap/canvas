@@ -145,7 +145,7 @@ cloudFileHooks.undoConflict = (file, writers) => {
 };
 cloudFileHooks.assertEdit = f => { const s = fileSession(f); if (s && !CAN_EDIT[s.store.meta.role])
     fail(403, 'read_only', 'This Cloud file is read only'); };
-export function fileInfo(file: string) { const s = fileSession(file); return s ? { name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
+export function fileInfo(file: string) { const s = fileSession(file); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
 async function request(cloud: string, p: string, method = 'GET', body?: unknown): Promise<Response> {
     cloud = resolveCloud(cloud);
     if(revoked.has(cloud))fail(403,'removed','Cloud membership was removed');

@@ -166,6 +166,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     /// Files the app opens on its own (the first launch's course): not recents until the person opens them.
     var quietRecents = Set<String>()
+    struct LivePerson: Identifiable { let id: String; let name: String; let role: String; let color: String }
+    @Published var livePeople: [LivePerson] = []
+    @Published var peopleStatus = "connected"
     @Published var bottomOverlay = CGRect.zero
     @Published var toast: String?
     @Published var toastKind: Toast.Kind = .plain
@@ -291,6 +294,13 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
         // A toast may carry an icon (Copy Link's "link"), drawn in the text colour, and buttons (Undo) whose clicks go
         // back to the page as {cmd: "toastAction", id}.
+        if let strip = m["peopleStrip"] as? [String: Any] {
+            livePeople = (strip["people"] as? [[String: String]] ?? []).compactMap { p in
+                guard let id = p["session"], let name = p["name"], let role = p["role"], let color = p["color"] else { return nil }
+                return LivePerson(id: id, name: name, role: role, color: color)
+            }
+            peopleStatus = strip["status"] as? String ?? "connected"
+        }
         if let p = m["bottomOverlay"] as? [String: Double], let x = p["x"], let y = p["y"], let width = p["width"] {
             bottomOverlay = CGRect(x: x - width / 2, y: y, width: width, height: 0)
         }

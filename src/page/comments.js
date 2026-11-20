@@ -168,15 +168,15 @@ function start(host) {
 .cm-hint b{font-weight:600}
 .cm-hint .cm-soft{color:#ffffffa6}
 .cm-hint .cm-key{background:#ffffff26;color:#ffffffcc}
-.cm-shared{position:absolute;right:12px;top:12px;display:none;align-items:center;gap:10px;height:36px;padding:0 12px 0 8px;border-radius:12px;background:color-mix(in srgb,var(--c-popover) 85%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);color:color-mix(in srgb,var(--c-fg) 75%,transparent);box-shadow:0 0 0 .5px #0000000f,0 8px 24px -6px #00000026;font:500 12px/100% var(--c-font-sans);white-space:nowrap}
+.cm-shared{position:absolute;right:12px;top:12px;display:none;align-items:center;gap:10px;min-height:36px;padding:6px 8px;border-radius:18px;background:var(--c-popover);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);color:color-mix(in srgb,var(--c-fg) 75%,transparent);box-shadow:0 0 0 .5px #0000000f,0 8px 24px -6px #00000026;font:500 12px/100% var(--c-font-sans);white-space:nowrap}
 .cm-shared.on{display:flex}
+.cm-shared.toolbar{position:static;min-height:0;padding:0 6px 0 0;background:transparent;box-shadow:none;--cm-chip:var(--c-hover)}
+.native .cm-shared{display:none!important}
 .cm-people{display:flex;align-items:center}
-.cm-people .cm-av{width:24px;height:24px;border-radius:12px;box-shadow:0 0 0 2px var(--c-popover)}
-.cm-people .cm-av+.cm-av{margin-left:-6px}
+.cm-people .cm-av{width:28px;height:28px;border-radius:14px;border:0;padding:0;cursor:pointer;box-shadow:0 0 0 2px var(--c-popover)}
+.cm-people .cm-av+.cm-av{margin-left:-6px}.cm-people button:hover{translate:0 -2px}.cm-people button:focus-visible{outline:2px solid var(--c-fg);outline-offset:2px}
 .cm-people .cm-more{background:var(--cm-chip);color:var(--c-muted-fg);font-size:10px}
 .cm-server{display:flex;align-items:center;gap:6px}
-.cm-dot{flex:none;width:7px;height:7px;border-radius:50%;background:color-mix(in srgb,var(--c-muted-fg) 60%,transparent)}
-.cm-dot.ok{background:#16a34a}.cm-dot.warn{background:#d97706}
 .cm-state{display:inline-flex;align-items:center;gap:4px;min-width:0;color:var(--c-muted-fg);font-size:12px;line-height:100%}
 .cm-state svg{flex:none}
 .cm-state.wait{display:inline;white-space:nowrap}.cm-state.wait svg{vertical-align:calc(.5cap - 5.5px);margin-right:4px}
@@ -211,6 +211,7 @@ function start(host) {
   const shared = h("div", "cm-shared cm-ui");
   const bar = h("div", "cm-bar cm-ui");
   layer.append(hov, pop, comp, hint, bar, shared);
+  if (!host.native) { const toolbar = document.querySelector("#bar .island:last-child"); if (toolbar) { toolbar.prepend(shared); shared.classList.add("toolbar"); } }
 
   /** doc: the file's comment identity (null until the first comment); threads: every thread, tombstones too. repin: a thread waiting for a new layer. */
   const st = { doc: null, threads: [], sync: null, me: "", mode: false, open: null, draft: null, repin: null, menu: false, people: [] };
@@ -440,9 +441,9 @@ function start(host) {
 
     const ins = host.insets || {};
     // In the app the shell's insets say what its islands cover; in the browser the bar sits under the page's own islands.
-    let below = ins.t || 0;
+    let below = 0;
     if (!host.native) { const vt = view.getBoundingClientRect().top; for (const e of document.querySelectorAll(".island")) below = Math.max(below, e.getBoundingClientRect().bottom - vt - 4); }
-    shared.style.top = below + 12 + "px";
+    shared.style.top = (host.native ? 12 : below + 12) + "px";
     shared.style.right = (ins.r || 0) + 12 + "px";
     if (st.mode && hovId) paintHover();
   }
@@ -781,36 +782,54 @@ function start(host) {
     }
   }
 
-  /** The shared bar (design board 5): who commented and whether the server is reachable. Only for a shared file. */
-  const STATUS = { connected: ["ok", "Connected"], offline: ["", "Offline. Comments are kept and sent when the server is back"], signedOut: ["warn", "Signed out. Sign in in Settings > Cloud"], signInAgain: ["warn", "Sign in again in Settings > Cloud"], forbidden: ["warn", "No access to this team"], tooOld: ["warn", "The server is too old for this Canvas"], tooNew: ["warn", "The server is newer than this Canvas. Update Canvas"], down: ["", "Cloud down: its Mac isn't open right now. Comments are kept and sent when it is back"], removed: ["warn", "Removed from this Cloud. Ask the host for a new invite"], unavailable: ["warn", "This Canvas cannot reach a Cloud hosted on a Mac"], notAdded: ["", "This file's Cloud is not one of your Clouds. Comments stay on this Mac until you add it again"] };
+  /** People in this file now, using the cursor roster rather than comment history. */
+  let peopleSig = null;
   function drawShared() {
-    const s = st.sync;
-    shared.classList.toggle("on", !!s);
-    shared.textContent = "";
-    if (!s) return;
-    const seen = new Map();
-    for (const t of st.threads) for (const c of t.comments) {
-      if (c.deletedAt || !c.author || L.isAgent(c.author)) continue;
-      const key = c.author.email || c.author.name;
-      if (key && !seen.has(key)) seen.set(key, c.author);
+    const fileState = window.canvasCloudFile, sync = st.sync;
+    const state = fileState || sync;
+    shared.classList.toggle("on", !!state);
+    if (!state) { shared.replaceChildren(); if (host.native && peopleSig !== "") host.post({peopleStrip:{people:[],status:"connected"}}); peopleSig = ""; return; }
+    const me = fileState?.author || sync?.me || { name: st.me || "Me" };
+    const own = { by:me, name:me.name || st.me || "Me", role:state.role || "editor", color:L.colorOf(me.name || st.me), self:true };
+    const seen = new Set([me.id || me.email || me.name]);
+    const people = [own];
+    for (const p of host.presence?.people || []) {
+      const key = p.by?.id || p.by?.email || p.name;
+      if (seen.has(key)) continue; seen.add(key); people.push(p);
     }
-    const people = [...seen.values()];
-    if (people.length) {
-      const g = h("div", "cm-people");
-      for (const a of people.slice(0, 4)) { const e = avatar(a); e.title = a.email || a.name; g.append(e); }
-      if (people.length > 4) { const m = h("span", "cm-av cm-more"); m.append(lbl("+" + (people.length - 4))); m.title = people.slice(4).map((a) => a.name).join(", "); g.append(m); }
-      shared.append(g);
+    const signature = JSON.stringify([state.status, people.map(p => [p.session, p.name, p.role, p.color])]);
+    if (signature === peopleSig) return; peopleSig = signature; shared.replaceChildren();
+    if (host.native) host.post({peopleStrip:{people:people.map(p => ({session:p.self ? "self" : p.session,name:p.name,role:p.role,color:p.color})),status:state.status}});
+    const group = h("div", "cm-people");
+    for (const p of people.slice(0, 4)) {
+      const button = h("button", "cm-av"); button.type = "button";
+      button.append(lbl(L.initialOf(p.name))); button.style.background = p.color;
+      button.title = p.name + ", " + p.role; button.setAttribute("aria-label", button.title);
+      button.onclick = () => focusPerson(p.self ? "self" : p.session);
+      group.append(button);
     }
-    const [tone, say] = STATUS[s.status] || STATUS.offline;
-    // The server's state only: its name belongs to this Mac's settings, not to the file (Home names it).
-    const srv = h("div", "cm-server");
-    const dot = h("span", "cm-dot" + (tone ? " " + tone : ""));
-    srv.append(dot);
-    srv.title = say;
-    shared.setAttribute("aria-label", `Shared: ${say}`);
-    shared.dataset.status = s.status;
-    shared.append(srv);
+    if (people.length > 4) { const more = h("span", "cm-av cm-more", "+" + (people.length - 4)); more.title = people.slice(4).map(p => p.name + ", " + p.role).join("\n"); group.append(more); }
+    shared.append(group);
+    const status = state.status;
+    shared.dataset.status = status; shared.setAttribute("aria-label", "People in this file");
+    if (status !== "connected") {
+      const text = h("span", "cm-server", ["offline", "down", "notAdded", "removed", "signedOut", "signInAgain", "forbidden"].includes(status) ? "Offline" : "Reconnecting");
+      text.title = status === "removed" ? "Removed from this Cloud. Ask the host for a new invite" : status === "down" ? "Cloud down: its Mac isn't open right now. Comments are kept and sent when it is back" : text.textContent;
+      shared.append(text);
+    }
   }
+  async function focusPerson(session) {
+        if (session === "self") return;
+        const current = host.presence?.people.find(person => person.session === session);
+        if (!current) return;
+        if (current.page && current.page !== host.page) await host.setPage(current.page);
+        const r = (current.sel || []).map(id => host.worldRectOf(id)).find(Boolean);
+        const cursor = current.cursor || current.lastCursor;
+        if (r) host.fitRect(r, 80, host.cam.z);
+        else if (cursor) host.fitRect({ x:cursor.x-20, y:cursor.y-20, w:40, h:40 }, 80, host.cam.z);
+  }
+  host.on("cmd", c => { if (c.cmd === "focusPerson") focusPerson(c.session); });
+  host.on("presencechange", drawShared);
 
   // ---------- comment mode ----------
   function setMode(on) {

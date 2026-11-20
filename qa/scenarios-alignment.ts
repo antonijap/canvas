@@ -65,7 +65,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
     let img = await grab(t);
     let m = resolve(img, await measure(t, {
       bar: "b:.cm-bar", barIcon: "b:.cm-bar > span:first-child svg", barText: "t:.cm-bar > span:nth-child(2)", show: "b:.cm-bar .cm-btn", showT: "t:.cm-bar .cm-btn",
-      shared: "b:.cm-shared", av: "b:.cm-shared .cm-av:last-child", avT: "t:.cm-shared .cm-av:last-child", dot: "b:.cm-dot",
+      shared: "b:.cm-shared", av: "b:.cm-shared .cm-av:last-child", avT: "t:.cm-shared .cm-av:last-child",
       pin: `b:${pin(A)}`, pinAv: `b:${pin(A)} .cm-av`, pinAvT: `t:${pin(A)} .cm-av`, gonePin: `b:${pin(C)}`, gonePinT: `t:${pin(C)}`,
     }));
     let k = new AlignChecker("page", th, img, K);
@@ -74,7 +74,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
     k.near("count bar: the bubble's middle on the bar's centre line", midY(barIcon), cy(m.bar));
     k.near("count bar: the count's cap middle on the bar's centre line", m.barText?.cap, cy(m.bar));
     k.label("shared-avatar", m.av, m.avT, { inset: 1.5 });
-    k.near("shared bar: the dot's middle on the bar's centre line", cy(m.dot), cy(m.shared));
+    k.near("shared bar: avatar on the toolbar center line", cy(m.av), cy(m.shared));
     k.label("pin-avatar", m.pinAv, m.pinAvT, { inset: 1.5 });
     k.near("pin: the avatar centred across the pin", m.pinAv && m.pinAv.x + m.pinAv.w / 2, m.pin && m.pin.x + m.pin.w / 2);
     k.near("pin: the avatar centred down the pin", cy(m.pinAv), cy(m.pin));

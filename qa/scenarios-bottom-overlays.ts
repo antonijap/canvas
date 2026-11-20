@@ -4,6 +4,7 @@ import { sc, type T } from "./harness.ts";
 
 sc('comments', 'Bottom pill positions share canvas center and zoom center', { covers: ['comments:light', 'comments:dark'], skip: { visual: 'Measured at multiple widths and saved review screenshots.' } }, async (t: T) => {
   await t.open({ native: true });
+  await t.ev("document.getElementById('rev').style.visibility='hidden'");
   await t.waitFor('!!window.canvasHost.comments', 'comments');
   await t.ev("window.canvasCmd({cmd:'comment'})");
   for (const width of [720, 1280, 1800]) {

@@ -1503,3 +1503,4 @@ sc("clipboard", "layers and every card kind copied in one file paste into anothe
 });
 
 import "./scenarios-bottom-overlays.ts";
+import "./scenarios-people.ts";
