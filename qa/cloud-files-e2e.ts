@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { startServer, sleep, ROOT, type Scratch } from './lib.ts';
+import { measurePresence } from './cloud-files-presence.ts';
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-files-e2e-')));
 const servers: Scratch[] = [];
 const until = async (what: string, fn: () => Promise<boolean>, ms = 10000) => { const end = Date.now() + ms; while (!(await fn())) {
@@ -46,6 +47,7 @@ try {
     await call(a, '/api/history/undo?file=' + encodeURIComponent(fa), {});
     await until('own undo', async () => bytes(fa) === bytes(fb) && !bytes(fa).includes('opacity'));
     console.log('PASS undo of own edit');
+    await measurePresence(a,b,fa,fb);
     // A package carrying all three media types is moved only after its published hashes check out.
     const pkg = path.join(tmp, 'anna', 'Move.canvas');
     fs.mkdirSync(pkg);
@@ -96,11 +98,11 @@ try {
         assert.equal(r.status, 403, route);
     }
     console.log('PASS viewer mid-edit and every mutation family');
-    await call(b, '/api/cloud/files/disconnect', { file: fb });
+    // Cache deletion follows the authenticated revocation frame. A disconnected Mac cannot distinguish a
+    // revoked tunnel key from an outage; offline catch-up is exercised separately above.
     const status = await call(a, '/api/cloud/host?hostId=' + host.hostId);
     const person = status.people.find((p: any) => p.label === 'Ben');
     await call(a, '/api/cloud/host/remove', { hostId: host.hostId, personId: person.id });
-    await call(b, '/api/cloud/files/reconnect', { file: fb });
     await until('removed cache', async () => !fs.existsSync(fb));
     console.log('PASS removed member cache deletion');
 }

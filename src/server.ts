@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { forgetStore } from "./widgets/store.ts";
-import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents } from "./cloud-files.ts";
+import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers } from "./cloud-files.ts";
 import { readOnlyRoute } from "./cloud-files-gate.ts";
 import { applyView } from "./docwriter.ts";
 // Canvas: a lightweight local design surface for .canvas documents.
@@ -174,6 +174,9 @@ fileEvents.view = (file) => {
 fileEvents.removed = (file) => {
   cache.drop(file); forgetStore(file); resetHistory(file);
   for (const c of clients.get(file) ?? []) c.write(sse("cloudremoved", {}));
+};
+fileEvents.presence = (file, peers) => {
+  for (const c of clients.get(file) ?? []) c.write(sse('presence', { peers }));
 };
 widgetHooks.docOf = (docFile) => watched(docFile).doc;
 
@@ -1016,6 +1019,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
         const since = url.searchParams.get("since");
         res.write(`retry: 1000\n${since && since === snap.revision ? sse("docsame", { revision: snap.revision }) : sse("doc", docPayload(snap))}`);
         const cf = fileInfo(snap.path); if (cf) res.write(sse("cloudfile", cf));
+        const peers = cf ? filePeers(snap.path) : []; if (peers.length) res.write(sse('presence', { peers }));
         let set = clients.get(snap.path);
         if (!set) clients.set(snap.path, (set = new Set()));
         set.add(res);
@@ -2897,6 +2901,7 @@ function beginGroupMove(e) {
 host.beginGroupMove = (e) => beginGroupMove(e); // a press on a selected widget card (/page/widgets.js)
 function groupApply(m) {
   const dx = m.pos.x - m.r0.x, dy = m.pos.y - m.r0.y;
+  host.emit('presence', { preview:{kind:'move',ids:m.items.map(i=>i.id).slice(0,20),dx,dy} });
   if (dupApply(m, dx, dy)) {
     const moved = groupRects(m);
     multiWorld = (multi || []).map((id, k) => moved.get(id) || multiWorld[k] || null);
@@ -2992,6 +2997,7 @@ function mvApply() {
   // The layer itself follows the pointer (drawn by the page), and the inspector's x and y with it. A layer inside a
   // clipping frame is lifted out for the drag (drawn unclipped, on top): a copy on the overlay board moves.
   if (m.kind === "node" && m.lift === undefined) m.lift = liftLayer(m);
+  host.emit('presence', { preview:{kind:'move',ids:[m.id],dx:m.pos.x-m.r0.x,dy:m.pos.y-m.r0.y} });
   if (host.live) {
     const p = movedTo(m);
     if (m.lift) { host.ghost.move(m.pos.x - m.r0.x, m.pos.y - m.r0.y); host.live.note(m.id, p, [], 0); }
@@ -3005,6 +3011,7 @@ function mvApply() {
 function endMove(cancel) {
   const m = mv;
   if (!m) return;
+  host.presence?.end();
   mv = null;
   mvDirty = false;
   clearGuides();
@@ -3626,6 +3633,12 @@ es.addEventListener("docdiff", (e) => {
   fetch(api("/api/doc")).then((r) => r.json()).then((full) => { if (g === docGen) onDoc(full); }).catch(() => {});
 });
 host.es = es;
+host.presenceEarly = [];
+es.addEventListener('presence', e => {
+  const list = JSON.parse(e.data).peers;
+  if (host.presence) host.presence.receive(list);
+  else { host.presenceEarly.push(list); if(host.presenceEarly.length > 128) host.presenceEarly.shift(); }
+});
 // widgets.js is a deferred module; keep what the stream says before it starts listening.
 for (const n of ["hello", "widgets", "wdata"]) es.addEventListener(n, (e) => { if (host.early) host.early.push([n, e.data]); });
 es.onerror = () => {};
@@ -3799,6 +3812,7 @@ function historyStep(dir, plain) {
 <script type="module" src="/page/spark.js"></script>
 <script type="module" src="/page/variations.js"></script>
 <script type="module" src="/page/agent-cursor.js"></script>
+<script type="module" src="/page/presence.js"></script>
 <script type="module" src="/page/comments.js"></script>
 </body>
 </html>`;

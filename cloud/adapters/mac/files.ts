@@ -6,6 +6,7 @@ import type { Duplex } from "node:stream";
 import { randomUUID } from "node:crypto";
 import { SqliteStore } from "./sqlite.ts";
 import { MacUsage, macUsageTone } from './usage.ts';
+import { PresenceLimiter, receivePresence, snapshotFor, goneOf, fanOut, type PresenceSocket, type KeptPresence, type PeerPresence } from '../../core/presence.ts';
 import { upgrade, type ServerSocket } from "./websocket.ts";
 import { FileRoom, type Conn } from "../../core/files/room.ts";
 import { RoleCache } from "../../core/files/access.ts";
@@ -121,6 +122,7 @@ interface Room {
     comments: Operations;
     roles: RoleCache;
     sockets: Map<ServerSocket, Me>;
+    presence: Map<ServerSocket, { socket: PresenceSocket; kept: KeptPresence }>;
     lastAction: number;
     snapshotAt: number;
     timer?: ReturnType<typeof setTimeout>;
@@ -130,6 +132,7 @@ export class MacFiles {
     private readonly db: SqliteStore;
     private readonly root: string;
     private readonly rooms = new Map<string, Room>();
+    private readonly presenceLimiter = new PresenceLimiter();
     private readonly downloads = new Map<http.ServerResponse, Me>();
     private readonly bank: LeaseBank;
     private readonly importBank: LeaseBank;
@@ -183,12 +186,19 @@ export class MacFiles {
             const comments = new Operations(store);
             if (!store.sql.exec("SELECT 1 AS one FROM pragma_table_info('ops') WHERE name = 'by_id'").toArray().length)
                 store.sql.exec('ALTER TABLE ops ADD COLUMN by_id TEXT');
-            r = { leases, store, core, roles, comments, sockets: new Map(), lastAction: 0, snapshotAt: this.now() };
+            r = { leases, store, core, roles, comments, sockets: new Map(), presence: new Map(), lastAction: 0, snapshotAt: this.now() };
             this.rooms.set(file, r);
         }
         return r;
     }
     private conn(me: Me): Conn { return { author: { id: me.id, name: me.name }, role: me.role }; }
+    private relayPresence(r: Room, from: PresenceSocket, peer: PeerPresence) {
+        const recipients = new Set(fanOut([...r.presence.values()].map(p => p.socket), from));
+        for (const [ws, p] of r.presence) {
+            const me = r.sockets.get(ws);
+            if (recipients.has(p.socket.session) && me && this.current(me)) ws.send(JSON.stringify({ type: 'presence', peers: [peer] }));
+        }
+    }
     recheck() {
         for(const [res,me] of this.downloads)if(!this.current(me)){this.downloads.delete(res);res.destroy();}
         for (const r of this.rooms.values())
@@ -308,7 +318,7 @@ export class MacFiles {
                     return json(409,{code:'conflict',message:'Another person edited the imported file; kept it in the Cloud'});
                 if(r.timer)clearTimeout(r.timer);
                 for(const ws of r.sockets.keys())ws.close(1008,'Import cancelled');
-                r.sockets.clear();r.store.close();this.rooms.delete(file);
+                r.presence.clear();r.sockets.clear();r.store.close();this.rooms.delete(file);
                 for(const suffix of ['', '-wal','-shm'])fs.rmSync(path.join(this.root,'files',file+'.sqlite'+suffix),{force:true});
                 fs.rmSync(path.join(this.objects.root,'files',file),{recursive:true,force:true});
                 this.db.sql.exec('DELETE FROM storage_held WHERE key LIKE ?',`${file}/%`);
@@ -554,10 +564,26 @@ export class MacFiles {
                 error(429, 'quota', 'Socket limit');
             upgrade(req, socket, head, { maxMessage: 1024 * 1024, maxFragments: 1024 }, ws => {
                 r.sockets.set(ws, me);
-                ws.on('close', () => r.sockets.delete(ws));
+                const presence = { socket: { session: randomUUID(), person: me.id, author: { id: me.id, name: me.name }, role: me.role }, kept: {} as KeptPresence };
+                r.presence.set(ws, presence);
+                ws.on('close', () => {
+                    r.sockets.delete(ws); r.presence.delete(ws);
+                    this.relayPresence(r, presence.socket, goneOf(presence.socket));
+                });
                 let chain = Promise.resolve(), window = this.now(), count = 0, queued = 0;
                 ws.on('message', (text: string) => {
                     this.meter.message();
+                    let parsed: any;
+                    try { parsed = JSON.parse(text); } catch { ws.close(1008, 'Invalid JSON'); return; }
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { ws.close(1008, 'Invalid message'); return; }
+                    if (parsed.type === 'presence') {
+                        const fresh = this.current(me);
+                        if (!fresh) { ws.send(JSON.stringify({ type: 'removed' })); ws.close(1008, 'removed'); return; }
+                        presence.socket.role = fresh.role;
+                        const out = receivePresence(text, presence.socket, presence.kept, { limiter: this.presenceLimiter, now: this.now() });
+                        if (out.ok) { presence.kept = out.kept; if (out.relay) this.relayPresence(r, presence.socket, out.relay); }
+                        return;
+                    }
                     if (this.now() - window >= 60000) {
                         window = this.now();
                         count = 0;
@@ -577,7 +603,7 @@ export class MacFiles {
                             return;
                         }
                         r.roles.push(me.id, fresh.role);
-                        const msg = JSON.parse(text) as FileClientMessage | any;
+                        const msg = parsed as FileClientMessage | any;
                         if (msg.type === 'hello') {
                             if (msg.protocol !== 2) {
                                 ws.send(JSON.stringify({ type: 'error', code: 'invalid', message: 'Update Canvas' }));
@@ -587,6 +613,8 @@ export class MacFiles {
                             await buildSnapshot(r.core);
                             for (const out of r.core.hello(this.conn(fresh), msg))
                                 ws.send(JSON.stringify(out));
+                            const peers = snapshotFor(presence.socket, r.presence.values());
+                            if (peers.length) ws.send(JSON.stringify({ type: 'presence', peers }));
                             ws.send(JSON.stringify({ type: 'comments.snapshot', ...r.comments.snapshot() }));
                         }
                         else if (msg.type === 'actions') {

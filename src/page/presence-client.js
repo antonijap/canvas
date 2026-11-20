@@ -214,10 +214,11 @@ export function createPeers({ idleMs = IDLE_MS, fadeMs = FADE_MS } = {}) {
       for (const [session, e] of peers) {
         if (page != null && e.page != null && e.page !== page) continue;
         const opacity = e.cursor ? idleOpacity(now - e.at.cursor, idleMs, fadeMs) : 0;
-        const name = String((e.by && e.by.name) || "Someone").slice(0, 24);
+        const name = String((e.by && e.by.name) || "Someone").slice(0, 24) + (e.by?.agent ? "'s agent" : '');
         const color = colorOf(e.by && e.by.name);
         out.push({
           session,
+          agent: !!e.by?.agent,
           name,
           color,
           ink: inkOn(color),
@@ -260,4 +261,27 @@ export function previewBoxes(preview, rectOf) {
     if (r) out.push({ id, x: r.x + dx, y: r.y + dy, w: Math.max(0, r.w + dw), h: Math.max(0, r.h + dh) });
   }
   return out;
+}
+
+const SCRUB_KEYS = new Set(['x','y','width','height','rotation','opacity','cornerRadius','gap','padding','paddingLeft','paddingRight','paddingTop','paddingBottom','fontSize','letterSpacing','lineHeight']);
+/** Remote gestures apply to a fresh server scene. Local edits and pins applied afterwards take priority. */
+export function applyPeerPreviews(root, peers) {
+  let changed=false;
+  const find = (n,id) => n.id===id ? n : (n.children || []).map(c=>find(c,id)).find(Boolean);
+  for(const p of peers || []) {
+    const v=p.preview;
+    if(v) for(const id of v.ids || []) {
+      const n=find(root,id);if(!n)continue;
+      if(v.kind==='scrub') { if(SCRUB_KEYS.has(v.key) && Number.isFinite(v.value)) { n[v.key]=v.value;changed=true; } }
+      else {
+        if(id!==root.id) { n.x=(n.x || 0)+(v.dx || 0);n.y=(n.y || 0)+(v.dy || 0); }
+        if(v.kind==='resize') { n.width=Math.max(0,(n.width || 0)+(v.dw || 0));n.height=Math.max(0,(n.height || 0)+(v.dh || 0)); }
+        changed=true;
+      }
+    }
+    if(p.editing && typeof p.editing.text==='string') {
+      const n=find(root,p.editing.id);if(n?.type==='text') {n.content=p.editing.text;changed=true;}
+    }
+  }
+  return changed;
 }

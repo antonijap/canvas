@@ -18,6 +18,8 @@ import { type Action, type FileServerMessage, type FileOp, CAN_EDIT, checkBlobPa
 import { readBodyText } from './body.ts';
 import { applyOp, type OpEnvelope, type Thread } from '../cloud/protocol.ts';
 import { prepareMove } from './cloud-files-move.ts';
+import { checkPresence, stripIdentity, keep, type Presence, type PeerPresence } from '../cloud/core/presence.ts';
+import { createPresenceSender } from './page/presence-client.js';
 async function boundedBytes(response: Response, limit: number): Promise<Uint8Array> {
     if (Number(response.headers.get('content-length')) > limit) {
         await response.body?.cancel();
@@ -67,6 +69,8 @@ interface Session {
     comments: Thread[];
     commentsSeq: number;
     commentsPending: OpEnvelope[];
+    presenceSender?: ReturnType<typeof createPresenceSender>;
+    peers?: Map<string, PeerPresence>;
 }
 const sessions = new Map<string, Session>();
 const checkpointSession=(s:Session)=>s.store.checkpoint(path.join(os.homedir(),"Library","Caches","Canvas","cloud",cloudKey(s.store.meta.cloud),"boards"));
@@ -74,7 +78,24 @@ const revoked = new Set<string>();
 export const fileEvents: {
     view?: (file: string) => void;
     removed?: (file: string) => void;
+    presence?: (file: string, peers: PeerPresence[]) => void;
 } = {};
+export const filePeers = (file: string) => [...(fileSession(file)?.peers?.values() ?? [])];
+export function sendFilePresence(file: string, patch: unknown): boolean {
+    const s = fileSession(file), p = stripIdentity(patch);
+    if (!s || s.stopped || s.offline || checkPresence(p)) return false;
+    s.presenceSender ??= createPresenceSender({ send: p => {
+        if (!s.stopped && s.status === 'connected' && s.ws?.readyState === WebSocket.OPEN) s.ws.send(JSON.stringify({ type: 'presence', p }));
+    } });
+    s.presenceSender.update(p as Presence);
+    return true;
+}
+function clearPresence(s: Session) {
+    s.presenceSender?.dispose(); s.presenceSender = undefined;
+    const gone = [...(s.peers?.values() ?? [])].map(p => ({ ...p, gone: true as const }));
+    s.peers?.clear();
+    if (gone.length) fileEvents.presence?.(path.join(s.store.pkg, 'document.json'), gone);
+}
 function docFile(file: string) {
     const f = file.endsWith('document.json') ? path.resolve(file) : path.join(path.resolve(file), 'document.json');
     return fs.existsSync(f) ? fs.realpathSync(f) : f;
@@ -179,6 +200,15 @@ function saveComments(s: Session) { s.store.db.prepare('INSERT OR REPLACE INTO c
 async function receive(s: Session, m: any) {
     if (s.stopped)
         return;
+    if (m.type === 'presence') {
+        s.peers ??= new Map();
+        for (const p of m.peers as PeerPresence[]) {
+            if (p.gone) s.peers.delete(p.session);
+            else s.peers.set(p.session, { ...keep(s.peers.get(p.session) ?? {}, p), session:p.session, by:p.by, role:p.role });
+        }
+        fileEvents.presence?.(path.join(s.store.pkg, 'document.json'), m.peers);
+        return;
+    }
     if ((m.type==='error'||m.type==='reject')&&m.code==='quota') {
       s.status='quota';for(const p of s.store.replica.pending)p.sent=false;s.store.commit();
       if(s.timer)clearTimeout(s.timer);s.timer=setTimeout(()=>{if(!s.stopped){s.status='connected';void send(s).catch(()=>s.ws?.close());}},60_000);s.timer.unref();
@@ -229,6 +259,15 @@ async function receive(s: Session, m: any) {
         fs.cpSync(s.store.pkg, local, { recursive: true, filter: p => path.basename(p) !== '.cloud' });
     }
     const result = await s.store.receive(m as FileServerMessage, objects(s.store.meta.cloud, s.store.meta.file));
+    if(m.type==='applied') for(const a of m.actions) {
+        if(!a.by.agent || a.by.id===s.store.meta.author.id)continue;
+        const op=a.ops.find((o:FileOp)=>'id' in o || o.k==='insert'), id=op && (op.k==='insert' ? op.node.id : op.id);
+        if(!id)continue;
+        const tree=s.store.replica.view(), n=tree.node(id); if(!n)continue;
+        let x=Number(n.props.x)||0,y=Number(n.props.y)||0;
+        for(const parent of tree.ancestors(id,256)) {const p=tree.node(parent);x+=Number(p?.props.x)||0;y+=Number(p?.props.y)||0;}
+        fileEvents.presence?.(path.join(s.store.pkg,'document.json'),[{session:'agent:'+a.by.id,by:a.by,role:'editor',cursor:{x,y},sel:[id],editing:{id}}]);
+    }
     if(m.type==='applied'&&Number(s.store.db.prepare('SELECT COUNT(*) AS n FROM confirmed').get()!.n)>=2000)checkpointSession(s);
     if (m.type === 'welcome')
         s.status = 'connected';
@@ -285,6 +324,7 @@ async function connect(s: Session) {
             ws.close();
         } }); });
         ws.addEventListener('close', () => { if (s.ws === ws) {
+            clearPresence(s);
             s.ws = undefined;
             reconnect(s);
         } });
@@ -379,6 +419,7 @@ function removeCaches(cloud: string) {
         if (s.store.meta.cloud !== cloud)
             continue;
         s.stopped = true;
+        clearPresence(s);
         if (s.timer)
             clearTimeout(s.timer);
         s.ws?.close();
@@ -466,7 +507,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             } catch(error) {
                 if(importing) {
                     const pkg=path.join(root(),cloudKey(resolveCloud(b.cloud)),importing+'.canvas'), file=path.join(pkg,'document.json'), s=sessions.get(file);
-                    if(s) {s.stopped=true;if(s.timer)clearTimeout(s.timer);s.ws?.close();await s.chain.catch(()=>{});s.store.close();sessions.delete(file);fileEvents.removed?.(file);}
+                    if(s) {s.stopped=true;clearPresence(s);if(s.timer)clearTimeout(s.timer);s.ws?.close();await s.chain.catch(()=>{});s.store.close();sessions.delete(file);fileEvents.removed?.(file);}
                     fs.rmSync(pkg,{recursive:true,force:true});
                     try {await request(b.cloud,`/v1/files/${importing}/import`,'DELETE');}
                     catch(cleanup) {throw new Error((error as Error).message+'; local source kept. Cloud cleanup: '+(cleanup as Error).message);}
@@ -479,10 +520,11 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             return out(404, { code: 'not_found' });
         if(p==='/api/cloud/files/close') {
           await asOneAction(path.join(s.store.pkg,'document.json'),()=>{
-            s.stopped=true;if(s.timer)clearTimeout(s.timer);s.ws?.close();checkpointSession(s);s.store.materialize();s.store.close();sessions.delete(path.join(s.store.pkg,'document.json'));
+            s.stopped=true;clearPresence(s);if(s.timer)clearTimeout(s.timer);s.ws?.close();checkpointSession(s);s.store.materialize();s.store.close();sessions.delete(path.join(s.store.pkg,'document.json'));
           });
           evictClosedPackages(root(),new Set([...sessions.values()].map(s=>s.store.pkg)));return out(200,{ok:true});
         }
+        if (p === '/api/cloud/files/presence') return out(200, { ok: sendFilePresence(b.file ?? url.searchParams.get('file')!, b.p) });
         if (p === '/api/cloud/files/disconnect') {
             s.offline = true;
             s.ws?.close();

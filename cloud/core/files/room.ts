@@ -325,6 +325,7 @@ export class FileRoom {
 
     const first = m.seq + 1;
     const at = new Date(this.now()).toISOString();
+    const author = a.agent ? { ...conn.author, agent: true } : conn.author;
     const before = this.tree.rowsWritten;
     let result!: AppliedAction;
     try {
@@ -332,7 +333,7 @@ export class FileRoom {
         this.tree.seq = first;
         this.tree.bytesDelta = 0;
         this.tree.boardDelta.clear();
-        const r = this.apply(this.tree, { ...a, ops, at }, { by: conn.author, seq: first, limits: FILE_LIMITS, confine: true });
+        const r = this.apply(this.tree, { ...a, ops, at }, { by: author, seq: first, limits: FILE_LIMITS, confine: true });
         if (isReject(r)) throw new Refusal(r.reject, (r as Reject).message);
         this.uploadsFor(ops);
         this.faultAt("applied");
@@ -341,7 +342,7 @@ export class FileRoom {
           this.store.sql.exec(q, ...b);
           this.tree.rowsWritten++;
         };
-        w("INSERT INTO log (first, last, action, by_json, at, ops_json) VALUES (?, ?, ?, ?, ?, ?)", first, last, a.id, JSON.stringify(conn.author), at, JSON.stringify(r.ops));
+        w("INSERT INTO log (first, last, action, by_json, at, ops_json) VALUES (?, ?, ?, ?, ?, ?)", first, last, a.id, JSON.stringify(author), at, JSON.stringify(r.ops));
         this.faultAt("logged");
         w("INSERT INTO receipts (action, by_id, epoch, sha, first, last, at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)", a.id, conn.author.id, a.epoch, sha, first, last, this.now());
         this.faultAt("receipted");
