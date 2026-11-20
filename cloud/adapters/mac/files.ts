@@ -292,6 +292,9 @@ export class MacFiles {
                 this.edit(me);
             if (row.state === 'trash')
                 return json(404, { code: 'not_found', message: 'File is in Trash' });
+            if (!sub && method === 'GET') return json(200, row);
+            if ((sub === 'import' || sub === 'import/complete') && row.state !== 'importing')
+                return json(409, { code: 'conflict', message: 'This file is already published' });
             if (!sub && method === 'PATCH') {
                 const b = await body();
                 this.edit(me);
@@ -313,9 +316,6 @@ export class MacFiles {
             if (sub === 'import' && method === 'DELETE') {
                 if(row.created_by !== me.id) return json(403,{code:'forbidden'});
                 const r=this.rooms.get(file) ?? this.room(file);
-                // A failed move must not discard somebody else's edits made after publication.
-                if(r.store.sql.exec("SELECT 1 FROM log WHERE json_extract(by_json,'$.id')!=? LIMIT 1",me.id).toArray().length)
-                    return json(409,{code:'conflict',message:'Another person edited the imported file; kept it in the Cloud'});
                 if(r.timer)clearTimeout(r.timer);
                 for(const ws of r.sockets.keys())ws.close(1008,'Import cancelled');
                 r.presence.clear();r.sockets.clear();r.store.close();this.rooms.delete(file);

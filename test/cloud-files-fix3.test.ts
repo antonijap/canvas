@@ -19,3 +19,17 @@ test('typing generates confirmed-state splices and preserves concurrent text',()
  const c=new FileStateStore(path.join(dir,'c'),{...b.meta,state:state()});try{const overlap=submit(c,'aZZd');const out=room.submit({author:c.meta.author,role:'editor'},{type:'actions',epoch:1,actions:[overlap]});assert.equal(out.replies[0].type,'ack');}finally{c.close();}
  }finally{a.close();b.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+import {CloudHost} from '../cloud/adapters/mac/host.ts';
+async function hostTest(fn:(h:CloudHost,call:(p:string,method?:string,b?:unknown)=>Promise<Response>,dir:string)=>Promise<void>){
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-fix3-host-')),h=new CloudHost({dir,port:0});
+ try{const token=h.ownerDevice('Anna'),base='http://127.0.0.1:'+await h.start();await fn(h,(p,method='GET',b)=>fetch(base+p,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:b===undefined?undefined:JSON.stringify(b)}),dir);}finally{await h.stop();fs.rmSync(dir,{recursive:true,force:true});}
+}
+test('published files refuse import cancellation and demotion',()=>hostTest(async(h,call,dir)=>{
+ const id=crypto.randomUUID();assert.equal((await call('/v1/files','POST',{id,name:'Design',importing:true})).status,201);
+ assert.equal((await call(`/v1/files/${id}/import/complete`,'POST',{})).status,200);
+ for(const method of ['DELETE','POST'])assert.equal((await call(`/v1/files/${id}/import`,method,{})).status,409);
+ assert.equal((await call(`/v1/files/${id}`)).status,200);
+ assert.equal((await call(`/v1/files/${id}`,'DELETE')).status,200);
+ assert.equal(fs.existsSync(path.join(dir,'files',id+'.sqlite')),true);
+}));
