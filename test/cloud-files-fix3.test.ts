@@ -72,3 +72,13 @@ test('capacity uses accounted bytes between timed recounts',()=>hostTest(async(h
  const key=`files/${crypto.randomUUID()}/blobs/${'b'.repeat(64)}`;await h.files.objects.putIfAbsent(key,new Uint8Array(123));assert.equal((h.files as any).usedBytes,before+123);await h.files.objects.delete(key);assert.equal((h.files as any).usedBytes,before);
  }finally{fs.readdirSync=original;}
 }));
+
+test('rejected action batch creates one recovered package with every draft',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-reject-batch-')),old=process.env.HOME;process.env.HOME=dir;
+ const store=new FileStateStore(path.join(dir,'cache.canvas'),{cloud:'mac://studio',file:crypto.randomUUID(),name:'Design',role:'editor',author:{id:'anna',name:'Anna'},state:state()});
+ const a=store.propose([{k:'set',id:'Board',props:{x:{v:1}}}]),b=store.propose([{k:'set',id:'Board',props:{y:{v:2}}}]);assert.ok(!('reject'in a)&&!('reject'in b));
+ const s:any={store,status:'connected',chain:Promise.resolve(),stopped:false,offline:false,comments:[],commentsSeq:0,commentsPending:[]};
+ try{for(const action of [a,b])await receive(s,{type:'reject',id:action.id,code:'conflict',message:'Changed remotely'});
+ const root=path.join(dir,'Documents','Canvas Recovered'),copies=fs.readdirSync(root);assert.equal(copies.length,1);const archive=fs.readFileSync(path.join(root,copies[0],'unsent-actions.json'),'utf8');assert.ok(archive.includes(a.id)&&archive.includes(b.id));
+ }finally{store.close();if(old===undefined)delete process.env.HOME;else process.env.HOME=old;fs.rmSync(dir,{recursive:true,force:true});}
+});

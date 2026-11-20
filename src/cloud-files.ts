@@ -71,6 +71,7 @@ interface Session {
     commentsSeq: number;
     commentsPending: OpEnvelope[];
     commentsRejected?: RefusedOp[];
+    recovery?: string;
     presenceSender?: ReturnType<typeof createPresenceSender>;
     peers?: Map<string, PeerPresence>;
 }
@@ -205,6 +206,21 @@ function waitForQuota(s: Session) {
     if (s.timer) clearTimeout(s.timer);
     s.timer = setTimeout(() => { if (!s.stopped) { s.status = 'connected'; void send(s).catch(() => s.ws?.close()); } }, 60_000); s.timer.unref();
 }
+function recoverDrafts(s: Session) {
+    if (!s.recovery) {
+        const local = path.join(os.homedir(), 'Documents', 'Canvas Recovered', s.store.meta.file + '-' + randomUUID() + '.canvas');
+        s.store.materialize(); fs.mkdirSync(path.dirname(local), { recursive: true });
+        fs.cpSync(s.store.pkg, local, { recursive: true, filter: p => path.basename(p) !== '.cloud' });
+        s.recovery = local;
+    }
+    const file = path.join(s.recovery, 'unsent-actions.json');
+    const previous = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { pending: [], refused: [] };
+    const refused = new Map([...previous.refused, ...s.store.replica.refused].map(p => [p.action.id, p]));
+    const pending = new Map([...previous.pending, ...s.store.replica.pending].map(p => [p.action.id, p]));
+    for (const id of refused.keys()) pending.delete(id);
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify({ pending: [...pending.values()], refused: [...refused.values()], comments: s.commentsPending, rejectedComments: s.commentsRejected ?? [] }), { mode: 0o600 }); fs.renameSync(tmp, file);
+}
 export async function receive(s: Session, m: any) {
     if (s.stopped)
         return;
@@ -267,12 +283,10 @@ export async function receive(s: Session, m: any) {
         return;
     }
     if ((m.type === 'reject' && m.code !== 'quota' && s.store.replica.pending.some(p => p.action.id === m.id)) || (m.type === 'reset' && s.store.replica.pending.length)) {
-        const local = path.join(os.homedir(), 'Documents', 'Canvas Recovered', s.store.meta.file + '-' + Date.now() + '.canvas');
-        s.store.materialize();
-        fs.mkdirSync(path.dirname(local), { recursive: true });
-        fs.cpSync(s.store.pkg, local, { recursive: true, filter: p => path.basename(p) !== '.cloud' });
+        recoverDrafts(s);
     }
     const result = await s.store.receive(m as FileServerMessage, objects(s.store.meta.cloud, s.store.meta.file));
+    if (s.recovery) recoverDrafts(s);
     if(m.type==='applied') for(const a of m.actions) {
         if(!a.by.agent || a.by.id===s.store.meta.author.id)continue;
         const op=a.ops.find((o:FileOp)=>'id' in o || o.k==='insert'), id=op && (op.k==='insert' ? op.node.id : op.id);
@@ -437,13 +451,7 @@ function removeCaches(cloud: string) {
         if (s.timer)
             clearTimeout(s.timer);
         s.ws?.close();
-        if (s.store.replica.pending.length || s.store.replica.refused.length || s.commentsPending.length) {
-            const local = path.join(os.homedir(), 'Documents', 'Canvas Recovered', s.store.meta.file + '-' + Date.now() + '-' + randomUUID().slice(0, 8) + '.canvas');
-            fs.mkdirSync(path.dirname(local), { recursive: true });
-            s.store.materialize();
-            fs.cpSync(s.store.pkg, local, { recursive: true, filter: p => path.basename(p) !== '.cloud' });
-            fs.writeFileSync(path.join(local, 'unsent-actions.json'), JSON.stringify({ pending: s.store.replica.pending, refused: s.store.replica.refused, comments: s.commentsPending }));
-        }
+        if (s.store.replica.pending.length || s.store.replica.refused.length || s.commentsPending.length || s.commentsRejected?.length) recoverDrafts(s);
         s.store.close();
         sessions.delete(file);
         fileEvents.removed?.(file);
