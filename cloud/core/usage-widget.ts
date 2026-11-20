@@ -1,6 +1,5 @@
-// The Home widget's reading of GET /v1/usage (owners only). Pure: the app passes the JSON it got and
-// the time, and shows `line` with `detail` under it. It never says "free" as a promise: a Cloudflare
-// Cloud "Stays within the limits you set" (decision 13.6, review finding 26).
+// The usage widget reads GET /v1/usage (owners only). The app passes the JSON and time,
+// then shows `line` with the counted resources in `detail`.
 
 import { AMBER_AT, DAILY, isDaily, MONTHLY, RED_AT, STORED, type Daily, type Monthly, type Resource, type Stored } from "./usage.ts";
 
@@ -83,7 +82,7 @@ export function usageWidget(json: unknown, now = Date.now()): UsageWidget {
   }
   if (body.brake === "amber") level = max(level, "amber");
   if (body.brake === "red" || body.brake === "stop") level = "red";
-  const detail = ["Stays within the limits you set", ...reached, ...lines];
+  const detail = [...reached, ...lines];
   if (stale) detail.push("Last counted more than a day ago");
   return { level, line: `Today, ${percent(top.counted, top.free)} of free`, detail };
 }

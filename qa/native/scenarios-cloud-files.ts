@@ -5,29 +5,39 @@ import path from 'node:path';
 import { center, NT, sc } from './harness.ts';
 import { startServer, ROOT, type Scratch } from '../lib.ts';
 const post = async (base: string, p: string, b: unknown) => { const r = await fetch(base + p, { method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, j: await r.json() as any }; };
-sc('cloud-files', 'Usage shows uptime, messages, restarts and normal, amber, red and unavailable states', { covers: ['cloud-files:usage'] }, async (t: NT) => {
+sc('cloud-files', 'Only actionable warnings appear on files; storage and people live in host settings', { covers: ['cloud-files:usage'] }, async (t: NT) => {
     await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
     const h = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Anna' });
+    const base = { storageBytes: 1024, freeDisk: 40*1024**3, peopleConnected: 2, uptimeMs: 7200000, messages24h: 123, restartsHour: 0, brake: 'none' };
     try {
-        await t.cmd('qa.cloud', { clouds: [{ url: h.j.url, name: 'Studio' }] });
+        await t.cmd('qa.cloud', { clouds: [{ url: h.j.url, name: 'Studio' }], usage: base });
         await t.key('0', ['cmd', 'shift']);
         await t.waitState(s => s.homeShown, 'Home');
         await t.click(center(await t.mark({ id: 'home-row', label: 'Studio' })));
-        const base = { storageBytes: 1024, freeDisk: 40*1024**3, peopleConnected: 2, uptimeMs: 7200000, messages24h: 123, restartsHour: 0, brake: 'none' };
-        for (const tone of ['normal', 'amber', 'red']) {
-            await t.cmd('qa.cloud', { usage: { ...base, tone, restartsHour: tone === 'red' ? 4 : 0 } });
-            await t.mark({ id: 'cloud-files-usage', label: tone === 'red' ? '4 restarts' : '123 messages' }, 7000);
-            await t.mark({ id: 'cloud-files-usage-' + tone }, 7000);
-            const text = (await t.mark({ id: 'cloud-files-usage' })).label ?? '';
-            t.ok(text.includes('Up 2h 0m') && text.includes('123 messages in 24h'), 'meter details');
-            if (tone === 'red') t.ok(text.includes('4 restarts') && text.includes('restarting often'), 'restart warning');
-            await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-usage-' + tone + '.png'));
+        await t.mark({ id: 'cloud-files-empty', label: 'No files in Studio yet' }, 7000);
+        t.eq((await t.marks({ id: 'cloud-files-warning' })).length, 0, 'healthy Cloud has no banner');
+        t.eq((await t.marks({ id: 'cloud-files-usage' })).length, 0, 'no diagnostics on files');
+        await t.mark({ id: 'cloud-files-move' });
+        await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-empty.png'));
+        for (const [usage, label] of [
+            [{ ...base, restartsHour: 4 }, 'This Cloud keeps restarting. Check the Mac that hosts it.'],
+            [{ ...base, freeDisk: 4*1024**3, brake: 'storage' }, 'This Mac is almost full. New uploads are paused.'],
+        ] as const) {
+            await t.cmd('qa.cloud', { usage });
+            await t.mark({ id: 'cloud-files-warning', label }, 7000);
+            await t.mark({ id: 'cloud-files-settings', label: 'Open Settings' });
         }
-        await t.cmd('qa.cloud', { usage: { ...base, tone:'red', freeDisk: 4*1024**3, brake:'storage' } });
-        await t.mark({ id: 'cloud-files-usage', label: 'Uploads paused' }, 7000);
+        await t.click(center(await t.mark({ id: 'cloud-files-settings' })));
+        await t.mark({ id: 'cloud-host-usage', label: '2 people connected.' , window: 'settings' }, 7000);
+        await t.mark({ id: 'text', label: 'Check code', window: 'settings' });
+        await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-host-settings.png'), 'settings');
+        await t.key('w', ['cmd'], { window: 'settings' });
         await t.cmd('qa.cloud', { usage: {} });
-        await t.mark({ id: 'cloud-files-usage', label: 'Usage unavailable' }, 7000);
+        await t.waitFor(async () => (await t.marks({ id: 'cloud-files-warning' })).length === 0, 'unavailable usage is silent', 7000);
+        await post(t.app.base, '/api/cloud/host/stop', { hostId: h.j.hostId });
+        await t.mark({ id: 'cloud-files-warning', label: 'This Cloud is offline.' }, 10000);
     } finally {
+        await t.key('w', ['cmd'], { window: 'settings' }).catch(() => {});
         await t.cmd('qa.cloud', { usage: null, clouds: [] });
         await post(t.app.base, '/api/cloud/host/stop', { hostId: h.j.hostId });
         await post(t.app.base, '/api/cloud/host/wipe', { hostId: h.j.hostId });
@@ -45,7 +55,8 @@ sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode,
         await t.key('0', ['cmd', 'shift']);
         await t.waitState(s => s.homeShown, 'Home');
         await t.click(center(await t.mark({ id: 'home-row', label: 'Studio' }, 8000)));
-        await t.click(center(await t.mark({ id: 'cloud-files-new' }, 5000)));
+        await t.mark({ id: 'cloud-files-new' }, 5000);
+        await t.key('n', ['cmd']);
         await t.waitState(s => typeof s.file === 'string' && s.file.includes('/cloud-files/') && !s.homeShown, 'a Cloud file', 10000);
         const file = (await t.state()).file;
         const info = await (await fetch(t.app.base + '/api/cloud/files/info?file=' + encodeURIComponent(file))).json() as any;
@@ -96,7 +107,7 @@ sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode,
         await t.waitFor(async () => JSON.stringify(await t.js('return window.canvasHost.doc')).includes('Reconnected'), 'offline catch-up', 8000);
         await t.key('0', ['cmd', 'shift']);
         await t.click(center(await t.mark({ id: 'home-row', label: 'Studio' }, 5000)));
-        await t.mark({ id: 'cloud-files-usage' }, 5000);
+        await t.mark({ id: 'cloud-files-search' }, 5000);
         await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-home.png'));
         await t.click(center(await t.mark({ id: 'cloud-file', label: 'Untitled' }, 5000)));
         await t.waitState(s => !s.homeShown, 'open from Home');
@@ -123,10 +134,6 @@ sc('cloud-files', 'Viewer opens from Home with disabled editing, then removal cl
     try {
         host = await startServer(dir, { HOME: dir, CANVAS_STATE_DIR: path.join(dir, 'state'), CANVAS_CLOUD_SECRETS_FILE: path.join(dir, 'secrets.json'), CANVAS_COMMENT_NAME: 'Ben', CANVAS_TUNNEL_BIN: path.join(ROOT, 'test/fixtures/fake-tunnel.sh'), CANVAS_FAKE_TUNNEL_DIR: path.join(t.app.dir, 'tunnels'), CANVAS_FAKE_TUNNEL_NODE: process.execPath, CANVAS_FAKE_TUNNEL_ANY_PORT: '1' });
         const started = await post(host.base, '/api/cloud/host/start', { name: 'Studio', label: 'Ben' }), cloud = started.j.url;
-        const made = await post(host.base, '/api/cloud/files/create', { cloud, name: 'Design' });
-        t.eq(made.status, 201, 'host creates');
-        await post(host.base,'/api/structure',{file:made.j.file,op:'add',nodes:[{id:'ViewerBoard',type:'frame',width:300,height:200,children:[{id:'ViewerText',type:'text',x:20,y:20,content:'Read only',fontSize:16}]}]});
-        await t.waitFor(async()=>((await (await fetch(host!.base+'/api/cloud/files/info?file='+encodeURIComponent(made.j.file))).json()) as any).pending===0,'viewer fixture confirmed');
         const inv = await post(host.base, '/api/cloud/host/invite', { hostId: started.j.hostId, label: 'Anna', role: 'viewer' });
         const joined = await post(t.app.base, '/api/cloud/join', { link: inv.j.link, device: 'A Mac' });
         t.eq(joined.status, 200, 'viewer joins');
@@ -134,6 +141,16 @@ sc('cloud-files', 'Viewer opens from Home with disabled editing, then removal cl
         await t.key('0', ['cmd', 'shift']);
         await t.waitState(s => s.homeShown, 'Home');
         await t.click(center(await t.mark({ id: 'home-row', label: 'Studio' }, 6000)));
+        await t.mark({ id: 'cloud-files-empty', label: 'No files yet' }, 6000);
+        await t.mark({ id: 'text', label: 'Files show up here when an editor adds them.' });
+        t.eq((await t.marks({ id: 'cloud-files-new' })).length + (await t.marks({ id: 'cloud-files-move' })).length, 0, 'viewer has no creation actions');
+        await t.key('n', ['cmd']);
+        t.eq((await t.state()).panels.length, 0, 'viewer Command N opens no local save panel');
+        await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-viewer-empty.png'));
+        const made = await post(host.base, '/api/cloud/files/create', { cloud, name: 'Design' });
+        t.eq(made.status, 201, 'host creates');
+        await post(host.base,'/api/structure',{file:made.j.file,op:'add',nodes:[{id:'ViewerBoard',type:'frame',width:300,height:200,children:[{id:'ViewerText',type:'text',x:20,y:20,content:'Read only',fontSize:16}]}]});
+        await t.waitFor(async()=>((await (await fetch(host!.base+'/api/cloud/files/info?file='+encodeURIComponent(made.j.file))).json()) as any).pending===0,'viewer fixture confirmed');
         await t.click(center(await t.mark({ id: 'cloud-file', label: 'Design' }, 6000)));
         await t.waitState(s => s.cloudReadOnly === true && typeof s.file === 'string' && s.file.includes('/cloud-files/'), 'viewer view mode', 10000);
         const file = (await t.state()).file;
@@ -162,5 +179,64 @@ sc('cloud-files', 'Viewer opens from Home with disabled editing, then removal cl
         await host?.stop();
         await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
         fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+sc('cloud-files', 'Empty actions, page drop confirmation, matching cards and search in light and dark', { covers: ['cloud-files:new', 'cloud-files:open', 'home:clouds'] }, async (t: NT) => {
+    await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
+    const h = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Anna' });
+    const local = path.join(t.app.docs, 'Design.canvas');
+    fs.mkdirSync(local);
+    fs.writeFileSync(path.join(local, 'document.json'), JSON.stringify({ version: '2.21', children: [] }));
+    try {
+        await t.cmd('qa.cloud', { clouds: [{ url: h.j.url, name: 'Studio' }] });
+        await t.key('0', ['cmd', 'shift']);
+        await t.click(center(await t.mark({ id: 'home-row', label: 'Studio' }, 6000)));
+        await t.mark({ id: 'cloud-files-empty', label: 'No files in Studio yet' }, 6000);
+        t.eq((await t.marks({ id: 'cloud-files-search' })).length, 0, 'no search before files');
+        await t.click(center(await t.mark({ id: 'cloud-files-move' })));
+        t.ok((await t.state()).panels.includes('Move a file here'), 'secondary action opens the local file picker');
+        const target = center(await t.mark({ id: 'cloud-files-empty' }));
+        const drag = () => t.cmd('qa.files', { files: [local], from: [target.x - 120, target.y], to: [target.x, target.y] });
+        await drag();
+        await t.waitState(s => !!s.modal, 'move confirmation', 5000);
+        let button = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Cancel');
+        t.ok(button, 'Cancel button');
+        await t.click(center(button), { window: 'modal' });
+        t.ok(fs.existsSync(local), 'cancel keeps the source');
+        await drag();
+        await t.waitState(s => !!s.modal, 'move confirmation again', 5000);
+        button = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Move');
+        t.ok(button, 'Move button');
+        await t.click(center(button), { window: 'modal' });
+        await t.waitState(s => !s.homeShown && typeof s.file === 'string' && s.file.includes('/cloud-files/'), 'dropped file opens in this Cloud', 15000);
+        t.ok(!fs.existsSync(local), 'verified source moved to Trash');
+        const listed = await (await fetch(t.app.base + '/api/cloud/files?cloud=' + encodeURIComponent(h.j.url))).json() as any;
+        t.eq(listed.files.length, 1, 'one published file');
+        const name = listed.files[0].name;
+        await t.key('0', ['cmd', 'shift']);
+        await t.mark({ id: 'cloud-file', label: name }, 7000);
+        await t.mark({ id: 'text', label: 'Edited just now' });
+        const search = await t.mark({ id: 'cloud-files-search' });
+        const create = await t.mark({ id: 'cloud-files-new' });
+        t.near(search.h, create.h, 1, 'header controls share a height');
+        for (const theme of ['light', 'dark']) {
+            await t.cmd('qa.theme', { theme });
+            await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-grid-' + theme + '.png'));
+        }
+        await t.click(center(search));
+        await t.type('No match');
+        await t.mark({ id: 'text', label: 'No files match your search' }, 5000);
+        t.eq((await t.marks({ id: 'cloud-file' })).length, 0, 'nonmatching cards hidden');
+        await t.key('a', ['cmd']); await t.key('Delete');
+        await t.mark({ id: 'cloud-file', label: name }, 5000);
+        await t.click(center(await t.mark({ id: 'cloud-files-new' })));
+        await t.waitState(s => !s.homeShown && typeof s.file === 'string' && s.file.includes('/cloud-files/'), 'header creates here', 10000);
+    } finally {
+        await t.cmd('qa.theme', { theme: 'light' });
+        await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
+        await post(t.app.base, '/api/cloud/host/stop', { hostId: h.j.hostId });
+        await post(t.app.base, '/api/cloud/host/wipe', { hostId: h.j.hostId });
+        fs.rmSync(local, { recursive: true, force: true });
     }
 });

@@ -5,6 +5,47 @@
 import CryptoKit
 import Foundation
 
+/// Copy shared by the Cloud file page, its actions and the host's settings.
+enum CloudFilesText {
+    static func canEdit(_ role: String) -> Bool { role == "owner" || role == "editor" }
+
+    static func problem(code: String?, fallback: String) -> String {
+        switch code {
+        case "not_found": return "This file was moved to the Trash"
+        case "read_only": return "You can view this file but not edit it"
+        case "quota": return "This Cloud is full"
+        case "removed": return "You no longer have access to this Cloud"
+        default: return fallback
+        }
+    }
+
+    static func warning(offline: Bool, usage: [String: Any]) -> String? {
+        if offline { return "This Cloud is offline." }
+        if usage["brake"] as? String == "storage" || (usage["freeDisk"] as? Int64).map({ $0 < 5 * 1024 * 1024 * 1024 }) == true {
+            return "This Mac is almost full. New uploads are paused."
+        }
+        if (usage["restartsHour"] as? Int ?? 0) > 3 { return "This Cloud keeps restarting. Check the Mac that hosts it." }
+        return nil
+    }
+
+    static func hostUsage(_ usage: [String: Any]) -> String? {
+        guard let bytes = usage["storageBytes"] as? Int64, let people = usage["peopleConnected"] as? Int else { return nil }
+        let stored = ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        return "\(stored) of files. \(people) \(people == 1 ? "person" : "people") connected."
+    }
+
+    /// The host records edit time, but does not yet record the last editor's name.
+    static func edited(_ timestamp: String?, now: Date = Date()) -> String {
+        guard let timestamp else { return "" }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var date = iso.date(from: timestamp)
+        if date == nil { iso.formatOptions = [.withInternetDateTime]; date = iso.date(from: timestamp) }
+        guard let date else { return "" }
+        return "Edited " + HomeLogic.ago(date.timeIntervalSince1970, now: now.timeIntervalSince1970)
+    }
+}
+
 /// One file the person opened: its path and when (seconds since 1970).
 struct RecentEntry: Codable, Equatable {
     var path: String

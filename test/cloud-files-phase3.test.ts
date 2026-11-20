@@ -131,6 +131,7 @@ test('Mac storage cap includes new file databases and snapshots', async () => {
         const port = await h.start();
         const r = await fetch(`http://127.0.0.1:${port}/v1/files`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ id: crypto.randomUUID(), name: 'Full' }) });
         assert.equal(r.status, 429);
+        assert.deepEqual(await r.json(), { code: 'quota', message: 'This Cloud is full. Delete files to make room.' });
     }
     finally {
         await h.stop();

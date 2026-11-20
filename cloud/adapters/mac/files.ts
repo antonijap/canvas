@@ -319,7 +319,7 @@ export class MacFiles {
         error(401, 'removed', 'This device was removed'); if (fresh!.role !== 'owner' && fresh!.role !== 'editor')
         error(403, 'read_only', 'This Cloud file is read only'); return fresh!; }
     private capacity(bytes: number) { if (this.usedBytes + bytes > this.cap)
-        error(429, 'quota', "This Cloud storage cap is reached"); }
+        error(429, 'quota', "This Cloud is full. Delete files to make room."); }
     private disk() { const s = fs.statfsSync(this.root); return s.bavail * s.bsize; }
     private storage(): number { return fs.readdirSync(path.join(this.root, 'files')).reduce((n, f) => n + fs.statSync(path.join(this.root, 'files', f)).size, 0) + this.ledger.held(); }
     async route(req: http.IncomingMessage, res: http.ServerResponse, url: URL, me: Me, body: () => Promise<any>): Promise<boolean> {

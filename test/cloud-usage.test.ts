@@ -191,7 +191,7 @@ test("brakes: amber at 60%, red at 80% stops bulk work, work stops at 95%, essen
   assert.equal(team.report(T0).brake, "stop");
 });
 
-test("the Home widget reads /v1/usage: percent of free, levels, the limits line", () => {
+test("the usage widget reads /v1/usage: percent of free, levels and counted resources", () => {
   const team = new UsageTeam(defaultCapConfig(), undefined, T0);
   team.countRequest({ http: 12_000 }, T0);
   team.settle({ extra: { rowsWritten: 3_000, storageBytes: 1_200_000_000 } }, T0);
@@ -199,10 +199,11 @@ test("the Home widget reads /v1/usage: percent of free, levels, the limits line"
   const w = usageWidget(json, T0 + HOUR);
   assert.equal(w.line, "Today, 12% of free");
   assert.equal(w.level, "ok");
-  assert.equal(w.detail[0], "Stays within the limits you set");
+  assert.equal(w.detail[0], "Requests: 12,000 of 80,000");
+  assert.ok(w.detail.every(line => !line.includes("Stays within the limits you set")));
   assert.ok(w.detail.includes("Requests: 12,000 of 80,000"));
   assert.ok(w.detail.includes("Design data: 1.2 GB of 4 GB"));
-  assert.ok(w.detail.every(line => !/free\b/i.test(line) || line === "Stays within the limits you set" || /free on/.test(line)), "no promise of free in the details");
+  assert.ok(w.detail.every(line => !/free\b/i.test(line) || /free on/.test(line)), "no promise of free in the details");
 
   team.countRequest({ http: 38_000 }, T0);
   assert.equal(usageWidget(team.report(T0), T0).level, "amber", "50,000 of 80,000 is past 60% of the cap");
