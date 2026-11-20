@@ -439,6 +439,7 @@ function start(host) {
     return rotateVec(px - cx, py - cy, sh.r);
   }
   const handleFor = (e) => {
+    if (host.readOnly) return null;
     if (!resizable()) return null;
     const r = selRects();
     if (!r) return null;
@@ -817,6 +818,7 @@ function start(host) {
   }
 
   const scaleHandleFor = (e) => {
+    if (host.readOnly) return null;
     if (!scaleMode || !ev() || host.hand) return null;
     const ids = scaleIds();
     // A locked layer (selected in the Layers panel) does not scale on the canvas; the inspector's scale field still does.
