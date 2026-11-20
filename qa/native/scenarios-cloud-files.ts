@@ -30,6 +30,7 @@ sc('cloud-files', 'Usage shows uptime, messages, restarts and normal, amber, red
     } finally {
         await t.cmd('qa.cloud', { usage: null, clouds: [] });
         await post(t.app.base, '/api/cloud/host/stop', { hostId: h.j.hostId });
+        await post(t.app.base, '/api/cloud/host/wipe', { hostId: h.j.hostId });
     }
 });
 sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode, confinement, usage and removal', { covers: ['home:clouds', 'settings:cloud', 'cloud-files:new', 'cloud-files:open', 'cloud-files:remote', 'cloud-files:offline', 'cloud-files:confinement', 'cloud-files:usage', 'cloud-files:undo', 'cloud-files:presence'] }, async (t: NT) => {
@@ -110,6 +111,7 @@ sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode,
     finally {
         await peer?.stop();
         await post(t.app.base, '/api/cloud/host/stop', { hostId: host.j.hostId });
+        await post(t.app.base, '/api/cloud/host/wipe', { hostId: host.j.hostId });
         await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
         fs.rmSync(dir, { recursive: true, force: true });
     }
