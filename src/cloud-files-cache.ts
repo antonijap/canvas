@@ -52,7 +52,7 @@ export function evictClosedPackages(root:string,open:Set<string>,cap=5*1024**3,b
   if(!c.isDirectory()||!/^[0-9a-f]{16}$/.test(c.name))continue;const cloud=path.join(root,c.name);
   for(const f of fs.readdirSync(cloud,{withFileTypes:true})){
    if(!f.isDirectory()||!/^[0-9a-f-]{36}\.canvas$/.test(f.name))continue;const pkg=path.join(cloud,f.name),file=path.join(pkg,'.cloud','state.sqlite');let pending=true;
-   if(!open.has(pkg)&&fs.existsSync(file)){let db:DatabaseSync|undefined;try{db=new DatabaseSync(file,{readOnly:true});pending=Number(db.prepare('SELECT COUNT(*) AS n FROM pending').get()!.n)>0;const have=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='comments_state'").get();if(have){const c=db.prepare('SELECT json FROM comments_state WHERE id=1').get();if(c)pending ||= JSON.parse(String(c.json)).commentsPending?.length>0;}}catch{pending=true;}finally{db?.close();}}
+   if(!open.has(pkg)&&fs.existsSync(file)){let db:DatabaseSync|undefined;try{db=new DatabaseSync(file,{readOnly:true});pending=Number(db.prepare('SELECT COUNT(*) AS n FROM pending').get()!.n)>0;const have=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='comments_state'").get();if(have){const c=db.prepare('SELECT json FROM comments_state WHERE id=1').get();if(c){const saved=JSON.parse(String(c.json));pending ||= saved.commentsPending?.length>0 || saved.commentsRejected?.length>0;}}}catch{pending=true;}finally{db?.close();}}
    files.push({pkg,bytes:bytes(pkg),at:fs.statSync(pkg).mtimeMs,pending:pending||open.has(pkg)});
   }
  }

@@ -35,3 +35,10 @@ test('board objects are collected by durable references and count toward evictio
  evictClosedPackages(root,new Set(),packageBytes(pkg),cache);assert.equal(fs.existsSync(pkg),false);assert.equal(fs.readdirSync(boardDir).length,0);
  }finally{try{s.close();}catch{}fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('cache eviction keeps permanently rejected comment drafts',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-rejected-cache-')),pkg=path.join(dir,'a'.repeat(16),crypto.randomUUID()+'.canvas');
+ const s=new FileStateStore(pkg,{cloud:'mac://studio',file:path.basename(pkg,'.canvas'),name:'Design',role:'editor',author:{id:'anna',name:'Anna'},state:stateFromFiles({children:[]})});
+ try{s.db.exec('CREATE TABLE comments_state(id INTEGER PRIMARY KEY,json TEXT NOT NULL)');s.db.prepare('INSERT INTO comments_state VALUES(1,?)').run(JSON.stringify({commentsPending:[],commentsRejected:[{envelope:{opId:'draft',op:{body:'Keep this draft'}},code:'invalid',message:'Retry'}]}));s.close();evictClosedPackages(dir,new Set(),0,path.join(dir,'boards'));assert.equal(fs.existsSync(pkg),true);
+ }finally{try{s.close();}catch{}fs.rmSync(dir,{recursive:true,force:true});}
+});

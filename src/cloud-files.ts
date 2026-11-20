@@ -444,13 +444,16 @@ function removeCaches(cloud: string) {
                 continue;
             const store = new FileStateStore(pkg);
             let commentsPending: OpEnvelope[] = [];
+            let commentsRejected: RefusedOp[] = [];
             try {
                 const c = store.db.prepare('SELECT json FROM comments_state WHERE id=1').get();
-                if (c)
-                    commentsPending = JSON.parse(String(c.json)).commentsPending ?? [];
+                if (c) {
+                    const saved = JSON.parse(String(c.json));
+                    commentsPending = saved.commentsPending ?? []; commentsRejected = saved.commentsRejected ?? [];
+                }
             }
             catch { }
-            sessions.set(file, { store, status: 'removed', chain: Promise.resolve(), stopped: false, offline: true, comments: [], commentsSeq: 0, commentsPending });
+            sessions.set(file, { store, status: 'removed', chain: Promise.resolve(), stopped: false, offline: true, comments: [], commentsSeq: 0, commentsPending, commentsRejected });
         }
     for (const [file, s] of sessions) {
         if (s.store.meta.cloud !== cloud)
