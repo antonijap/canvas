@@ -33,3 +33,16 @@ test('published files refuse import cancellation and demotion',()=>hostTest(asyn
  assert.equal((await call(`/v1/files/${id}`,'DELETE')).status,200);
  assert.equal(fs.existsSync(path.join(dir,'files',id+'.sqlite')),true);
 }));
+
+import {receive} from '../src/cloud-files.ts';
+test('comment quota retries and other rejected drafts survive restart',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-comment-draft-'));
+ const store=new FileStateStore(dir,{cloud:'mac://studio',file:crypto.randomUUID(),name:'Design',role:'editor',author:{id:'anna',name:'Anna'},state:state()});
+ store.db.exec('CREATE TABLE comments_state(id INTEGER PRIMARY KEY,json TEXT NOT NULL)');
+ const op={opId:crypto.randomUUID(),doc:store.meta.file,at:new Date().toISOString(),op:{kind:'thread.create',thread:crypto.randomUUID(),comment:crypto.randomUUID(),anchor:{nodeId:'Title',board:'Board',x:0,y:0},body:'Draft text'}};
+ const s:any={store,status:'connected',chain:Promise.resolve(),stopped:false,offline:false,comments:[],commentsSeq:0,commentsPending:[op]};
+ try{await receive(s,{type:'comments.ack',acks:[],rejected:[{opId:op.opId,code:'quota',message:'Try later'}]});assert.equal(s.commentsPending.length,1);assert.equal(s.status,'quota');
+ await receive(s,{type:'comments.ack',acks:[],rejected:[{opId:op.opId,code:'invalid',message:'Anchor unavailable'}]});
+ const saved=JSON.parse(String(store.db.prepare('SELECT json FROM comments_state').get()!.json));assert.equal(saved.commentsRejected[0].envelope.op.body,'Draft text');assert.match(fs.readFileSync(path.join(dir,'comments.json'),'utf8'),/Draft text/);
+ }finally{clearTimeout(s.timer);store.close();fs.rmSync(dir,{recursive:true,force:true});}
+});

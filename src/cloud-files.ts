@@ -20,6 +20,7 @@ import { applyOp, type OpEnvelope, type Thread } from '../cloud/protocol.ts';
 import { prepareMove } from './cloud-files-move.ts';
 import { checkPresence, stripIdentity, keep, type Presence, type PeerPresence } from '../cloud/core/presence.ts';
 import { createPresenceSender } from './page/presence-client.js';
+import { pendingStates, retry, discard, type RefusedOp } from './cloud-sync.ts';
 async function boundedBytes(response: Response, limit: number): Promise<Uint8Array> {
     if (Number(response.headers.get('content-length')) > limit) {
         await response.body?.cancel();
@@ -69,6 +70,7 @@ interface Session {
     comments: Thread[];
     commentsSeq: number;
     commentsPending: OpEnvelope[];
+    commentsRejected?: RefusedOp[];
     presenceSender?: ReturnType<typeof createPresenceSender>;
     peers?: Map<string, PeerPresence>;
 }
@@ -195,9 +197,15 @@ async function cacheBlobs(s: Session) {
 }
 function render(s: Session) { if (s.stopped)
     return; adoptWriters(path.join(s.store.pkg, 'document.json'), s.store.replica.view().allVers()); s.store.materialize(); fileEvents.view?.(path.join(s.store.pkg, 'document.json')); }
-function saveComments(s: Session) { s.store.db.prepare('INSERT OR REPLACE INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: s.comments, commentsSeq: s.commentsSeq, commentsPending: s.commentsPending })); const threads = structuredClone(s.comments); for (const e of s.commentsPending)
-    applyOp(threads, s.store.meta.file, e.op, { name: s.store.meta.author.name ?? "Me", id: s.store.meta.author.id }, e.at); fs.writeFileSync(path.join(s.store.pkg, 'comments.json'), JSON.stringify({ format: 1, doc: s.store.meta.file, seq: s.commentsSeq, threads, outbox: [] })); }
-async function receive(s: Session, m: any) {
+function commentState(s: Session) { return { format: 1 as const, doc: s.store.meta.file, seq: s.commentsSeq, threads: s.comments, outbox: s.commentsPending, rejected: s.commentsRejected ?? [] }; }
+function saveComments(s: Session) { s.store.db.prepare('INSERT OR REPLACE INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: s.comments, commentsSeq: s.commentsSeq, commentsPending: s.commentsPending, commentsRejected: s.commentsRejected ?? [] })); const threads = structuredClone(s.comments); for (const e of [...s.commentsPending, ...(s.commentsRejected ?? []).map(r => r.envelope)])
+    applyOp(threads, s.store.meta.file, e.op, { name: s.store.meta.author.name ?? "Me", id: s.store.meta.author.id }, e.at); fs.writeFileSync(path.join(s.store.pkg, 'comments.json'), JSON.stringify({ ...commentState(s), threads })); }
+function waitForQuota(s: Session) {
+    s.status = 'quota'; for (const p of s.store.replica.pending) p.sent = false; s.store.commit();
+    if (s.timer) clearTimeout(s.timer);
+    s.timer = setTimeout(() => { if (!s.stopped) { s.status = 'connected'; void send(s).catch(() => s.ws?.close()); } }, 60_000); s.timer.unref();
+}
+export async function receive(s: Session, m: any) {
     if (s.stopped)
         return;
     if (m.type === 'presence') {
@@ -210,8 +218,7 @@ async function receive(s: Session, m: any) {
         return;
     }
     if ((m.type==='error'||m.type==='reject')&&m.code==='quota') {
-      s.status='quota';for(const p of s.store.replica.pending)p.sent=false;s.store.commit();
-      if(s.timer)clearTimeout(s.timer);s.timer=setTimeout(()=>{if(!s.stopped){s.status='connected';void send(s).catch(()=>s.ws?.close());}},60_000);s.timer.unref();
+      waitForQuota(s);
       return;
     }
     if (m.type === 'removed') {
@@ -248,8 +255,15 @@ async function receive(s: Session, m: any) {
         return;
     }
     if (m.type === 'comments.ack') {
-        s.commentsPending = s.commentsPending.filter(p => !m.acks.some((a: any) => a.opId === p.opId) && !m.rejected.some((r: any) => r.opId === p.opId));
+        for (const r of m.rejected ?? []) {
+            const envelope = s.commentsPending.find(p => p.opId === r.opId);
+            if (!envelope) continue;
+            if (r.code === 'quota') { waitForQuota(s); continue; }
+            (s.commentsRejected ??= []).push({ envelope, code: r.code, message: r.message });
+        }
+        s.commentsPending = s.commentsPending.filter(p => !m.acks.some((a: any) => a.opId === p.opId && a.seq <= s.commentsSeq) && !m.rejected.some((r: any) => r.opId === p.opId && r.code !== 'quota'));
         saveComments(s);
+        fileEvents.view?.(path.join(s.store.pkg, 'document.json'));
         return;
     }
     if ((m.type === 'reject' && m.code !== 'quota' && s.store.replica.pending.some(p => p.action.id === m.id)) || (m.type === 'reset' && s.store.replica.pending.length)) {
@@ -455,7 +469,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                 return out(200, await cloudFiles(url.searchParams.get('cloud')!, url.searchParams.get('query') ?? ''));
             if (p === '/api/comments') {
                 const s = fileSession(url.searchParams.get('file')!)!;
-                return out(200, { doc: s.store.meta.file, threads: JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8')).threads, sync: { status: s.status, role: s.store.meta.role, url:s.store.meta.cloud, connected:s.status==='connected', pending:s.commentsPending.map(e=>({opId:e.opId,kind:e.op.kind,...('thread'in e.op?{thread:e.op.thread}:{}),...('comment'in e.op?{comment:e.op.comment}:{})})), rejected:[] } });
+                return out(200, { doc: s.store.meta.file, threads: JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8')).threads, sync: { status: s.status, role: s.store.meta.role, url:s.store.meta.cloud, connected:s.status==='connected', ...pendingStates(commentState(s), s.comments) } });
             }
             return out(404, { error: 'No such route' });
         }
@@ -539,13 +553,20 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             void connect(s);
             return out(200, { ok: true });
         }
+        if (p === '/api/comments/retry' || p === '/api/comments/discard') {
+            const state = commentState(s);
+            (p.endsWith('/retry') ? retry : discard)(state, b.opId);
+            s.commentsPending = state.outbox; s.commentsRejected = state.rejected;
+            saveComments(s); await send(s);
+            return out(200, { ok: true });
+        }
         if (p === '/api/comments/ops') {
             if (s.store.meta.role === 'viewer')
                 return out(403, { code: 'read_only', error: 'Viewers cannot comment' });
             const ops = (b.ops ?? []).map((e: OpEnvelope) => ({ ...e, doc: s.store.meta.file }));
             s.commentsPending.push(...ops);
             saveComments(s);
-            if (s.ws?.readyState === WebSocket.OPEN)
+            if (s.ws?.readyState === WebSocket.OPEN && s.status !== 'quota')
                 s.ws.send(JSON.stringify({ type: 'comments', ops }));
             return out(200, { doc: s.store.meta.file, threads: JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8')).threads, applied: ops.map((e: OpEnvelope) => ({ opId: e.opId, seq: 0 })), rejected: [] });
         }
