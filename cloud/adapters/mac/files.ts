@@ -129,6 +129,7 @@ export class MacFiles {
     private readonly db: SqliteStore;
     private readonly root: string;
     private readonly rooms = new Map<string, Room>();
+    private readonly downloads = new Map<http.ServerResponse, Me>();
     private readonly bank: LeaseBank;
     private readonly importBank: LeaseBank;
     private readonly ledger: StorageLedger;
@@ -189,6 +190,7 @@ export class MacFiles {
     }
     private conn(me: Me): Conn { return { author: { id: me.id, name: me.name }, role: me.role }; }
     recheck() {
+        for(const [res,me] of this.downloads)if(!this.current(me)){this.downloads.delete(res);res.destroy();}
         for (const r of this.rooms.values())
             for (const [ws, me] of r.sockets) {
                 const fresh = this.current(me);
@@ -501,7 +503,7 @@ export class MacFiles {
                 if(start>end||end>=size){res.writeHead(416,{'content-range':`bytes */${size}`});res.end();return true;}
                 if(range)headers['content-range']=`bytes ${start}-${end}/${size}`;
                 headers['content-length']=String(end-start+1);res.writeHead(range?206:200,headers);
-                const stream=fs.createReadStream(object.file,{start,end});res.on('close',()=>stream.destroy());stream.on('error',()=>res.destroy());stream.pipe(res);return true;
+                const stream=fs.createReadStream(object.file,{start,end});this.downloads.set(res,me);res.on('finish',()=>this.downloads.delete(res));res.on('close',()=>{this.downloads.delete(res);stream.destroy();});stream.on('error',()=>res.destroy());stream.pipe(res);return true;
             }
             if (sub === 'comments' && method === 'POST') {
                 const b = await body(), fresh = this.current(me);
@@ -600,7 +602,8 @@ export class MacFiles {
         }
         return true;
     }
-    close() { for (const r of this.rooms.values()) {
+    close() {
+        for(const res of this.downloads.keys())res.destroy();this.downloads.clear(); for (const r of this.rooms.values()) {
         if (r.timer)
             clearTimeout(r.timer);
         for (const ws of r.sockets.keys())
