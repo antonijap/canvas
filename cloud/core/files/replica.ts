@@ -14,8 +14,9 @@ import { applyAction, isReject, FILE_LIMITS, type Action, type AppliedAction, ty
 import type { ObjectStore } from "./objects.ts";
 import type { RoomTree, FileState } from "./state.ts";
 
-export type Pending = { action: Action; sha: string; sent: boolean };
-export type Refused = { action: Action; code: FileRejectCode | "local"; message: string };
+export type TextDraft = { id: string; content: string };
+export type Pending = { action: Action; sha: string; sent: boolean; textDrafts?: TextDraft[] };
+export type Refused = { action: Action; code: FileRejectCode | "local"; message: string; textDrafts?: TextDraft[] };
 
 /** What a Mac commits durably (state.sqlite in Phase 3): enough to come back after a crash. */
 export interface ReplicaDurable {
@@ -161,13 +162,13 @@ export class Replica {
   private refuse(id: string, code: Refused["code"], message: string): void {
     const i = this.pending.findIndex((p) => p.action.id === id);
     if (i < 0) return;
-    this.refused.push({ action: this.pending[i].action, code, message });
+    this.refused.push({ action: this.pending[i].action, textDrafts: this.pending[i].textDrafts, code, message });
     this.pending.splice(i, 1);
   }
 
   /** Every pending action becomes a refused copy (the file was restored, or the edit is too old to apply). */
   private refuseAll(code: Refused["code"], message: string): void {
-    for (const p of this.pending) this.refused.push({ action: p.action, code, message });
+    for (const p of this.pending) this.refused.push({ action: p.action, textDrafts: p.textDrafts, code, message });
     this.pending = [];
   }
 

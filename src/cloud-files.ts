@@ -214,6 +214,12 @@ function recoverDrafts(s: Session) {
         const local = path.join(os.homedir(), 'Documents', 'Canvas Recovered', s.store.meta.file + '-' + randomUUID() + '.canvas');
         s.store.materialize(); fs.mkdirSync(path.dirname(local), { recursive: true });
         fs.cpSync(s.store.pkg, local, { recursive: true, filter: p => path.basename(p) !== '.cloud' });
+        const drafts = new Map([...s.store.replica.refused, ...s.store.replica.pending].flatMap(p => (p.textDrafts ?? []).map(d => [d.id, d.content] as const)));
+        if (drafts.size) {
+            const file = path.join(local, 'document.json'), doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const walk = (nodes: any[]) => { for (const n of nodes) { if (drafts.has(n.id)) n.content = drafts.get(n.id); if (Array.isArray(n.children)) walk(n.children); } };
+            walk(doc.children ?? []); fs.writeFileSync(file, JSON.stringify(doc));
+        }
         s.recovery = local;
     }
     const file = path.join(s.recovery, 'unsent-actions.json');
