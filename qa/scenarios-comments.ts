@@ -55,9 +55,10 @@ sc("comments", "Comment hint follows the zoom corner at every window size", { co
         return { bottom:h.bottom, zoomBottom:z.bottom, right:h.right, zoomLeft:z.left, left:h.left,
           gap:parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-island-gap')) };
       })()`);
-      t.near(boxes.bottom, boxes.zoomBottom, 1, `${theme} ${width}: bottom edges align`);
-      t.near(boxes.right + boxes.gap, boxes.zoomLeft, 1, `${theme} ${width}: island gap`);
-      t.ok(boxes.left >= 0, `${theme} ${width}: hint fits the window`);
+      const geometry = await t.ev<any>(`(() => { const r = document.querySelector('.cm-hint').getBoundingClientRect(), z = document.getElementById('qa-zoom-corner').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,zy:z.y+z.height/2,right:r.right}; })()`);
+      t.near(geometry.x, (60 + width - 304)/2, 1, 'canvas center');
+      t.near(geometry.y, geometry.zy, 1, 'zoom center');
+      t.ok(geometry.right < boxes.zoomLeft, 'clear of zoom');
     }
   }
   await t.ev(`document.getElementById('qa-zoom-corner').remove(); window.canvasCmd({cmd:'comment'})`);
@@ -342,4 +343,46 @@ sc("comments", "light and dark: comment mode, a thread, a deleted layer's pin", 
     await t.io.key("Escape");
   }
   await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: "dark" }] });
+});
+
+sc('comments', 'Mentions in replies filter people and persist a picked token', { covers: ['comments:keyboard'], skip: { visual: 'Keyboard selection and persisted metadata are asserted.' } }, async (t: T) => {
+  await t.focus('lay_nest'); await t.clearSel(); await t.io.key('c');
+  const r = await t.center('r_free');
+  await comment(t, r.x, r.y, 'A note');
+  await until(t, () => !!file(t)?.threads?.length, 'saved thread');
+  const f = file(t); f.threads[0].comments[0].author = { name: 'Ben' };
+  fs.writeFileSync(path.join(t.file, 'comments.json'), JSON.stringify(f));
+  await t.ev('window.canvasHost.comments.reload()');
+  await t.io.key('Escape'); await openThread(t);
+  await t.io.type('@be');
+  await t.waitFor('!!document.querySelector(".cm-mentions:not([hidden]) button")', 'mention suggestions');
+  t.eq(await t.ev('document.querySelector(".cm-mentions:not([hidden])").innerText'), 'Ben', 'filtered local commenters');
+  await t.io.key('ArrowDown'); await t.io.key('Tab');
+  t.eq(await t.ev('document.querySelector(".cm-pop textarea").value'), '@Ben ', 'picked name');
+  const updated = file(t); updated.threads[0].comments[0].body = 'Updated note';
+  fs.writeFileSync(path.join(t.file, 'comments.json'), JSON.stringify(updated));
+  await t.ev('window.canvasHost.comments.reload()');
+  await t.io.type('please check'); await t.io.key('Enter');
+  await until(t, () => file(t)?.threads[0]?.comments.length === 2, 'mention saved');
+  await t.waitFor(`document.querySelector('.cm-pop textarea')?.value === ''`, 'successful reply clears the visible field');
+  const reply = file(t).threads[0].comments[1];
+  t.eq(reply.body, '@Ben please check', 'older readers see text');
+  t.eq(reply.mentions, [{ start: 0, end: 4, name: 'Ben' }], 'mention metadata saved');
+  await t.ev(`(() => { const original=window.fetch; window.fetch=async(u,o)=>{ const r=await original(u,o); if(typeof u==='string' && u.startsWith('/api/comments?file=')){const j=await r.json();j.me='Ben';return new Response(JSON.stringify(j));} return r; };return window.canvasHost.comments.reload();})()`);
+  t.ok(await t.ev(`document.querySelector('.cm-pop').innerText.includes('mentioned you')`), 'recipient sees mentioned you');
+  await t.ev("document.querySelector('.cm-pop textarea').focus()");
+  await t.io.type('Another @be');
+  await t.waitFor('!!document.querySelector(".cm-mentions:not([hidden]) button")', 'suggestions again after a space');
+  await t.io.key('Escape');
+  t.eq(await t.ev(`document.querySelector('.cm-pop').hidden`), false, 'Escape closes suggestions and keeps reply open');
+  await t.io.type('n'); await t.io.key('Enter');
+  t.eq(file(t).threads[0].comments.length, 2, 'Return picked the person without posting');
+  await t.io.key('Enter');
+  await until(t, () => file(t)?.threads[0]?.comments.length === 3, 'Return posts after picking');
+  await t.waitFor(`document.querySelector('.cm-pop textarea')?.value === ''`, 'second reply clears');
+  t.eq(file(t).threads[0].comments[2].body, 'Another @Ben', 'fresh reply body');
+  t.eq(file(t).threads[0].comments[2].mentions, [{ start: 8, end: 12, name: 'Ben' }], 'fresh mention range');
+  await t.io.type('@');
+  await t.waitFor('!!document.querySelector(".cm-mentions:not([hidden]) button")', 'suggestions at the start');
+  await t.io.key('Escape');
 });

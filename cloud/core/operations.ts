@@ -1,5 +1,5 @@
-import { applyOp, checkEnvelope, LIMITS, mayApply } from "../protocol.ts";
-import type { Applied, OpEnvelope, Rejected, Role, Thread } from "../protocol.ts";
+import { applyOp, canonicalMentions, checkEnvelope, LIMITS, mayApply } from "../protocol.ts";
+import type { Applied, Author, OpEnvelope, Rejected, Role, Thread } from "../protocol.ts";
 import { initializeRoom } from "./room-schema.ts";
 import type { SqlStore } from "./sql.ts";
 
@@ -41,7 +41,7 @@ export class Operations {
       seq: row.seq, opId: row.op_id, by: { email: row.by_email, name: row.by_name, ...(row.by_id ? { id: String(row.by_id) } : {}) }, at: row.at, op: JSON.parse(row.op_json),
     }));
   }
-  submit(doc: string, values: unknown[], me: Identity, role: Role | null, allowance: number = LIMITS.opsPerMinutePerUser): OpResult {
+  submit(doc: string, values: unknown[], me: Identity, role: Role | null, allowance: number = LIMITS.opsPerMinutePerUser, members: readonly Author[] = []): OpResult {
     const result: OpResult = { acks: [], rejected: [], entries: [] };
     for (const [index, value] of values.entries()) {
       const rawId = value && typeof value === "object" && "opId" in value ? value.opId : "";
@@ -55,7 +55,7 @@ export class Operations {
       if (envelope.doc !== doc) { reject("invalid", "Document does not match the room"); continue; }
       this.storage.transactionSync(() => {
         const sql = this.storage.sql;
-        const op = envelope.op;
+        const op = canonicalMentions(envelope.op, members);
         const commentThread = "comment" in op ? sql.exec<{ thread_id: string }>("SELECT thread_id FROM comment_threads WHERE comment_id = ?", op.comment).toArray()[0]?.thread_id : undefined;
         const threadId = "thread" in op ? op.thread : commentThread;
         const row = threadId ? sql.exec<{ json: string }>("SELECT json FROM threads WHERE id = ?", threadId).toArray()[0] : undefined;

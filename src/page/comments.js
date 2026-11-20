@@ -14,6 +14,8 @@
 // Pins are plain DOM over the canvas. Their places are worked out in host.beforeFrame, so they cost nothing while the
 // camera and the layers stand still.
 
+import { installBottomOverlays } from "/page/bottom-overlays.js";
+import { mentionQuery, mentionPeople, mentionTokens, mentionedYou } from "/page/mentions.js";
 import * as L from "/page/comments-logic.js";
 
 const host = window.canvasHost;
@@ -25,7 +27,6 @@ const ICON = {
   check: svg('<path d="M2.5 7.4l3 3 6-6.4"/>'),
   trash: svg('<path d="M2.5 3.8h9M5.5 3.8V2.6h3v1.2M3.8 3.8l.5 7.6h5.4l.5-7.6M5.8 6v3.6M8.2 6v3.6"/>'),
   send: svg('<path d="M7 11.5v-9M3.2 6.2L7 2.4l3.8 3.8"/>'),
-  ret: svg('<path d="M11.5 3v4.2H3M5.8 4.6L3 7.2l2.8 2.6"/>', 11),
   bubble: svg('<path d="M7 1.8c3 0 5.2 2.1 5.2 4.7S10 11.2 7 11.2c-.7 0-1.3-.1-1.9-.3l-2.9 1.3.7-2.5C1.9 8.9 1.8 7.7 1.8 6.5 1.8 3.9 4 1.8 7 1.8z"/>'),
   layer: svg('<path d="M2 4.2V2.6A.6.6 0 012.6 2h1.6M9.8 2h1.6a.6.6 0 01.6.6v1.6M12 9.8v1.6a.6.6 0 01-.6.6H9.8M4.2 12H2.6a.6.6 0 01-.6-.6V9.8M5.4 5.4l3.9 1.6-1.6.7-.7 1.6z"/>', 12),
   ghost: svg('<path d="M2 4.2V2.6A.6.6 0 012.6 2h1.6M9.8 2h1.6a.6.6 0 01.6.6v1.6M12 9.8v1.6a.6.6 0 01-.6.6H9.8M4.2 12H2.6a.6.6 0 01-.6-.6V9.8"/>', 16),
@@ -67,6 +68,7 @@ const cursorCss = (theme) => `cursor:${svgUrl(addPinSvg(theme))} ${ADD_HOT.x} ${
 
 function start(host) {
   const { view, file } = host;
+  installBottomOverlays(host);
   const h = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   /** A one-line label: its box trimmed to the capitals (an x for lowercase-only, cls "cm-t ex"), so a flex row centres the letters themselves. */
   const lbl = (text, cls = "cm-t") => h("span", cls, text);
@@ -124,6 +126,12 @@ function start(host) {
 .cm-row{display:flex;align-items:flex-end;gap:8px;padding:10px 10px 10px 14px}
 .cm-row .cm-fieldwrap{flex:1;min-width:0;padding:5px 0}
 .cm-field{display:block;width:100%;border:0;outline:0;resize:none;background:transparent;color:var(--c-fg);font:13px/18px var(--c-font-sans);padding:0;margin:0;height:18px;min-height:18px;max-height:120px;overflow-y:hidden}
+.cm-fieldwrap{position:relative}
+.cm-mentions{position:absolute;bottom:100%;left:0;z-index:5;min-width:160px;max-height:230px;overflow:auto;padding:4px;border-radius:10px;background:var(--c-popover);box-shadow:var(--cm-card)}
+.cm-mentions[hidden]{display:none}
+.cm-mentions button{display:block;width:100%;text-align:left;border:0;border-radius:6px;padding:9px 8px;background:transparent;color:var(--c-fg);font:13px/100% var(--c-font-sans)}
+.cm-mentions button[aria-selected=true],.cm-mentions button:hover{background:var(--c-hover)}
+.cm-mention{background:var(--c-hover);border-radius:4px;padding:2px 1px}
 .cm-field::placeholder{color:var(--cm-time)}
 .cm-field.scroll{overflow-y:auto}
 .cm-send{flex:none;width:28px;height:28px;border-radius:14px;border:0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--cm-chip);color:var(--cm-time);transition:background-color .15s ease-out,color .15s ease-out}
@@ -149,26 +157,25 @@ function start(host) {
 .cm-gone .cm-btn:hover{background:#fed7aa}
 @media (prefers-color-scheme: dark){.cm-gone{background:#fb923c24;color:#fdba74}.cm-gone .cm-ghost{color:#fb923c}.cm-gone b{color:#fed7aa}.cm-gone .cm-btn{background:#fb923c2e;color:#fed7aa}.cm-gone .cm-btn:hover{background:#fb923c47}}
 .cm-bar,.cm-hint{position:absolute;left:50%;translate:-50% 0;display:none;align-items:center;gap:10px;white-space:nowrap;font-size:13px;line-height:100%;pointer-events:none}
-.cm-bar{height:36px;padding:0 5px 0 11px;border-radius:12px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:12px;font-weight:500;pointer-events:auto}
+.cm-bar{min-height:36px;padding:8px 5px 8px 11px;border-radius:12px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:12px;font-weight:500;pointer-events:auto}
 .cm-bar.on,.cm-hint.on{display:flex}
 .cm-bar svg{color:var(--c-muted-fg)}
 .cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
-.cm-hint{height:36px;padding:0 12px 0 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
-.native .cm-hint{left:auto;translate:none;bottom:var(--cm-hint-bottom,var(--c-inset));right:var(--cm-hint-right,var(--c-inset));max-width:calc(100% - var(--c-inset) - var(--cm-hint-right,var(--c-inset)));box-sizing:border-box}
-.native .cm-hint .cm-soft{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.cm-hint{min-height:36px;padding:8px 12px 8px 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
+.native .cm-hint .cm-soft{min-width:0;padding:3px 0;margin:-3px 0}
 .native .cm-hint>b,.native .cm-hint>.cm-key,.native .cm-hint>span:first-child{flex-shrink:0}
 .cm-hint b{font-weight:600}
 .cm-hint .cm-soft{color:#ffffffa6}
 .cm-hint .cm-key{background:#ffffff26;color:#ffffffcc}
-.cm-shared{position:absolute;right:12px;top:12px;display:none;align-items:center;gap:10px;height:36px;padding:0 12px 0 8px;border-radius:12px;background:color-mix(in srgb,var(--c-popover) 85%,transparent);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);color:color-mix(in srgb,var(--c-fg) 75%,transparent);box-shadow:0 0 0 .5px #0000000f,0 8px 24px -6px #00000026;font:500 12px/100% var(--c-font-sans);white-space:nowrap}
+.cm-shared{position:absolute;right:12px;top:12px;display:none;align-items:center;gap:10px;min-height:36px;padding:6px 8px;border-radius:18px;background:var(--c-popover);-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);color:color-mix(in srgb,var(--c-fg) 75%,transparent);box-shadow:0 0 0 .5px #0000000f,0 8px 24px -6px #00000026;font:500 12px/100% var(--c-font-sans);white-space:nowrap}
 .cm-shared.on{display:flex}
+.cm-shared.toolbar{position:static;min-height:0;padding:0 6px 0 0;background:transparent;box-shadow:none;--cm-chip:var(--c-hover)}
+.native .cm-shared{display:none!important}
 .cm-people{display:flex;align-items:center}
-.cm-people .cm-av{width:24px;height:24px;border-radius:12px;box-shadow:0 0 0 2px var(--c-popover)}
-.cm-people .cm-av+.cm-av{margin-left:-6px}
+.cm-people .cm-av{width:28px;height:28px;border-radius:14px;border:0;padding:0;cursor:pointer;box-shadow:0 0 0 2px var(--c-popover)}
+.cm-people .cm-av+.cm-av{margin-left:-6px}.cm-people button:hover{translate:0 -2px}.cm-people button:focus-visible{outline:2px solid var(--c-fg);outline-offset:2px}
 .cm-people .cm-more{background:var(--cm-chip);color:var(--c-muted-fg);font-size:10px}
 .cm-server{display:flex;align-items:center;gap:6px}
-.cm-dot{flex:none;width:7px;height:7px;border-radius:50%;background:color-mix(in srgb,var(--c-muted-fg) 60%,transparent)}
-.cm-dot.ok{background:#16a34a}.cm-dot.warn{background:#d97706}
 .cm-state{display:inline-flex;align-items:center;gap:4px;min-width:0;color:var(--c-muted-fg);font-size:12px;line-height:100%}
 .cm-state svg{flex:none}
 .cm-state.wait{display:inline;white-space:nowrap}.cm-state.wait svg{vertical-align:calc(.5cap - 5.5px);margin-right:4px}
@@ -203,24 +210,27 @@ function start(host) {
   const shared = h("div", "cm-shared cm-ui");
   const bar = h("div", "cm-bar cm-ui");
   layer.append(hov, pop, comp, hint, bar, shared);
+  if (!host.native) { const toolbar = document.querySelector("#bar .island:last-child"); if (toolbar) { toolbar.prepend(shared); shared.classList.add("toolbar"); } }
 
   /** doc: the file's comment identity (null until the first comment); threads: every thread, tombstones too. repin: a thread waiting for a new layer. */
-  const st = { doc: null, threads: [], sync: null, me: "", mode: false, open: null, draft: null, repin: null, menu: false };
+  const st = { doc: null, threads: [], sync: null, me: "", mode: false, open: null, draft: null, repin: null, menu: false, people: [] };
   const pins = new Map(); // thread id (or "draft") -> {el, x, y, vis}
   const gone = new Map(); // node id -> {rev, at, gone} what the file said about a layer with no drawing now
   const asked = new Set();
 
   // ---------- the file ----------
-  const sendOps = (ops) => fetch("/api/comments/ops?file=" + encodeURIComponent(file), { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ ops }) })
+  const sendOps = (ops, onAccepted) => fetch("/api/comments/ops?file=" + encodeURIComponent(file), { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ ops }) })
     .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }))
     .then((j) => {
+      if (!j.rejected?.length) onAccepted?.();
       apply(j);
       for (const x of j.rejected || []) tell(`Comment not saved: ${x.message}`);
       return j;
     });
   function apply(j) {
+    if (Array.isArray(j.people)) st.people = j.people;
     if (j.doc !== undefined) st.doc = j.doc;
-    if (Array.isArray(j.threads)) { st.threads = j.threads; st.sync = j.sync || null; }
+    if (Array.isArray(j.threads)) { st.threads = j.threads; if (j.sync !== undefined) st.sync = j.sync || null; }
     if (typeof j.me === "string") st.me = j.me;
     render();
   }
@@ -395,7 +405,7 @@ function start(host) {
 
   let raf = 0;
   const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; place(); }); };
-  const bottomOf = () => (host.native ? (host.insets && host.insets.b || 0) + 16 : 56) + "px";
+
 
   /** Where each pin and popover goes: run in every frame the canvas draws, and nowhere else. */
   function place() {
@@ -428,13 +438,12 @@ function start(host) {
       else pop.style.transform = "translate(-9999px,0)";
     }
     if (st.draft && at.has("draft") && !comp.hidden) { const o = L.popoverAt(at.get("draft"), size(comp, 320, 110), vw, vh); comp.style.transform = `translate(${o.x}px,${o.y}px)`; }
-    bar.style.bottom = bottomOf();
-    if (!host.native) hint.style.bottom = bottomOf();
+
     const ins = host.insets || {};
     // In the app the shell's insets say what its islands cover; in the browser the bar sits under the page's own islands.
-    let below = ins.t || 0;
+    let below = 0;
     if (!host.native) { const vt = view.getBoundingClientRect().top; for (const e of document.querySelectorAll(".island")) below = Math.max(below, e.getBoundingClientRect().bottom - vt - 4); }
-    shared.style.top = below + 12 + "px";
+    shared.style.top = (host.native ? 12 : below + 12) + "px";
     shared.style.right = (ins.r || 0) + 12 + "px";
     if (st.mode && hovId) paintHover();
   }
@@ -446,9 +455,9 @@ function start(host) {
     if (c && c.cmd === "insets") schedule();
     if (c && c.cmd === "comment") setMode(!st.mode);
   });
-  host.on("resync", () => load());
+  host.on("resync", () => { resyncPeople(); load(); });
   if (host.es) host.es.addEventListener("comments", () => load());
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { resyncPeople(); load(); } });
 
   // ---------- fields ----------
   function autoGrow(ta) {
@@ -465,9 +474,40 @@ function start(host) {
     ta.spellcheck = true;
     // No AutoFill (macOS offers one-time codes from Mail over the controls), autocorrect or writing suggestions.
     for (const [k, v] of [["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"], ["writingsuggestions", "false"]]) ta.setAttribute(k, v);
-    ta.addEventListener("input", () => { autoGrow(ta); if (onChange) onChange(ta.value.trim() !== ""); });
+    const picked = [];
+    ta.mentions = () => mentionTokens(ta.value.trim(), picked);
+    ta.restoreMentions = people => picked.push(...people);
+    const menu = h("div", "cm-mentions cm-ui"); menu.hidden = true; menu.setAttribute("role", "listbox");
+    let choices = [], active = 0, trigger = null;
+    const close = () => { menu.hidden = true; ta.setAttribute("aria-expanded", "false"); };
+    ta.clearDraft = () => { ta.value = ""; picked.length = 0; close(); autoGrow(ta); onChange?.(false); };
+    const choose = (p) => {
+      if (!trigger) return;
+      const text = "@" + p.name + " ";
+      ta.setRangeText(text, trigger.start, trigger.end, "end");
+      if (!picked.some(x => (x.email || x.id || x.name) === (p.email || p.id || p.name))) picked.push(p);
+      close(); autoGrow(ta); if (onChange) onChange(true); ta.focus();
+    };
+    const update = () => {
+      if (ta.isComposing) return;
+      trigger = mentionQuery(ta.value, ta.selectionStart);
+      const locals = st.threads.filter(t => !t.deletedAt).flatMap(t => t.comments.filter(c => !c.deletedAt).map(c => c.author));
+      choices = trigger ? mentionPeople(st.sync || window.canvasCloudFile ? st.people : locals, trigger.query) : [];
+      if (!choices.length) { close(); return; }
+      active = Math.min(active, choices.length - 1); menu.replaceChildren();
+      choices.forEach((p, i) => { const b = h("button", "", p.name); b.type = "button"; b.setAttribute("role", "option"); b.setAttribute("aria-selected", String(i === active)); b.onpointerdown = e => e.preventDefault(); b.onclick = () => choose(p); menu.append(b); });
+      ta.parentElement?.append(menu); menu.hidden = false; ta.setAttribute("aria-expanded", "true");
+    };
+    ta.setAttribute("aria-autocomplete", "list");
+    ta.addEventListener("click", update);
+    ta.addEventListener("input", () => { update(); autoGrow(ta); if (onChange) onChange(ta.value.trim() !== ""); });
     ta.addEventListener("keydown", (e) => {
       e.stopPropagation();
+      if (!menu.hidden && !e.isComposing) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); active = (active + (e.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length; update(); return; }
+        if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choose(choices[active]); return; }
+        if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      }
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value.trim(); if (v) onPost(v, ta); }
       else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
     });
@@ -527,11 +567,12 @@ function start(host) {
     }
     const where = layerLabel(t);
     const live = L.liveComments(t);
-    const key = JSON.stringify([t.id, t.resolvedAt || "", where, live.map((c) => [c.id, c.body, c.editedAt || ""]), syncKey()]);
+    const key = JSON.stringify([t.id, t.resolvedAt || "", where, live.map((c) => [c.id, c.body, c.mentions, c.editedAt || ""]), st.me, st.sync?.me, syncKey()]);
     pop.hidden = false;
     if (popFor === t.id && popKey === key) return;
     const keep = popFor === t.id ? pop.querySelector(".cm-field") : null;
     const draftText = keep ? keep.value : "";
+    const draftMentions = keep?.mentions?.() || [];
     const hadFocus = keep && document.activeElement === keep;
     popFor = t.id; popKey = key;
     pop.textContent = "";
@@ -571,7 +612,13 @@ function start(host) {
         x.onclick = () => sendOps([env({ kind: "comment.delete", comment: c.id })]).catch((e) => tell(e.message));
         who.append(x);
       }
-      body.append(who, h("div", "cm-text", c.body));
+      if (mentionedYou(c, st.sync?.me || { name: st.me })) who.append(h("span", "cm-state", "mentioned you"));
+      const text = h("div", "cm-text"); let offset = 0;
+      for (const m of c.mentions || []) {
+        if (m.start < offset || c.body.slice(m.start, m.end) !== "@" + m.name) continue;
+        text.append(document.createTextNode(c.body.slice(offset, m.start)), h("span", "cm-mention", c.body.slice(m.start, m.end))); offset = m.end;
+      }
+      text.append(document.createTextNode(c.body.slice(offset))); body.append(who, text);
       for (const r of opsFor(st.sync && st.sync.rejected, c.id)) body.append(failRow(r));
       it.append(avatar(c.author), body);
       lst.append(it);
@@ -586,11 +633,12 @@ function start(host) {
     const send = sendBtn("Send reply", () => ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: false })));
     const ta = field("Reply", (v, el) => {
       el.disabled = true;
-      sendOps([env({ kind: "comment.add", thread: t.id, comment: crypto.randomUUID(), body: v })])
-        .then((j) => { el.disabled = false; if (!(j.rejected && j.rejected.length)) { el.value = ""; autoGrow(el); send.classList.remove("ready"); el.focus(); } })
+      sendOps([env({ kind: "comment.add", thread: t.id, comment: crypto.randomUUID(), body: v, mentions: el.mentions() })], () => el.clearDraft())
+        .then((j) => { el.disabled = false; if (!j.rejected?.length && st.open === t.id) pop.querySelector(".cm-field")?.focus(); })
         .catch((e) => { el.disabled = false; tell(e.message); });
     }, () => openThread(null), (ready) => send.classList.toggle("ready", ready));
     ta.value = draftText;
+    ta.restoreMentions(draftMentions);
     send.classList.toggle("ready", draftText.trim() !== "");
     wrap.append(ta);
     row.append(wrap, send);
@@ -669,15 +717,14 @@ function start(host) {
       if (!v) return;
       ta.disabled = true;
       const a = st.draft && st.draft.anchor;
-      sendOps([env({ kind: "thread.create", thread: crypto.randomUUID(), anchor: a, comment: crypto.randomUUID(), body: v })])
+      sendOps([env({ kind: "thread.create", thread: crypto.randomUUID(), anchor: a, comment: crypto.randomUUID(), body: v, mentions: ta.mentions() })])
         .then((j) => { if (!(j.rejected && j.rejected.length)) closeDraft(); else ta.disabled = false; render(); })
         .catch((err) => { ta.disabled = false; tell(err.message); });
     }
     wrap.append(ta);
     fieldRow.append(avatar({ name: st.me }), wrap);
     const foot = h("div", "cm-foot");
-    const key = h("span", "cm-key"); key.innerHTML = ICON.ret; key.title = "Return posts";
-    foot.append(chip(anchor.preview ? anchor.preview.name || "Layer" : "Canvas", !anchor.nodeId), h("span", "cm-sp"), key, send);
+    foot.append(chip(anchor.preview ? anchor.preview.name || "Layer" : "Canvas", !anchor.nodeId), h("span", "cm-sp"), send);
     comp.append(fieldRow, foot);
     comp.hidden = false;
     render();
@@ -735,36 +782,55 @@ function start(host) {
     }
   }
 
-  /** The shared bar (design board 5): who commented and whether the server is reachable. Only for a shared file. */
-  const STATUS = { connected: ["ok", "Connected"], offline: ["", "Offline. Comments are kept and sent when the server is back"], signedOut: ["warn", "Signed out. Sign in in Settings > Cloud"], signInAgain: ["warn", "Sign in again in Settings > Cloud"], forbidden: ["warn", "No access to this team"], tooOld: ["warn", "The server is too old for this Canvas"], tooNew: ["warn", "The server is newer than this Canvas. Update Canvas"], down: ["", "Cloud down: its Mac isn't open right now. Comments are kept and sent when it is back"], removed: ["warn", "Removed from this Cloud. Ask the host for a new invite"], unavailable: ["warn", "This Canvas cannot reach a Cloud hosted on a Mac"], notAdded: ["", "This file's Cloud is not one of your Clouds. Comments stay on this Mac until you add it again"] };
+  /** People in this file now, using the cursor roster rather than comment history. */
+  let peopleSig = null;
+  function resyncPeople() { peopleSig = null; drawShared(); }
   function drawShared() {
-    const s = st.sync;
-    shared.classList.toggle("on", !!s);
-    shared.textContent = "";
-    if (!s) return;
-    const seen = new Map();
-    for (const t of st.threads) for (const c of t.comments) {
-      if (c.deletedAt || !c.author || L.isAgent(c.author)) continue;
-      const key = c.author.email || c.author.name;
-      if (key && !seen.has(key)) seen.set(key, c.author);
+    const fileState = window.canvasCloudFile, sync = st.sync;
+    const state = fileState || sync;
+    shared.classList.toggle("on", !!state);
+    if (!state) { shared.replaceChildren(); if (host.native && peopleSig !== "") host.post({peopleStrip:{people:[],status:"connected"}}); peopleSig = ""; return; }
+    const me = fileState?.author || sync?.me || { name: st.me || "Me" };
+    const own = { by:me, name:me.name || st.me || "Me", role:state.role || "editor", color:L.colorOf(me.name || st.me), self:true };
+    const seen = new Set([me.id || me.email || me.name]);
+    const people = [own];
+    for (const p of host.presence?.people || []) {
+      const key = p.by?.id || p.by?.email || p.name;
+      if (seen.has(key)) continue; seen.add(key); people.push(p);
     }
-    const people = [...seen.values()];
-    if (people.length) {
-      const g = h("div", "cm-people");
-      for (const a of people.slice(0, 4)) { const e = avatar(a); e.title = a.email || a.name; g.append(e); }
-      if (people.length > 4) { const m = h("span", "cm-av cm-more"); m.append(lbl("+" + (people.length - 4))); m.title = people.slice(4).map((a) => a.name).join(", "); g.append(m); }
-      shared.append(g);
+    const signature = JSON.stringify([state.status, people.map(p => [p.session, p.name, p.role, p.color])]);
+    if (signature === peopleSig) return; peopleSig = signature; shared.replaceChildren();
+    if (host.native) host.post({peopleStrip:{people:people.map(p => ({session:p.self ? "self" : p.session,name:p.name,role:p.role,color:p.color})),status:state.status}});
+    const group = h("div", "cm-people");
+    for (const p of people.slice(0, 4)) {
+      const button = h("button", "cm-av"); button.type = "button";
+      button.append(lbl(L.initialOf(p.name))); button.style.background = p.color;
+      button.title = p.name + ", " + p.role; button.setAttribute("aria-label", button.title);
+      button.onclick = () => focusPerson(p.self ? "self" : p.session);
+      group.append(button);
     }
-    const [tone, say] = STATUS[s.status] || STATUS.offline;
-    // The server's state only: its name belongs to this Mac's settings, not to the file (Home names it).
-    const srv = h("div", "cm-server");
-    const dot = h("span", "cm-dot" + (tone ? " " + tone : ""));
-    srv.append(dot);
-    srv.title = say;
-    shared.setAttribute("aria-label", `Shared: ${say}`);
-    shared.dataset.status = s.status;
-    shared.append(srv);
+    if (people.length > 4) { const more = h("span", "cm-av cm-more", "+" + (people.length - 4)); more.title = people.slice(4).map(p => p.name + ", " + p.role).join("\n"); group.append(more); }
+    shared.append(group);
+    const status = state.status;
+    shared.dataset.status = status; shared.setAttribute("aria-label", "People in this file");
+    if (status !== "connected") {
+      const text = h("span", "cm-server", ["offline", "down", "notAdded", "removed", "signedOut", "signInAgain", "forbidden"].includes(status) ? "Offline" : "Reconnecting");
+      text.title = status === "removed" ? "Removed from this Cloud. Ask the host for a new invite" : status === "down" ? "Cloud down: its Mac isn't open right now. Comments are kept and sent when it is back" : text.textContent;
+      shared.append(text);
+    }
   }
+  async function focusPerson(session) {
+        if (session === "self") return;
+        const current = host.presence?.people.find(person => person.session === session);
+        if (!current) return;
+        if (current.page && current.page !== host.page) await host.setPage(current.page);
+        const r = (current.sel || []).map(id => host.worldRectOf(id)).find(Boolean);
+        const cursor = current.cursor || current.lastCursor;
+        if (r) host.fitRect(r, 80, host.cam.z);
+        else if (cursor) host.fitRect({ x:cursor.x-20, y:cursor.y-20, w:40, h:40 }, 80, host.cam.z);
+  }
+  host.on("cmd", c => { if (c.cmd === "focusPerson") focusPerson(c.session); });
+  host.on("presencechange", drawShared);
 
   // ---------- comment mode ----------
   function setMode(on) {

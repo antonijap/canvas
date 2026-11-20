@@ -147,7 +147,21 @@ export async function handleCommentsRoute(req: http.IncomingMessage, res: http.S
     if (url.pathname === "/api/comments") {
       if (req.method !== "GET") return out(405, { error: "method not allowed" });
       hooks.touch(pkg, file); // opening a shared file's comments connects it (a no-op for any other file)
-      return out(200, { ...readThreads(pkg), me: localName() });
+      const threads = readThreads(pkg);
+      const { fileInfo } = await import("./cloud-files.ts");
+      const cloud = fileInfo(file)?.cloud || (threads.sync as { url?: string } | undefined)?.url;
+      let people: unknown[] = [];
+      if (cloud) {
+        try {
+          const { target } = await import("./cloud.ts");
+          const t = await target(cloud);
+          if (!("fail" in t)) {
+            const r = await fetch(t.base + "/v1/members", { headers: t.headers, signal: AbortSignal.timeout(3000) });
+            if (r.ok) { const data = await r.json(); if (Array.isArray(data)) people = data; }
+          }
+        } catch { /* Offline: keep comments readable. */ }
+      }
+      return out(200, { ...threads, me: localName(), ...(cloud ? { people } : {}) });
     }
     if (req.method !== "POST") return out(405, { error: "method not allowed" });
     if (req.headers["x-canvas"] !== "1") return out(403, { error: "forbidden", code: "forbidden" });

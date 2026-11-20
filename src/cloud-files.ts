@@ -145,7 +145,7 @@ cloudFileHooks.undoConflict = (file, writers) => {
 };
 cloudFileHooks.assertEdit = f => { const s = fileSession(f); if (s && !CAN_EDIT[s.store.meta.role])
     fail(403, 'read_only', 'This Cloud file is read only'); };
-export function fileInfo(file: string) { const s = fileSession(file); return s ? { name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
+export function fileInfo(file: string) { const s = fileSession(file); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
 async function request(cloud: string, p: string, method = 'GET', body?: unknown): Promise<Response> {
     cloud = resolveCloud(cloud);
     if(revoked.has(cloud))fail(403,'removed','Cloud membership was removed');
@@ -167,6 +167,9 @@ async function request(cloud: string, p: string, method = 'GET', body?: unknown)
         fail(r.status, j.code ?? 'cloud', j.message ?? 'The Cloud refused the request');
     }
     return r;
+}
+export async function cloudMembers(cloud: string): Promise<unknown[]> {
+    try { const data = await cloudJson(await request(cloud, '/v1/members')); return Array.isArray(data) ? data : []; } catch { return []; }
 }
 export const cloudFiles = async (cloud: string, query = '') => cloudJson(await request(cloud, '/v1/files?q=' + encodeURIComponent(query)));
 function objects(cloud: string, file: string): ObjectStore {
@@ -489,7 +492,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                 return out(200, await cloudFiles(url.searchParams.get('cloud')!, url.searchParams.get('query') ?? ''));
             if (p === '/api/comments') {
                 const s = fileSession(url.searchParams.get('file')!)!;
-                return out(200, { doc: s.store.meta.file, threads: JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8')).threads, sync: { status: s.status, role: s.store.meta.role, url:s.store.meta.cloud, connected:s.status==='connected', ...pendingStates(commentState(s), s.comments) } });
+                return out(200, { me: s.store.meta.author.name, people: await cloudMembers(s.store.meta.cloud), doc: s.store.meta.file, threads: JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8')).threads, sync: { me: s.store.meta.author, status: s.status, role: s.store.meta.role, url:s.store.meta.cloud, connected:s.status==='connected', ...pendingStates(commentState(s), s.comments) } });
             }
             return out(404, { error: 'No such route' });
         }

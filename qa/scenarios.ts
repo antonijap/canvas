@@ -1501,3 +1501,6 @@ sc("clipboard", "layers and every card kind copied in one file paste into anothe
   await evidence(t, "copypaste-cards-file-to-file", sel.filter((id) => id.startsWith("widget:")));
   t.subject = sel;
 });
+
+import "./scenarios-bottom-overlays.ts";
+import "./scenarios-people.ts";

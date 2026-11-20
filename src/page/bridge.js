@@ -198,7 +198,8 @@ let toastEl = null, toastTimer = 0;
 function toast(a) {
   if (!toastEl) {
     toastEl = document.createElement("div");
-    toastEl.style.cssText = "position:fixed;left:50%;bottom:48px;transform:translateX(-50%);display:none;background:var(--c-island,#fff);color:var(--c-fg,#111);border:1px solid var(--c-island-rim,#ddd);border-radius:12px;padding:7px 14px;font:13px/1.4 system-ui,sans-serif;z-index:40;box-shadow:0 3px 3px #0000001f;max-width:70vw";
+    toastEl.dataset.bottomToast = "";
+    toastEl.style.cssText = "position:fixed;left:50%;bottom:48px;transform:translateX(-50%);display:none;background:var(--c-island,#fff);color:var(--c-fg,#111);border:0;border-radius:12px;padding:7px 14px;font:13px/100% system-ui,sans-serif;z-index:40;box-shadow:0 3px 3px #0000001f;max-width:70vw";
     document.body.appendChild(toastEl);
   }
   clearTimeout(toastTimer);

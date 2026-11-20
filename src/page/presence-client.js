@@ -218,6 +218,10 @@ export function createPeers({ idleMs = IDLE_MS, fadeMs = FADE_MS } = {}) {
         const color = colorOf(e.by && e.by.name);
         out.push({
           session,
+          by: { ...e.by },
+          role: e.role,
+          page: e.page,
+          lastCursor: e.cursor,
           agent: !!e.by?.agent,
           name,
           color,

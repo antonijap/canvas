@@ -82,3 +82,17 @@ test("moving a thread: its author or the Cloud owner, nobody else", () => {
   assert.deepEqual(ts[0].anchor, { nodeId: "b", x: 0.1, y: 0.9 });
   assert.equal(ts[0].comments.length, 2);
 });
+
+test('mention recipients use current membership and canonical identity', async () => {
+  const { canonicalMentions } = await import('../cloud/protocol.ts');
+  const op = { kind: 'comment.edit' as const, comment: u(2), body: '@Alias @Ghost @Email', mentions: [
+    { start: 0, end: 6, name: 'Alias', id: 'recipient', email: 'forged@example.com' },
+    { start: 7, end: 13, name: 'Ghost', id: 'removed', email: 'valid@example.com' },
+    { start: 14, end: 20, name: 'Email', email: 'valid@example.com' },
+  ] };
+  assert.deepEqual(canonicalMentions(op, [{ id: 'recipient', email: 'valid@example.com', name: 'Recipient' }]).mentions, [
+    { start: 0, end: 6, id: 'recipient', email: 'valid@example.com', name: 'Recipient' },
+    { start: 14, end: 20, id: 'recipient', email: 'valid@example.com', name: 'Recipient' },
+  ]);
+  assert.equal(op.mentions[0].name, 'Alias');
+});

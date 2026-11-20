@@ -1168,10 +1168,10 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 #props details{margin-top:10px}
 #props summary{color:var(--c-muted-fg);cursor:pointer;font-size:var(--c-size-2xs)}
 #props pre{font:10px/1.55 var(--c-font-mono);background:var(--c-muted);border-radius:var(--c-radius);padding:8px;overflow:auto;max-height:260px;white-space:pre-wrap;word-break:break-all}
-#msg{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--c-island);border:1px solid var(--c-island-rim);border-radius:var(--c-radius-island);padding:7px 14px;font-size:var(--c-size-xs);display:none;z-index:20;box-shadow:0 3px 3px #0000001f}
+#msg{line-height:100%;position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--c-island);border:0;border-radius:var(--c-radius-island);padding:9px 14px;font-size:var(--c-size-xs);display:none;z-index:20;box-shadow:0 3px 3px #0000001f}
 #wtoast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%);display:none;align-items:center;gap:10px;background:var(--c-island);border:1px solid var(--c-island-rim);border-radius:var(--c-radius-island);padding:5px 8px 5px 14px;font-size:var(--c-size-xs);z-index:30;box-shadow:0 3px 3px #0000001f}
 /* The browser page says what it is: the engine build missing, and that the Mac app is the main way (src/onboarding.ts). */
-#webhint{position:fixed;left:calc(var(--c-sidebar-width) + var(--c-inset));bottom:14px;display:flex;align-items:flex-start;gap:10px;max-width:min(560px,calc(100vw - var(--c-sidebar-width) - var(--c-props-width) - 48px));background:var(--c-island);border-radius:var(--c-radius-island);padding:9px 8px 9px 14px;font-size:var(--c-size-xs);line-height:1.45;z-index:20;box-shadow:0 0 0 .5px #0000001a,0 1px 2px #00000014,0 6px 16px #0000001a}
+#webhint{position:fixed;left:calc(var(--c-sidebar-width) + var(--c-inset));bottom:14px;display:flex;align-items:flex-start;gap:10px;max-width:min(560px,calc(100vw - var(--c-sidebar-width) - var(--c-props-width) - 48px));background:var(--c-island);border-radius:var(--c-radius-island);padding:9px 8px 9px 14px;font-size:var(--c-size-xs);line-height:100%;z-index:20;box-shadow:0 0 0 .5px #0000001a,0 1px 2px #00000014,0 6px 16px #0000001a}
 #webhint[hidden]{display:none}
 #webhint .wh-lines{display:flex;flex-direction:column;gap:2px;padding-top:1px}
 #webhint .wh-lines>div[hidden]{display:none}
@@ -3692,8 +3692,9 @@ window.canvasCmd = (c) => {
     applyCam();
   } else if (c.cmd === "select") select(c.id);
   else if (c.cmd === "deselect") deselect();
-  else if (c.cmd === "insets") { insets = { l: c.l, t: c.t, r: c.r, b: c.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); sizeGuides(); }
+  else if (c.cmd === "insets") { insets = { l: c.l, t: c.t, r: c.r, b: c.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); sizeGuides(); host.emit("cmd", c); }
   else if (c.cmd === "zoomCorner") {
+    host.emit("cmd", c);
     // Keep geometry on the root even when the comments module has not loaded yet.
     const shown = Number.isFinite(c.left) && c.left > 0 && Number.isFinite(c.bottom) && c.bottom > 0;
     const style = document.documentElement.style;

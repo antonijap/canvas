@@ -488,3 +488,13 @@ describe("review fixes", () => {
     assert.ok(!Object.keys(v).some((k) => /html/i.test(k)), "no HTML field to set");
   });
 });
+
+test('people strip retains role, identity and page after a cursor fades', () => {
+  const peers = C.createPeers();
+  peers.receive([{ session:'peer-ben', by:{name:'Ben',id:'person-ben'}, role:'editor', page:'page-two', cursor:{x:100,y:200} }], 0);
+  const [person] = peers.view(C.IDLE_MS + C.FADE_MS + 1, null);
+  assert.equal(person.role, 'editor');
+  assert.equal(person.page, 'page-two');
+  assert.deepEqual(person.by, {name:'Ben',id:'person-ben'});
+  assert.deepEqual(person.lastCursor, {x:100,y:200});
+});

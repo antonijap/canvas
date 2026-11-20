@@ -48,11 +48,26 @@ export interface Anchor {
   preview?: { name?: string; type?: string; width?: number; height?: number };
 }
 
+export interface Mention { start: number; end: number; name: string; email?: string; id?: string }
+
+/** Call after shape validation. Recipient ids take precedence; names and emails come from membership. */
+export function canonicalMentions<T extends Op>(op: T, members: readonly Author[]): T {
+  if (!("mentions" in op) || !op.mentions) return op;
+  return { ...op, mentions: op.mentions.flatMap(mention => {
+    const member = mention.id !== undefined
+      ? members.find(person => person.id === mention.id)
+      : mention.email !== undefined ? members.find(person => person.email === mention.email) : undefined;
+    return member ? [{ start: mention.start, end: mention.end, name: member.name,
+      ...(member.id ? { id: member.id } : {}), ...(member.email ? { email: member.email } : {}) }] : [];
+  }) };
+}
+
 export interface Comment {
   id: Uuid;
   thread: Uuid;
   author: Author;
   body: string;
+  mentions?: Mention[];
   createdAt: Iso;
   editedAt?: Iso;
   /** Tombstone: kept so a replay or an old copy never brings it back. The body is emptied. */
@@ -73,9 +88,9 @@ export interface Thread {
 
 /** One change. Every change to comments is one of these, locally and on the server. */
 export type Op =
-  | { kind: "thread.create"; thread: Uuid; anchor: Anchor; comment: Uuid; body: string }
-  | { kind: "comment.add"; thread: Uuid; comment: Uuid; body: string }
-  | { kind: "comment.edit"; comment: Uuid; body: string }
+  | { kind: "thread.create"; thread: Uuid; anchor: Anchor; comment: Uuid; body: string; mentions?: Mention[] }
+  | { kind: "comment.add"; thread: Uuid; comment: Uuid; body: string; mentions?: Mention[] }
+  | { kind: "comment.edit"; comment: Uuid; body: string; mentions?: Mention[] }
   | { kind: "comment.delete"; comment: Uuid }
   | { kind: "thread.resolve"; thread: Uuid; resolved: boolean }
   | { kind: "thread.move"; thread: Uuid; anchor: Anchor }
@@ -206,11 +221,21 @@ export function checkEnvelope(e: unknown): string | null {
   const op = x.op as Op | undefined;
   if (!op || typeof op !== "object") return "op is missing";
   const body = (b: unknown) => (typeof b !== "string" ? "body is not text" : b.trim() === "" ? "body is empty" : b.length > LIMITS.bodyChars ? "body is too long" : null);
+  const mentions = (op: { body: string; mentions?: Mention[] }) => {
+    if (op.mentions === undefined) return null;
+    if (!Array.isArray(op.mentions) || op.mentions.length > 100) return "invalid mentions";
+    let end = 0;
+    for (const m of op.mentions) {
+      if (!m || !Number.isInteger(m.start) || !Number.isInteger(m.end) || m.start < end || m.end <= m.start || m.end > op.body.length || typeof m.name !== "string" || !m.name || m.name.length > 120 || op.body.slice(m.start, m.end) !== "@" + m.name || (m.email !== undefined && (typeof m.email !== "string" || m.email.length > 254)) || (m.id !== undefined && (typeof m.id !== "string" || m.id.length > 120))) return "invalid mentions";
+      end = m.end;
+    }
+    return null;
+  };
   const anchor = (a: unknown) => checkAnchor(a);
   switch (op.kind) {
-    case "thread.create": return !isUuid(op.thread) || !isUuid(op.comment) ? "thread and comment need uuids" : anchor(op.anchor) ?? body(op.body);
-    case "comment.add": return !isUuid(op.thread) || !isUuid(op.comment) ? "thread and comment need uuids" : body(op.body);
-    case "comment.edit": return !isUuid(op.comment) ? "comment needs a uuid" : body(op.body);
+    case "thread.create": return !isUuid(op.thread) || !isUuid(op.comment) ? "thread and comment need uuids" : anchor(op.anchor) ?? body(op.body) ?? mentions(op);
+    case "comment.add": return !isUuid(op.thread) || !isUuid(op.comment) ? "thread and comment need uuids" : body(op.body) ?? mentions(op);
+    case "comment.edit": return !isUuid(op.comment) ? "comment needs a uuid" : body(op.body) ?? mentions(op);
     case "comment.delete": return !isUuid(op.comment) ? "comment needs a uuid" : null;
     case "thread.resolve": return !isUuid(op.thread) || typeof op.resolved !== "boolean" ? "thread needs a uuid and resolved a boolean" : null;
     case "thread.move": return !isUuid(op.thread) ? "thread needs a uuid" : anchor(op.anchor);
@@ -231,7 +256,7 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
     case "thread.create": {
       if (thread(op.thread)) return "thread exists";
       if (comment(op.comment)) return "comment exists";
-      threads.push({ id: op.thread, doc, anchor: op.anchor, createdAt: at, createdBy: by, comments: [{ id: op.comment, thread: op.thread, author: by, body: op.body, createdAt: at }] });
+      threads.push({ id: op.thread, doc, anchor: op.anchor, createdAt: at, createdBy: by, comments: [{ id: op.comment, thread: op.thread, author: by, body: op.body, ...(op.mentions?.length ? { mentions: structuredClone(op.mentions) } : {}), createdAt: at }] });
       return null;
     }
     case "comment.add": {
@@ -240,7 +265,7 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
       if (t.deletedAt) return "thread deleted";
       if (comment(op.comment)) return "comment exists";
       if (t.comments.length >= LIMITS.commentsPerThread) return "thread is full";
-      t.comments.push({ id: op.comment, thread: t.id, author: by, body: op.body, createdAt: at });
+      t.comments.push({ id: op.comment, thread: t.id, author: by, body: op.body, ...(op.mentions?.length ? { mentions: structuredClone(op.mentions) } : {}), createdAt: at });
       return null;
     }
     case "comment.edit": {
@@ -248,12 +273,13 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
       if (!f) return "no such comment";
       if (f.c.deletedAt || f.t.deletedAt) return "comment deleted";
       f.c.body = op.body; f.c.editedAt = at;
+      if (op.mentions?.length) f.c.mentions = structuredClone(op.mentions); else delete f.c.mentions;
       return null;
     }
     case "comment.delete": {
       const f = comment(op.comment);
       if (!f) return "no such comment";
-      if (!f.c.deletedAt) { f.c.deletedAt = at; f.c.body = ""; }
+      if (!f.c.deletedAt) { f.c.deletedAt = at; f.c.body = ""; delete f.c.mentions; }
       return null;
     }
     case "thread.resolve": {

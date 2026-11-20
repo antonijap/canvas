@@ -362,7 +362,8 @@ export class CloudHost {
   /** Applies ops and sends the applied entries to every socket in the room that is still allowed in. */
   private submit(doc: string, ops: unknown[], me: Me, allowance: number) {
     const r = this.room(doc);
-    const result = r.ops.submit(doc, ops, { email: me.email, name: me.name, id: me.id }, me.role, allowance);
+    const members = this.people().filter(person => person.devices.length).map(person => ({ id: person.id, name: person.label }));
+    const result = r.ops.submit(doc, ops, { email: me.email, name: me.name, id: me.id }, me.role, allowance, members);
     if (result.entries.length) {
       const text = JSON.stringify({ type: "applied", entries: result.entries } satisfies ServerMessage);
       for (const [socket, s] of r.sockets) {
@@ -492,10 +493,15 @@ export class CloudHost {
       }
     }
     const me = this.who(req);
-    if (!me) { const [st, c, m] = this.refusal(); res.setHeader("connection", "close"); return json(st, { code: c, message: m }); }
+    if (!me) {
+      const [st, c, m] = this.refusal(); res.setHeader("connection", "close");
+      if (st !== 429 && p === "/v1/members" && parseSecret("ccd", this.bearer(req))) return json(403, { code: "forbidden", message: "No access to this Cloud" });
+      return json(st, { code: c, message: m });
+    }
     if (!this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
     if (await this.files.route(req, res, url, me, () => this.body(req, 1024 * 1024, me.device))) return;
     if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files"], hostId: this.hostId() } as ServerInfo);
+    if (p === "/v1/members" && method === "GET") return json(200, this.people().filter(p => p.devices.length).map(p => ({ id: p.id, name: p.label, role: p.role })));
     if (p === "/v1/me" && method === "GET") return json(200, { id: me.id, email: me.email, name: me.name, role: me.role, hostId: this.hostId() });
     if (p === "/v1/docs" && method === "POST") {
       if (me.role !== "owner" && me.role !== "editor") return json(403, { code: "forbidden", message: "Owner or editor role required" });

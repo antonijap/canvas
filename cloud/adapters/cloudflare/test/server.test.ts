@@ -207,3 +207,48 @@ it("rejects comment-id reuse before it can grant another author's edit permissio
   expect(result.acks).toEqual([]);
   expect(await bindings.ROOM.getByName(doc).snapshot()).toMatchObject({ seq: 1, threads: [{ comments: [{ body: "Hello", author: { email: owner } }] }] });
 });
+
+it("lists mention recipients only for members and drops revoked people", async () => {
+  expect((await call('/v1/members', '')).status).toBe(401);
+  await rules([{ match: member, role: 'editor' }]);
+  const directory = await (await call('/v1/members', member)).json() as {email:string;name:string;role:string}[];
+  expect(directory).toContainEqual({ email: member, name: 'member', role: 'editor' });
+  expect(directory).toContainEqual({ email: owner, name: 'owner', role: 'owner' });
+  expect(directory.every(p => Object.keys(p).sort().join(',') === 'email,name,role')).toBe(true);
+  await rules([{ match: member, role: 'deny' }]);
+  expect((await call('/v1/members', member)).status).toBe(403);
+  expect(await (await call('/v1/members')).json()).not.toContainEqual(expect.objectContaining({ email: member }));
+});
+
+it('canonicalizes known mention recipients and drops unknown recipients', async () => {
+  await rules([{ match: member, role: 'commenter' }]);
+  const doc = await register();
+  const op = envelope(doc);
+  if (op.op.kind !== 'thread.create') throw new Error('Expected create');
+  op.op.body = '@Alias @Ghost';
+  op.op.mentions = [{ start: 0, end: 6, name: 'Alias', email: member }, { start: 7, end: 13, name: 'Ghost', email: 'unknown@example.com' }];
+  expect((await post(doc, [op])).rejected).toEqual([]);
+  expect((await bindings.ROOM.getByName(doc).snapshot()).threads[0].comments[0].mentions).toEqual([{ start: 0, end: 6, name: 'member', email: member, id: expect.any(String) }]);
+});
+
+it.each(['viewer', 'commenter'] as const)('%s directory contains only opaque ids, display names and roles', async role => {
+  await rules([{ match: member, role }]);
+  const directory = await (await call('/v1/members', member)).json() as {id:string;name:string;role:string}[];
+  expect(directory).toHaveLength(2);
+  expect(directory.every(person => Object.keys(person).sort().join(',') === 'id,name,role')).toBe(true);
+  expect(JSON.stringify(directory)).not.toContain('@');
+  expect(await (await call('/v1/members', member)).json()).toEqual(directory);
+  const recipient = directory.find(person => person.name === 'member')!;
+  const doc = await register();
+  const op = envelope(doc);
+  if (op.op.kind !== 'thread.create') throw new Error('Expected create');
+  op.op.body = '@Alias'; op.op.mentions = [{ start: 0, end: 6, name: 'Alias', id: recipient.id }];
+  expect((await post(doc, [op])).rejected).toEqual([]);
+  expect((await bindings.ROOM.getByName(doc).snapshot()).threads[0].comments[0].mentions).toEqual([{ start: 0, end: 6, name: 'member', email: member, id: recipient.id }]);
+  await rules([{ match: member, role: 'deny' }]);
+  expect((await call('/v1/members', member)).status).toBe(403);
+  expect(await (await call('/v1/members')).json()).not.toContainEqual(expect.objectContaining({email:member}));
+  const later = envelope(doc, { ...op.op, thread: crypto.randomUUID(), comment: crypto.randomUUID() });
+  expect((await post(doc, [later])).rejected).toEqual([]);
+  expect((await bindings.ROOM.getByName(doc).snapshot()).threads.find(thread => thread.id === (later.op as typeof op.op).thread)!.comments[0].mentions).toBeUndefined();
+});

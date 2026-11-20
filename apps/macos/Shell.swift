@@ -134,8 +134,9 @@ struct RootView: View {
                     if let t = model.toast {
                         Toast(text: t, kind: model.toastKind, actions: model.toastActions,
                               onCopy: model.toastCopy == nil ? nil : { model.copyToast() }, onHover: { model.toastHovered = $0 })
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                            .padding(.bottom, Metric.inset * 2).transition(.opacity)
+                            .frame(maxWidth: model.bottomOverlay.width > 0 ? model.bottomOverlay.width : 300)
+                            .position(x: model.bottomOverlay.midX - Metric.inset, y: model.bottomOverlay.midY - Metric.inset)
+                            .transition(.opacity)
                     }
                 }
             }
@@ -331,7 +332,9 @@ struct TopBar: View {
             .layoutPriority(1)
             WindowDragArea().frame(maxWidth: .infinity).frame(height: Metric.pill)
 
-            GlassPill {
+            HStack(spacing: Metric.islandGap) {
+                LivePeopleStrip(model: model)
+                GlassPill {
                 HStack(spacing: 0) {
                     ResourceReadout(meter: ResourceMeter.shared, model: model)
                     IconButton(symbol: "magnifyingglass", help: "Quick actions  \u{2318}K") { PaletteController.shared.toggle() }
@@ -341,6 +344,7 @@ struct TopBar: View {
                     }
                 }
             }
+                }
             .fixedSize(horizontal: true, vertical: false)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { actionsWidth = $0 }
         }
@@ -736,6 +740,40 @@ private struct TabNameField: NSViewRepresentable {
             if selector == #selector(NSResponder.cancelOperation(_:)) { end(false, reason: "escape"); return true }
             if selector == #selector(NSResponder.insertNewline(_:)) { end(true, reason: "return"); return true }
             return false
+        }
+    }
+}
+
+/// People currently in the file, beside the toolbar actions.
+struct LivePeopleStrip: View {
+    @ObservedObject var model: CanvasModel
+    var body: some View {
+        if !model.livePeople.isEmpty && !model.homeShown {
+            HStack(spacing: 8) {
+                HStack(spacing: -6) {
+                    ForEach(Array(model.livePeople.prefix(4))) { person in
+                        Button {
+                            model.run("{cmd:'focusPerson',session:" + JSONText.string(person.id) + "}")
+                        } label: {
+                            Text(String(person.name.prefix(1)).uppercased()).font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.white).frame(width: 28, height: 28)
+                                .background(Circle().fill(Color(light: UInt32(person.color.dropFirst(), radix: 16) ?? 0x71717A, dark: UInt32(person.color.dropFirst(), radix: 16) ?? 0x71717A)))
+                                .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+                        }
+                        .buttonStyle(.plain).help(person.name + ", " + person.role)
+                        .qaID("live-person-" + person.id, label: person.name + ", " + person.role)
+                    }
+                    if model.livePeople.count > 4 {
+                        Text("+" + String(model.livePeople.count - 4)).font(Typography.micro)
+                            .frame(width: 28, height: 28).background(Circle().fill(Palette.field))
+                            .help(model.livePeople.dropFirst(4).map { $0.name + ", " + $0.role }.joined(separator: "\n"))
+                    }
+                }
+                if model.peopleStatus != "connected" {
+                    Text(["offline", "down", "removed", "signedOut", "signInAgain", "forbidden", "notAdded"].contains(model.peopleStatus) ? "Offline" : "Reconnecting")
+                        .font(Typography.label).foregroundStyle(Palette.mutedFg)
+                }
+            }.fixedSize()
         }
     }
 }

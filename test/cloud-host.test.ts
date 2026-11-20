@@ -544,3 +544,44 @@ test("the host process: answers orders over IPC only, binds 127.0.0.1, exits whe
   const gone = await new Promise<boolean>((resolve) => { const c = net.connect(port, "127.0.0.1"); c.on("connect", () => { c.destroy(); resolve(false); }); c.on("error", () => resolve(true)); });
   assert.ok(gone, "the port is closed");
 });
+
+test('member directory requires membership and exposes no device credentials', async () => {
+  const { h, base } = await host();
+  const owner = h.ownerDevice('Anna');
+  assert.equal((await fetch(base + '/v1/members')).status, 401);
+  const response = await fetch(base + '/v1/members', { headers: bearer(owner) });
+  assert.equal(response.status, 200);
+  const members = await response.json() as any[];
+  assert.equal(members[0].name, 'Anna');
+  assert.deepEqual(Object.keys(members[0]).sort(), ['id', 'name', 'role']);
+});
+
+test('host canonicalizes mention ids and drops unknown recipients', async () => {
+  const { h, base } = await host();
+  const token = h.ownerDevice('Host');
+  const recipient = h.people()[0];
+  const doc = crypto.randomUUID();
+  await post(base, '/v1/docs', { doc }, bearer(token));
+  const result = await (await post(base, `/v1/docs/${doc}/ops`, { ops: [{ opId: crypto.randomUUID(), doc, at: new Date().toISOString(), op: {
+    kind: 'thread.create', thread: crypto.randomUUID(), comment: crypto.randomUUID(), anchor: { x: 0, y: 0 }, body: '@Alias @Ghost',
+    mentions: [{ start: 0, end: 6, name: 'Alias', id: recipient.id, email: 'forged@example.com' }, { start: 7, end: 13, name: 'Ghost', id: 'removed' }],
+  } }] }, bearer(token))).json() as any;
+  assert.deepEqual(result.rejected, []);
+  const snapshot = await (await fetch(`${base}/v1/docs/${doc}/threads`, { headers: bearer(token) })).json() as any;
+  assert.deepEqual(snapshot.threads[0].comments[0].mentions, [{ start: 0, end: 6, name: 'Host', id: recipient.id }]);
+});
+
+test('viewer directory has no invite data and removed members get forbidden', async () => {
+  const { h, base } = await host();
+  h.ownerDevice('Host');
+  const invite = h.invite('Viewer', 'viewer');
+  const viewer = await join(base, invite.code, 'Viewer device');
+  h.invite('Pending', 'editor');
+  const response = await fetch(base + '/v1/members', { headers: bearer(viewer.token) });
+  assert.equal(response.status, 200);
+  const members = await response.json() as any[];
+  assert.equal(members.length, 2);
+  assert.ok(members.every(person => Object.keys(person).sort().join(',') === 'id,name,role'));
+  h.remove(invite.personId);
+  assert.equal((await fetch(base + '/v1/members', { headers: bearer(viewer.token) })).status, 403);
+});

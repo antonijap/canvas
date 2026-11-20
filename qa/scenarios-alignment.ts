@@ -65,7 +65,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
     let img = await grab(t);
     let m = resolve(img, await measure(t, {
       bar: "b:.cm-bar", barIcon: "b:.cm-bar > span:first-child svg", barText: "t:.cm-bar > span:nth-child(2)", show: "b:.cm-bar .cm-btn", showT: "t:.cm-bar .cm-btn",
-      shared: "b:.cm-shared", av: "b:.cm-shared .cm-av:last-child", avT: "t:.cm-shared .cm-av:last-child", dot: "b:.cm-dot",
+      shared: "b:.cm-shared", av: "b:.cm-shared .cm-av:last-child", avT: "t:.cm-shared .cm-av:last-child",
       pin: `b:${pin(A)}`, pinAv: `b:${pin(A)} .cm-av`, pinAvT: `t:${pin(A)} .cm-av`, gonePin: `b:${pin(C)}`, gonePinT: `t:${pin(C)}`,
     }));
     let k = new AlignChecker("page", th, img, K);
@@ -74,7 +74,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
     k.near("count bar: the bubble's middle on the bar's centre line", midY(barIcon), cy(m.bar));
     k.near("count bar: the count's cap middle on the bar's centre line", m.barText?.cap, cy(m.bar));
     k.label("shared-avatar", m.av, m.avT, { inset: 1.5 });
-    k.near("shared bar: the dot's middle on the bar's centre line", cy(m.dot), cy(m.shared));
+    k.near("shared bar: avatar on the toolbar center line", cy(m.av), cy(m.shared));
     k.label("pin-avatar", m.pinAv, m.pinAvT, { inset: 1.5 });
     k.near("pin: the avatar centred across the pin", m.pinAv && m.pinAv.x + m.pinAv.w / 2, m.pin && m.pin.x + m.pin.w / 2);
     k.near("pin: the avatar centred down the pin", cy(m.pinAv), cy(m.pin));
@@ -139,7 +139,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
     m = resolve(img, await measure(t, {
       hint: "b:.cm-hint", hintIcon: "b:.cm-hint > span:first-child svg", hintB: "t:.cm-hint b", hintSoft: "t:.cm-hint .cm-soft", key: "b:.cm-hint .cm-key", keyT: "t:.cm-hint .cm-key",
       comp: "b:.cm-comp", compAv: "b:.cm-compfield .cm-av", compAvT: "t:.cm-compfield .cm-av", compField: "t:.cm-compfield .cm-field",
-      chip: "b:.cm-foot .cm-chip", chipT: "t:.cm-foot .cm-chip span", chipIcon: "b:.cm-foot .cm-chip svg", retKey: "b:.cm-foot .cm-key", send: "b:.cm-foot .cm-send",
+      chip: "b:.cm-foot .cm-chip", chipT: "t:.cm-foot .cm-chip span", chipIcon: "b:.cm-foot .cm-chip svg", send: "b:.cm-foot .cm-send",
       draft: `b:${pin("draft")}`,
     }));
     k = new AlignChecker("page", th, img, K);
@@ -156,7 +156,6 @@ sc("comments", "alignment: every comment control is optically centred, light and
     k.near("add pin: the plus's middle on the teardrop's centre, x", midX(plus), m.draft ? m.draft.x + 13.5 : null);
     k.near("add pin: the plus's middle on the teardrop's centre, y", midY(plus), m.draft ? m.draft.y + 14.5 : null);
     k.near("composer: the field's cap middle on the avatar's centre line", m.compField?.cap, cy(m.compAv));
-    k.icon("composer-return-key", m.retKey, { inset: 1 });
     k.icon("composer-send", m.send);
     k.label("composer-chip", m.chip, m.chipT);
     const cIcon = k.ink("composer-chip-icon", bare(m.chipIcon), { inset: 0 });
