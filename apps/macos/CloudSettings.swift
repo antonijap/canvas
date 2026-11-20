@@ -440,7 +440,7 @@ final class CloudAccount: ObservableObject {
             let saved = await Task.detached { KeychainStore.set(service: CloudAccount.service, account: account, secret: token) }.value
             _ = await waitListed(model, url)
             _ = await CloudAccount.post(model, "api/cloud/token", ["url": url, "token": token])
-            if !saved { model.flash("Signed in, but the token could not be saved to the Keychain. You will sign in again after a restart.") }
+            if !saved { model.flash("Signed in. Canvas couldn't remember it, so you'll sign in again next time.") }
             busy.remove(url)
             await refresh(model, fresh: true)
             if let now = entry(model, url: url) { announce(model, now) }
@@ -452,7 +452,7 @@ final class CloudAccount: ObservableObject {
         let name = HomeLogic.cloudName(e)
         let s = state(e)
         guard s.status == "connected" else {
-            model.flash("\(name) says: \(CloudStatusText.line(s.status, configured: true))")
+            model.flash(CloudStatusText.line(s.status, configured: true))
             return
         }
         SettingsWindow.shared.close()
@@ -482,15 +482,49 @@ final class CloudAccount: ObservableObject {
 
     // MARK: Sharing
 
+    /// Both the file page and Command N create in the Cloud being browsed.
+    func newFile(_ model: CanvasModel, in entry: CloudEntry) {
+        guard !busy.contains(entry.url) else { return }
+        busy.insert(entry.url)
+        Task {
+            defer { busy.remove(entry.url) }
+            guard await waitListed(model, entry.url) else { model.flash("This Cloud is offline."); return }
+            let (status, j) = await Self.post(model, "api/cloud/files/create", ["cloud": entry.url, "name": "Untitled"])
+            if status == 201, let file = j["file"] as? String {
+                model.cloudFileNames[file] = "Untitled"
+                model.open(file)
+            } else { model.flash(CloudFilesText.problem(code: j["code"] as? String, fallback: "Could not create the Cloud file. Try again.")) }
+        }
+    }
+
     /// A verified move waits for typing and inspector writes before uploading the package.
-    func moveOpenFile(_ model: CanvasModel, file selectedFile: String? = nil) {
+    func moveOpenFile(_ model: CanvasModel, file selectedFile: String? = nil, to target: CloudEntry? = nil) {
         guard let file = selectedFile ?? model.currentFile else { model.flash("Open a Canvas file first"); return }
         model.flushTextEdit { ok in
             guard ok else { model.flash("Finish saving the text before moving this file"); return }
             model.afterWrites { Task {
             await self.refresh(model, fresh: true)
             let can = CloudShare.candidates(model.prefs.clouds, status: self.states.mapValues { ($0.status, $0.role) }).filter { $0.kind != .server }
-            guard let chosen = can.count == 1 ? can.first : await CloudAccount.pickOutsideTask(can, move: true) else { model.flash("Add a Mac Cloud with editor access first"); return }
+            let chosen: CloudEntry?
+            if let target { chosen = can.first { $0.id == target.id } }
+            else { chosen = can.count == 1 ? can.first : await CloudAccount.pickOutsideTask(can, move: true) }
+            guard let chosen else { model.flash("Add a Mac Cloud with editor access first"); return }
+            guard !self.busy.contains(chosen.url) else { return }
+            self.busy.insert(chosen.url)
+            defer { self.busy.remove(chosen.url) }
+            if target != nil {
+                let confirmed = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
+                    RunLoop.main.perform { MainActor.assumeIsolated {
+                        let alert = NSAlert()
+                        alert.messageText = "Move \(HomeLogic.name(file)) to \(HomeLogic.cloudName(chosen))?"
+                        alert.informativeText = "Everyone in this Cloud can open its files. The verified local package goes to the Trash."
+                        alert.addButton(withTitle: "Move")
+                        alert.addButton(withTitle: "Cancel")
+                        done.resume(returning: alert.runModal() == .alertFirstButtonReturn)
+                    } }
+                }
+                guard confirmed else { return }
+            }
             let (movedStatus, moved) = await CloudAccount.post(model, "api/cloud/files/move", ["cloud": chosen.url], query: [URLQueryItem(name: "file", value: file)])
             if movedStatus == 200, let destination = moved["file"] as? String {
                 model.cloudFileNames[destination] = moved["name"] as? String ?? "Untitled"
@@ -498,7 +532,7 @@ final class CloudAccount: ObservableObject {
                 HomeStore.shared.remove(file)
                 model.open(destination)
                 model.flash("Moved to \(HomeLogic.cloudName(chosen))", level: "success")
-            } else { model.flash(moved["error"] as? String ?? "Could not move the file") }
+            } else { model.flash(CloudFilesText.problem(code: moved["code"] as? String, fallback: "Could not move the file. Your local copy is kept.")) }
 
             } }
         }
@@ -771,6 +805,7 @@ struct CloudPage: View {
     @ObservedObject private var account = CloudAccount.shared
     /// Add person: the name or email of the next invite.
     @State private var invitee = ""
+    @State private var hostUsage: String?
 
     var body: some View {
         let e = entry
@@ -802,9 +837,16 @@ struct CloudPage: View {
                 case .server: serverRows(e, s)
                 case .hosted:
                     SettingsDivider()
-                    SettingsRow("Fingerprint", detail: "People joining see the same one") {
+                    SettingsRow("Check code", detail: "People joining see the same one") {
                         Text(h.fingerprint ?? "\u{2013}").font(Typography.body).monospacedDigit().foregroundStyle(Palette.mutedFg).lineLimit(1)
                             .qaID("cloud-fingerprint", label: h.fingerprint ?? "")
+                    }
+                    if let hostUsage {
+                        SettingsDivider()
+                        SettingsRow("Host on this Mac") {
+                            Text(hostUsage).font(Typography.body).foregroundStyle(Palette.mutedFg).lineLimit(1)
+                                .qaID("cloud-host-usage", label: hostUsage)
+                        }
                     }
                 case .joined:
                     SettingsDivider()
@@ -843,6 +885,16 @@ struct CloudPage: View {
                 }
                 .padding(.horizontal, 14)
                 .qaID("cloud-disclosure")
+            }
+        }
+        .task(id: entry.url + entry.kind.rawValue) {
+            hostUsage = nil
+            guard entry.kind == .hosted else { return }
+            while !Task.isCancelled {
+                let usage = await CloudFilesView.read(model, entry: entry, path: "api/cloud/usage")
+                guard !Task.isCancelled else { return }
+                hostUsage = CloudFilesText.hostUsage(usage)
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
     }
@@ -1107,7 +1159,7 @@ struct AddCloudSheet: View {
                 AddCloudGlyph(symbol: "laptopcomputer")
                 VStack(alignment: .leading, spacing: 3) {
                     Text(invite.name).font(Typography.body).fontWeight(.semibold).foregroundStyle(Palette.fg).lineLimit(1).qaText(invite.name)
-                    Text("Hosted on a Mac. Fingerprint \(invite.fingerprint)").font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1)
+                    Text("Hosted on a Mac. Check code \(invite.fingerprint)").font(Typography.micro).foregroundStyle(Palette.mutedFg).lineLimit(1)
                         .qaID("add-cloud-fingerprint", label: invite.fingerprint)
                 }
                 Spacer(minLength: 0)
@@ -1121,7 +1173,8 @@ struct AddCloudSheet: View {
                 case .hostsIt?:
                     Text("This Mac hosts this Cloud.").font(Typography.micro).foregroundStyle(Palette.fg).qaText("This Mac hosts this Cloud")
                 default:
-                    Text("Ask the host to read the fingerprint from Settings > Cloud: they should match.").font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true)
+                    Text("Ask the host to read the check code from Settings > Cloud. The codes should match.").font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true)
+                        .qaText("Ask the host to read the check code from Settings > Cloud. The codes should match.")
                 }
                 ForEach(CloudDisclosure.lines, id: \.self) { line in
                     Text(line).font(Typography.micro).foregroundStyle(Palette.mutedFg).fixedSize(horizontal: false, vertical: true).qaText(line)

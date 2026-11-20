@@ -191,7 +191,7 @@ extension CanvasModel {
 
 // MARK: Views
 
-private extension View {
+extension View {
     /// Layered soft shadows instead of a border: a hairline of depth, a tight one and a wide one.
     func cardShadow(_ lift: Bool = false) -> some View {
         shadow(color: .black.opacity(0.05), radius: 0.5, y: 0.5)
@@ -411,10 +411,9 @@ private struct HomeMain: View {
 
     var body: some View {
         if let cloud, cloud.kind != .server {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) { top; CloudFilesView(model: model, entry: cloud) }
-                    .padding(.horizontal, HomeMetric.gutter).padding(.top, topInset)
-            }
+            CloudFilesView(model: model, entry: cloud).id(cloud.id)
+                .padding(.horizontal, HomeMetric.gutter).padding(.top, topInset)
+                .padding(.bottom, HomeMetric.gutter)
         } else if let emptyLine {
             // Nothing to scroll: the header on top, the line in the middle of the space left under it.
             VStack(alignment: .leading, spacing: 0) {
@@ -553,13 +552,21 @@ private struct HomeThumbnail: View {
             if card.exists, store.thumbVersion >= 0, let img = store.thumbnail(card.path) {
                 Image(nsImage: img).resizable().scaledToFill()
             } else {
-                Palette.muted.overlay {
-                    Text(HomeLogic.initial(card.path)).font(.system(size: 34, weight: .semibold)).foregroundStyle(Palette.mutedFg.opacity(0.7))
-                }
+                HomeFilePlaceholder(name: card.name)
             }
         }
         .clipped()
         .saturation(card.exists ? 1 : 0)
+    }
+}
+
+/// Home and Cloud files share the same tile until a thumbnail is available.
+struct HomeFilePlaceholder: View {
+    let name: String
+    var body: some View {
+        Palette.muted.overlay {
+            Text(HomeLogic.initial(name + ".canvas")).font(.system(size: 34, weight: .semibold)).foregroundStyle(Palette.mutedFg.opacity(0.7))
+        }
     }
 }
 

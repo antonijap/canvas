@@ -173,6 +173,7 @@ sc("settings", "Join with an invite: the sheet reads the link, shows the Cloud's
     // Before Join: the name, the fingerprint, and every disclosure line.
     await t.mark({ id: "text", label: "Team Cloud", window: SHEET }, 4000);
     await t.mark({ id: "add-cloud-fingerprint", window: SHEET });
+    await t.mark({ id: "text", label: "Ask the host to read the check code from Settings > Cloud. The codes should match.", window: SHEET });
     await t.mark({ id: "add-cloud-disclosure", window: SHEET });
     await t.waitText("Everyone in this Cloud can open its files", undefined, 4000, SHEET);
     await t.shot(`${process.cwd()}/qa/out/native/add-cloud-join.png`, SHEET);

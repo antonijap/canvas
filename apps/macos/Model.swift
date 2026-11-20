@@ -736,6 +736,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func newCanvas() {
+        if homeShown, let entry = CloudAccount.shared.entry(self, id: HomeStore.shared.section.cloudId), entry.kind != .server {
+            CloudAccount.shared.newFile(self, in: entry)
+            return
+        }
         guard let url = savePanel(title: "New Canvas", name: "Untitled.canvas") else { return }
         post("api/canvas/new", ["target": url.path]) { file, error in
             if let file { self.open(file) } else { self.flash(error ?? "Could not create the document") }

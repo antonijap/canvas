@@ -72,7 +72,10 @@ sc("settings", "Add Cloud: the sheet from Home's + offers Join, This Mac and Clo
     await t.click(center(await t.mark({ id: "add-cloud-server-go", window: SHEET })), { window: SHEET });
     await sleep(400);
     t.eq((await t.cmd("qa.cloud", {})).clouds.length, 0, "Connect with a bad address adds nothing");
-    await t.key("Delete", [], { window: SHEET, repeat: 10 });
+    await t.key("a", ["cmd"], { window: SHEET });
+    await t.type("https://studio.workers.dev", { window: SHEET });
+    t.eq((await t.marks({ id: "add-cloud-dev-email", window: SHEET })).length, 0, "remote servers hide development email");
+    await t.key("a", ["cmd"], { window: SHEET });
     await t.type(a.url, { window: SHEET });
     // A local server takes a development email in place of a sign-in.
     await t.click(center(await t.mark({ id: "add-cloud-dev-email", window: SHEET }, 4000)), { window: SHEET });

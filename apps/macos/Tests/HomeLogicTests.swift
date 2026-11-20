@@ -15,9 +15,32 @@ struct HomeLogicTests {
     }
 
     static func main() {
-        recents(); comments(); servers(); cards(); empty(); labels(); thumbnails()
+        recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func cloudFiles() {
+        for (code, text) in [
+            "not_found": "This file was moved to the Trash",
+            "read_only": "You can view this file but not edit it",
+            "quota": "This Cloud is full",
+            "removed": "You no longer have access to this Cloud"
+        ] {
+            check(CloudFilesText.problem(code: code, fallback: "Could not open the file") == text, "plain error for \(code)")
+        }
+        check(CloudFilesText.problem(code: "invalid", fallback: "Could not open the file") == "Could not open the file", "unknown errors use the action's fallback")
+        check(CloudFilesText.warning(offline: false, usage: [:]) == nil, "missing usage stays silent")
+        check(CloudFilesText.warning(offline: false, usage: ["tone": "amber"]) == nil, "tone alone needs no action")
+        check(CloudFilesText.warning(offline: false, usage: ["restartsHour": 4]) == "This Cloud keeps restarting. Check the Mac that hosts it.", "restart warning")
+        check(CloudFilesText.warning(offline: false, usage: ["freeDisk": Int64(4 * 1024 * 1024 * 1024)]) == "This Mac is almost full. New uploads are paused.", "disk warning")
+        check(CloudFilesText.warning(offline: true, usage: [:]) == "This Cloud is offline.", "offline warning")
+        check(CloudFilesText.hostUsage(["storageBytes": Int64(1024), "peopleConnected": 1])?.hasSuffix("1 person connected.") == true, "singular person")
+        check(CloudFilesText.hostUsage(["storageBytes": Int64(1024), "peopleConnected": 2])?.hasSuffix("2 people connected.") == true, "plural people")
+        check(CloudFilesText.hostUsage([:]) == nil, "no invented storage reading")
+        check(CloudFilesText.edited("2026-11-20T10:00:00.000Z", now: Date(timeIntervalSince1970: 1795169100)) == "Edited 5 min ago", "timestamp subtitle")
+        check(CloudFilesText.edited(nil) == "", "no invented author or edit time")
+        check(CloudFilesText.canEdit("owner") && CloudFilesText.canEdit("editor") && !CloudFilesText.canEdit("viewer"), "only editors can create or move")
     }
 
     static func recents() {
