@@ -50,6 +50,18 @@ export interface Anchor {
 
 export interface Mention { start: number; end: number; name: string; email?: string; id?: string }
 
+/** Call after shape validation. Recipient ids take precedence; names and emails come from membership. */
+export function canonicalMentions<T extends Op>(op: T, members: readonly Author[]): T {
+  if (!("mentions" in op) || !op.mentions) return op;
+  return { ...op, mentions: op.mentions.flatMap(mention => {
+    const member = mention.id !== undefined
+      ? members.find(person => person.id === mention.id)
+      : mention.email !== undefined ? members.find(person => person.email === mention.email) : undefined;
+    return member ? [{ start: mention.start, end: mention.end, name: member.name,
+      ...(member.id ? { id: member.id } : {}), ...(member.email ? { email: member.email } : {}) }] : [];
+  }) };
+}
+
 export interface Comment {
   id: Uuid;
   thread: Uuid;

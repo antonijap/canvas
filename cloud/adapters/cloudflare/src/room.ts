@@ -37,7 +37,8 @@ export class Room extends DurableObject<Env> {
   private async applyAndBroadcast(doc: string, ops: unknown[], me: Identity, role: Role | null, allowance: number) {
     if (!this.matches(doc)) throw new Error("Document does not match the room");
     if (!Array.isArray(ops) || ops.length > LIMITS.opsPerMessage) throw new Error("Too many ops");
-    const result = this.operations.submit(doc, ops, me, role, allowance);
+    const members = await this.env.TEAM.getByName("team").members();
+    const result = this.operations.submit(doc, ops, me, role, allowance, members);
     if (result.entries.length) {
       await this.refreshRules();
       for (const socket of this.ctx.getWebSockets()) {

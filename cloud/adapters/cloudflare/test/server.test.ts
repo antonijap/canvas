@@ -219,3 +219,14 @@ it("lists mention recipients only for members and drops revoked people", async (
   expect((await call('/v1/members', member)).status).toBe(403);
   expect(await (await call('/v1/members')).json()).not.toContainEqual(expect.objectContaining({ email: member }));
 });
+
+it('canonicalizes known mention recipients and drops unknown recipients', async () => {
+  await rules([{ match: member, role: 'commenter' }]);
+  const doc = await register();
+  const op = envelope(doc);
+  if (op.op.kind !== 'thread.create') throw new Error('Expected create');
+  op.op.body = '@Alias @Ghost';
+  op.op.mentions = [{ start: 0, end: 6, name: 'Alias', email: member }, { start: 7, end: 13, name: 'Ghost', email: 'unknown@example.com' }];
+  expect((await post(doc, [op])).rejected).toEqual([]);
+  expect((await bindings.ROOM.getByName(doc).snapshot()).threads[0].comments[0].mentions).toEqual([{ start: 0, end: 6, name: 'member', email: member }]);
+});

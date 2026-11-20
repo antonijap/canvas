@@ -362,7 +362,8 @@ export class CloudHost {
   /** Applies ops and sends the applied entries to every socket in the room that is still allowed in. */
   private submit(doc: string, ops: unknown[], me: Me, allowance: number) {
     const r = this.room(doc);
-    const result = r.ops.submit(doc, ops, { email: me.email, name: me.name, id: me.id }, me.role, allowance);
+    const members = this.people().filter(person => person.devices.length).map(person => ({ id: person.id, name: person.label }));
+    const result = r.ops.submit(doc, ops, { email: me.email, name: me.name, id: me.id }, me.role, allowance, members);
     if (result.entries.length) {
       const text = JSON.stringify({ type: "applied", entries: result.entries } satisfies ServerMessage);
       for (const [socket, s] of r.sockets) {
