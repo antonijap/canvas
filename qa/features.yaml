@@ -760,6 +760,11 @@ features:
     area: chrome
     driven: [native]
     cases: [$themes, privacy, agents-model, updates, comment-name, cloud, cloud-name, cloud-host, cloud-many, add-cloud, cloud-join, cloud-remove, cloud-share-pick, alignment]
+  - id: cloud-files
+    name: Live files on a Mac hosted Cloud
+    area: chrome
+    driven: [native, mcp]
+    cases: [new, open, remote, offline, viewer, removed, confinement, usage]
   - id: home
     name: Home, the pinned first tab (recents, files on this Mac, a team server, first launch)
     area: chrome

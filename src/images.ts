@@ -1,3 +1,4 @@
+import { isCloudFile } from "./cloud-files-runtime.ts";
 // Image files brought into a document: a file dragged from Finder onto the canvas, or an image pasted with Cmd+V
 // (a screenshot). The bytes are copied next to the design so the document keeps working when the original moves:
 //   Name.canvas/media/<name>-<hash>.<ext>        inside a package
@@ -106,7 +107,8 @@ export function safeStem(name: string): string {
 /** Copy image bytes into the document's media folder (once per content). */
 export async function saveImage(file: string, bytes: Buffer, name: string): Promise<{ url: string; width: number; height: number; bytes: number }> {
   if (!bytes.length) throw new ImageError(400, "empty", "The image is empty");
-  if (bytes.length > MAX_IMAGE) throw new ImageError(413, "too-large", `The image is larger than ${MAX_IMAGE / 1048576} MB`);
+  const max = isCloudFile(file.endsWith("document.json") ? file : path.join(file,"document.json")) ? 100 * 1024 * 1024 : MAX_IMAGE;
+  if (bytes.length > max) throw new ImageError(413, "too-large", `The image is larger than ${MAX_IMAGE / 1048576} MB`);
   const kind = sniffImage(bytes);
   if (!kind) throw new ImageError(415, "not-image", `${name || "The file"} is not an image Canvas can show (PNG, JPEG, GIF, WebP or SVG)`);
   const size = imageSize(bytes, kind);
@@ -143,9 +145,11 @@ export async function handleImageRoute(req: http.IncomingMessage, res: http.Serv
     if (req.headers["x-canvas"] !== "1") return reply(403, { error: "forbidden", code: "forbidden" }), true;
     const chunks: Buffer[] = [];
     let size = 0;
+    const file = url.searchParams.get("file") ?? "";
+    const limit = isCloudFile(file.endsWith("document.json")?file:path.join(file,"document.json")) ? 100*1024*1024 : MAX_IMAGE;
     for await (const c of req) {
       size += (c as Buffer).length;
-      if (size > MAX_IMAGE) throw new ImageError(413, "too-large", `The image is larger than ${MAX_IMAGE / 1048576} MB`);
+      if (size > limit) throw new ImageError(413, "too-large", `The image is larger than ${MAX_IMAGE / 1048576} MB`);
       chunks.push(c as Buffer);
     }
     const out = await saveImage(url.searchParams.get("file") ?? "", Buffer.concat(chunks), url.searchParams.get("name") ?? "image");

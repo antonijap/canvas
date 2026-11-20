@@ -1,3 +1,4 @@
+import { fileStorageBytes, UPLOAD_LIMITS } from "./uploads.ts";
 // A Cloud file room: orders every action, checks it against its own rows with the shared apply, applies it whole or
 // not at all, and hands back what to send. Plain logic over a SqlStore and an ObjectStore, so the Worker's Durable
 // Object and a Cloud hosted on a Mac run the same code; sockets, alarms and the Team stay with the adapter.
@@ -347,6 +348,7 @@ export class FileRoom {
         for (const e of textEditsOf(r)) w("INSERT INTO text_edits (node, seq, action, whole, from_, del, ins) VALUES (?, ?, ?, ?, ?, ?, ?)", e.node, e.seq, e.action, e.whole ? 1 : 0, e.from, e.del, e.ins);
         const bytes = this.store.sql.exec<{ n: number }>("SELECT node_bytes AS n FROM file_meta WHERE id = 1").one().n + this.tree.bytesDelta;
         if (this.tree.bytesDelta > 0 && bytes > FILE_NODE_CAP) throw new Refusal("quota", `this file is full: it holds at most ${FILE_NODE_CAP / 1024 / 1024} MB of layers`);
+        if(fileStorageBytes(this.store,bytes)>UPLOAD_LIMITS.file)throw new Refusal("quota","this file holds at most 1 GB in total");
         w("UPDATE file_meta SET seq = ?, node_bytes = ? WHERE id = 1", last, bytes);
         const full = this.tree.flushBoardBytes(BOARD_BYTES_CAP);
         if (full) throw new Refusal("invalid", `the board "${full}" is full: a board holds at most 32 MB of layers`);

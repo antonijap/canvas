@@ -5,6 +5,9 @@
 import type http from "node:http";
 
 /** How much more than the limit is read (and thrown away) so the 413 answer reaches a client still sending. */
+const cached = new WeakMap<object, string | null>();
+export function cacheBody(req: http.IncomingMessage, body: string | null) { cached.set(req, body); }
+
 const DRAIN_MAX = 64 * 1024 * 1024;
 
 /**
@@ -13,6 +16,7 @@ const DRAIN_MAX = 64 * 1024 * 1024;
  * connection, and fetch then rejects with "Load failed" instead of showing the JSON message.
  */
 export async function readBodyText(req: http.IncomingMessage, maxBytes: number): Promise<string | null> {
+  if (cached.has(req)) { const b = cached.get(req)!; return b === null || Buffer.byteLength(b) > maxBytes ? null : b; }
   const chunks: Buffer[] = [];
   let size = 0;
   let over = false;
@@ -31,4 +35,10 @@ export async function readBodyText(req: http.IncomingMessage, maxBytes: number):
     chunks.push(b);
   }
   return over ? null : Buffer.concat(chunks).toString("utf8");
+}
+
+/** Reuse a body inspected at dispatch, including handlers with their own JSON shape checks. */
+export async function* bodyChunks(req: AsyncIterable<Buffer | string>): AsyncGenerator<Buffer | string> {
+  if(cached.has(req)) { const raw=cached.get(req); if(raw===null)throw new Error("Request body is too large"); yield Buffer.from(raw!); return; }
+  yield* req;
 }

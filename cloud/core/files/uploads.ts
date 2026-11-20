@@ -48,6 +48,15 @@ export class StorageLedger implements StorageBudget {
   }
 }
 
+/** Current layers, sidecars and unique blobs, plus uploads not yet referenced. */
+export function fileStorageBytes(store:SqlStore,nodeBytes?:number):number {
+  const nodes=nodeBytes??store.sql.exec<{n:number}>('SELECT node_bytes AS n FROM file_meta WHERE id=1').one().n;
+  const sidecars=store.sql.exec<{n:number}>("SELECT (SELECT COALESCE(SUM(length(CAST(json AS BLOB))),0) FROM widgets)+(SELECT COALESCE(SUM(length(CAST(json AS BLOB))),0) FROM kv) AS n").one().n;
+  const blobs=store.sql.exec<{n:number}>('SELECT COALESCE(SUM(bytes),0) AS n FROM (SELECT sha256,MAX(bytes) AS bytes FROM blobs GROUP BY sha256)').one().n;
+  const pending=store.sql.exec<{n:number}>("SELECT COALESCE(SUM(bytes),0) AS n FROM uploads WHERE state IN ('open','stored')").one().n;
+  return nodes+sidecars+blobs+pending;
+}
+
 export class UploadError extends Error {
   code: "forbidden" | "invalid" | "quota" | "conflict";
   constructor(code: UploadError["code"], message: string) {
@@ -95,9 +104,7 @@ export function reserveUpload(room: FileRoom, budget: StorageBudget, conn: Conn,
   return room.store.transactionSync(() => {
     const sql = room.store.sql;
     if (sql.exec("SELECT 1 FROM uploads WHERE id = ?", req.id).toArray().length) throw new UploadError("conflict", "this upload id is taken");
-    const inFile = sql.exec<{ n: number }>("SELECT COALESCE(SUM(bytes), 0) AS n FROM (SELECT sha256, MAX(bytes) AS bytes FROM blobs GROUP BY sha256)").one().n;
-    const open = sql.exec<{ n: number }>("SELECT COALESCE(SUM(bytes), 0) AS n FROM uploads WHERE state IN ('open', 'stored')").one().n;
-    if (inFile + open + req.bytes > UPLOAD_LIMITS.file) throw new UploadError("quota", "a file holds at most 1 GB of images, videos and fonts");
+    if (fileStorageBytes(room.store)+req.bytes>UPLOAD_LIMITS.file) throw new UploadError("quota","a file holds at most 1 GB in total");
     if (!budget.reserve(`${room.file}/${req.id}`, req.bytes)) throw new UploadError("quota", "this Cloud's storage is full");
     sql.exec("INSERT INTO uploads (id, sha256, bytes, type, by_id, at_ms, state) VALUES (?, ?, ?, ?, ?, ?, 'open')", req.id, req.sha256, req.bytes, req.type, conn.author.id, room.now());
     return req.id;

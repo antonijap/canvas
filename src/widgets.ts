@@ -1,3 +1,4 @@
+import { bodyChunks } from "./body.ts";
 // Widgets on the canvas: todo lists, notes and live numbers that sit beside the boards. Their
 // definitions live in a sidecar (widgets.json in the package, or foo.widgets.json next to foo.canvas.json); live values are fetched here,
 // never stored, and pushed to open pages over the same /events stream as document changes.
@@ -329,7 +330,7 @@ function reply(res: http.ServerResponse, status: number, body: unknown, extra: R
 async function readBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const c of req) {
+  for await (const c of bodyChunks(req)) {
     size += (c as Buffer).length;
     if (size > BODY_MAX) throw new WidgetError(413, "too-large", "The request body is larger than 512 KB");
     chunks.push(c as Buffer);

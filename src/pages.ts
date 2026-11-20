@@ -1,3 +1,4 @@
+import { bodyChunks } from "./body.ts";
 // Pages: named groups of boards. The design file has no pages, so they are Canvas metadata and live
 // in the same envelope as the widgets (widgets.json in a package, foo.widgets.json beside a single foo.canvas.json), as
 // `pages: [{id, name, boards: [board ids]}]`, written through the same store mutation queue.
@@ -285,7 +286,7 @@ export async function replacePages(file: string, pages: unknown, boardIds: Board
 async function body(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const c of req) {
+  for await (const c of bodyChunks(req)) {
     chunks.push(Buffer.from(c));
     size += c.length;
     if (size > 1_000_000) throw new WidgetError(413, "too-large", "The request body is larger than 1 MB");

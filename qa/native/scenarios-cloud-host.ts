@@ -115,7 +115,7 @@ sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, 
     // Stop hosting Client review: Studio runs on.
     await t.click(center(await t.mark({ id: "cloud-stop-hosting", window: "settings" }, 4000)), { window: "settings" });
     await t.waitState((s) => s.modal, "Stop asks first", 6000);
-    await t.key("Return", [], { window: "modal" });
+    { const button = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Stop Hosting"); t.ok(button, "Stop Hosting button"); await t.click(center(button), { window: "modal" }); }
     await t.waitText("Not hosting", undefined, 15_000, "settings");
     await t.waitFor(async () => cloudPids().length === 1, "one Cloud process left", 15_000);
     const st = (await (await fetch(`${t.app.base}/api/cloud/status?url=${encodeURIComponent(studio.url)}&fresh=1`)).json()) as any;
@@ -124,7 +124,7 @@ sc("settings", "Host on this Mac, twice: two Clouds at once, each its own page, 
     await t.click(center(await t.mark({ id: "cloud-remove-cloud", window: "settings" }, 4000)), { window: "settings" });
     await t.waitState((s) => s.modal, "Delete asks first", 6000);
     await t.shot(`${process.cwd()}/qa/out/native/cloud-delete-ask.png`, "modal");
-    await t.key("Return", [], { window: "modal" });
+    { const button = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Delete"); t.ok(button, "Delete button"); await t.click(center(button), { window: "modal" }); }
     await t.waitFor(async () => (await t.cmd("qa.cloud", {})).clouds.length === 1, "Client review to leave the list", 10_000);
     const hosts = (await (await fetch(`${t.app.base}/api/cloud/host`)).json()) as any;
     t.ok(!hosts.clouds.some((c: any) => c.hostId === review.url.replace("canvas-cloud://", "")), "this Mac no longer keeps Client review");

@@ -248,3 +248,9 @@ test("concurrent standalone edits keep their own history writers", async () => {
     assert.equal(steps[1].writers?.["n:node:x"], actions[1].id);
   });
 });
+
+test('agent action labels stay in their request context',async()=>{
+ const {withActionAgent,makeAction}=await import('../src/cloud-files-ops.ts');
+ const ops:any[]=[{k:'set',id:'node',props:{x:{v:1}}}];
+ const a=await withActionAgent('Helper',async()=>makeAction(ops));assert.equal(a.agent,'Helper');assert.equal(makeAction(ops).agent,undefined);
+});

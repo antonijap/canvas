@@ -1,3 +1,5 @@
+import { bodyChunks } from "./body.ts";
+import { isCloudFile, cloudAsset, cloudDerived } from "./cloud-files-runtime.ts";
 // Shader cards on disk. A shader card is a widget of kind "shader" (src/widgets/kinds/shader.ts); its
 // WGSL lives in a file beside the widgets:
 //   Name.canvas/shaders/<id>.wgsl                  inside a package
@@ -50,7 +52,7 @@ export function shaderDir(docFile: string): string {
 
 const ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const sourcePath = (docFile: string, id: string) => path.join(shaderDir(docFile), `${id}.wgsl`);
-const posterPath = (docFile: string, id: string, rev: string) => path.join(shaderDir(docFile), `${id}.poster-${rev}.png`);
+const posterPath = (docFile: string, id: string, rev: string) => path.join(isCloudFile(docFile) ? cloudDerived(docFile) : shaderDir(docFile), `${id}.poster-${rev}.png`);
 
 /** Write a file by renaming a temp file over it, so a reader sees the old bytes or the new ones. */
 async function writeAtomic(file: string, bytes: string | Buffer): Promise<void> {
@@ -354,6 +356,12 @@ export async function readShaderSource(file: string, id: string): Promise<{ sour
  * hand: no snapshot holds it) is left as it is.
  */
 async function currentSource(docFile: string, id: string, w: Widget | undefined): Promise<{ text: string | null }> {
+  if (isCloudFile(docFile)) {
+    const cfg = (w?.config ?? {}) as { rev?: string; source?: string };
+    const rel = cfg.source ?? (cfg.rev ? 'shaders/' + id + '.src-' + cfg.rev + '.wgsl' : 'shaders/' + id + '.wgsl');
+    const confined = cloudAsset(docFile, rel);
+    return { text: confined ? await readText(confined) : null };
+  }
   const file = sourcePath(docFile, id);
   const text = await readText(file);
   const cfg = (w?.config ?? {}) as { rev?: unknown; uniforms?: unknown };
@@ -417,7 +425,7 @@ function reply(res: http.ServerResponse, status: number, body: unknown) {
 async function readBytes(req: http.IncomingMessage, max: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const c of req) {
+  for await (const c of bodyChunks(req)) {
     size += (c as Buffer).length;
     if (size > max) throw new WidgetError(413, "too-large", `The request body is larger than ${Math.round(max / 1024)} KB`);
     chunks.push(c as Buffer);

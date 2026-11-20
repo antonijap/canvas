@@ -195,7 +195,7 @@ sc("settings", "Two Clouds: sharing a file asks which one, the file goes to the 
     await t.waitState((s) => s.modal, "the question which Cloud", 10_000);
     await t.shot(`${process.cwd()}/qa/out/native/share-pick.png`, "modal");
     // The first Cloud in the menu is chosen: Share.
-    await t.key("Return", [], { window: "modal" });
+    { const button = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Share"); t.ok(button, "Share button"); await t.click(center(button), { window: "modal" }); }
     await t.waitState((s) => !s.modal, "the question to close", 6000);
     await t.waitState((s) => /^Comments shared to Acme/.test(s.toast ?? ""), "the shared toast names the Cloud", 10_000);
     const comments = () => { try { return JSON.parse(fs.readFileSync(path.join(t.file, "comments.json"), "utf8")); } catch { return null; } };
@@ -207,7 +207,7 @@ sc("settings", "Two Clouds: sharing a file asks which one, the file goes to the 
     await t.click(center(await t.mark({ id: "cloud-remove-cloud", window: "settings" }, 4000)), { window: "settings" });
     await t.waitState((s) => s.modal, "Remove asks first", 6000);
     await t.shot(`${process.cwd()}/qa/out/native/cloud-remove-ask.png`, "modal");
-    await t.key("Return", [], { window: "modal" });
+    { const button = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Remove"); t.ok(button, "Remove button"); await t.click(center(button), { window: "modal" }); }
     await t.waitFor(async () => (await t.cmd("qa.cloud", {})).clouds.length === 1, "Acme to leave the list", 8000);
     await t.mark({ id: "cloud-row", label: "Birch", window: "settings" }, 4000);
     t.eq((await t.marks({ id: "cloud-row", label: "Acme", window: "settings" })).length, 0, "its row is gone");

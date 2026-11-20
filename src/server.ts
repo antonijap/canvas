@@ -1,10 +1,14 @@
 #!/usr/bin/env node
+import { forgetStore } from "./widgets/store.ts";
+import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents } from "./cloud-files.ts";
+import { readOnlyRoute } from "./cloud-files-gate.ts";
+import { applyView } from "./docwriter.ts";
 // Canvas: a lightweight local design surface for .canvas documents.
 // Agents design through Canvas MCP (it edits the file through this server); Canvas watches the file and
 // redraws the changed boards in place. Pan by drag or scroll, zoom by pinch or Cmd+scroll,
 // click a node to see its properties, left rail lists boards, components, text styles and variables.
 
-import { asOneAction } from "./cloud-files-ops.ts";
+import { asOneAction, withActionAgent } from "./cloud-files-ops.ts";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -37,7 +41,7 @@ import { handleImageRoute } from "./images.ts";
 import { handleVideoRoute } from "./videos.ts";
 import { loadBox } from "./boardbox.ts";
 import { fitCam, keepLabels, overlayNode, pickPage, retryDelay, unionRect, wheelAction, zoomAt } from "./pagelogic.ts";
-import { handleHistoryRoute, historyState, nodeDiff, nodeLabel, onAgentEdit, onHistory, propsOf, record, type NodeOp } from "./history.ts";
+import { handleHistoryRoute, historyState, nodeDiff, nodeLabel, onAgentEdit, onHistory, resetHistory, propsOf, record, type NodeOp } from "./history.ts";
 import { agentLabel, cursorActions } from "./agent-cursor.ts";
 import { GROUP_MERGE_MS, handleMoveRoute, isGroupMerge, moveModeOf, moveNodes, MoveError } from "./move.ts";
 import { handleResizeRoute } from "./resize.ts";
@@ -53,7 +57,7 @@ import { followRename, handleOverrideRoute, OverrideError, overrideInfo, renameF
 import { replaceEach, selectionColors } from "./selection-colors.ts";
 import { nodeDepth } from "./doc/tree.ts";
 import { buildIndex, defaultTheme, expand, findNode, FIT_SCRIPT, resolveDocPath, resolveVariable, StaleFileError, updateNode, type Json, type CanvasDoc, type DocNode } from "./engine.ts";
-import { readBodyText } from "./body.ts";
+import { readBodyText, cacheBody } from "./body.ts";
 import { handleAgentRoute, renderInChild, type AgentCtx } from "./agent-run.ts";
 import { handleOnboardingRoute, noteMcp } from "./onboarding.ts";
 import { countUsage, handleUsageCountsRoute, usage } from "./usage-counts.ts";
@@ -160,6 +164,17 @@ async function prime(file: string): Promise<void> {
   }
   await Promise.all([cache.ensure(docFile).catch(() => {}), storeForAsync(docFile).catch(() => {})]);
 }
+fileEvents.view = (file) => {
+  applyView(file, JSON.parse(fs.readFileSync(file, "utf8")));
+  void storeForAsync(file).then(store => store.refresh()).catch(() => {});
+  docChanged(file, watched(file).revision, "remote");
+  for (const c of clients.get(file) ?? []) c.write(sse("cloudfile", fileInfo(file)));
+  tellCommentPages(file);
+};
+fileEvents.removed = (file) => {
+  cache.drop(file); forgetStore(file); resetHistory(file);
+  for (const c of clients.get(file) ?? []) c.write(sse("cloudremoved", {}));
+};
 widgetHooks.docOf = (docFile) => watched(docFile).doc;
 
 const sse = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -549,7 +564,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
     },
   };
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer((req, res) => withActionAgent(req.headers["x-canvas-source"] === "mcp" ? String(req.headers["x-canvas-agent"] ?? "Agent") : undefined, async () => {
     // canvas-mcp's heartbeat (src/onboarding.ts) says an agent is connected; it is not someone using Canvas.
     if (!(req.url ?? "").startsWith("/api/mcp/hello")) lastActivity = Date.now();
     // Nothing leaves the server before the crash journal holds every edit made so far durably (docwriter.ts group
@@ -567,8 +582,19 @@ export function startServer(port = PORT()): Promise<http.Server> {
     noteAgent(req);
     noteMcp(req);
     try {
-      const fileQ = url.searchParams.get("file");
-      if (fileQ) await prime(fileQ);
+      let bodyFile: string | undefined;
+      if (readOnlyRoute(req.method ?? "GET", url.pathname) && String(req.headers["content-type"] ?? "").startsWith("application/json")) {
+        const raw = await readBodyText(req, 20_000_000); cacheBody(req, raw);
+        try { bodyFile = JSON.parse(raw ?? "{}").file; } catch {}
+      }
+      const fileQ = url.searchParams.get("file") || bodyFile;
+      if (fileQ) {
+        const cf = fileInfo(fileQ);
+        if (cf && readOnlyRoute(req.method ?? "GET", url.pathname) && cf.role !== "owner" && cf.role !== "editor") return json(res, { error: "This Cloud file is read only", code: "read_only" }, 403);
+        await prime(fileQ);
+      }
+      if (url.pathname === "/api/cloud/files/move" && fileQ) { const source=resolveDocPath(fileQ); await flushWrites(source); await compactWrites(source); await settleShaderSources(fileQ); }
+      if (await handleCloudFiles(req, res, url)) return;
       if (await handleShaderRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
       if (await handleImageRoute(req, res, url)) return;
       if (await handleVideoRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
@@ -870,6 +896,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
         try {
           const b = JSON.parse(raw || "{}") as { file: string; name: unknown };
           if (typeof b.file !== "string" || !b.file) throw new DocError(400, "file is required");
+          if (fileInfo(b.file)) return json(res, {ok:true,file:await renameCloudFile(b.file,b.name)});
           const src = resolveDocPath(b.file);
           await flushWrites(src);
           await compactWrites(src);
@@ -988,6 +1015,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
         // A page coming back (a tab shown again) says which revision it has: the same one needs no whole document.
         const since = url.searchParams.get("since");
         res.write(`retry: 1000\n${since && since === snap.revision ? sse("docsame", { revision: snap.revision }) : sse("doc", docPayload(snap))}`);
+        const cf = fileInfo(snap.path); if (cf) res.write(sse("cloudfile", cf));
         let set = clients.get(snap.path);
         if (!set) clients.set(snap.path, (set = new Set()));
         set.add(res);
@@ -1003,7 +1031,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
     } catch (e) {
       return json(res, { error: (e as Error).message }, 500);
     }
-  });
+}));
 
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -3576,6 +3604,17 @@ const isComponentish = ${isComponentish};
 let docGen = 0; // bumped by every document the stream installs, so a recovery fetch it overtook is dropped
 es.addEventListener("doc", (e) => { docGen++; onDoc(JSON.parse(e.data)); });
 // Back on a stream with the document unchanged: the shell hears it again (it may have shown another tab meanwhile).
+let cloudReadOnly = false;
+es.addEventListener("cloudfile", (e) => {
+  const info = JSON.parse(e.data); window.canvasCloudFile = info; cloudReadOnly = !!info && info.role !== "owner" && info.role !== "editor";
+  if (native) post({ cloudFile: info || { role: "editor" } });
+  document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });
+});
+es.addEventListener("cloudremoved", () => {
+  world.replaceChildren(); doc = null; es.close();
+  if (native) post({ cloudRemoved: true });
+});
+document.addEventListener("keydown", e => { if (cloudReadOnly && (e.key === "Delete" || e.key === "Backspace" || (!e.metaKey && !e.ctrlKey && e.key.length === 1) || ((e.metaKey || e.ctrlKey) && /[zvx]/i.test(e.key)))) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
 es.addEventListener("docsame", () => { if (doc && native) post({ file, doc: docMsg(), pages: pagesMsg() }); });
 const applyDocDiff = ${applyDocDiff};
 es.addEventListener("docdiff", (e) => {

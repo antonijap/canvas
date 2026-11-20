@@ -763,7 +763,7 @@ enum QA {
             "tabRename": ["file": tabRenameFile() as Any? ?? NSNull(), "events": tabRenameEvents],
             "section": m.section?.rawValue ?? NSNull(), "panelOpen": m.panelOpen, "sidebarWidth": Double(m.sidebarWidth), "homeSidebarWidth": Double(m.homeSidebarWidth), "inspectorOpen": m.inspectorOpen, "uiHidden": m.uiHidden,
             "pages": m.pages.map { ["id": $0.id, "name": $0.name, "count": $0.count] }, "activePage": m.activePage ?? NSNull(),
-            "boards": m.boards.map(\.id), "selection": sel, "selectedWidget": m.selectedWidgetId ?? NSNull(),
+            "cloudReadOnly": m.cloudReadOnly, "boards": m.boards.map(\.id), "selection": sel, "selectedWidget": m.selectedWidgetId ?? NSNull(),
             "widgets": m.widgets.map { ["id": $0.id, "kind": $0.kind] },
             "widgetKinds": m.widgetKinds.map { ["id": $0.id, "title": $0.title] },
             "paperShaders": m.paperShaders.map { ["id": $0.id, "name": $0.name] },

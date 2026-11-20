@@ -153,6 +153,8 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var section: RailSection? = .boards
     @Published var allFiles: [FileEntry] = []
     @Published var openFiles: [String] = UserDefaults.standard.stringArray(forKey: "canvas.openFiles") ?? []
+    @Published var cloudFileNames: [String: String] = [:]
+    @Published var cloudReadOnly = false
     @Published var currentFile: String?
     /// The Home tab is the shown one (Home.swift): the shown file's page stays alive underneath, hidden, and takes no keys.
     @Published var homeShown = false {
@@ -271,6 +273,11 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func apply(_ m: [String: Any]) {
+        if let cloud = m["cloudFile"] as? [String: Any] {
+            cloudReadOnly = (cloud["role"] as? String).map { $0 != "owner" && $0 != "editor" } ?? false
+            if let file = currentFile, let name = cloud["name"] as? String { cloudFileNames[file] = name }
+        }
+        if m["cloudRemoved"] as? Bool == true, let file = currentFile { close(file); flash("Your access to this Cloud was removed"); return }
         if let file = m["file"] as? String, file != currentFile { noteOpened(file) }
         if let z = m["zoom"] as? Double, let v = JSONNumber.int(z) { zoom = v }
         if m.keys.contains("selBoard") { selectedBoard = m["selBoard"] as? String }
@@ -397,6 +404,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         let m = PanelMemory.next(sectionByFile, leaving: currentFile, current: section, opening: file)
         sectionByFile = m.saved
         if let r = m.section { section = r }
+        cloudReadOnly = false
         currentFile = file
         if widgetKinds.isEmpty { fetchKinds() }
         UserDefaults.standard.set(file, forKey: "canvas.lastFile")
@@ -422,7 +430,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func name(of file: String) -> String {
-        allFiles.first { $0.file == file }?.name ?? URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+        cloudFileNames[file] ?? allFiles.first { $0.file == file }?.name ?? URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
     }
 
     func open(_ file: String) {
@@ -814,6 +822,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func close(_ file: String) {
         guard let i = openFiles.firstIndex(of: file) else { return }
         openFiles.remove(at: i)
+        Task { _ = await CloudAccount.post(self, "api/cloud/files/close", ["file": file]) }
         UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
         drop(file) // a hidden tab's page goes with it (the shown one goes once another is shown)
         guard file == currentFile else { return }
