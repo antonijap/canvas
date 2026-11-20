@@ -300,6 +300,21 @@ export class MacFiles {
                         ws.close(1008, 'File is in Trash');
                 return json(200, { ok: true });
             }
+            if (sub === 'import' && method === 'DELETE') {
+                if(row.created_by !== me.id) return json(403,{code:'forbidden'});
+                const r=this.rooms.get(file) ?? this.room(file);
+                // A failed move must not discard somebody else's edits made after publication.
+                if(r.store.sql.exec("SELECT 1 FROM log WHERE json_extract(by_json,'$.id')!=? LIMIT 1",me.id).toArray().length)
+                    return json(409,{code:'conflict',message:'Another person edited the imported file; kept it in the Cloud'});
+                if(r.timer)clearTimeout(r.timer);
+                for(const ws of r.sockets.keys())ws.close(1008,'Import cancelled');
+                r.sockets.clear();r.store.close();this.rooms.delete(file);
+                for(const suffix of ['', '-wal','-shm'])fs.rmSync(path.join(this.root,'files',file+'.sqlite'+suffix),{force:true});
+                fs.rmSync(path.join(this.objects.root,'files',file),{recursive:true,force:true});
+                this.db.sql.exec('DELETE FROM storage_held WHERE key LIKE ?',`${file}/%`);
+                this.db.sql.exec('DELETE FROM files WHERE id=?',file);
+                return json(200,{ok:true});
+            }
             const r = this.room(file);
             if (sub === 'import' && method === 'POST') {
                 if (row.created_by !== me.id)

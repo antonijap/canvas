@@ -1,6 +1,5 @@
 // A move keeps its source until the destination's document and every asset have been downloaded and verified.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { checkBlobPath, blobTypeOf, type BlobPath, type FileOp, type Json } from '../cloud/protocol-files.ts';
@@ -21,7 +20,7 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     name: string;
     cloud: string;
     role: string;
-}>) {
+}>, finalize?: (destination: { id:string; file:string; name:string; cloud:string; role:string }) => Promise<void>) {
     const pkg = path.resolve(source);
     if (!pkg.endsWith('.canvas') || fs.lstatSync(pkg).isSymbolicLink() || !fs.statSync(pkg).isDirectory())
         throw new Error('Move a local Canvas package');
@@ -102,6 +101,7 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
         if (b.source && (!fs.existsSync(b.source)||createHash('sha256').update(fs.readFileSync(b.source)).digest('hex') !== b.op.sha256))
             throw new Error('Local media changed during the move');
     if((fs.existsSync(commentsPath)?fs.readFileSync(commentsPath,'utf8'):null)!==commentsBefore)throw new Error('Local comments changed during the move; source kept');
+    await finalize?.(dest);
     trashPackage(pkg);
     return { ...dest, verified: true };
 }
