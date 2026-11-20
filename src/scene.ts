@@ -1,3 +1,4 @@
+import { isCloudFile, cloudAsset } from "./cloud-files-runtime.ts";
 // The GPU engine's input: one board as a fully resolved tree. Resolution stays here in TypeScript,
 // exactly as html.ts does it: component instances expanded (path ids), $variables resolved for the
 // active theme (a node's `theme` narrows it for its subtree), disabled nodes dropped, image URLs
@@ -190,7 +191,8 @@ function remoteIcon(url: string): Promise<{ size: number; body: string } | undef
 type TextUse = { family: string; weight: number; style: "normal" | "italic"; cps: Set<number> };
 type Ctx = { doc: CanvasDoc; baseDir: string; warnings: string[]; fonts: Map<string, TextUse>; images: Set<string>; file: string; icons: Promise<void>[]; transient?: boolean };
 
-function assetUrl(url: string, baseDir: string): string {
+function assetUrl(url: string, baseDir: string, file: string): string {
+  if (isCloudFile(file)) { const abs = cloudAsset(file, url); return abs ? `/asset?p=${encodeURIComponent(abs)}` : ""; }
   if (/^(https?:|data:)/.test(url)) return url;
   const abs = localPath(url, baseDir);
   return `/asset?p=${encodeURIComponent(abs)}`;
@@ -204,7 +206,7 @@ function rewritePaints(v: Json | undefined, c: Ctx): Json | undefined {
   const one = (p: Json): Json => {
     if (p && typeof p === "object" && !Array.isArray(p) && p.type === "image" && typeof p.url === "string") {
       // Adjustments name a recoloured copy of the image (src/page/image-adjust.js; the page applies them as it decodes).
-      const url = assetUrl(p.url, c.baseDir) + adjustFragment(p.adjust);
+      const url = assetUrl(p.url, c.baseDir, c.file) + adjustFragment(p.adjust);
       c.images.add(url);
       return { ...p, url };
     }
@@ -616,7 +618,7 @@ export async function handleEngineRoute(url: URL, res: http.ServerResponse, snap
     if (file) {
       try {
         const snap = snapOf(file);
-        doc = { fonts: Array.isArray(snap.doc.fonts) ? (snap.doc.fonts as never) : [], baseDir: path.dirname(snap.path) };
+        doc = { fonts: Array.isArray(snap.doc.fonts) ? (snap.doc.fonts as any[]).filter(f => !isCloudFile(snap.path) || (typeof f.url === "string" && !!cloudAsset(snap.path,f.url))) : [], baseDir: path.dirname(snap.path) };
       } catch {
         // A file that does not open still lets installed and web fonts answer.
       }
