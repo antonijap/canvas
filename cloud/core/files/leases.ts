@@ -46,6 +46,7 @@ export class RoomLeases {
     this.bank = bank;
     this.now = now;
   }
+  clear(): void { this.held.clear(); }
   /** Spend `n` of the person's budget; false (nothing spent) when the Team has no more for this minute. */
   take(person: string, kind: LeaseKind, n: number): boolean {
     const t = this.now();

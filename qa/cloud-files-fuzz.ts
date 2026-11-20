@@ -17,7 +17,7 @@ import { collectGarbage } from "../cloud/core/files/gc.ts";
 import { reserveUpload, putUpload, StorageLedger } from "../cloud/core/files/uploads.ts";
 import { NodeSqlStore } from "../cloud/core/files/memory.ts";
 import { Divergence } from "../cloud/core/files/replica.ts";
-import type { MemoryTree } from "../cloud/core/files/tree-memory.ts";
+import type { ReplicaTree } from "../cloud/core/files/replica.ts";
 import type { FileOp, Json, DocNode } from "../cloud/core/files/seam.ts";
 import type { Role } from "../cloud/core/files/messages.ts";
 
@@ -64,7 +64,7 @@ type Metrics = {
   rowsWritten: number; ms: number; failures: string[];
 };
 
-function liveNodes(v: MemoryTree): { id: string; type: string; parent: string | null; props: Record<string, Json> }[] {
+function liveNodes(v: ReplicaTree): { id: string; type: string; parent: string | null; props: Record<string, Json> }[] {
   const out: { id: string; type: string; parent: string | null; props: Record<string, Json> }[] = [];
   const walk = (p: string | null) => {
     for (const id of v.children(p)) {
@@ -105,7 +105,7 @@ class Gen {
   }
 
   /** One random action on what `c` sees. */
-  action(c: SimClient, v: MemoryTree): FileOp[] {
+  action(c: SimClient, v: ReplicaTree): FileOp[] {
     const nodes = liveNodes(v);
     const containers = nodes.filter((n) => n.type === "frame" || n.type === "group");
     const components = nodes.filter((n) => n.props.reusable === true).map((n) => n.id);
