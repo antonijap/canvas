@@ -681,6 +681,7 @@ enum QA {
     /// {key: "k" | "Return" | ..., mods?: ["cmd", ...], hold?: true (keep the modifiers for the next mouse ops), release?: true}
     private static func key(_ a: [String: Any]) async throws -> [String: Any] {
         let w = try target(a)
+        if w !== NSApp.modalWindow && !w.isKeyWindow { w.makeKey() }
         let f = flags(a)
         if a["release"] as? Bool == true {
             heldMods = []
@@ -695,6 +696,12 @@ enum QA {
             return ["held": true]
         }
         guard let k = a["key"] as? String, !k.isEmpty else { throw QAError(code: "invalid", message: "key needs key") }
+        // Background field editors do not publish SwiftUI changes for a synthetic clipboard insertion.
+        // Deliver the private clipboard through the same native input path as qa.type, without interleaved modifiers.
+        if f.contains(.command), k.lowercased() == "v", let field = w.firstResponder as? NSTextView, field.isFieldEditor,
+           let text = canvasPasteboard.string(forType: .string), !text.contains("\n") {
+            return try await typeText(["text": text, "window": a["window"] ?? "main"])
+        }
         let repeatN = max(1, (a["repeat"] as? NSNumber)?.intValue ?? 1)
         for _ in 0..<repeatN {
             let evs = QAKey.events(k, f, windowNumber: w.windowNumber, location: last)
@@ -712,6 +719,7 @@ enum QA {
     /// {text}: one key press per character, as typed.
     private static func typeText(_ a: [String: Any]) async throws -> [String: Any] {
         let w = try target(a)
+        if w !== NSApp.modalWindow && !w.isKeyWindow { w.makeKey() }
         guard let text = a["text"] as? String else { throw QAError(code: "invalid", message: "type needs text") }
         for ch in text {
             let evs = QAKey.events(ch == "\n" ? "Return" : String(ch), heldMods, windowNumber: w.windowNumber, location: last)

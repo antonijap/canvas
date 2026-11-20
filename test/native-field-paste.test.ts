@@ -18,6 +18,10 @@ test("native invite fields paste from the QA instance clipboard", { skip: proces
 import ObjectiveC
 let canvasPasteboard = NSPasteboard.withUniqueName()
 ${extensionCode}
+final class Observer: NSObject, NSTextViewDelegate {
+    var changed = false
+    func textDidChange(_ notification: Notification) { changed = true }
+}
 @main struct Check { @MainActor static func main() {
     defer { canvasPasteboard.releaseGlobally() }
     canvasPasteboard.setString("invite from this instance", forType: .string)
@@ -28,9 +32,11 @@ ${extensionCode}
     class_replaceMethod(NSTextView.self, selector, imp_implementationWithBlock(empty), method_getTypeEncoding(original))
     ${hook}
     let field = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 60))
+    let observer = Observer(); field.delegate = observer
     field.string = "before after"; field.setSelectedRange(NSRange(location: 7, length: 5))
     field.paste(nil)
     guard field.string == "before invite from this instance" else { print("FAIL: invite never reached the native field"); exit(1) }
+    guard observer.changed else { print("FAIL: paste did not notify the field's binding"); exit(1) }
     print("ok: native field uses the instance clipboard")
 }
 ${helper}

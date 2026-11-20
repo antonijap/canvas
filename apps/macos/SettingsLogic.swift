@@ -600,7 +600,9 @@ struct CloudInvite: Equatable {
 
     static func parse(_ raw: String) -> CloudInvite? {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard t.count <= 8192, let u = URLComponents(string: t), u.scheme?.lowercased() == "canvas", u.host == "cloud", u.path == "/join" else { return nil }
+        guard t.count <= 8192, var u = URLComponents(string: t), u.scheme?.lowercased() == "canvas", u.host == "cloud", u.path == "/join" else { return nil }
+        // The host uses form encoding. Decode spaces before queryItems so an escaped literal plus stays a plus.
+        u.percentEncodedQuery = u.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%20")
         func q(_ k: String) -> String { u.queryItems?.first { $0.name == k }?.value ?? "" }
         let host = q("host").lowercased(), addr = q("tc"), code = q("code")
         guard q("v") == "1", UUID(uuidString: host) != nil, host.count == 36,

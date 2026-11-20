@@ -233,6 +233,8 @@ extension SettingsTests {
         let good = ["v": "1", "name": "Studio Cloud", "host": id, "tc": tc, "code": code]
         let i = CloudInvite.parse(link(good))
         check(i?.name == "Studio Cloud" && i?.hostId == id && i?.addr == tc && i?.code == code, "an invite link is read")
+        check(CloudInvite.parse(link(good).replacingOccurrences(of: "Studio%20Cloud", with: "Studio+Cloud"))?.name == "Studio Cloud", "form-encoded spaces in invite names")
+        check(CloudInvite.parse(link(good.merging(["name": "Studio+Review"]) { $1 }).replacingOccurrences(of: "Studio+Review", with: "Studio%2BReview"))?.name == "Studio+Review", "escaped plus in invite names")
         check(i?.fingerprint == "3956-A61F", "the fingerprint is the one the server shows (src/cloud-tunnel.ts)")
         check(CloudInvite.parse(link(good.merging(["name": ""]) { $1 }))?.name == "Cloud", "no name: Cloud")
         check(i!.fingerprintLine.contains("3956-A61F"), "the fingerprint to compare is said before joining")
