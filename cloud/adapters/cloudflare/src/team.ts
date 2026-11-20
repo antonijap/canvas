@@ -17,10 +17,22 @@ export class Team extends DurableObject<Env> {
     const key = "member:" + email;
     if (await this.ctx.storage.get<string>(key) !== name) await this.ctx.storage.put(key, name.slice(0, 120));
   }
-  async members() {
+  async members(fields?: "public" | "recipients") {
     const known = Object.fromEntries([...(await this.ctx.storage.list<string>({ prefix: "member:" }))].map(([key, name]) => [key.slice(7), name]));
     const emails = new Set([...Object.keys(known), ...configuredOwners(this.env.OWNER_EMAILS), ...this.rules().filter(r => !r.match.startsWith("@")).map(r => r.match)]);
-    return [...emails].flatMap(email => { const role = this.role(email); return role ? [{ email, name: known[email] || email.split("@")[0], role }] : []; });
+    const members = [...emails].flatMap(email => { const role = this.role(email); return role ? [{ email, name: known[email] || email.split("@")[0], role }] : []; });
+    if (!fields) return members;
+    return Promise.all(members.map(async member => {
+      const id = await this.ctx.storage.transaction(async storage => {
+        const key = "member-id:" + member.email;
+        const existing = await storage.get<string>(key);
+        if (existing) return existing;
+        const id = crypto.randomUUID();
+        await storage.put(key, id);
+        return id;
+      });
+      return { id, name: member.name, role: member.role, ...(fields === "recipients" ? { email: member.email } : {}) };
+    }));
   }
   allowMessage(email: string): boolean { return this.store.allowMessage(email); }
   takeOps(email: string, count: number): number { return this.store.takeOps(email, count); }

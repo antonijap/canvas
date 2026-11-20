@@ -570,3 +570,18 @@ test('host canonicalizes mention ids and drops unknown recipients', async () => 
   const snapshot = await (await fetch(`${base}/v1/docs/${doc}/threads`, { headers: bearer(token) })).json() as any;
   assert.deepEqual(snapshot.threads[0].comments[0].mentions, [{ start: 0, end: 6, name: 'Host', id: recipient.id }]);
 });
+
+test('viewer directory has no invite data and removed members get forbidden', async () => {
+  const { h, base } = await host();
+  h.ownerDevice('Host');
+  const invite = h.invite('Viewer', 'viewer');
+  const viewer = await join(base, invite.code, 'Viewer device');
+  h.invite('Pending', 'editor');
+  const response = await fetch(base + '/v1/members', { headers: bearer(viewer.token) });
+  assert.equal(response.status, 200);
+  const members = await response.json() as any[];
+  assert.equal(members.length, 2);
+  assert.ok(members.every(person => Object.keys(person).sort().join(',') === 'id,name,role'));
+  h.remove(invite.personId);
+  assert.equal((await fetch(base + '/v1/members', { headers: bearer(viewer.token) })).status, 403);
+});

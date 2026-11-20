@@ -493,7 +493,11 @@ export class CloudHost {
       }
     }
     const me = this.who(req);
-    if (!me) { const [st, c, m] = this.refusal(); res.setHeader("connection", "close"); return json(st, { code: c, message: m }); }
+    if (!me) {
+      const [st, c, m] = this.refusal(); res.setHeader("connection", "close");
+      if (st !== 429 && p === "/v1/members" && parseSecret("ccd", this.bearer(req))) return json(403, { code: "forbidden", message: "No access to this Cloud" });
+      return json(st, { code: c, message: m });
+    }
     if (!this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
     if (await this.files.route(req, res, url, me, () => this.body(req, 1024 * 1024, me.device))) return;
     if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files"], hostId: this.hostId() } as ServerInfo);
