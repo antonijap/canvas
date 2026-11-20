@@ -696,6 +696,12 @@ enum QA {
             return ["held": true]
         }
         guard let k = a["key"] as? String, !k.isEmpty else { throw QAError(code: "invalid", message: "key needs key") }
+        // An inactive QA app has no key window. Select the requested field's text, not the canvas behind it.
+        if f.contains(.command), k.lowercased() == "a", let field = w.firstResponder as? NSTextView, field.isFieldEditor {
+            field.selectAll(nil)
+            try await sleep(80)
+            return [:]
+        }
         // Background field editors do not publish SwiftUI changes for a synthetic clipboard insertion.
         // Deliver the private clipboard through the same native input path as qa.type, without interleaved modifiers.
         if f.contains(.command), k.lowercased() == "v", let field = w.firstResponder as? NSTextView, field.isFieldEditor,
