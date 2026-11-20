@@ -2929,5 +2929,7 @@ export async function verify(st: FileState | string): Promise<number> {
 export function applyView(docFile: string, doc: CanvasDoc): void {
   if (!host) return;
   const previous = host.peek(docFile);
+  // An unopened Cloud file already has its durable view on disk. Its first reader loads that view.
+  if (!previous) return;
   host.adopt(docFile, snapshotOfDoc(docFile, doc, token(), previous?.format));
 }

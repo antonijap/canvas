@@ -53,7 +53,7 @@ async function boundedBytes(response: Response, limit: number): Promise<Uint8Arr
 const cloudJson = async (response: Response) => JSON.parse(new TextDecoder().decode(await boundedBytes(response, 8 * 1024 * 1024)));
 const SHA = /^[0-9a-f]{64}$/, UUID = /^[0-9a-f-]{36}$/;
 export const cloudKey = (url: string) => createHash('sha256').update(url).digest('hex').slice(0, 16);
-const root = () => path.join(os.homedir(), 'Library', 'Application Support', 'Canvas', 'cloud-files');
+const root = () => path.join(fs.realpathSync(os.homedir()), 'Library', 'Application Support', 'Canvas', 'cloud-files');
 const resolveCloud = (cloud: string) => cloudConfigs().find(c => c.url === cloud || cloudKey(c.url) === cloud)?.url ?? fail(404, 'not_found', 'Cloud is not added');
 const fail = (status: number, code: string, message: string): never => { throw Object.assign(new Error(message), { status, code }); };
 interface Session {
@@ -75,7 +75,10 @@ export const fileEvents: {
     view?: (file: string) => void;
     removed?: (file: string) => void;
 } = {};
-function docFile(file: string) { return file.endsWith('document.json') ? path.resolve(file) : path.join(path.resolve(file), 'document.json'); }
+function docFile(file: string) {
+    const f = file.endsWith('document.json') ? path.resolve(file) : path.join(path.resolve(file), 'document.json');
+    return fs.existsSync(f) ? fs.realpathSync(f) : f;
+}
 export function fileSession(file: string): Session | undefined {
     const f = docFile(file);
     let s = sessions.get(f);
@@ -108,8 +111,10 @@ async function request(cloud: string, p: string, method = 'GET', body?: unknown)
     cloud = resolveCloud(cloud);
     if(revoked.has(cloud))fail(403,'removed','Cloud membership was removed');
     const g = generation(cloud), t = await target(cloud);
-    if ('fail' in t)
+    if ('fail' in t) {
+        if (t.fail === 'removed') removeCaches(cloud);
         fail(503, t.fail, 'The Cloud is unavailable');
+    }
     const r = await fetch((t as any).base + p, { method, headers: { ...(t as any).headers, ...(body === undefined ? {} : { 'content-type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json' }) }, body: body === undefined ? undefined : body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body), signal: AbortSignal.timeout(30000), redirect: 'error' });
     if (generation(cloud) !== g || !isConfigured(cloud))
         fail(403, 'removed', 'This Cloud was removed');

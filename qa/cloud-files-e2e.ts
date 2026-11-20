@@ -18,7 +18,9 @@ try {
     for (const name of ['anna', 'ben']) {
         const dir = path.join(tmp, name);
         fs.mkdirSync(dir);
-        servers.push(await startServer(dir, { ...env, HOME: dir, CANVAS_STATE_DIR: path.join(dir, 'state'), CANVAS_CLOUD_SECRETS_FILE: path.join(dir, 'secrets.json'), CANVAS_COMMENT_NAME: name === 'anna' ? 'Anna' : 'Ben' }));
+        const home = path.join(tmp, name + '-home');
+        fs.symlinkSync(dir, home);
+        servers.push(await startServer(dir, { ...env, HOME: home, CANVAS_STATE_DIR: path.join(dir, 'state'), CANVAS_CLOUD_SECRETS_FILE: path.join(dir, 'secrets.json'), CANVAS_COMMENT_NAME: name === 'anna' ? 'Anna' : 'Ben' }));
     }
     const a = servers[0];
     let b = servers[1];
