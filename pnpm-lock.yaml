@@ -12,8 +12,8 @@ importers:
         specifier: 1.2.1
         version: 1.2.1
       '@iconify-json/lucide':
-        specifier: 1.2.151
-        version: 1.2.151
+        specifier: 1.2.154
+        version: 1.2.154
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(zod@4.6.7)
@@ -39,8 +39,8 @@ packages:
   '@iconify-json/feather@1.2.1':
     resolution: {integrity: sha512-gURNg2TJYuO1U7DoOGCylm9TwkMfzjOH2BHdWsE0IXLXj/MNkFIJu56Wu1xRws27M8hzDzUDt/biGUa/LfAjdg==}
 
-  '@iconify-json/lucide@1.2.151':
-    resolution: {integrity: sha512-OCp+cNzynOlOI7zHq8bFGhBBzmSSWFICvOSTxZrajhFJC4YizvlLiBJMbaLzzlpMaGRidmZmAA8GpovoDKiy/w==}
+  '@iconify-json/lucide@1.2.154':
+    resolution: {integrity: sha512-8+fuquLzqefUqEsnQSn77laDESOd9AX5ZM9zQzL5HT9DN58DtzwMIkLXxDjX77GAQ8PF4HTMuxhShQCOynwADg==}
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -430,7 +430,7 @@ snapshots:
     dependencies:
       '@iconify/types': 2.0.0
 
-  '@iconify-json/lucide@1.2.151':
+  '@iconify-json/lucide@1.2.154':
     dependencies:
       '@iconify/types': 2.0.0
 
@@ -440,7 +440,7 @@ snapshots:
     dependencies:
       '@hono/node-server': 2.1.8(hono@4.13.18)
       ajv: 8.20.0
-      ajv-formats: 3.0.1
+      ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
       cors: 2.8.6
       cross-spawn: 7.0.6
@@ -467,8 +467,8 @@ snapshots:
       mime-types: 3.0.2
       negotiator: 1.1.0
 
-  ajv-formats@3.0.1:
-    dependencies:
+  ajv-formats@3.0.1(ajv@8.20.0):
+    optionalDependencies:
       ajv: 8.20.0
 
   ajv@8.20.0:
