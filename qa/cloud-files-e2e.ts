@@ -47,6 +47,19 @@ try {
     await call(a, '/api/history/undo?file=' + encodeURIComponent(fa), {});
     await until('own undo', async () => bytes(fa) === bytes(fb) && !bytes(fa).includes('opacity'));
     console.log('PASS undo of own edit');
+    const failedMove=path.join(tmp,'anna','Failed.canvas');
+    fs.mkdirSync(path.join(failedMove,'media'),{recursive:true});
+    const localBefore=JSON.stringify({version:'2.21',children:[]});
+    fs.writeFileSync(path.join(failedMove,'document.json'),localBefore);
+    fs.writeFileSync(path.join(failedMove,'media','invalid.png'),'not an image');
+    const hostRooms=()=>fs.readdirSync(path.join(tmp,'anna','state'),{recursive:true}).map(String).filter(p=>/\/files\/[0-9a-f-]{36}\.sqlite$/.test(p)).sort();
+    const roomsBefore=hostRooms();
+    const failed=await fetch(a.base+'/api/cloud/files/move?file='+encodeURIComponent(failedMove),{method:'POST',headers:{'x-canvas':'1','content-type':'application/json'},body:JSON.stringify({cloud})});
+    assert.ok(failed.status>=400,'invalid media refuses the move');
+    const failure=await failed.json();
+    assert.equal(fs.readFileSync(path.join(failedMove,'document.json'),'utf8'),localBefore);
+    assert.deepEqual(hostRooms(),roomsBefore,'failed import leaves no orphan room: '+JSON.stringify(failure));
+    console.log('PASS failed move keeps local source and cleans its Cloud import');
     await measurePresence(a,b,fa,fb);
     // A package carrying all three media types is moved only after its published hashes check out.
     const pkg = path.join(tmp, 'anna', 'Move.canvas');

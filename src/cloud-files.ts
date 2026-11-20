@@ -509,7 +509,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                     const pkg=path.join(root(),cloudKey(resolveCloud(b.cloud)),importing+'.canvas'), file=path.join(pkg,'document.json'), s=sessions.get(file);
                     if(s) {s.stopped=true;clearPresence(s);if(s.timer)clearTimeout(s.timer);s.ws?.close();await s.chain.catch(()=>{});s.store.close();sessions.delete(file);fileEvents.removed?.(file);}
                     fs.rmSync(pkg,{recursive:true,force:true});
-                    try {await request(b.cloud,`/v1/files/${importing}/import`,'DELETE');}
+                    try {await request(b.cloud,`/v1/files/${importing}/import`,'DELETE',{});}
                     catch(cleanup) {throw new Error((error as Error).message+'; local source kept. Cloud cleanup: '+(cleanup as Error).message);}
                 }
                 throw error;
