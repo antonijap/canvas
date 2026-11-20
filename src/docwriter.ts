@@ -1,3 +1,4 @@
+import { cloudFileHooks, isCloudFile } from "./cloud-files-runtime.ts";
 // Edits that never stop the server. The plain write path (store.ts writeDoc) reads, parses, serializes, hashes and
 // saves the whole document synchronously: about 240 ms on an 18 MB file, during which no request, event stream or bridge message
 // moves. Here an edit changes the document Canvas already holds in memory (snapcache.ts) and the file is written
@@ -1360,6 +1361,7 @@ export async function editDoc<T>(docFile: string, opts: EditOpts, change: (doc: 
 }
 
 function editDocNow<T>(docFile: string, opts: EditOpts, change: (doc: CanvasDoc) => T): EditResult<T> {
+  cloudFileHooks.assertEdit?.(docFile);
   if (closing) throw new Error("Canvas is quitting: the edit was not made");
   if (!host) {
     if (!wantActions()) return writeDoc(docFile, { expectedRevision: opts.expectedRevision }, change);
@@ -1381,6 +1383,16 @@ function editDocNow<T>(docFile: string, opts: EditOpts, change: (doc: CanvasDoc)
     const msg = `${name} was moved or deleted while open in Canvas, so this edit was not made. Open it from its new place.`;
     report(docFile, msg);
     throw new FileGoneError(msg);
+  }
+  if (isCloudFile(docFile)) {
+    const snap = host.peek(docFile) ?? host.get(docFile);
+    if (opts.expectedRevision && opts.expectedRevision !== snap.revision) throw new StaleFileError("The Cloud file changed; read it again before editing");
+    const next = cowDoc(snap.doc, opts.touches, opts.deep, opts.docKeys);
+    const result = change(next);
+    const accepted = docEditAction(docFile, snap.doc, next, opts.recorded ? opts.recorded() : effectOf(snap.doc, next, opts.touches), opts.media, true);
+    host.adopt(docFile, snapshotOfDoc(docFile, next, token(), snap.format));
+    accepted?.();
+    return { result, write: { revision: host.peek(docFile)!.revision, edit: token(), history: editHistory(docFile) } };
   }
   const st = stateOf(docFile);
   let snap = host.peek(docFile) ?? host.get(docFile);
@@ -2911,4 +2923,11 @@ export async function verify(st: FileState | string): Promise<number> {
   s.dirty = true;
   kick(s);
   return bad;
+}
+
+/** Adopt a Cloud view. Its SQLite store already committed it; this creates no history or outgoing action. */
+export function applyView(docFile: string, doc: CanvasDoc): void {
+  if (!host) return;
+  const previous = host.peek(docFile);
+  host.adopt(docFile, snapshotOfDoc(docFile, doc, token(), previous?.format));
 }

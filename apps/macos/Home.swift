@@ -410,7 +410,12 @@ private struct HomeMain: View {
     }
 
     var body: some View {
-        if let emptyLine {
+        if let cloud, cloud.kind != .server {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) { top; CloudFilesView(model: model, entry: cloud) }
+                    .padding(.horizontal, HomeMetric.gutter).padding(.top, topInset)
+            }
+        } else if let emptyLine {
             // Nothing to scroll: the header on top, the line in the middle of the space left under it.
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 20) { top }

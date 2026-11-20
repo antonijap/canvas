@@ -1270,6 +1270,7 @@ export async function handleHistoryRoute(req: http.IncomingMessage, res: http.Se
     return reply(200, { ok: true, ...r }), true;
   } catch (e) {
     if (e instanceof HistoryError) return reply(e.status, { error: e.message, code: e.code, state: safeState(url, docFileOf) }), true;
+    if ((e as any).status === 409 && (e as any).code === "conflict") return reply(409, {error:(e as Error).message,code:"conflict"}),true;
     return reply(422, { error: (e as Error).message, code: "failed" }), true;
   }
 }

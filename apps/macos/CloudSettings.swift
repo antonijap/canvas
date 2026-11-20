@@ -482,8 +482,28 @@ final class CloudAccount: ObservableObject {
 
     // MARK: Sharing
 
-    /// File > Share Comments: the open file's comments go to a Cloud. A file already shared stays where it is; with
-    /// more than one Cloud that can take it, Canvas asks which.
+    /// A verified move waits for typing and inspector writes before uploading the package.
+    func moveOpenFile(_ model: CanvasModel, file selectedFile: String? = nil) {
+        guard let file = selectedFile ?? model.currentFile else { model.flash("Open a Canvas file first"); return }
+        model.flushTextEdit { ok in
+            guard ok else { model.flash("Finish saving the text before moving this file"); return }
+            model.afterWrites { Task {
+            await self.refresh(model, fresh: true)
+            let can = CloudShare.candidates(model.prefs.clouds, status: self.states.mapValues { ($0.status, $0.role) }).filter { $0.kind != .server }
+            guard let chosen = can.count == 1 ? can.first : await CloudAccount.pickOutsideTask(can, move: true) else { model.flash("Add a Mac Cloud with editor access first"); return }
+            let (movedStatus, moved) = await CloudAccount.post(model, "api/cloud/files/move", ["cloud": chosen.url], query: [URLQueryItem(name: "file", value: file)])
+            if movedStatus == 200, let destination = moved["file"] as? String {
+                model.cloudFileNames[destination] = moved["name"] as? String ?? "Untitled"
+                model.close(file)
+                HomeStore.shared.remove(file)
+                model.open(destination)
+                model.flash("Moved to \(HomeLogic.cloudName(chosen))", level: "success")
+            } else { model.flash(moved["error"] as? String ?? "Could not move the file") }
+
+            } }
+        }
+    }
+
     func shareOpenFile(_ model: CanvasModel, file selectedFile: String? = nil) {
         guard let file = selectedFile ?? model.currentFile else { model.flash("Open a Canvas file first"); return }
         Task {
@@ -529,19 +549,19 @@ final class CloudAccount: ObservableObject {
     /// The question from inside a Task. Its modal loop runs from the run loop, not from this Task's main-actor job:
     /// run from the job, the main actor stays busy until the question closes and every other main-actor job (the
     /// bridge, the page, QA) waits, so the app stops answering.
-    static func pickOutsideTask(_ clouds: [CloudEntry]) async -> CloudEntry? {
+    static func pickOutsideTask(_ clouds: [CloudEntry], move: Bool = false) async -> CloudEntry? {
         await withCheckedContinuation { (done: CheckedContinuation<CloudEntry?, Never>) in
-            RunLoop.main.perform { MainActor.assumeIsolated { done.resume(returning: pick(clouds)) } }
+            RunLoop.main.perform { MainActor.assumeIsolated { done.resume(returning: pick(clouds, move: move)) } }
         }
     }
 
-    static func pick(_ clouds: [CloudEntry]) -> CloudEntry? {
+    static func pick(_ clouds: [CloudEntry], move: Bool = false) -> CloudEntry? {
         let a = NSAlert()
-        a.messageText = "Share comments to which Cloud?"
-        a.informativeText = "Everyone in that Cloud can read the comments on this file."
+        a.messageText = move ? "Move file to which Cloud?" : "Share comments to which Cloud?"
+        a.informativeText = move ? "Everyone in this Cloud can open its files. The verified local package goes to the Trash." : "Everyone in that Cloud can read the comments on this file."
         let menu = CloudSharePicker.make(clouds, name: HomeLogic.cloudName, detail: { $0.kind == .server ? ServerName.host($0.url) : "on a Mac, \($0.hostId?.prefix(4) ?? "")" })
         a.accessoryView = menu
-        a.addButton(withTitle: "Share")
+        a.addButton(withTitle: move ? "Move" : "Share")
         a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return nil }
         return CloudSharePicker.selected(menu, in: clouds)
@@ -1025,7 +1045,7 @@ struct AddCloudSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Add a Cloud").font(Typography.title).foregroundStyle(Palette.fg).qaText("Add a Cloud")
-                Text("A Cloud keeps comments in sync with your team.").font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg)
+                Text("Everyone in this Cloud can open its files.").font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg)
             }
             VStack(alignment: .leading, spacing: 4) {
                 AddCloudOption(symbol: "link", title: "Join with an invite", detail: "Paste the link a teammate sent you", id: "add-cloud-join") { route.step = .join(nil) }

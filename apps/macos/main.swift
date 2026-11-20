@@ -300,6 +300,17 @@ func openCanvasLink(_ url: URL) {
     showMainWindow()
     return
   }
+  if let q = URLComponents(url: url, resolvingAgainstBaseURL: false), let cloud = q.queryItems?.first(where: { $0.name == "cloud" })?.value, let id = q.queryItems?.first(where: { $0.name == "cloudFile" })?.value {
+    Task { @MainActor in
+      let (status, j) = await CloudAccount.post(model, "api/cloud/files/open", ["cloud": cloud, "id": id])
+      if status == 200, let file = j["file"] as? String {
+        model.cloudFileNames[file] = j["name"] as? String
+        model.open(file)
+      } else { model.flash(j["error"] as? String ?? "Could not open the Cloud file") }
+    }
+    showMainWindow()
+    return
+  }
   guard let link = CanvasLink.parse(url) else { model.flash("That Canvas link is not one Canvas can open"); return }
   guard FileManager.default.fileExists(atPath: link.file) else {
     model.flash("Canvas cannot find \(URL(fileURLWithPath: link.file).lastPathComponent): it was moved, renamed or deleted")
@@ -327,6 +338,7 @@ class FileActions: NSObject, NSMenuItemValidation {
   @objc func saveAsCanvas(_ s: Any?) { model.saveAsCanvas() }
   /// File > Share Comments...: the open file's comments go to one of the Clouds in Settings > Cloud (asked which when
   /// more than one can take it).
+  @objc func moveCloud(_ s: Any?) { MainActor.assumeIsolated { CloudAccount.shared.moveOpenFile(model) } }
   @objc func shareComments(_ s: Any?) { MainActor.assumeIsolated { CloudAccount.shared.shareOpenFile(model) } }
   /// File > Export (Shift+Cmd+E): the selection, else every layer on the page with export settings (Library.swift).
   @objc func exportSettings(_ s: Any?) { model.exportSelectionWithSettings() }
@@ -822,6 +834,7 @@ func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op:
   case "open": return (fileActions, #selector(FileActions.openDocument(_:)), nil)
   case "closeTab": return (fileActions, #selector(FileActions.closeTab(_:)), nil)
   case "saveAs": return (fileActions, #selector(FileActions.saveAsCanvas(_:)), nil)
+  case "moveCloud": return (fileActions, #selector(FileActions.moveCloud(_:)), nil)
   case "shareComments": return (fileActions, #selector(FileActions.shareComments(_:)), nil)
   case "reload": return (fileActions, #selector(FileActions.reloadPage(_:)), nil)
   case "undo": return (editActions, #selector(EditActions.undo(_:)), nil)

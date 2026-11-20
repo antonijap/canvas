@@ -1,3 +1,4 @@
+import { writeBoardCheckpoint } from "./cloud-files-cache.ts";
 import { DocTree } from "./cloud-files-tree.ts";
 // state.sqlite is the commit point. Package JSON is disposable and rebuilt from confirmed + pending.
 import { DatabaseSync } from 'node:sqlite';
@@ -146,6 +147,16 @@ export class FileStateStore {
         }
         const hash = createHash('sha256').update(view.document).update('\0').update(view.widgets).digest('hex');
         this.db.prepare('UPDATE meta SET view_hash=? WHERE id=1').run(hash);
+    }
+    checkpoint(dir:string):void {
+        const children=this.replica.tree.children(null).map(id=>this.replica.tree.subtree(id)!);
+        let boards;
+        try{boards=writeBoardCheckpoint(dir,children);}catch(e){if(!(e as any).corruptFile)throw e;fs.rmSync((e as any).corruptFile,{force:true});boards=writeBoardCheckpoint(dir,children);}
+        this.db.exec('CREATE TABLE IF NOT EXISTS base_manifest(id INTEGER PRIMARY KEY CHECK(id=1),seq INTEGER NOT NULL,json TEXT NOT NULL)');
+        this.db.exec('BEGIN IMMEDIATE');try{
+          this.db.prepare('INSERT OR REPLACE INTO base_manifest VALUES(1,?,?)').run(this.replica.seq,JSON.stringify({format:1,epoch:this.replica.epoch,seq:this.replica.seq,boards}));
+          this.db.prepare('DELETE FROM confirmed WHERE last<=?').run(this.replica.seq);this.db.exec('COMMIT');
+        }catch(e){this.db.exec('ROLLBACK');throw e;}
     }
     close() { this.db.close(); }
 }
