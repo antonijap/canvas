@@ -46,7 +46,7 @@ export const INSTRUCTIONS = [
 const SERVER_INFO = {
   name: "canvas",
   title: "Canvas",
-  version: "0.1.2",
+  version: "0.2.0",
   description: "Canvas design tool: see the selection, edit layers and boards with undo, and point at things in the open Canvas file.",
 };
 
