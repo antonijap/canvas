@@ -13,6 +13,15 @@ export class Team extends DurableObject<Env> {
     super(ctx, env);
     this.store = new TeamStore(ctx.storage as unknown as SqlStore, () => configuredOwners(this.env.OWNER_EMAILS));
   }
+  async rememberMember(email: string, name: string) {
+    const key = "member:" + email;
+    if (await this.ctx.storage.get<string>(key) !== name) await this.ctx.storage.put(key, name.slice(0, 120));
+  }
+  async members() {
+    const known = Object.fromEntries([...(await this.ctx.storage.list<string>({ prefix: "member:" }))].map(([key, name]) => [key.slice(7), name]));
+    const emails = new Set([...Object.keys(known), ...configuredOwners(this.env.OWNER_EMAILS), ...this.rules().filter(r => !r.match.startsWith("@")).map(r => r.match)]);
+    return [...emails].flatMap(email => { const role = this.role(email); return role ? [{ email, name: known[email] || email.split("@")[0], role }] : []; });
+  }
   allowMessage(email: string): boolean { return this.store.allowMessage(email); }
   takeOps(email: string, count: number): number { return this.store.takeOps(email, count); }
   admitOps(email: string, count: number) { return this.store.admitOps(email, count); }

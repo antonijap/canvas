@@ -25,6 +25,8 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
   const role = await team.role(me.email);
   if (!role) return failure(403, "forbidden", "No access to this team");
+  await team.rememberMember(me.email, me.name);
+  if (path === "/v1/members" && method === "GET") return Response.json(await team.members());
   if (path === "/v1/me" && method === "GET") return Response.json({ ...me, role });
   if (path === "/v1/people" || path === "/v1/export") {
     if (role !== "owner") return failure(403, "forbidden", "Owner role required");

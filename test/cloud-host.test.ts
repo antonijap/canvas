@@ -544,3 +544,14 @@ test("the host process: answers orders over IPC only, binds 127.0.0.1, exits whe
   const gone = await new Promise<boolean>((resolve) => { const c = net.connect(port, "127.0.0.1"); c.on("connect", () => { c.destroy(); resolve(false); }); c.on("error", () => resolve(true)); });
   assert.ok(gone, "the port is closed");
 });
+
+test('member directory requires membership and exposes no device credentials', async () => {
+  const { h, base } = await host();
+  const owner = h.ownerDevice('Anna');
+  assert.equal((await fetch(base + '/v1/members')).status, 401);
+  const response = await fetch(base + '/v1/members', { headers: bearer(owner) });
+  assert.equal(response.status, 200);
+  const members = await response.json() as any[];
+  assert.equal(members[0].name, 'Anna');
+  assert.deepEqual(Object.keys(members[0]).sort(), ['id', 'name', 'role']);
+});

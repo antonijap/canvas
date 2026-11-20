@@ -14,6 +14,7 @@
 // Pins are plain DOM over the canvas. Their places are worked out in host.beforeFrame, so they cost nothing while the
 // camera and the layers stand still.
 
+import { mentionQuery, mentionPeople, mentionTokens, mentionedYou } from "/page/mentions.js";
 import * as L from "/page/comments-logic.js";
 
 const host = window.canvasHost;
@@ -124,6 +125,12 @@ function start(host) {
 .cm-row{display:flex;align-items:flex-end;gap:8px;padding:10px 10px 10px 14px}
 .cm-row .cm-fieldwrap{flex:1;min-width:0;padding:5px 0}
 .cm-field{display:block;width:100%;border:0;outline:0;resize:none;background:transparent;color:var(--c-fg);font:13px/18px var(--c-font-sans);padding:0;margin:0;height:18px;min-height:18px;max-height:120px;overflow-y:hidden}
+.cm-fieldwrap{position:relative}
+.cm-mentions{position:absolute;bottom:100%;left:0;z-index:5;min-width:160px;max-height:230px;overflow:auto;padding:4px;border-radius:10px;background:var(--c-popover);box-shadow:var(--cm-card)}
+.cm-mentions[hidden]{display:none}
+.cm-mentions button{display:block;width:100%;text-align:left;border:0;border-radius:6px;padding:9px 8px;background:transparent;color:var(--c-fg);font:13px/100% var(--c-font-sans)}
+.cm-mentions button[aria-selected=true],.cm-mentions button:hover{background:var(--c-hover)}
+.cm-mention{background:var(--c-hover);border-radius:4px;padding:2px 1px}
 .cm-field::placeholder{color:var(--cm-time)}
 .cm-field.scroll{overflow-y:auto}
 .cm-send{flex:none;width:28px;height:28px;border-radius:14px;border:0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--cm-chip);color:var(--cm-time);transition:background-color .15s ease-out,color .15s ease-out}
@@ -205,7 +212,7 @@ function start(host) {
   layer.append(hov, pop, comp, hint, bar, shared);
 
   /** doc: the file's comment identity (null until the first comment); threads: every thread, tombstones too. repin: a thread waiting for a new layer. */
-  const st = { doc: null, threads: [], sync: null, me: "", mode: false, open: null, draft: null, repin: null, menu: false };
+  const st = { doc: null, threads: [], sync: null, me: "", mode: false, open: null, draft: null, repin: null, menu: false, people: [] };
   const pins = new Map(); // thread id (or "draft") -> {el, x, y, vis}
   const gone = new Map(); // node id -> {rev, at, gone} what the file said about a layer with no drawing now
   const asked = new Set();
@@ -219,6 +226,7 @@ function start(host) {
       return j;
     });
   function apply(j) {
+    if (Array.isArray(j.people)) st.people = j.people;
     if (j.doc !== undefined) st.doc = j.doc;
     if (Array.isArray(j.threads)) { st.threads = j.threads; st.sync = j.sync || null; }
     if (typeof j.me === "string") st.me = j.me;
@@ -397,6 +405,7 @@ function start(host) {
   const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; place(); }); };
   const bottomOf = () => (host.native ? (host.insets && host.insets.b || 0) + 16 : 56) + "px";
 
+
   /** Where each pin and popover goes: run in every frame the canvas draws, and nowhere else. */
   function place() {
     const cam = host.cam;
@@ -428,6 +437,7 @@ function start(host) {
       else pop.style.transform = "translate(-9999px,0)";
     }
     if (st.draft && at.has("draft") && !comp.hidden) { const o = L.popoverAt(at.get("draft"), size(comp, 320, 110), vw, vh); comp.style.transform = `translate(${o.x}px,${o.y}px)`; }
+
     bar.style.bottom = bottomOf();
     if (!host.native) hint.style.bottom = bottomOf();
     const ins = host.insets || {};
@@ -465,9 +475,38 @@ function start(host) {
     ta.spellcheck = true;
     // No AutoFill (macOS offers one-time codes from Mail over the controls), autocorrect or writing suggestions.
     for (const [k, v] of [["autocomplete", "off"], ["autocorrect", "off"], ["autocapitalize", "off"], ["writingsuggestions", "false"]]) ta.setAttribute(k, v);
-    ta.addEventListener("input", () => { autoGrow(ta); if (onChange) onChange(ta.value.trim() !== ""); });
+    const picked = [];
+    ta.mentions = () => mentionTokens(ta.value.trim(), picked);
+    const menu = h("div", "cm-mentions cm-ui"); menu.hidden = true; menu.setAttribute("role", "listbox");
+    let choices = [], active = 0, trigger = null;
+    const close = () => { menu.hidden = true; ta.setAttribute("aria-expanded", "false"); };
+    const choose = (p) => {
+      if (!trigger) return;
+      const text = "@" + p.name + " ";
+      ta.setRangeText(text, trigger.start, trigger.end, "end");
+      if (!picked.some(x => (x.email || x.id || x.name) === (p.email || p.id || p.name))) picked.push(p);
+      close(); autoGrow(ta); if (onChange) onChange(true); ta.focus();
+    };
+    const update = () => {
+      if (ta.isComposing) return;
+      trigger = mentionQuery(ta.value, ta.selectionStart);
+      const locals = st.threads.filter(t => !t.deletedAt).flatMap(t => t.comments.filter(c => !c.deletedAt).map(c => c.author));
+      choices = trigger ? mentionPeople(st.sync || window.canvasCloudFile ? st.people : locals, trigger.query) : [];
+      if (!choices.length) { close(); return; }
+      active = Math.min(active, choices.length - 1); menu.replaceChildren();
+      choices.forEach((p, i) => { const b = h("button", "", p.name); b.type = "button"; b.setAttribute("role", "option"); b.setAttribute("aria-selected", String(i === active)); b.onpointerdown = e => e.preventDefault(); b.onclick = () => choose(p); menu.append(b); });
+      ta.parentElement?.append(menu); menu.hidden = false; ta.setAttribute("aria-expanded", "true");
+    };
+    ta.setAttribute("aria-autocomplete", "list");
+    ta.addEventListener("click", update);
+    ta.addEventListener("input", () => { update(); autoGrow(ta); if (onChange) onChange(ta.value.trim() !== ""); });
     ta.addEventListener("keydown", (e) => {
       e.stopPropagation();
+      if (!menu.hidden && !e.isComposing) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); active = (active + (e.key === "ArrowDown" ? 1 : choices.length - 1)) % choices.length; update(); return; }
+        if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choose(choices[active]); return; }
+        if (e.key === "Escape") { e.preventDefault(); close(); return; }
+      }
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value.trim(); if (v) onPost(v, ta); }
       else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
     });
@@ -571,7 +610,13 @@ function start(host) {
         x.onclick = () => sendOps([env({ kind: "comment.delete", comment: c.id })]).catch((e) => tell(e.message));
         who.append(x);
       }
-      body.append(who, h("div", "cm-text", c.body));
+      if (mentionedYou(c, st.sync?.me || { name: st.me })) who.append(h("span", "cm-state", "mentioned you"));
+      const text = h("div", "cm-text"); let offset = 0;
+      for (const m of c.mentions || []) {
+        if (m.start < offset || c.body.slice(m.start, m.end) !== "@" + m.name) continue;
+        text.append(document.createTextNode(c.body.slice(offset, m.start)), h("span", "cm-mention", c.body.slice(m.start, m.end))); offset = m.end;
+      }
+      text.append(document.createTextNode(c.body.slice(offset))); body.append(who, text);
       for (const r of opsFor(st.sync && st.sync.rejected, c.id)) body.append(failRow(r));
       it.append(avatar(c.author), body);
       lst.append(it);
@@ -586,7 +631,7 @@ function start(host) {
     const send = sendBtn("Send reply", () => ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: false })));
     const ta = field("Reply", (v, el) => {
       el.disabled = true;
-      sendOps([env({ kind: "comment.add", thread: t.id, comment: crypto.randomUUID(), body: v })])
+      sendOps([env({ kind: "comment.add", thread: t.id, comment: crypto.randomUUID(), body: v, mentions: el.mentions() })])
         .then((j) => { el.disabled = false; if (!(j.rejected && j.rejected.length)) { el.value = ""; autoGrow(el); send.classList.remove("ready"); el.focus(); } })
         .catch((e) => { el.disabled = false; tell(e.message); });
     }, () => openThread(null), (ready) => send.classList.toggle("ready", ready));
@@ -669,7 +714,7 @@ function start(host) {
       if (!v) return;
       ta.disabled = true;
       const a = st.draft && st.draft.anchor;
-      sendOps([env({ kind: "thread.create", thread: crypto.randomUUID(), anchor: a, comment: crypto.randomUUID(), body: v })])
+      sendOps([env({ kind: "thread.create", thread: crypto.randomUUID(), anchor: a, comment: crypto.randomUUID(), body: v, mentions: ta.mentions() })])
         .then((j) => { if (!(j.rejected && j.rejected.length)) closeDraft(); else ta.disabled = false; render(); })
         .catch((err) => { ta.disabled = false; tell(err.message); });
     }
