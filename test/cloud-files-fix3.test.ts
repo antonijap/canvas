@@ -124,3 +124,9 @@ test('typing splices transform automatic span shifts and empty style arrays',()=
  }assert.equal(room.tree.node('Title')!.props.content,'XabcdY');
  }}finally{for(const s of stores)s.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('conditional text undo still checks the last writer',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-text-undo-')),store=new FileStateStore(dir,{cloud:'mac://studio',file:crypto.randomUUID(),name:'Design',role:'editor',author:{id:'anna',name:'Anna'},state:state()});
+ try{store.replica.confirm([{id:crypto.randomUUID(),first:1,last:1,by:{id:'ben',name:'Ben'},at:'',ops:[{k:'set',id:'Title',props:{content:{v:'Changed by Ben'}}}]}]);const out=store.propose([{k:'set',id:'Title',props:{content:{v:'abcd'}},if:{content:0}}]);assert.ok('reject'in out);assert.equal(out.reject,'conflict');
+ }finally{store.close();fs.rmSync(dir,{recursive:true,force:true});}
+});

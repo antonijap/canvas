@@ -89,6 +89,7 @@ export class FileStateStore {
         // Text coordinates must name confirmed text, so the room can transform another person's splice.
         ops = ops.flatMap((op): FileOp[] => {
             if (op.k !== 'set' || typeof op.props.content?.v !== 'string') return [op];
+            if (op.if && ['content', 'spans', 'lists'].some(key => Object.hasOwn(op.if!, key))) return [op];
             const node = this.replica.tree.node(op.id), old = node?.props.content;
             if (!node || typeof old !== 'string') return [op];
             const next = op.props.content.v;
