@@ -23,6 +23,7 @@ import { LiveEdits, PAGE_OPS, covers, prepareEdit, findNode, CURSOR, handleAt, r
 import { scaleDrag, scaleRectAbout, scaleScene, ANCHORS, r2 } from "/page/scale.js";
 import { clampResize, minSize, sides } from "/page/autolayout-logic.js";
 import { rotateVec, rotatedResize, rotatedCursor, turnedGroupSize } from "/page/move-logic.js";
+import { applyPeerPreviews } from './presence-client.js';
 
 const host = window.canvasHost;
 if (host && host.file) start(host);
@@ -30,6 +31,7 @@ if (host && host.file) start(host);
 function start(host) {
   const { view, file } = host;
   const edits = new LiveEdits({ now: () => performance.now() });
+  let peerPreviews = [], peerKey = '';
   const dirty = new Set();
   let localOp = PAGE_OPS; // the page's own writes; the shell numbers its writes from 1
   const nextOp = () => ++localOp;
@@ -87,6 +89,7 @@ function start(host) {
       const t0 = performance.now();
       let scene;
       try { scene = JSON.parse(text); } catch { continue; }
+      applyPeerPreviews(scene.root, peerPreviews);
       edits.apply(board, scene);
       applyPins(board, scene);
       // A hook that returns true changed the scene beyond the touched layers (autolayout's drag overlay).
@@ -560,6 +563,7 @@ function start(host) {
   /** Draw the resize as it stands (op 0 while dragging). */
   function showResize(op) {
     const z = rz;
+    if(!op) host.emit('presence', { preview:{kind:'resize',ids:[z.id],dx:z.r.x-z.r0.x,dy:z.r.y-z.r0.y,dw:z.r.w-z.r0.w,dh:z.r.h-z.r0.h} });
     const w = writesOf(z);
     const scene = Object.assign({}, w.props);
     if (z.isBoard) { delete scene.x; delete scene.y; host.placeBoard(z.board, z.r.x, z.r.y); }
@@ -579,6 +583,7 @@ function start(host) {
     return w;
   }
   function endResize(cancel) {
+    host.presence?.end();
     const z = rz;
     rz = null;
     host.clearGuides();
@@ -930,11 +935,20 @@ function start(host) {
   host.on("select", (id) => { const b = boardOf(id); if (b && ev() && ev().sceneText(b) === null) fetchScene(b); });
 
   host.live = {
+    setPeerPreviews: peers => {
+      const key=JSON.stringify(peers.map(p=>[p.session,p.preview,p.editing]));
+      if(key===peerKey)return;
+      for(const p of [...peerPreviews,...peers]) for(const id of [...(p.preview?.ids || []),...(p.editing ? [p.editing.id] : [])]) {
+        const b=boardOf(id);if(b)markDirty(b);
+      }
+      peerPreviews=peers;peerKey=key;host.requestFrame();
+    },
     flush, edit, ack, historyStart, fitContent, note, noteAck, noteForget, overlay, nextOp,
     rebase: (board, scene, fetchedAt) => {
+      const remote = applyPeerPreviews(scene.root, peerPreviews);
       const a = edits.rebase(board, scene, fetchedAt), b = applyPins(board, scene);
       if (a || b || pins.has(board)) for (const f of sceneHooks) { try { f(board, scene); } catch (err) { console.error(err); } }
-      return a || b;
+      return a || b || remote;
     },
     pin, unpin, underPin, override, onScene: (f) => { sceneHooks.push(f); }, boardOf,
     // Auto layout (/page/autolayout.js): a parent's child order and a moved layer's props on a given board (the
@@ -956,6 +970,7 @@ function start(host) {
       if (text === null || text === undefined) return null;
       let scene;
       try { scene = JSON.parse(text); } catch { return null; }
+      applyPeerPreviews(scene.root, peerPreviews);
       edits.apply(board, scene);
       const n = findNode(scene.root, id);
       return n ? { x: typeof n.x === "number" ? n.x : 0, y: typeof n.y === "number" ? n.y : 0 } : null;
@@ -977,6 +992,7 @@ function start(host) {
       if (text === null) { if (v) fetchScene(board); return null; }
       let scene;
       try { scene = JSON.parse(text); } catch { return null; }
+      applyPeerPreviews(scene.root, peerPreviews);
       edits.apply(board, scene);
       applyPins(board, scene);
       return scene;

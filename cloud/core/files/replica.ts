@@ -174,6 +174,7 @@ export class Replica {
   /** One message from the room. Async only for a welcome that starts from a snapshot. */
   async receive(msg: FileServerMessage, objects: ObjectStore): Promise<"ok" | "gap" | "hello"> {
     switch (msg.type) {
+      case 'presence': return 'ok'; // Ephemeral state belongs to the page, never the replica or its journal.
       case "reset":
         this.refuseAll("reset", "the file was restored; your edits are kept as a copy");
         this.epoch = 0; // the next hello asks for the restored snapshot
