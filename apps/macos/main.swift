@@ -798,7 +798,7 @@ final class MenuActions: NSObject, NSMenuItemValidation {
       item.title = model.uiHidden ? "Show UI" : "Hide UI"
       return true
     case #selector(rename(_:)):
-      guard !nativeText, !model.textEditing, let sel = model.selection else { return false }
+      guard !model.cloudReadOnly, !nativeText, !model.textEditing, let sel = model.selection else { return false }
       // Several layers: Rename Layers (a batch rename) for the ones that have names of their own.
       if sel.ids.count > 1 { return sel.ids.filter { !$0.hasPrefix("widget:") && !LayersLogic.insideInstance($0) }.count > 1 }
       return !sel.isPath && !sel.inInstance && !sel.id.hasPrefix("widget:")

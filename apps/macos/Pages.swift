@@ -77,7 +77,7 @@ struct PagesSection: View {
             SectionHeader(title: "Pages")
             IconButton(symbol: "plus", help: "Add page", bounce: model.pages.count) {
                 model.addPage { id, name in startRename(PageInfo(id: id, name: name, count: 0)) }
-            }
+            }.qaID("page-add",label:"Add page").disabled(model.cloudReadOnly)
         }
         ForEach(model.pages) { p in
             Group {
@@ -103,6 +103,7 @@ struct PagesSection: View {
             }
             // Drag a page onto another to reorder; drop boards dragged from the Layers panel to move them here.
             .onDrag {
+                guard !model.cloudReadOnly else { return NSItemProvider() }
                 LayersStore.of(model).dragging = [] // a layer drag that ended elsewhere must not pass for this one
                 return NSItemProvider(object: PageDrag.payload(page: p.id) as NSString)
             }
@@ -115,11 +116,11 @@ struct PagesSection: View {
                 RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).stroke(Palette.sel, lineWidth: 1.5)
             } }
             .contextMenu {
-                Button("Rename") { startRename(p) }
+                Button("Rename") { startRename(p) }.disabled(model.cloudReadOnly)
                 // Deleting a page deletes its boards; an empty page goes without asking. One undo brings it all back.
                 Button(p.count > 0 ? "Delete…" : "Delete", role: .destructive) {
                     if p.count > 0 { confirmDelete = p } else { model.deletePage(p.id) }
-                }.disabled(model.pages.count < 2)
+                }.disabled(model.cloudReadOnly || model.pages.count < 2)
             }
         }
         // Another document shown: a rename in progress belonged to the old one and is dropped.
@@ -135,7 +136,7 @@ struct PagesSection: View {
         }
     }
 
-    private func startRename(_ p: PageInfo) { draft = p.name; editing = p.id; editingFile = model.currentFile; DispatchQueue.main.async { focused = true } }
+    private func startRename(_ p: PageInfo) { guard !model.cloudReadOnly else { return }; draft = p.name; editing = p.id; editingFile = model.currentFile; DispatchQueue.main.async { focused = true } }
     private func commit(_ id: String) {
         guard editing == id else { return }
         editing = nil
@@ -159,7 +160,7 @@ struct PageDrop: DropDelegate {
         PageDrag.boards(dragged: LayersStore.of(model).dragging, text: nil, boards: model.boards.map(\.id))
     }
 
-    func validateDrop(info: DropInfo) -> Bool { info.hasItemsConforming(to: [.text]) }
+    func validateDrop(info: DropInfo) -> Bool { !model.cloudReadOnly && info.hasItemsConforming(to: [.text]) }
 
     /// Bumped by every update: a line whose drag has ended (no update for a moment and no button held) goes away,
     /// whatever order SwiftUI sent the drop, exit and update in. Without it a line could stay after the drop.
@@ -191,6 +192,7 @@ struct PageDrop: DropDelegate {
     func dropExited(info: DropInfo) { if target?.page == page.id { target = nil } }
 
     func performDrop(info: DropInfo) -> Bool {
+        guard !model.cloudReadOnly else { return false }
         let zone = target?.zone
         target = nil
         let boards = draggedBoards

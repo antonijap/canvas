@@ -135,6 +135,9 @@ sc('cloud-files', 'Viewer opens from Home with disabled editing, then removal cl
         const file = (await t.state()).file;
         t.eq((await post(t.app.base, '/api/update', { file, id: 'Missing', props: { x: 1 } })).status, 403, 'viewer dispatch gate');
         t.eq((await t.cmd('qa.mainmenu',{title:'Paste'})).enabled,false,'viewer Paste is disabled');
+        await t.click(center(await t.mark({id:'page-add'})));
+        await new Promise(r=>setTimeout(r,300));
+        t.eq((await t.state()).toast,null,'viewer Add page is disabled without sending a refused edit');
         await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-viewer.png'));
         const st = await (await fetch(host.base + '/api/cloud/host?hostId=' + started.j.hostId)).json() as any;
         await post(host.base, '/api/cloud/host/remove', { hostId: started.j.hostId, personId: st.people.find((p: any) => p.label === 'Anna').id });
