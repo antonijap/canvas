@@ -11,7 +11,7 @@ import { upgrade, type ServerSocket } from "./websocket.ts";
 import { FileRoom, type Conn } from "../../core/files/room.ts";
 import { RoleCache } from "../../core/files/access.ts";
 import { LeaseBank, RoomLeases } from "../../core/files/leases.ts";
-import { StorageLedger, reserveUpload, putUpload, UploadError } from "../../core/files/uploads.ts";
+import { StorageLedger, reserveUpload, putUpload, UploadError, UPLOAD_GRACE_MS } from "../../core/files/uploads.ts";
 import { buildSnapshot, recoverSnapshots, compact, type Manifest } from "../../core/files/snapshots.ts";
 import { collectGarbage } from "../../core/files/gc.ts";
 import { stateFromFiles } from "../../core/files/state.ts";
@@ -144,6 +144,9 @@ export class MacFiles {
     private cap: number;
     private inFlight = 0;
     private bodies = 0;
+    private readonly partBytes = new Map<string, number>();
+    private readonly activeParts = new Set<string>();
+    private readonly sweepTimer: NodeJS.Timeout;
     constructor(root: string, db: SqliteStore, current: (me: Me) => Me | null, role: (person: string) => Role | null, now = Date.now, cap = 20 * GB) {
         this.cap = cap;
         this.root = root;
@@ -158,6 +161,26 @@ export class MacFiles {
         this.bank = new LeaseBank(db);
         this.importBank = new LeaseBank(db, { ops: 6000, messages: 120, presence: 0 });
         this.ledger = new StorageLedger(db, cap);
+        this.sweepParts();
+        this.sweepTimer = setInterval(() => this.sweepParts(), 60_000); this.sweepTimer.unref();
+    }
+    sweepParts() {
+        const root = path.join(this.root, 'uploads');
+        if (!fs.existsSync(root)) return;
+        for (const file of fs.readdirSync(root)) {
+            if (!UUID.test(file)) continue;
+            const dir = path.join(root, file);
+            if (fs.lstatSync(dir).isSymbolicLink()) continue;
+            const exists = this.db.sql.exec('SELECT 1 FROM files WHERE id=?', file).toArray().length;
+            for (const id of fs.readdirSync(dir)) {
+                const folder = path.join(dir, id);
+                if (this.activeParts.has(folder)) continue;
+                const up = exists ? this.room(file).store.sql.exec<{state:string;at_ms:number}>('SELECT state,at_ms FROM uploads WHERE id=?', id).toArray()[0] : null;
+                if (!up || up.state !== 'open' || this.now() - up.at_ms >= UPLOAD_GRACE_MS) {
+                    fs.rmSync(folder, { recursive: true, force: true }); this.partBytes.delete(folder);
+                }
+            }
+        }
     }
     private row(file: string, me: Me): Row {
         if (!this.current(me))
@@ -391,29 +414,35 @@ export class MacFiles {
                 const dir = path.join(this.root, 'uploads', file, part[1]);
                 fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
                 const dest = path.join(dir, part[2]), tmp = dest + '.tmp';
+                if (fs.existsSync(dest) || fs.existsSync(tmp)) return json(409, { code: 'conflict' });
+                if (!this.partBytes.has(dir)) this.partBytes.set(dir, diskBytes(dir));
+                this.activeParts.add(dir);
                 let bytes = 0;
                 const fd = fs.openSync(tmp, 'wx', 0o600);
                 try {
                     for await (const c of req) {
                         this.edit(me);
-                        bytes += c.length;
-                        if (bytes > 50 * 1024 * 1024 || bytes > up.bytes)
+                        if (bytes + c.length > 50 * 1024 * 1024 || this.partBytes.get(dir)! + c.length > up.bytes)
                             error(413, 'quota', 'Part exceeds its reservation');
                         this.capacity(c.length);
                         fs.writeSync(fd, c);
+                        bytes += c.length; this.partBytes.set(dir, this.partBytes.get(dir)! + c.length);
                     }
                     fs.fsyncSync(fd);
                 }
                 catch (e) {
                     fs.rmSync(tmp, { force: true });
+                    this.partBytes.set(dir, this.partBytes.get(dir)! - bytes);
                     throw e;
                 }
                 finally {
                     fs.closeSync(fd);
+                    this.activeParts.delete(dir);
                 }
                 this.edit(me);
                 if (fs.existsSync(dest)) {
                     fs.unlinkSync(tmp);
+                    this.partBytes.set(dir, this.partBytes.get(dir)! - bytes);
                     return json(409, { code: 'conflict' });
                 }
                 fs.renameSync(tmp, dest);
@@ -440,6 +469,7 @@ export class MacFiles {
                     const bytes = Buffer.concat(parts.map(p => fs.readFileSync(path.join(dir, p))));
                     const out = await putUpload(r.core, this.ledger, this.conn(me), complete[1], bytes);
                     fs.rmSync(dir, { recursive: true, force: true });
+                    this.partBytes.delete(dir);
                     return json(200, out);
                 }
                 finally {
@@ -645,6 +675,7 @@ export class MacFiles {
         return true;
     }
     close() {
+        clearInterval(this.sweepTimer);
         for(const res of this.downloads.keys())res.destroy();this.downloads.clear(); for (const r of this.rooms.values()) {
         if (r.timer)
             clearTimeout(r.timer);

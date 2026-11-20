@@ -54,3 +54,14 @@ test('move keeps source edits made while publication is awaited',async()=>{
  try{await assert.rejects(prepareMove(source,async(name,doc,env)=>{fs.mkdirSync(dest);fs.writeFileSync(path.join(dest,'document.json'),JSON.stringify(doc));fs.writeFileSync(path.join(dest,'widgets.json'),JSON.stringify(env));return{id:crypto.randomUUID(),file:dest,name,cloud:'mac://studio',role:'editor'};},async()=>{await Promise.resolve();fs.writeFileSync(path.join(source,'document.json'),JSON.stringify({version:'2.21',children:[{id:'New',type:'frame'}]}));}),/changed during the move/);assert.match(fs.readFileSync(path.join(source,'document.json'),'utf8'),/New/);
  }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test('multipart total cannot exceed reservation and closed parts are swept',()=>hostTest(async(h,call,dir)=>{
+ const id=crypto.randomUUID();await call('/v1/files','POST',{id,name:'Design'});
+ const up=await (await call(`/v1/files/${id}/uploads`,'POST',{bytes:8,type:'image/png',sha256:'a'.repeat(64)})).json() as any;
+ const token=h.ownerDevice('Anna'),port=(h as any).server.address().port;
+ const put=(part:number)=>fetch(`http://127.0.0.1:${port}/v1/files/${id}/uploads/${up.id}/parts/${part}`,{method:'PUT',headers:{authorization:'Bearer '+token},body:new Uint8Array(8)});
+ assert.equal((await put(0)).status,200);assert.equal((await put(1)).status,413);
+ const room=(h.files as any).rooms.get(id);room.store.sql.exec("UPDATE uploads SET state='stored' WHERE id=?",up.id);
+ h.files.sweepParts();assert.equal(fs.existsSync(path.join(dir,'uploads',id,up.id)),false);
+ const orphan=path.join(dir,'uploads',crypto.randomUUID(),'gone');fs.mkdirSync(orphan,{recursive:true});fs.writeFileSync(path.join(orphan,'0'),'leftover');h.files.sweepParts();assert.equal(fs.existsSync(orphan),false);
+}));
