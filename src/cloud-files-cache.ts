@@ -1,6 +1,7 @@
 // Disposable objects are content addressed; SQLite remains the commit point for a file and its pending edits.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
 import {createHash,randomUUID} from 'node:crypto';
 import {gzipSync,gunzipSync} from 'node:zlib';
@@ -21,7 +22,31 @@ export function writeBoardCheckpoint(dir:string,children:DocNode[]):{id:string;s
  });
 }
 function bytes(dir:string):number{return fs.readdirSync(dir,{withFileTypes:true}).reduce((n,e)=>{const p=path.join(dir,e.name);return n+(e.isSymbolicLink()?0:e.isDirectory()?bytes(p):fs.statSync(p).size);},0);}
-export function evictClosedPackages(root:string,open:Set<string>,cap=5*1024**3):string[]{
+function collectBoards(root:string,cache:string):number {
+ let total=0;if(!fs.existsSync(cache))return total;
+ for(const cloud of fs.readdirSync(cache)){
+  if(!/^[0-9a-f]{16}$/.test(cloud))continue;
+  const dir=path.join(cache,cloud,'boards');if(!fs.existsSync(dir)||fs.lstatSync(dir).isSymbolicLink())continue;
+  const refs=new Set<string>(),packages=path.join(root,cloud);let safe=true;
+  if(fs.existsSync(packages))for(const pkg of fs.readdirSync(packages)){
+   if(!/^[0-9a-f-]{36}\.canvas$/.test(pkg))continue;
+   let db:DatabaseSync|undefined;try{
+    db=new DatabaseSync(path.join(packages,pkg,'.cloud','state.sqlite'),{readOnly:true});
+    if(db.prepare("SELECT 1 FROM sqlite_master WHERE name='base_manifest'").get()){
+     const row=db.prepare('SELECT json FROM base_manifest WHERE id=1').get();
+     if(row)for(const b of JSON.parse(String(row.json)).boards)refs.add(b.sha256+'.json.gz');
+    }
+   }catch{safe=false;}finally{db?.close();}
+  }
+  for(const name of fs.readdirSync(dir)){
+   if(!/^[a-f0-9]{64}\.json\.gz$/.test(name))continue;
+   const file=path.join(dir,name);if(fs.lstatSync(file).isSymbolicLink())continue;
+   if(safe&&!refs.has(name))fs.unlinkSync(file);else total+=fs.statSync(file).size;
+  }
+ }
+ return total;
+}
+export function evictClosedPackages(root:string,open:Set<string>,cap=5*1024**3,boardCache=path.join(os.homedir(),'Library','Caches','Canvas','cloud')):string[]{
  if(!fs.existsSync(root))return[];const files:{pkg:string;bytes:number;at:number;pending:boolean}[]=[];
  for(const c of fs.readdirSync(root,{withFileTypes:true})){
   if(!c.isDirectory()||!/^[0-9a-f]{16}$/.test(c.name))continue;const cloud=path.join(root,c.name);
@@ -31,6 +56,6 @@ export function evictClosedPackages(root:string,open:Set<string>,cap=5*1024**3):
    files.push({pkg,bytes:bytes(pkg),at:fs.statSync(pkg).mtimeMs,pending:pending||open.has(pkg)});
   }
  }
- let total=files.reduce((n,f)=>n+f.bytes,0);const removed:string[]=[];
- for(const f of files.sort((a,b)=>a.at-b.at)){if(total<=cap)break;if(f.pending)continue;fs.rmSync(f.pkg,{recursive:true,force:true});total-=f.bytes;removed.push(f.pkg);}return removed;
+ let boardBytes=collectBoards(root,boardCache),total=files.reduce((n,f)=>n+f.bytes,0)+boardBytes;const removed:string[]=[];
+ for(const f of files.sort((a,b)=>a.at-b.at)){if(total<=cap)break;if(f.pending)continue;fs.rmSync(f.pkg,{recursive:true,force:true});total-=f.bytes;removed.push(f.pkg);const next=collectBoards(root,boardCache);total+=next-boardBytes;boardBytes=next;}return removed;
 }
