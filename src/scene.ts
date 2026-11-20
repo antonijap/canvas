@@ -206,7 +206,9 @@ function rewritePaints(v: Json | undefined, c: Ctx): Json | undefined {
   const one = (p: Json): Json => {
     if (p && typeof p === "object" && !Array.isArray(p) && p.type === "image" && typeof p.url === "string") {
       // Adjustments name a recoloured copy of the image (src/page/image-adjust.js; the page applies them as it decodes).
-      const url = assetUrl(p.url, c.baseDir, c.file) + adjustFragment(p.adjust);
+      const asset = assetUrl(p.url, c.baseDir, c.file);
+      if (!asset) return null;
+      const url = asset + adjustFragment(p.adjust);
       c.images.add(url);
       return { ...p, url };
     }
@@ -221,7 +223,7 @@ function rewritePaints(v: Json | undefined, c: Ctx): Json | undefined {
     }
     return p;
   };
-  return Array.isArray(v) ? v.map(one) : one(v);
+  return Array.isArray(v) ? v.map(one).filter(p => p !== null) : one(v);
 }
 
 function sceneNode(raw: DocNode, theme: Theme, c: Ctx): DocNode | undefined {
