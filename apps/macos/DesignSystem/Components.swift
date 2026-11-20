@@ -517,7 +517,7 @@ struct Toast: View {
                 ForEach(actions) { a in ToastButton(action: a).background(ToastFrames.track(a.label)) }
             }
             .padding(.leading, 16).padding(.trailing, actions.isEmpty ? 16 : Metric.pillPad)
-            .frame(height: Metric.control + 2 * Metric.pillPad)
+            .frame(minHeight: Metric.control + 2 * Metric.pillPad)
         }
         .onHover { h in hovering = h; onHover(h) }
     }
