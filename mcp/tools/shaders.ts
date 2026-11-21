@@ -4,7 +4,8 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { api, cmd, ensureServer, resolveFile, ToolError } from "../client.ts";
+import { api, background, cmd, ensureServer, resolveFile, ToolError } from "../client.ts";
+import { mediaFrame } from "../media.ts";
 import * as S from "../schemas.ts";
 import { Raw, tool } from "../tool.ts";
 
@@ -27,7 +28,8 @@ const geometry = {
 async function frame(file: string, id: string, rev: string, t: number | undefined, problems: unknown[] | undefined, extra: Record<string, unknown>) {
   let r: any;
   try {
-    r = (await cmd({ op: "shader_frame", args: { id, rev, t: t ?? 2 }, file, timeoutMs: 15_000 })).result;
+    r = background() ? await mediaFrame(file, "shaderFrame", { id, rev, t: t ?? 2 })
+      : (await cmd({ op: "shader_frame", args: { id, rev, t: t ?? 2 }, file, timeoutMs: 15_000 })).result;
   } catch (e) {
     if ((e as ToolError).code === "no_page") return { ...extra, compiled: false, note: "No open Canvas page shows this file, so the shader was not compiled; only the static checks ran (problems).", problems };
     throw e;

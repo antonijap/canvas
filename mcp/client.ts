@@ -27,7 +27,12 @@ export const SESSION = NAMED && /^[A-Za-z0-9_-]{4,64}$/.test(NAMED) ? NAMED : `m
 let AGENT = "";
 export const setAgentName = (name: unknown) => void (AGENT = typeof name === "string" ? name.replace(/[^\w .:@/-]/g, "").slice(0, 80) : "");
 
-export const PORT = () => Number(process.env.CANVAS_PORT ?? 5189);
+export const background = () => process.env.CANVAS_MCP_BACKGROUND === "1";
+export const PORT = () => {
+  const port = Number(process.env.CANVAS_PORT ?? (background() ? 5199 : 5189));
+  return background() && port === 5189 ? 5199 : port;
+};
+export const backgroundError = (name: string) => new ToolError("background_mode", `${name} needs the person's window.`, "Use render_node to look; ask the person to open the file.");
 export const BASE = () => `http://127.0.0.1:${PORT()}`;
 export const SERVER_SCRIPT = fileURLToPath(new URL("../src/server.ts", import.meta.url));
 export const REPO = fileURLToPath(new URL("..", import.meta.url));
@@ -65,6 +70,7 @@ const writeHeaders = (): Record<string, string> => ({ "x-canvas": "1", "content-
 
 /** canvas-mcp is here: on connect, then every HEARTBEAT_MS while it runs (src/onboarding.ts). Never starts a server. */
 export function sayHello(): void {
+  if (background()) return;
   const once = () => fetch(`${BASE()}/api/mcp/hello`, {
     method: "POST",
     headers: writeHeaders(),
@@ -77,7 +83,7 @@ export function sayHello(): void {
 }
 
 /** `root`: which copy of the code the server runs (src/version.ts codeRootId); older servers leave it out. */
-export type Health = { ok: boolean; version: string; root?: string };
+export type Health = { ok: boolean; version: string; root?: string; headless?: boolean };
 
 export async function health(timeoutMs = 800): Promise<Health | undefined> {
   try {
@@ -92,6 +98,7 @@ export const noServer = () => new ToolError("no_server", `No Canvas server answe
 
 /** Raw call. Errors from the server become ToolError with its code. */
 export async function api<T = any>(method: string, path: string, body?: unknown, o: { timeoutMs?: number } = {}): Promise<T> {
+  if (background() && path.startsWith("/api/bridge/state")) throw new ToolError("invalid", "Background mode needs explicit node ids", "Pass id or ids; selection belongs to the person.");
   let r: Response;
   try {
     r = await fetch(BASE() + path, {
@@ -123,7 +130,7 @@ export async function api<T = any>(method: string, path: string, body?: unknown,
 }
 
 export function spawnServer(file?: string): void {
-  const child = spawn(process.execPath, [SERVER_SCRIPT, ...(file ? [file] : [])], { detached: true, stdio: "ignore", env: { ...process.env, CANVAS_PORT: String(PORT()) } });
+  const child = spawn(process.execPath, [SERVER_SCRIPT, ...(file ? [file] : [])], { detached: true, stdio: "ignore", env: { ...process.env, CANVAS_PORT: String(PORT()), ...(background() ? { CANVAS_HEADLESS: "1" } : {}) } });
   child.on("error", () => {});
   child.unref();
 }
@@ -140,10 +147,16 @@ export async function waitHealthy(ms: number, want?: string): Promise<Health | u
 
 /** Make sure a server answers. Starts one (no window) unless CANVAS_MCP_NO_SPAWN=1. */
 export async function ensureServer(): Promise<void> {
-  if (await health()) return;
+  const check = (h: Health) => {
+    if (background() && !h.headless) throw new ToolError("background_mode", `Port ${PORT()} is not a headless Canvas server`, "Choose an unused CANVAS_PORT other than 5189. The app is untouched.");
+  };
+  const h = await health();
+  if (h) { check(h); return; }
   if (process.env.CANVAS_MCP_NO_SPAWN === "1") throw noServer();
   spawnServer();
-  if (!(await waitHealthy(8000))) throw new ToolError("no_server", `The Canvas server did not start on port ${PORT()}`, "Is something else using the port? Set CANVAS_PORT, or run pnpm start in the canvas repo to see the error.");
+  const started = await waitHealthy(8000);
+  if (started) { check(started); return; }
+  throw new ToolError("no_server", `The Canvas server did not start on port ${PORT()}`, "Is something else using the port? Set CANVAS_PORT, or run pnpm start in the canvas repo to see the error.");
 }
 
 /** The version a running server must report to count as current. CANVAS_MCP_WANT_VERSION pins it (tests do, so edits to src/ mid-run cannot flip the answer). */
@@ -181,6 +194,7 @@ export async function status(): Promise<Status> {
 /** The file a tool means: the one passed, else the active page's, else the app's front tab. */
 export async function resolveFile(file?: string): Promise<string> {
   if (file) return file;
+  if (background()) throw new ToolError("invalid", "background mode needs file", "Pass file or a canvas:// link naming the file.");
   const s = await status();
   const f = s.active?.file ?? s.shell?.currentFile ?? s.pages[0]?.file;
   if (!f) throw new ToolError("invalid", "file is required: no canvas page or tab is open", "Pass file, or open one with open_file.");
@@ -192,8 +206,14 @@ export type CmdOut = { ok: true; result: any; client: string; role: string; othe
 
 /** Run a command on a page or the shell and wait for its answer. */
 export async function cmd(c: Cmd): Promise<CmdOut> {
+  if (background()) throw new ToolError("no_page", "Background mode has no live page", "Use render_node to look at the file.");
   await ensureServer();
-  return api<CmdOut>("POST", "/api/bridge/cmd", c, { timeoutMs: (c.timeoutMs ?? 10_000) + 3000 });
+  try {
+    return await api<CmdOut>("POST", "/api/bridge/cmd", c, { timeoutMs: (c.timeoutMs ?? 10_000) + 3000 });
+  } catch (e) {
+    if (e instanceof ToolError && e.code === "no_page") e.hint = 'Use CANVAS_MCP_BACKGROUND=1 with file for disk tools, or ask the person to open the file with open_file focus:true.';
+    throw e;
+  }
 }
 
 export async function waitEvents(since: number | undefined, types: string[] | undefined, timeoutMs: number, limit?: number) {

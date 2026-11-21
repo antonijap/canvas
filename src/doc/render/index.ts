@@ -73,6 +73,11 @@ function call(req: object, timeoutMs = 120_000): any {
   return msg.ok;
 }
 
+/** A media card's frame in a private headless page, without joining the app bridge. */
+export function renderCard(url: string, kind: "shaderFrame" | "videoFrame", args: Record<string, unknown>, page?: string): any {
+  return call({ op: "card", url, kind, args, page }, 60_000);
+}
+
 export type RenderInput = { doc: CanvasDoc; file: string; theme?: Theme; warnings?: string[] };
 
 const options = (i: RenderInput, extra: Partial<HtmlOptions> = {}): HtmlOptions => ({

@@ -462,7 +462,7 @@ export async function finishWork(b: FinishRequest, ctx: BridgeCtx): Promise<Json
   const shell = shellClient();
   const message = summary ? `Done: ${summary}` : "Done";
   const result: Json = { glossed: [], trackedCount, toast: false, sound: "off" };
-  if (!page && !shell) return { ...result, note: "No canvas page or app is connected, so nothing was shown; the changes stay tracked." };
+  if (process.env.CANVAS_HEADLESS === "1" || (!page && !shell)) return { ...result, note: "No canvas page or app is connected, so nothing was shown; the changes stay tracked." };
   if (!page && trackedCount) result.note = "No canvas page shows this file, so nothing was glossed; the changes stay tracked.";
 
   const jobs: Promise<void>[] = [];
@@ -654,6 +654,7 @@ async function readJson(req: http.IncomingMessage, max: number): Promise<Json> {
 const ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 
 function openStream(req: http.IncomingMessage, res: http.ServerResponse, url: URL) {
+  if (process.env.CANVAS_HEADLESS === "1") throw new BridgeError("background_mode", "This headless server does not accept app or page connections");
   const id = url.searchParams.get("client") ?? "";
   const role = url.searchParams.get("role");
   if (!ID_RE.test(id)) throw new BridgeError("invalid", "client must be 6-64 letters, digits, - or _");

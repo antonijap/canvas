@@ -116,6 +116,33 @@ async function handle(req: any): Promise<any> {
     await ensureChrome();
     return {};
   }
+  if (req.op === "card") {
+    await ensureChrome();
+    // This renderer reads only the headless server. It never joins the person's page bridge.
+    const script = await send("Page.addScriptToEvaluateOnNewDocument", { source: "const NativeEventSource = window.EventSource; window.EventSource = class { constructor(url, options) { if (String(url).startsWith('/api/bridge/events')) return { close() {}, addEventListener() {} }; return new NativeEventSource(url, options); } };" }, session);
+    try {
+      const loaded = nextEvent("Page.loadEventFired");
+      await send("Page.navigate", { url: req.url }, session);
+      await loaded;
+      const expression = `(async () => {
+        const end = Date.now() + 20000;
+        while (!window.canvasHost?.[${JSON.stringify(req.kind)}] || window.__canvas?.renderer !== 'engine') {
+          if (Date.now() > end) throw new Error('Headless media renderer did not load');
+          await new Promise(r => setTimeout(r, 50));
+        }
+        if (${JSON.stringify(req.page ?? null)} && window.canvasHost.page !== ${JSON.stringify(req.page ?? null)}) await window.canvasHost.setPage(${JSON.stringify(req.page ?? null)});
+        return window.canvasHost[${JSON.stringify(req.kind)}](${JSON.stringify(req.args)});
+      })()`;
+      const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, session);
+      if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? "Media frame failed");
+      return r.result.value;
+    } finally {
+      const cleared = nextEvent("Page.loadEventFired");
+      await send("Page.navigate", { url: "about:blank" }, session);
+      await cleared;
+      await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script.identifier }, session);
+    }
+  }
   if (req.op === "layout") return { rects: await load(req.html) };
   if (req.op === "shot") {
     const out: string[] = [];

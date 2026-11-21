@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { api, BASE, cmd, health, OTHER_COPY_NOTE, PORT, REPO, spawnServer, staleness, status, ToolError, waitHealthy, wantVersion } from "./client.ts";
+import { api, background, backgroundError, BASE, cmd, health, OTHER_COPY_NOTE, PORT, REPO, spawnServer, staleness, status, ToolError, waitHealthy, wantVersion } from "./client.ts";
 
 /** The app to open: CANVAS_APP, else a built one (the repo commits none): installed, `pnpm app`'s, `apps/macos/build.sh`'s. */
 export const APP_PATH = () => process.env.CANVAS_APP ?? ["/Applications/Canvas.app", path.join(REPO, "build", "Canvas.app"), path.join(REPO, "apps/macos/Canvas.app")].find((p) => fs.existsSync(p)) ?? path.join(REPO, "build", "Canvas.app");
@@ -22,6 +22,7 @@ async function waitFor<T>(fn: () => Promise<T | undefined>, ms: number): Promise
 }
 
 export async function launchCanvas(o: LaunchOpts) {
+  if (background()) throw backgroundError("launch_canvas");
   const want = wantVersion();
   const waitMs = o.waitMs ?? 10_000;
   const mode = o.mode ?? "auto";
