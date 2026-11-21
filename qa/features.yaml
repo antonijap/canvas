@@ -796,3 +796,9 @@ features:
     area: mcp
     driven: [mcp, native]
     cases: [disk, quiet-open]
+
+  - id: design-helpers
+    name: Design recipes and mechanical helpers
+    area: design helpers
+    driven: [mcp]
+    cases: [recipe, checks, components]

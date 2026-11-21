@@ -34,7 +34,7 @@ export function tool<S extends Record<string, any>>(server: McpServer, name: str
   server.registerTool(name, { description, inputSchema: linkShape(name, shape), annotations }, (async (args: any, extra: Extra) => {
     try {
       const a = expandLink(name, shape, args ?? {});
-      if (background()) {
+      if (background() && name !== "get_recipe") {
         if (WINDOW_TOOLS.has(name)) throw backgroundError(name);
         if ('file' in shape && !a.file) await resolveFile();
         await ensureServer();
