@@ -198,6 +198,12 @@ fixture("mask", 400, 160, [
   rect(0, 0, 400, 160, { fill: grad("linear", RAINBOW, { rotation: 90 }) }),
   rect(220, 20, 160, 120, { fill: "#18181B", cornerRadius: 24, blendMode: "multiply" }),
 ], { note: "Use as mask: the ellipse cuts the layers above it; the grey under it shows outside." });
+const slant = (x: number, w: number, o: N = {}): N => ({ type: "path", id: id("p"), x, y: 20, width: w, height: 120, viewBox: [0, 0, 100, 100], geometry: "M25 0 L100 0 L75 100 L0 100 Z", ...o });
+fixture("mask-path", 400, 160, [
+  rect(0, 0, 400, 160, { fill: "#E4E4E7" }),
+  slant(20, 160, { fill: "#000000", mask: true }),
+  rect(0, 0, 400, 160, { fill: grad("linear", RAINBOW, { rotation: 90 }) }),
+], { note: "A slanted path as mask, its viewBox scaled to the layer: the layers above are cut to the outline, not its box." });
 
 // ---------------------------------------------------------------- shadows and blur
 

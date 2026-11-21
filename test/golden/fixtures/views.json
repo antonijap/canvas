@@ -168,6 +168,18 @@
     "dpr": 2
    }
   ],
+  "mask-path": [
+   {
+    "name": "1x",
+    "zoom": 1,
+    "dpr": 1
+   },
+   {
+    "name": "1x@2",
+    "zoom": 1,
+    "dpr": 2
+   }
+  ],
   "shadow-drop": [
    {
     "name": "1x",
@@ -595,6 +607,7 @@
   "blend-fill": "A blend mode per fill: the engine mixes each paint in its own layer, the DOM renderer with background-blend-mode (which only blends with the paints of the same box, so the two may differ where the box is translucent).",
   "fill-modes": "Crop, Tile and Rotate 90 in the engine and the DOM renderer; corner smoothing is engine-only (the DOM draws a circular corner).",
   "mask": "Use as mask: the ellipse cuts the layers above it; the grey under it shows outside.",
+  "mask-path": "A slanted path as mask, its viewBox scaled to the layer: the layers above are cut to the outline, not its box.",
   "image-fit": "The format has no tile mode (cover, contain, stretch only), so tiling has no fixture.",
   "text-letter-spacing": "Auto tracking is stored as a plain letterSpacing number; the values here come from src/tracking.ts autoTracking().",
   "text-wrap": "The format has no truncation or ellipsis property; a fixed-width-height box overflows in both renderers.",

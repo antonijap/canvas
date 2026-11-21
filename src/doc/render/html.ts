@@ -99,7 +99,8 @@ const shaderJobs = new WeakMap<HtmlOptions, { id: string; source: string; unifor
 /**
  * Children with a mask (`mask: true`): the mask is not drawn, the siblings above it are clipped to its shape
  * (a rectangle with its radius or an ellipse at its own place in a free frame). The engine cuts by the mask's alpha
- * (engine/src/paint.rs paint_kids); here other shapes, and masks in auto layout, clip to the mask's box.
+ * (engine/src/paint.rs paint_kids); here paths with a viewBox and polygons clip to their outline, other shapes to the
+ * mask's box, and masks in auto layout are left out.
  */
 function maskedKids(kids: DocNode[], ctx: ParentCtx, o: HtmlOptions, one: (k: DocNode) => string): string {
   const at = kids.findIndex((k) => k.mask === true && k.enabled !== false);
@@ -115,7 +116,22 @@ function maskedKids(kids: DocNode[], ctx: ParentCtx, o: HtmlOptions, one: (k: Do
     return kids.filter((k) => k !== m).map(one).join("");
   }
   const rest = maskedKids(kids.slice(at + 1), ctx, o, one);
-  return kids.slice(0, at).map(one).join("") + `<div data-mask="${esc(m.id)}" style="position:absolute;inset:0;pointer-events:none;clip-path:${box}"><div style="position:absolute;inset:0;pointer-events:auto">${rest}</div></div>`;
+  // Paths and polygons clip to their own outline through an SVG clipPath placed in the frame's space.
+  const outline = maskOutline(m, x, y, w, h);
+  const id = outline ? `cm${++maskSeq}` : "";
+  const defs = outline ? `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><clipPath id="${id}" clipPathUnits="userSpaceOnUse">${outline}</clipPath></defs></svg>` : "";
+  return kids.slice(0, at).map(one).join("") + `${defs}<div data-mask="${esc(m.id)}" style="position:absolute;inset:0;pointer-events:none;clip-path:${outline ? `url(#${id})` : box}"><div style="position:absolute;inset:0;pointer-events:auto">${rest}</div></div>`;
+}
+
+let maskSeq = 0;
+
+/** A path or polygon mask's outline in the parent frame's space, or "" to clip to the box. */
+function maskOutline(m: DocNode, x: number, y: number, w: number, h: number): string {
+  if (m.type === "polygon") return `<polygon transform="translate(${x} ${y})" points="${polygonPoints(m, w, h)}"/>`;
+  if (m.type !== "path" || typeof m.geometry !== "string" || !Array.isArray(m.viewBox)) return "";
+  const [vx, vy, vw, vh] = (m.viewBox as unknown[]).map((v) => num(v) ?? 0);
+  if (!vw || !vh) return "";
+  return `<path transform="translate(${x} ${y}) scale(${w / vw} ${h / vh}) translate(${-vx} ${-vy})" d="${esc(m.geometry)}" clip-rule="${esc(m.fillRule ?? "nonzero")}"/>`;
 }
 
 let adjustSeq = 0;
