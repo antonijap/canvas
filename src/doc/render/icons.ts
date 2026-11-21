@@ -1,4 +1,4 @@
-// Icon artwork for `icon` nodes. Lucide and Feather ship with this server; other libraries come from Iconify's public API.
+// Bundled icon artwork, loaded on first use of each set.
 
 import { createRequire } from "node:module";
 
@@ -15,24 +15,28 @@ function load(pkg: string): IconSet {
   return s;
 }
 
-const LOCAL: Record<string, string> = { lucide: "lucide", feather: "feather" };
-const REMOTE: Record<string, (n: string) => string> = {
-  phosphor: (n) => `ph/${n}`,
-  "Material Symbols Outlined": (n) => `material-symbols/${n.replaceAll("_", "-")}-outline`,
-  "Material Symbols Rounded": (n) => `material-symbols/${n.replaceAll("_", "-")}-rounded`,
-  "Material Symbols Sharp": (n) => `material-symbols/${n.replaceAll("_", "-")}-sharp`,
-};
+const libraries = new Map<string, { pkg: string; suffix?: string }>([
+  ["lucide", { pkg: "lucide" }],
+  ["feather", { pkg: "feather" }],
+  ["phosphor", { pkg: "ph" }],
+  ["Material Symbols Outlined", { pkg: "material-symbols", suffix: "-outline" }],
+  ["Material Symbols Rounded", { pkg: "material-symbols", suffix: "-rounded" }],
+  ["Material Symbols Sharp", { pkg: "material-symbols", suffix: "-sharp" }],
+]);
 
-export type IconArt = { kind: "svg"; body: string; size: number } | { kind: "url"; url: string } | null;
+export type IconArt = { kind: "svg"; body: string; size: number } | null;
+
+function findIcon(set: IconSet, name: string) {
+  const key = set.aliases?.[name]?.parent ?? name;
+  return Object.hasOwn(set.icons, key) ? set.icons[key] : undefined;
+}
 
 export function iconArt(library: string, name: string): IconArt {
-  const pkg = LOCAL[library];
-  if (pkg) {
-    const set = load(pkg);
-    const key = set.aliases?.[name]?.parent ?? name;
-    const icon = set.icons[key];
-    return icon ? { kind: "svg", body: icon.body, size: set.width ?? 24 } : null;
-  }
-  const remote = REMOTE[library];
-  return remote ? { kind: "url", url: `https://api.iconify.design/${remote(name)}.svg` } : null;
+  const lib = libraries.get(library);
+  if (!lib) return null;
+  const set = load(lib.pkg);
+  const base = lib.suffix ? name.replaceAll("_", "-") : name;
+  const variant = lib.suffix ? findIcon(set, base + lib.suffix) : undefined;
+  const icon = variant ?? findIcon(set, base);
+  return icon ? { kind: "svg", body: icon.body, size: set.width ?? 24 } : null;
 }

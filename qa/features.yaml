@@ -33,7 +33,12 @@ features:
     name: Every node type draws on the engine renderer
     area: canvas
     driven: [page]
-    cases: [$layers, board, component, $cards, rotated, nested, hidden, $themes, $sizes]
+    cases: [$layers, icon, board, component, $cards, rotated, nested, hidden, $themes, $sizes]
+  - id: icons
+    name: Phosphor and Material Symbols draw locally in the canvas and exports
+    area: icons
+    driven: [page, native]
+    cases: [offline, app]
   - id: pan-zoom
     name: Pan (Space drag, scroll, arrows with nothing selected) and zoom (Cmd scroll, pinch, Cmd +/-, Shift +/-, Z tool, typed in the zoom pill)
     area: canvas
