@@ -10,6 +10,7 @@ Rules for AI coding agents (Claude Code, Codex and others) working in this repos
 
 - pnpm only (`pnpm install --frozen-lockfile`, `pnpm <script>`); never npm or yarn. Do not add a dependency without an issue that approved it.
 - A bug fix comes with a test that failed before it.
+- Ship only what every user can use. A feature tied to one person's own tools, accounts or local services (a private tracker, a personal script) does not go in the repo: add a generic extension point instead, and the personal part lives outside it, for example as a local widget in `~/Library/Application Support/Canvas/widgets/`.
 
 ## Testing: only what changed
 
