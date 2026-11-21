@@ -113,6 +113,7 @@ export const METRICS = {
   radiusField: 8,
   railWidth: 40,
   tabMin: 96,
+  tabMax: 240,
   trafficLights: 78,
 };
 

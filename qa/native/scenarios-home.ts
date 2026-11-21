@@ -430,6 +430,56 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   await t.waitState((s) => s.file === c, "Shift+Cmd+[ to the tab before");
 });
 
+sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file and reorders", { covers: ["tabs:overflow"] }, async (t: NT) => {
+  const initial = await t.state();
+  const files = ["Studio Plan", "Anna Notes", "Studio Schedule", "Studio Reference", "Studio Draft", "Studio Review"]
+    .map((name) => { const file = path.join(t.app.docs, name + ".canvas"); copyDir(PLAYGROUND, file); return file; });
+  const open = async (file: string) => {
+    await t.app.cmd({ op: "open", args: { file }, timeoutMs: 20_000 });
+    await t.waitState((s) => s.file === file && !s.homeShown, "overflow file active");
+    await t.settle();
+  };
+  const mark = (file: string) => t.mark({ id: "file-tab", label: baseName(file), exact: true });
+  const single = new Map<string, number>();
+  try {
+    await t.cmd("qa.window", { width: 1000, height: 720 });
+    for (const file of files) {
+      await open(file);
+      for (const other of (await t.state()).openFiles.filter((f: string) => f !== file))
+        await t.app.cmd({ op: "close", args: { file: other } });
+      await t.settle();
+      single.set(file, (await mark(file)).w);
+    }
+    await t.app.cmd({ op: "close", args: { file: files[files.length - 1] } });
+    for (const file of files) await open(file);
+    t.eq((await t.state()).openFiles, files, "overflow tabs start in file order");
+    const home = await t.mark({ id: "home-tab" });
+    const plus = await t.mark({ id: "tab-open" });
+    t.ok([...single.values()].reduce((a, b) => a + b, 0) + (files.length - 1) * 2 > plus.x - home.x - home.w,
+      "natural widths exceed the strip");
+    for (const file of files) {
+      await open(file);
+      const tab = await mark(file);
+      t.near(tab.w, single.get(file)!, 1, baseName(file) + " keeps its single-tab width and is fully visible");
+      t.ok(tab.x >= home.x + home.w - 1 && tab.x + tab.w <= plus.x + 1, "active tab is inside the strip");
+    }
+    // Both trailing tabs are visible after scrolling to the end. Drag across their midpoint.
+    await open(files[4]);
+    const from = await mark(files[5]);
+    const before = await mark(files[4]);
+    await t.systemDrag(center(from), { x: before.x + 6, y: center(from).y }, { steps: 16 });
+    await t.settle();
+    t.eq((await t.state()).openFiles, [files[0], files[1], files[2], files[3], files[5], files[4]], "overflow tabs reorder");
+    await shot(t, "tabs-overflow");
+  } catch (error) {
+    await shot(t, "tabs-overflow-failure");
+    throw error;
+  } finally {
+    for (const file of files) await t.app.cmd({ op: "close", args: { file } });
+    await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });
+  }
+});
+
 sc("comments", "Comment hint shares the canvas center and zoom center", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
   const initial = await t.state();
   await t.settle();
@@ -525,7 +575,7 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   t.ok(fs.existsSync(final), "Escape cancels rename");
   t.ok(!fs.existsSync(path.join(t.app.docs, "cancelled-name.canvas")), "Escape creates no renamed file");
   t.eq((await t.marks({ id: "tab-rename" })).length, 0, "Escape closes the rename field");
-  await t.doubleClick(point(await tab("tab-double-renamed")));
+  await t.systemClick(point(await tab("tab-double-renamed")), { count: 2 });
   await t.mark({ id: "tab-rename" });
   await t.type("tab-away-renamed");
   await t.click(center(await t.mark({ id: "home-tab" })));

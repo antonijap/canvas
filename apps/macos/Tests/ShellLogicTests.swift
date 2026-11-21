@@ -84,14 +84,14 @@ struct ShellLogicTests {
     }
 
     static func tabSizing() {
-        let full: [CGFloat] = [340, 200, 120]
-        check(TabSizing.widths(natural: full, available: 664, minimum: 96) == full, "full names when there is room, including names over 180 pt")
-        check(TabSizing.widths(natural: [240, 200, 160], available: 484, minimum: 96) == [160, 160, 160], "crowded: the longest names shrink first, short names stay whole")
-        check(TabSizing.widths(natural: [300, 120, 100], available: 354, minimum: 96) == [130, 120, 100], "a long name gives up its width before a short one is cut")
-        check(TabSizing.widths(natural: [150, 260, 170, 300, 150], available: 838, minimum: 96) == [150, 180, 170, 180, 150], "short file names stay whole next to long ones")
-        check(TabSizing.widths(natural: full, available: 100, minimum: 96) == [96, 96, 96], "scroll when even minimum widths do not fit, including the active tab")
-        check(TabSizing.widths(natural: [], available: 100, minimum: 96).isEmpty, "no tabs")
-        check(TabSizing.widths(natural: [40, 200], available: 500, minimum: 96) == [96, 200], "short names still keep room for controls")
+        let full: [CGFloat] = [240, 200, 120]
+        check(TabSizing.widths(natural: full, available: 300, minimum: 96, maximum: 240) == full, "crowded tabs keep their natural widths")
+        check(TabSizing.widths(natural: [600], available: 800, minimum: 96, maximum: 240) == [240], "an extremely long name caps at 240")
+        check(TabSizing.widths(natural: [200, 600], available: 150, minimum: 96, maximum: 240) == [150, 150], "each tab fits within the available strip")
+        check(TabSizing.widths(natural: [40, 200], available: 500, minimum: 96, maximum: 240) == [96, 200], "minimum leaves room for controls")
+        check(TabSizing.widths(natural: [40, 200], available: 60, minimum: 96, maximum: 240) == [60, 60], "strip width takes priority over minimum")
+        check(TabSizing.widths(natural: [], available: 100, minimum: 96, maximum: 240).isEmpty, "no tabs")
+        check(TabSizing.widths(natural: [200], available: 0, minimum: 96, maximum: 240) == [0], "no strip room")
     }
 
     static func fileTabs() {

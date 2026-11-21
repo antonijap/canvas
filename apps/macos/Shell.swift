@@ -195,7 +195,7 @@ struct TopBar: View {
             let titleWidth = (model.name(of: file) as NSString).size(withAttributes: [.font: font]).width
             return ceil(titleWidth) + chromeWidth
         }
-        return TabSizing.widths(natural: natural, available: tabRoom, minimum: Metric.tabMin)
+        return TabSizing.widths(natural: natural, available: tabRoom, minimum: Metric.tabMin, maximum: Metric.tabMax)
     }
     private var stripWidth: CGFloat {
         min(tabRoom, fittedWidths.reduce(0, +) + CGFloat(max(0, model.openFiles.count - 1)) * 2)
