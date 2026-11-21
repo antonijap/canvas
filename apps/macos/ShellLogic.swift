@@ -1251,6 +1251,29 @@ enum RepeatHint {
     static func title(_ label: String?) -> String { label.map { "Repeat \($0)" } ?? "Repeat" }
 }
 
+enum DrawTool: String, CaseIterable {
+    case frame, rectangle, ellipse, text
+
+    var title: String { rawValue.capitalized }
+    var command: String { "draw-" + rawValue }
+    var key: String {
+        switch self {
+        case .frame: return "f"
+        case .rectangle: return "r"
+        case .ellipse: return "o"
+        case .text: return "t"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .frame: return "number"
+        case .rectangle: return "rectangle"
+        case .ellipse: return "circle"
+        case .text: return "textformat"
+        }
+    }
+}
+
 /// The menu bar: what each menu holds, in order, with its key. main.swift wires each command to its action;
 /// Tests/ShellLogicTests.swift checks the table (every expected item there, no key used twice).
 enum MenuSpec {
@@ -1345,6 +1368,10 @@ enum MenuSpec {
     static let view: [Entry] = [
         // Cmd+/ opens it too (the quick actions key); Palette.swift handles both keys before the menus.
         Item(title: "Quick Actions\u{2026}", command: "palette", key: "k"),
+        nil,
+    ] + DrawTool.allCases.map { tool in
+        Item(title: "Draw " + tool.title, command: tool.command, key: tool.key, mods: [], pageKey: true)
+    } + [
         nil,
         Item(title: "Zoom In", command: "zoomIn", key: "="),
         Item(title: "Zoom Out", command: "zoomOut", key: "-"),

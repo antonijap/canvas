@@ -1180,7 +1180,8 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 #sel.tiny i,#sel.locked i{display:none}
 #sel i{position:absolute;width:8px;height:8px;background:#fff;border:1px solid var(--ov);box-sizing:border-box}
 #sel i:nth-child(1){left:-4px;top:-4px}#sel i:nth-child(2){right:-4px;top:-4px}#sel i:nth-child(3){left:-4px;bottom:-4px}#sel i:nth-child(4){right:-4px;bottom:-4px}
-#seldim{position:absolute;left:50%;top:100%;transform:translate(-50%,8px);background:var(--ov);color:#fff;font:500 11px/16px var(--c-font-sans);padding:0 6px;border-radius:4px;white-space:nowrap;font-variant-numeric:tabular-nums}
+#draw-preview{position:absolute;display:none;pointer-events:none;z-index:4;box-shadow:inset 0 0 0 1px var(--c-sel);--ov:var(--c-sel)}
+#seldim,#draw-size{position:absolute;left:50%;top:100%;transform:translate(-50%,8px);background:var(--ov);color:#fff;font:500 11px/16px var(--c-font-sans);padding:0 6px;border-radius:4px;white-space:nowrap;font-variant-numeric:tabular-nums}
 #props{position:fixed;right:0;top:0;bottom:0;width:var(--c-props-width);box-sizing:border-box;overflow:auto;background:var(--c-sidebar);border-left:1px solid var(--c-sidebar-border);padding:40px 14px 14px;z-index:5;color:var(--c-sidebar-fg)}
 #props h2{margin:0 0 2px;font-size:var(--c-size-sm);font-weight:600}
 #props .tid{color:var(--c-muted-fg);font-size:var(--c-size-2xs);margin-bottom:8px;word-break:break-all}
@@ -1867,6 +1868,7 @@ async function engineLoad(list) {
 /** The size badge under a selection: the inspector's numbers (two decimals at most), so H 92.8 is 92.8 on both. */
 const dimNum = (v) => String(Math.round(v * 100) / 100);
 const dimText = (r) => dimNum(r.w) + " × " + dimNum(r.h);
+host.dimText = dimText;
 /** The badge's text: a rotated layer shows its own W × H (as the inspector does), not its bounding box. */
 function badgeText(r) {
   const sh = selShape();
@@ -2692,14 +2694,14 @@ function sendMove(body) {
 }
 // What a moving thing may snap to: boards and widgets on this page for a board or a widget, the siblings and
 // the parent for a layer. Only the ones near the view: you align to what you can see.
-function candsFor(kind, id) {
+function candsFor(kind, id, siblings = selMove?.siblings, parentId = selMove?.parentId) {
   const out = [];
   if (kind === "node") {
-    for (const s of (selMove && selMove.siblings) || []) { const r = worldRectOf(s); if (r) out.push({ id: s, x: r.x, y: r.y, w: r.w, h: r.h }); }
-    const pr = selMove && selMove.parentId ? worldRectOf(selMove.parentId) : null;
-    if (pr) out.push({ id: selMove.parentId, x: pr.x, y: pr.y, w: pr.w, h: pr.h });
+    for (const s of siblings || []) { const r = worldRectOf(s); if (r) out.push({ id: s, x: r.x, y: r.y, w: r.w, h: r.h }); }
+    const pr = parentId ? worldRectOf(parentId) : null;
+    if (pr) out.push({ id: parentId, x: pr.x, y: pr.y, w: pr.w, h: pr.h });
     // The parent frame's layout guides (columns, rows, grid), while they show (src/page/navigate.js).
-    if (selMove && host.layoutGuideRects) for (const g of host.layoutGuideRects(selMove.parentId)) out.push(g);
+    if (parentId && host.layoutGuideRects) out.push(...host.layoutGuideRects(parentId));
   } else {
     // A group moving: none of its own boards or cards is something to snap to.
     const skip = kind === "group" && mv && mv.exclude ? mv.exclude : null;
@@ -2739,6 +2741,15 @@ host.snapRect = (s, r, e) => { const o = snapQuery(s, r, e); paintGuides(o.guide
 host.snapEnd = () => clearGuides();
 // Live edits and resize handles (/page/live.js) draw through these.
 host.snapIndex = (kind, id) => (snapLib && cam ? snapLib.snapIndex(candsFor(kind, id)) : null);
+// A new layer has no move info yet. Use the same parent, sibling and guide candidates as an existing layer.
+host.drawSnapIndex = (parent) => {
+  if (!snapLib || !cam || !snapCfg.objects) return null;
+  if (!parent) return host.snapIndex("board");
+  const siblings = mode === "dom"
+    ? [...(liveEl(parent)?.querySelectorAll("[data-id]") ?? [])].map((e) => e.dataset.id).filter((id) => chainOf(id).length === 2)
+    : (host.live?.sceneOf(parent)?.root.children ?? []).map((n) => n.id);
+  return snapLib.snapIndex(candsFor("node", null, siblings, parent));
+};
 host.paintGuides = (gs) => paintGuides(gs);
 host.clearGuides = () => clearGuides();
 host.moveInfo = (id) => (selMove && selMove.id === id ? selMove : null);

@@ -472,6 +472,7 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
         let many = (sel?.ids.count ?? 0) > 1
         let editable = hasSel && !(sel?.isPath ?? false) && !(sel?.inInstance ?? false)
         func applies(_ cmd: String) -> Bool {
+            if DrawTool.allCases.contains(where: { $0.command == cmd }) { return model.canDraw }
             switch cmd {
             case "new", "open", "settings", "zoomIn", "zoomOut", "zoom100", "zoomFit", "zoomSelection", "toggleUI", "toggleProperties", "selectAll", "selectInverse", "collapseLayers": return true
             case "closeTab", "copyLink": return model.currentFile != nil
@@ -494,7 +495,7 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
         func fromMenus(_ titles: [String]) {
             for (title, entries) in MenuSpec.menus where titles.contains(title) {
                 for e in entries {
-                    guard let i = e, !i.command.isEmpty, i.command != "palette", let symbol = symbols[i.command] else { continue }
+                    guard let i = e, !i.command.isEmpty, i.command != "palette", let symbol = symbols[i.command] ?? DrawTool.allCases.first(where: { $0.command == i.command })?.symbol else { continue }
                     if ["Canvas", "File"].contains(title) && !wanted.contains(i.command) { continue }
                     let cmd = i.command
                     // Repeat names the edit it does again ("Repeat Fill Change"), like its menu item.
@@ -685,7 +686,9 @@ private struct PaletteRow: View {
                     Text(d).font(Typography.micro).monospacedDigit().foregroundStyle(Palette.mutedFg).lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: 220, alignment: .trailing).fixedSize(horizontal: d.count < 34, vertical: false).layoutPriority(1)
                 }
-                if !item.shortcut.isEmpty {
+                if item.shortcut.count == 1 {
+                    Keycaps(keys: [item.shortcut])
+                } else if !item.shortcut.isEmpty {
                     Text(item.shortcut).font(Typography.label).foregroundStyle(Palette.mutedFg).lineLimit(1).fixedSize()
                 }
             }

@@ -765,6 +765,10 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   /// View > Pixel Grid (Cmd+') and Rulers (Shift+R, the page's key): src/page/navigate.js toggles and answers {view}.
   @objc func pixelGrid(_ s: Any?) { model.run("{cmd:'nav',op:'grid'}") }
   @objc func rulers(_ s: Any?) { model.run("{cmd:'nav',op:'rulers'}") }
+  @objc func draw(_ item: NSMenuItem) {
+    guard let type = item.representedObject as? String, let tool = DrawTool(rawValue: type) else { return }
+    model.draw(tool)
+  }
   /// View > Layout Guides (Control+G, the page's key): frames' grids, columns and rows (src/page/navigate.js).
   @objc func layoutGuides(_ s: Any?) { model.run("{cmd:'nav',op:'layoutGuides'}") }
   @objc func toggleUI(_ s: Any?) { model.uiHidden.toggle() }
@@ -802,6 +806,8 @@ final class MenuActions: NSObject, NSMenuItemValidation {
       item.state = model.layoutGuides ? .on : .off
       // The menu owns Control+G: a Control+letter the menu declines never reaches the page (WebKit drops it).
       return model.currentFile != nil
+    case #selector(draw(_:)):
+      return model.canDraw && !(key && (webHasFocus || nativeText))
     case #selector(rulers(_:)):
       item.state = model.rulers ? .on : .off
       // Shift+R is the page's key on the canvas, and an "R" typed in a field is text.
@@ -840,6 +846,9 @@ let themePicker = ThemePicker()
 
 /// Each MenuSpec command's target and action. Items whose page op rides on them carry it as representedObject.
 func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op: String?)? {
+  if let tool = DrawTool.allCases.first(where: { $0.command == command }) {
+    return (menuActions, #selector(MenuActions.draw(_:)), tool.rawValue)
+  }
   switch command {
   case "about": return (menuActions, #selector(MenuActions.about(_:)), nil)
   case "settings": return (menuActions, #selector(MenuActions.settings(_:)), nil)

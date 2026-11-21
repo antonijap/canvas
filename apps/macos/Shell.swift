@@ -342,6 +342,17 @@ struct TopBar: View {
             WindowDragArea().frame(maxWidth: .infinity).frame(height: Metric.pill)
 
             HStack(spacing: Metric.islandGap) {
+                if model.currentFile != nil && !model.homeShown && !model.cloudReadOnly {
+                    GlassPill {
+                        HStack(spacing: 0) {
+                            ForEach(DrawTool.allCases, id: \.self) { tool in
+                                IconButton(symbol: tool.symbol, help: tool.title, shortcut: tool.key.uppercased()) { model.draw(tool) }
+                                    .qaID("draw-tool", label: tool.title)
+                            }
+                        }
+                    }
+                    .disabled(!model.canDraw)
+                }
                 LivePeopleStrip(model: model)
                 GlassPill {
                 HStack(spacing: 0) {

@@ -35,6 +35,12 @@ features:
     driven: [page, native, mcp]
     cases: [snap, persistence, zoom, inspector, undo]
 
+  - id: draw
+    name: Draw boards and layers
+    area: canvas
+    driven: [page, native]
+    cases: [board, rectangle, ellipse, text, cancel, toolbar, menu, palette]
+
   - id: render
     name: Every node type draws on the engine renderer
     area: canvas

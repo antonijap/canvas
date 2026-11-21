@@ -21,24 +21,26 @@ extension EnvironmentValues {
 
 extension View {
     /// `.help(text)`, except in the titlebar strip, where AppKit shows no tooltips: there, the same text in a tip of ours.
-    func chromeHelp(_ text: String) -> some View { modifier(ChromeHelp(text: text)) }
+    func chromeHelp(_ text: String, shortcut: String? = nil) -> some View { modifier(ChromeHelp(text: text, shortcut: shortcut)) }
 }
 
 private struct ChromeHelp: ViewModifier {
     let text: String
+    let shortcut: String?
+    private var hint: String { shortcut.map { "\(text)  \($0)" } ?? text }
     @Environment(\.titlebarTips) private var own
     @State private var token = UUID()
 
     func body(content: Content) -> some View {
         if own && !text.isEmpty {
             content
-                .accessibilityHint(text)
+                .accessibilityHint(hint)
                 .onHover { inside in
-                    if inside { ChromeTip.shared.hover(text, owner: token) } else { ChromeTip.shared.leave(owner: token) }
+                    if inside { ChromeTip.shared.hover(text, shortcut: shortcut, owner: token) } else { ChromeTip.shared.leave(owner: token) }
                 }
                 .onDisappear { ChromeTip.shared.leave(owner: token) }
         } else {
-            content.help(text)
+            content.help(hint)
         }
     }
 }
@@ -61,14 +63,14 @@ private struct ChromeHelp: ViewModifier {
         return ms > 0 ? Double(ms) / 1000 : 0.75
     }
 
-    func hover(_ text: String, owner id: UUID) {
+    func hover(_ text: String, shortcut: String?, owner id: UUID) {
         installMonitor()
         owner = id
         pending?.cancel()
         let quick = panel?.isVisible == true || Date().timeIntervalSince(hiddenAt) < 0.5
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.owner == id, NSApp.isActive else { return }
-            self.show(text)
+            self.show(text, shortcut: shortcut)
         }
         pending = work
         DispatchQueue.main.asyncAfter(deadline: .now() + (quick ? 0.05 : delay), execute: work)
@@ -86,9 +88,9 @@ private struct ChromeHelp: ViewModifier {
         if panel?.isVisible == true { hiddenAt = Date(); panel?.orderOut(nil) }
     }
 
-    private func show(_ text: String) {
+    private func show(_ text: String, shortcut: String?) {
         let panel = self.panel ?? makePanel()
-        host?.rootView = TipLabel(text: text)
+        host?.rootView = TipLabel(text: text, shortcut: shortcut)
         guard let host else { return }
         let size = host.fittingSize
         let mouse = NSEvent.mouseLocation
@@ -130,11 +132,16 @@ private struct ChromeHelp: ViewModifier {
 /// The tip itself: AppKit's tooltip look, in the shell's palette.
 struct TipLabel: View {
     let text: String
+    var shortcut: String? = nil
+
     var body: some View {
-        Text(text)
-            .font(Typography.micro)
-            .foregroundStyle(Palette.fg)
-            .lineLimit(4)
+        HStack(spacing: 6) {
+            Text(text)
+                .font(Typography.micro)
+                .foregroundStyle(Palette.fg)
+                .lineLimit(4)
+            if let shortcut { Keycaps(keys: [shortcut]) }
+        }
             .frame(maxWidth: 280, alignment: .leading)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 7).padding(.vertical, 4)

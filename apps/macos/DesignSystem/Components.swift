@@ -96,6 +96,7 @@ struct IconButton: View {
     let symbol: String
     var active = false
     var help: String = ""
+    var shortcut: String? = nil
     /// Bump to bounce the glyph (an add action just landed). Ignored under Reduce Motion.
     var bounce = 0
     let action: () -> Void
@@ -115,7 +116,7 @@ struct IconButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .chromeHelp(help)
+        .chromeHelp(help, shortcut: shortcut)
         .accessibilityLabel(help.isEmpty ? symbol : help)
         .accessibilityAddTraits(active ? .isSelected : [])
         .onHover { h in withAnimation(Motion.fast) { hovering = h } }

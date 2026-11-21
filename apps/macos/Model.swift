@@ -1232,6 +1232,12 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func showPage(_ id: String) { run("{cmd:'page',id:\(jsString(id))}"); focusCanvas() }
+    var canDraw: Bool { currentFile != nil && !homeShown && !cloudReadOnly && !textEditing }
+    func draw(_ tool: DrawTool) {
+        guard canDraw else { return }
+        run("{cmd:'draw',type:'\(tool.rawValue)'}")
+        focusCanvas()
+    }
     /// After a click in a list, keyboard shortcuts belong to the canvas again (unless a text field is being typed in).
     func focusCanvas() {
         guard let w = webView.window, !(w.firstResponder is NSText) else { return }
