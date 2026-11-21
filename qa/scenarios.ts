@@ -1508,3 +1508,4 @@ import "./scenarios-people.ts";
 import "./scenarios-mcp-background.ts";
 import './scenarios-design-helpers.ts';
 import './scenarios-context.ts';
+import "./scenarios-page-background.ts";

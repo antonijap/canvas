@@ -515,6 +515,11 @@ features:
     area: pages
     driven: [page, native, mcp]
     cases: [board, other-page, many, mouse, agent]
+  - id: page-background
+    name: Page canvas background and properties with nothing selected
+    area: page background
+    driven: [page, native, mcp]
+    cases: [set, reset, themes, undo, persistence, empty-selection]
   - id: page-crud
     name: Create, rename, reorder and delete pages (delete takes its boards, one undo)
     area: pages

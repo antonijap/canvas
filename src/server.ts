@@ -1373,7 +1373,7 @@ window.canvasHost = host;
 const isW = (id) => typeof id === "string" && id.startsWith("widget:");
 const pageMetas = () => (doc ? doc.boards.filter((b) => pageBoards.has(b.id)) : []);
 const docMsg = () => doc && ({ name: doc.name, revision: doc.revision, boards: pageMetas().map((b) => ({ id: b.id, name: b.name, width: b.width, height: b.height })), components: doc.components, styles: doc.styles, variables: doc.variables, tokens: doc.tokens });
-const pagesMsg = () => ({ active: activePage, implicit: pageImplicit, list: pageList.map((p) => ({ id: p.id, name: p.name, count: p.boards.length })) });
+const pagesMsg = () => ({ active: activePage, implicit: pageImplicit, list: pageList.map((p) => ({ id: p.id, name: p.name, count: p.boards.length, background: p.background ?? null })) });
 
 // ---------- camera loop ----------
 // Wheel, pointer and commands only change cam and ask for a frame. One rAF applies it: transform, labels,
@@ -2048,6 +2048,8 @@ function setDoc(d) {
     if (cam) { endTween(true); cam = null; restoredCam = false; zeroFit = false; if (sel) deselect(); }
     activePage = pg.id;
   }
+  view.style.backgroundColor = pg.background || "";
+  if (ev) ev.syncBg();
   pageBoards = new Set(pg.boards);
   const seen = new Set();
   let idx = 0, reordered = false;

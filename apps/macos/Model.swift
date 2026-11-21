@@ -13,7 +13,7 @@ struct TextStyle: Identifiable { let id = UUID(); let title: String; let count: 
 struct Variable: Identifiable { let id: String; let value: String; let isColor: Bool }
 struct FileEntry: Identifiable, Equatable { var id: String { file }; let name: String; let file: String }
 /// One of the document's pages (Canvas metadata; the file has none). `count` is how many boards it shows.
-struct PageInfo: Identifiable, Equatable { let id: String; let name: String; let count: Int }
+struct PageInfo: Identifiable, Equatable { let id: String; let name: String; let count: Int; var background: String? = nil }
 
 /// The space between the layers of a smart selection (nil on an axis it does not run along).
 struct SmartSpacing: Equatable {
@@ -244,9 +244,6 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
     }
 
-    /// Something the properties panel can show: a node or a widget.
-    var hasInspectable: Bool { selection != nil || selectedWidgetId != nil }
-
     let base: URL
     let fonts = FontCatalog()
     /// The Edit menu's target (main.swift): the right-click menu sends its Cut/Copy/Paste/Group/Arrange items to it,
@@ -290,7 +287,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         if let p = m["pages"] as? [String: Any] {
             pages = (p["list"] as? [[String: Any]] ?? []).compactMap { d in
                 guard let id = d["id"] as? String else { return nil }
-                return PageInfo(id: id, name: d["name"] as? String ?? id, count: (d["count"] as? NSNumber)?.intValue ?? 0)
+                return PageInfo(id: id, name: d["name"] as? String ?? id, count: (d["count"] as? NSNumber)?.intValue ?? 0, background: d["background"] as? String)
             }
             activePage = p["active"] as? String
         }
@@ -1079,6 +1076,27 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func fit(_ id: String? = nil) { run("{cmd:'fit',id:\(id.map { "'\($0)'" } ?? "null")\(insetsArg)}") }
     /// The boards list: select the board and fly the camera to it.
     func fly(_ id: String) { run("{cmd:'fly',id:\(jsString(id))}"); focusCanvas() }
+    func setPageBackground(_ color: String?, page: String) {
+        guard !cloudReadOnly, let file = currentFile,
+              let index = pages.firstIndex(where: { $0.id == page }) else { return }
+        let background = color.flatMap { PaintLogic.withAlpha($0, percent: 100) }?.uppercased()
+        guard color == nil || background?.range(of: "^#[0-9A-F]{6}$", options: .regularExpression) != nil else { return }
+        guard pages[index].background != background else { return }
+        guard var parts = URLComponents(url: base.appendingPathComponent("api/pages/" + page), resolvingAgainstBaseURL: false) else { return }
+        parts.setQuery([URLQueryItem(name: "file", value: file)])
+        guard let url = parts.url else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PATCH"
+        req.setValue("1", forHTTPHeaderField: "X-Canvas")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["background": background as Any? ?? NSNull()])
+        URLSession.shared.dataTask(with: req) { _, response, _ in
+            if (response as? HTTPURLResponse)?.statusCode != 200 {
+                DispatchQueue.main.async { self.flash("Could not change the page background") }
+            }
+        }.resume()
+    }
+
     func showPage(_ id: String) { run("{cmd:'page',id:\(jsString(id))}"); focusCanvas() }
     /// After a click in a list, keyboard shortcuts belong to the canvas again (unless a text field is being typed in).
     func focusCanvas() {

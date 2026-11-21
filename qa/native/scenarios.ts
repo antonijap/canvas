@@ -1507,3 +1507,4 @@ sc("inspector", "letter spacing: the token button on hover sits beside the numbe
 });
 import "./scenarios-mcp-background.ts";
 import './scenarios-context.ts';
+import "./scenarios-page-background.ts";

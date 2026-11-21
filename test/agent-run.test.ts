@@ -76,7 +76,7 @@ describe("harness command lines", () => {
   });
 
   test("the denied tools leave the selection alone: files, camera, selection, pages, widgets, history", () => {
-    for (const t of ["open_file", "launch_canvas", "close_tab", "select_nodes", "clear_selection", "fit_view", "pan_view", "set_zoom", "delete_page", "add_widget", "undo", "redo", "wait_for_selection", "export_shader"]) assert.ok(DENIED_TOOLS.includes(t), t);
+    for (const t of ["open_file", "launch_canvas", "close_tab", "select_nodes", "clear_selection", "fit_view", "pan_view", "set_zoom", "delete_page", "set_page_background", "add_widget", "undo", "redo", "wait_for_selection", "export_shader"]) assert.ok(DENIED_TOOLS.includes(t), t);
     for (const t of ["inspect_node", "set_node_props", "add_nodes", "render_node", "finish_work"]) assert.ok(!DENIED_TOOLS.includes(t), t);
   });
 

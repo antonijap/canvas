@@ -23,13 +23,13 @@ export async function activeFor(file: string): Promise<string | null> {
 }
 
 export function register(server: McpServer) {
-  tool(server, "list_pages", "The document's pages in order, each with its board ids (document order). The first page is the default page: boards no page lists show there. active is the page the open canvas shows, when one is open. Works with Canvas closed. The document's revision is in get_document_summary.", { file: S.file }, async (a) => {
+  tool(server, "list_pages", "The document's pages in order, each with its board ids (document order) and background (#RRGGBB, or null for the theme canvas colour). The first page is the default page: boards no page lists show there. active is the page the open canvas shows, when one is open. Works with Canvas closed. The document's revision is in get_document_summary.", { file: S.file }, async (a) => {
     await ensureServer();
     const file = await resolveFile(a.file);
     // `rev` is the page list's own write guard (a hash of the sidecar Canvas keeps beside the design), not the
     // document's revision, and no page tool takes it: left out so it is not mistaken for one.
     const { rev: _rev, ...r } = await api<any>("GET", `/api/pages?file=${enc(file)}`);
-    return { ...r, active: await activeFor(file) };
+    return { ...r, pages: r.pages.map((p: any) => ({ ...p, background: p.background ?? null })), active: await activeFor(file) };
   }, { readOnlyHint: true });
 
   tool(server, "create_page", "Add a page. name defaults to \"Page N\"; index places it (default last); boards moves those boards onto it.", {
@@ -40,6 +40,15 @@ export function register(server: McpServer) {
   }, async (a) => {
     await ensureServer();
     return api("POST", `/api/pages?file=${enc(await resolveFile(a.file))}`, { name: a.name, index: a.index, boards: a.boards });
+  });
+
+  tool(server, "set_page_background", "Set a page's canvas background to #RRGGBB, used in both themes. Pass color: null to reset to the theme canvas colour. Stored with the page in the .canvas package. Uses Canvas undo history; MCP edits group until finish_work. Rendering only; board exports are unchanged. Works with Canvas closed and in background/headless mode with an explicit file.", {
+    file: S.file,
+    page: pageId,
+    color: z.string().regex(/^#[0-9a-f]{6}$/i).nullable(),
+  }, async (a) => {
+    await ensureServer();
+    return api("PATCH", `/api/pages/${enc(a.page)}?file=${enc(await resolveFile(a.file))}`, { background: a.color });
   });
 
   tool(server, "rename_page", "Rename a page, and optionally move it to another position (index).", {
