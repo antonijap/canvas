@@ -23,13 +23,13 @@ export async function activeFor(file: string): Promise<string | null> {
 }
 
 export function register(server: McpServer) {
-  tool(server, "list_pages", "The document's pages in order, each with its board ids (document order) and background (#RRGGBB, or null for the theme canvas colour). The first page is the default page: boards no page lists show there. active is the page the open canvas shows, when one is open. Works with Canvas closed. The document's revision is in get_document_summary.", { file: S.file }, async (a) => {
+  tool(server, "list_pages", "The document's pages in order, each with its board ids (document order) a background (#RRGGBB, or null for the theme canvas colour), and a pattern (Blueprint settings or null). The first page is the default page: boards no page lists show there. active is the page the open canvas shows, when one is open. Works with Canvas closed. The document's revision is in get_document_summary.", { file: S.file }, async (a) => {
     await ensureServer();
     const file = await resolveFile(a.file);
     // `rev` is the page list's own write guard (a hash of the sidecar Canvas keeps beside the design), not the
     // document's revision, and no page tool takes it: left out so it is not mistaken for one.
     const { rev: _rev, ...r } = await api<any>("GET", `/api/pages?file=${enc(file)}`);
-    return { ...r, pages: r.pages.map((p: any) => ({ ...p, background: p.background ?? null })), active: await activeFor(file) };
+    return { ...r, pages: r.pages.map((p: any) => ({ ...p, background: p.background ?? null, pattern: p.pattern ?? null })), active: await activeFor(file) };
   }, { readOnlyHint: true });
 
   tool(server, "create_page", "Add a page. name defaults to \"Page N\"; index places it (default last); boards moves those boards onto it.", {
@@ -49,6 +49,21 @@ export function register(server: McpServer) {
   }, async (a) => {
     await ensureServer();
     return api("PATCH", `/api/pages/${enc(a.page)}?file=${enc(await resolveFile(a.file))}`, { background: a.color });
+  });
+
+  tool(server, "set_page_pattern", "Set a local page's Blueprint pattern over its background. Opacity is a percentage. Omit lineColor for automatic contrast, or pass pattern: null to remove the grid. Works with Canvas closed and uses Canvas undo history.", {
+    file: S.file,
+    page: pageId,
+    pattern: z.object({
+      kind: z.literal("blueprint"),
+      spacing: z.number().int().min(4).max(256),
+      major: z.number().int().min(1).max(32),
+      opacity: z.number().int().min(0).max(100),
+      lineColor: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+    }).nullable(),
+  }, async (a) => {
+    await ensureServer();
+    return api("PATCH", `/api/pages/${enc(a.page)}?file=${enc(await resolveFile(a.file))}`, { pattern: a.pattern });
   });
 
   tool(server, "rename_page", "Rename a page, move it to a zero-based index, or do both.", {

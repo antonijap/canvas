@@ -143,6 +143,8 @@ struct FrameStats {
 #[wasm_bindgen]
 pub struct Engine {
     gpu: Gpu,
+    blueprint: Vec<f32>,
+    blueprint_color: [f32; 4],
     /// Since the engine started: tiles rendered whole, tiles brought up to date in place, px rendered.
     whole_tiles: u64,
     partial_tiles: u64,
@@ -281,6 +283,8 @@ impl Engine {
         gpu.tiles.budget = tile_budget_for(canvas.width(), canvas.height());
         Ok(Engine {
             gpu,
+            blueprint: Vec::new(),
+            blueprint_color: [0.0; 4],
             whole_tiles: 0,
             partial_tiles: 0,
             batched_tiles: 0,
@@ -1498,7 +1502,15 @@ impl Engine {
         // together, so tiles meet without a seam. Once the zoom settles, exact tiles replacing current
         // stand-ins are revealed together when the last one is ready (at most `REVEAL_MAX_MS` later),
         // not one by one: the view sharpens in one step instead of popping tile by tile.
-        let mut quads: Vec<(Source, Quad)> = Vec::new();
+        let mut quads = Vec::with_capacity(self.blueprint.len() / 3);
+        let width = (self.css.0 * dpr).round() as f32;
+        let height = (self.css.1 * dpr).round() as f32;
+        let [r, g, b, _] = self.blueprint_color;
+        for line in self.blueprint.chunks_exact(3) {
+            let [axis, at, a] = [line[0], line[1], line[2]];
+            let rect = if axis == 0.0 { [at, 0.0, at + 1.0, height] } else { [0.0, at, width, at + 1.0] };
+            quads.push((Source::White, Quad { rect, uv: [0.0, 0.0, 1.0, 1.0], tint: [r * a, g * a, b * a, a], scissor: None, extra: [0.0; 4] }));
+        }
         let white = [1.0, 1.0, 1.0, 1.0];
         let (dw, dh) = self.gpu.size();
         let mut unfresh = 0u32;
@@ -2811,6 +2823,15 @@ impl Engine {
             }
             None => false,
         }
+    }
+
+    /// Device-pixel blueprint lines, packed as axis (0 vertical, 1 horizontal), position, opacity.
+    #[wasm_bindgen(js_name = setBlueprint)]
+    pub fn set_blueprint(&mut self, color: &str, lines: &[f32]) {
+        self.blueprint_color = parse_color(color).map_or([0.0; 4], |c| c.components);
+        self.blueprint.clear();
+        self.blueprint.extend_from_slice(lines);
+        self.dirty = true;
     }
 
     /// What text without `fontSize` / `lineHeight` inherits from the page (html.ts sets neither,

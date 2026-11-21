@@ -7,7 +7,7 @@
 // thousands of rects. The threshold is in screen pixels, so snapping feels the same at every zoom.
 
 export const SNAP_PX = 6;
-export const DEFAULT_SNAP = { objects: true, pixel: true, guides: true, bigNudge: 10 };
+export const DEFAULT_SNAP = { objects: true, pixel: true, blueprint: true, guides: true, bigNudge: 10 };
 
 /** Settings from storage or the shell, with defaults for anything missing or malformed. */
 export function snapSettings(v) {
@@ -16,6 +16,7 @@ export function snapSettings(v) {
   return {
     objects: typeof o.objects === "boolean" ? o.objects : DEFAULT_SNAP.objects,
     pixel: typeof o.pixel === "boolean" ? o.pixel : DEFAULT_SNAP.pixel,
+    blueprint: typeof o.blueprint === "boolean" ? o.blueprint : DEFAULT_SNAP.blueprint,
     guides: typeof o.guides === "boolean" ? o.guides : DEFAULT_SNAP.guides,
     bigNudge: Number.isFinite(big) && big >= 1 && big <= 1000 ? Math.round(big) : DEFAULT_SNAP.bigNudge,
   };
@@ -81,6 +82,19 @@ function bestOffset(ax, a, s, tol) {
   return best;
 }
 
+export function gridOffset(value, spacing, tolerance) {
+  if (!(spacing > 0)) return null;
+  const delta = Math.round(value / spacing) * spacing - value;
+  return Math.abs(delta) <= tolerance ? delta : null;
+}
+
+function gridMove(a, size, spacing, tol, originOnly) {
+  const start = gridOffset(a, spacing, tol);
+  if (originOnly) return start;
+  const end = gridOffset(a + size, spacing, tol);
+  return end !== null && (start === null || Math.abs(end) < Math.abs(start)) ? end : start;
+}
+
 const EPS = 0.5; // world px: lines this close after rounding count as aligned
 
 /**
@@ -91,13 +105,14 @@ const EPS = 0.5; // world px: lines this close after rounding count as aligned
 export function snapRect(index, r, o = {}) {
   const z = o.z > 0 ? o.z : 1;
   const tol = (o.threshold ?? SNAP_PX) / z;
-  let x = r.x, y = r.y;
-  if (o.objects !== false && index && index.rects.length) {
-    const bx = bestOffset(index.x, r.x, r.w, tol), by = bestOffset(index.y, r.y, r.h, tol);
-    if (bx) x += bx.d;
-    if (by) y += by.d;
-  }
-  if (o.pixel !== false) { x = Math.round(x); y = Math.round(y); }
+  const place = (axis, start, size) => {
+    const object = o.objects !== false && index?.rects.length ? bestOffset(index[axis], start, size, tol) : null;
+    const grid = gridMove(start, size, o.grid, tol, o.gridOrigin);
+    if (grid !== null && (!object || Math.abs(grid) < Math.abs(object.d))) return start + grid;
+    const value = start + (object?.d ?? 0);
+    return o.pixel !== false ? Math.round(value) : value;
+  };
+  const x = place("x", r.x, r.w), y = place("y", r.y, r.h);
   const out = { x, y, guides: [] };
   if (o.objects !== false && o.guides !== false && index && index.rects.length) out.guides = guidesFor(index, { x, y, w: r.w, h: r.h });
   return out;

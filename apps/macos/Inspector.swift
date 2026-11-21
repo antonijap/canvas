@@ -42,10 +42,89 @@ private struct PageInspector: View {
     @ObservedObject var model: CanvasModel
     let page: PageInfo
     @Environment(\.colorScheme) private var scheme
+    @State private var opacityDraft: Double?
 
     private var color: String { page.background ?? (scheme == .dark ? "#18181B" : "#F6F6F6") }
     private let cloudHint = "Page colours stay on local files for now"
     private func write(_ color: String) { model.setPageBackground(color, page: page.id) }
+
+    private var autoLineColor: String {
+        guard let rgb = UInt32(color.dropFirst(), radix: 16) else { return "#000000" }
+        let r = Double((rgb >> 16) & 255), g = Double((rgb >> 8) & 255), b = Double(rgb & 255)
+        return r * 0.2126 + g * 0.7152 + b * 0.0722 > 140 ? "#000000" : "#FFFFFF"
+    }
+
+    private func editPattern(_ change: (inout BlueprintPattern) -> Void) {
+        guard var pattern = model.pages.first(where: { $0.id == page.id })?.pattern else { return }
+        change(&pattern)
+        model.setPagePattern(pattern, page: page.id)
+    }
+
+    private func modeButton(_ label: String, blueprint: Bool) -> some View {
+        let selected = (page.pattern != nil) == blueprint
+        return Button {
+            guard !selected else { return }
+            model.setPagePattern(blueprint ? BlueprintPattern() : nil, page: page.id)
+        } label: {
+            Text(label).font(Typography.label).frame(maxWidth: .infinity).padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: Metric.radiusField).fill(selected ? Palette.active : .clear))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .qaID(blueprint ? "page-blueprint" : "page-color")
+    }
+
+    private func gridNumber(_ label: String, key: WritableKeyPath<BlueprintPattern, Int>, value: Int, min: Double, max: Double) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(Typography.label).foregroundStyle(Palette.mutedFg).qaText(label)
+            NumberField(prefix: "", value: Double(value), minimum: min, maximum: max) { number in
+                editPattern { $0[keyPath: key] = Int(number.rounded()) }
+            }
+        }
+    }
+
+    private func gridControls(_ pattern: BlueprintPattern) -> some View {
+        let lineColor = pattern.lineColor ?? autoLineColor
+        let writeLineColor: (String) -> Void = { hex in
+            guard let value = PaintLogic.withAlpha(hex, percent: 100),
+                  value.range(of: "^#[0-9A-Fa-f]{6}$", options: .regularExpression) != nil else { return }
+            editPattern { $0.lineColor = value.uppercased() }
+        }
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                gridNumber("Spacing", key: \.spacing, value: pattern.spacing, min: 4, max: 256)
+                gridNumber("Major every", key: \.major, value: pattern.major, min: 1, max: 32)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Line visibility")
+                    Spacer()
+                    Text("\(Int(opacityDraft ?? Double(pattern.opacity)))%").monospacedDigit()
+                }
+                .font(Typography.label).foregroundStyle(Palette.mutedFg)
+                Slider(value: Binding(get: { opacityDraft ?? Double(pattern.opacity) }, set: { opacityDraft = $0 }),
+                       in: 0...100, step: 1) { editing in
+                    if !editing, let value = opacityDraft {
+                        editPattern { $0.opacity = Int(value) }
+                        opacityDraft = nil
+                    }
+                }
+                .accessibilityLabel("Line visibility")
+                .qaID("page-blueprint-opacity")
+            }
+            Text("Line color").font(Typography.label).foregroundStyle(Palette.mutedFg).qaText("Line color")
+            HStack(spacing: 4) {
+                ColorAlphaField(model: model, value: lineColor, enabled: !model.isCloudFile,
+                                swatch: AnyView(ColorSwatchButton(value: lineColor, enabled: !model.isCloudFile,
+                                                                 onChange: { _ in }, onCommit: writeLineColor)),
+                                showsOpacity: false, allowsTokens: false, write: writeLineColor)
+                MiniButton(symbol: "arrow.uturn.backward", help: "Reset line color") {
+                    editPattern { $0.lineColor = nil }
+                }
+                .disabled(pattern.lineColor == nil || model.isCloudFile)
+            }
+        }
+    }
 
     var body: some View {
         InspectorSection(title: "Page") {
@@ -62,6 +141,16 @@ private struct PageInspector: View {
                     .disabled(page.background == nil || model.isCloudFile)
                     .qaID("page-background-reset")
                 }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 2) {
+                        modeButton("Color", blueprint: false)
+                        modeButton("Blueprint", blueprint: true)
+                    }
+                    .padding(2)
+                    .background(RoundedRectangle(cornerRadius: Metric.radiusField).fill(Palette.field))
+                    if let pattern = page.pattern { gridControls(pattern) }
+                }
+                .disabled(model.isCloudFile)
                 if model.isCloudFile {
                     Text(cloudHint).font(Typography.label).foregroundStyle(Palette.mutedFg).qaText(cloudHint)
                 }

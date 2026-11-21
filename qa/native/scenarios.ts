@@ -1,3 +1,5 @@
+import "./scenarios-blueprint.ts";
+
 // Native scenarios (pnpm qa:native): what the browser runner cannot reach. The sidebar's drags, the SwiftUI
 // inspector's fields, menus, the palette and the Settings window, driven by real NSEvents in a QA instance of the
 // app. Each scenario starts on a fresh copy of demos/playground.canvas (pages Layout, Components, Style, Cards).

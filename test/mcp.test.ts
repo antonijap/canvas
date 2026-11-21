@@ -104,7 +104,7 @@ const TOOLS = [
   "list_shaders", "list_shader_presets", "create_shader", "update_shader", "export_shader",
   "list_videos", "add_video", "video_frame",
   "notify_user", "finish_work",
-  "list_pages", "set_page_background", "create_page", "rename_page", "duplicate_page", "delete_page", "move_boards_to_page", "set_active_page",
+  "list_pages", "set_page_background", "set_page_pattern", "create_page", "rename_page", "duplicate_page", "delete_page", "move_boards_to_page", "set_active_page",
   "make_variations", "list_variations", "keep_variation", "discard_variations", "get_product_brief", "set_product_brief", "get_design_context", "check_variation", "mark_variation",
   "resolve_link",
   "list_comments", "add_comment", "reply_comment", "resolve_comment",
@@ -818,9 +818,18 @@ describe("pages", () => {
     assert.match((await call("move_boards_to_page", { file, boards: ["Nope"], page: pid })).text, /^not_found: /);
     const sum = await call("get_document_summary", { file });
     assert.deepEqual(sum.json.pages.map((p: any) => p.name), ["Proposals", "Page 1"]);
+    const color = "#123456";
+    const pattern = { kind: "blueprint", spacing: 24, major: 6, opacity: 35, lineColor: "#ABCDEF" };
+    const background = await call("set_page_background", { file, page: pid, color });
+    assert.equal(background.isError, false, background.text);
+    const blueprint = await call("set_page_pattern", { file, page: pid, pattern });
+    assert.equal(blueprint.isError, false, blueprint.text);
     const copy = await call("duplicate_page", { file, id: pid });
     assert.equal(copy.isError, false, copy.text);
     assert.equal(copy.json.pages[1].name, "Proposals copy");
+    const duplicated = (await call("list_pages", { file })).json.pages[1];
+    assert.equal(duplicated.background, color);
+    assert.deepEqual(duplicated.pattern, pattern);
     assert.equal(copy.json.pages[1].boards.length, 2);
     assert.ok(copy.json.pages[1].boards.every((id: string) => !m.json.pages[0].boards.includes(id)));
     const restore = await call("delete_page", { file, id: copy.json.result });

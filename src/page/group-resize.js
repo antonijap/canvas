@@ -134,9 +134,10 @@ function start(host) {
     if (!rz.moved && Math.hypot(e.clientX - rz.cx, e.clientY - rz.cy) < 2) return;
     rz.moved = true;
     const snap = host.snap ? host.snap() : { pixel: true, objects: false };
-    rz.r = resizeRect(rz.r0, rz.h, (e.clientX - rz.cx) / c.z, (e.clientY - rz.cy) / c.z, { shift: e.shiftKey || rz.p.uniform, alt: e.altKey, round: false, min: 0.01, snap: snap.objects && !e.ctrlKey && rz.index ? edgeSnapper(rz.index, c.z) : null }); // Control: no snapping
+    const index = snap.objects && !e.ctrlKey && !host.blueprintBypass(e) ? rz.index : null;
+    rz.r = resizeRect(rz.r0, rz.h, (e.clientX - rz.cx) / c.z, (e.clientY - rz.cy) / c.z, { shift: e.shiftKey || rz.p.uniform, alt: e.altKey, round: false, min: 0.01, snap: edgeSnapper(index, c.z, undefined, host.blueprintSpacing(e)) });
     show(0);
-    if (host.paintGuides) host.paintGuides(snap.objects && !e.ctrlKey && rz.index ? resizeGuides(rz.index, rz.r) : []);
+    if (host.paintGuides) host.paintGuides(resizeGuides(index, rz.r));
   }, true);
   addEventListener("pointerup", (e) => { if (rz) { e.stopPropagation(); end(false); } }, true);
   addEventListener("pointercancel", (e) => { if (rz) { e.stopPropagation(); end(true); } }, true);

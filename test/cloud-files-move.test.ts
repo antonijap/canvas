@@ -72,7 +72,7 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                         { id: 'Note', kind: 'note', name: 'Note', x: 0, y: 120, w: 100, h: 100, locked: false, config: { text: 'Example' } },
                     ], pages: [
                         fixture === 'children first'
-                            ? { id: 'first', name: 'First', boards: [], background: '#123ABC' }
+                            ? { id: 'first', name: 'First', boards: [], background: '#123ABC', pattern: { kind: 'blueprint', spacing: 8, major: 4, opacity: 30 } }
                             : { id: 'first', name: 'First', boards: ['Board'] },
                         { id: 'second', name: 'Second', boards: fixture === 'children first' ? [] : ['Empty'] },
                         { id: 'third', name: 'Third', boards: [] },
@@ -86,7 +86,10 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     images.push({ rel, bytes });
                 }
                 const envelope = JSON.parse(fs.readFileSync(path.join(source, 'widgets.json'), 'utf8'));
-                if (fixture === 'children first') delete envelope.pages[0].background;
+                if (fixture === 'children first') {
+                    delete envelope.pages[0].background;
+                    delete envelope.pages[0].pattern;
+                }
                 const assets = ['media', 'shaders'].flatMap(folder => fs.readdirSync(path.join(source, folder))
                     .filter(name => fs.statSync(path.join(source, folder, name)).isFile() && !name.includes('.poster-'))
                     .map(name => ({ rel: folder + '/' + name, bytes: fs.readFileSync(path.join(source, folder, name)) })));
@@ -111,6 +114,11 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                         }));
                         for (const color of ['#456DEF', null]) {
                             const result = await client.callTool({ name: 'set_page_background', arguments: { file: moved.file, page: 'first', color } });
+                            assert.equal(result.isError, true);
+                            assert.match(JSON.stringify(result.content), /Page colours stay on local files for now/);
+                        }
+                        for (const pattern of [{ kind: 'blueprint', spacing: 8, major: 4, opacity: 30 }, null]) {
+                            const result = await client.callTool({ name: 'set_page_pattern', arguments: { file: moved.file, page: 'first', pattern } });
                             assert.equal(result.isError, true);
                             assert.match(JSON.stringify(result.content), /Page colours stay on local files for now/);
                         }

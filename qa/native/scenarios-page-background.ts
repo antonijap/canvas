@@ -84,6 +84,8 @@ async function checkCloudPageBackground(t: NT) {
     await t.click({ x: field.x - 14, y: field.y + field.h / 2 });
     t.ok(!(await t.state()).popoverShown, "Cloud colour picker stays closed");
     const page = (await t.state()).pages[0].id;
+    await t.click(center(await t.mark({ id: "page-blueprint" })));
+    t.eq(await t.js("return window.canvasHost.pages[0].pattern ?? null"), null, "Cloud Blueprint control stays off");
     const res = await fetch(t.app.base + `/api/pages/${encodeURIComponent(page)}?file=${encodeURIComponent(file)}`, {
       method: "PATCH",
       headers: { "x-canvas": "1", "content-type": "application/json" },

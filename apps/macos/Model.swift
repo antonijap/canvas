@@ -13,7 +13,38 @@ struct TextStyle: Identifiable { let id = UUID(); let title: String; let count: 
 struct Variable: Identifiable { let id: String; let value: String; let isColor: Bool }
 struct FileEntry: Identifiable, Equatable { var id: String { file }; let name: String; let file: String }
 /// One of the document's pages (Canvas metadata; the file has none). `count` is how many boards it shows.
-struct PageInfo: Identifiable, Equatable { let id: String; let name: String; let count: Int; var background: String? = nil }
+struct PageInfo: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let count: Int
+    var background: String? = nil
+    var pattern: BlueprintPattern? = nil
+}
+
+struct BlueprintPattern: Equatable {
+    var spacing = 8
+    var major = 8
+    var opacity = 35
+    var lineColor: String?
+
+    init() {}
+
+    init?(_ data: Any?) {
+        guard let data = data as? [String: Any], data["kind"] as? String == "blueprint",
+              let spacing = data["spacing"] as? Int, let major = data["major"] as? Int,
+              let opacity = data["opacity"] as? Int else { return nil }
+        self.spacing = spacing
+        self.major = major
+        self.opacity = opacity
+        self.lineColor = data["lineColor"] as? String
+    }
+
+    var json: [String: Any] {
+        var value: [String: Any] = ["kind": "blueprint", "spacing": spacing, "major": major, "opacity": opacity]
+        if let lineColor { value["lineColor"] = lineColor }
+        return value
+    }
+}
 
 /// The space between the layers of a smart selection (nil on an axis it does not run along).
 struct SmartSpacing: Equatable {
@@ -303,7 +334,8 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         if let p = m["pages"] as? [String: Any] {
             pages = (p["list"] as? [[String: Any]] ?? []).compactMap { d in
                 guard let id = d["id"] as? String else { return nil }
-                return PageInfo(id: id, name: d["name"] as? String ?? id, count: (d["count"] as? NSNumber)?.intValue ?? 0, background: d["background"] as? String)
+                return PageInfo(id: id, name: d["name"] as? String ?? id, count: (d["count"] as? NSNumber)?.intValue ?? 0,
+                                background: d["background"] as? String, pattern: BlueprintPattern(d["pattern"]))
             }
             activePage = p["active"] as? String
         }
@@ -1174,6 +1206,16 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         let background = color.flatMap { PaintLogic.withAlpha($0, percent: 100) }?.uppercased()
         guard color == nil || background?.range(of: "^#[0-9A-F]{6}$", options: .regularExpression) != nil else { return }
         guard pages[index].background != background else { return }
+        patchPage(["background": background as Any? ?? NSNull()], page: page, file: file)
+    }
+
+    func setPagePattern(_ pattern: BlueprintPattern?, page: String) {
+        guard !isCloudFile, let file = currentFile,
+              let current = pages.first(where: { $0.id == page }), current.pattern != pattern else { return }
+        patchPage(["pattern": pattern?.json as Any? ?? NSNull()], page: page, file: file)
+    }
+
+    private func patchPage(_ patch: [String: Any], page: String, file: String) {
         guard var parts = URLComponents(url: base.appendingPathComponent("api/pages/" + page), resolvingAgainstBaseURL: false) else { return }
         parts.setQuery([URLQueryItem(name: "file", value: file)])
         guard let url = parts.url else { return }
@@ -1181,7 +1223,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         req.httpMethod = "PATCH"
         req.setValue("1", forHTTPHeaderField: "X-Canvas")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try? JSONSerialization.data(withJSONObject: ["background": background as Any? ?? NSNull()])
+        req.httpBody = try? JSONSerialization.data(withJSONObject: patch)
         URLSession.shared.dataTask(with: req) { _, response, _ in
             if (response as? HTTPURLResponse)?.statusCode != 200 {
                 DispatchQueue.main.async { self.flash("Could not change the page background") }
@@ -1217,7 +1259,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     /// Settings > Performance: how much the snapshots take, or Clear them (the page answers with snapshotBytes).
     func snapshots(_ op: String) { run("{cmd:'snapshots',op:'\(op)'}") }
-    func pushSnap() { run("{cmd:'snap',objects:\(snap.objects),pixel:\(snap.pixel),guides:\(snap.guides),bigNudge:\(snap.bigNudge)}") }
+    func pushSnap() { run("{cmd:'snap',objects:\(snap.objects),pixel:\(snap.pixel),blueprint:\(snap.blueprint),guides:\(snap.guides),bigNudge:\(snap.bigNudge)}") }
 
     /// Cmd+R: the selected layer's name opens for editing in the Layers panel (the panel opens on Layers).
     /// With several layers selected: the Rename Layers sheet (a batch rename).

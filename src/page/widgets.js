@@ -359,7 +359,7 @@ function start(host) {
     act.moved = true;
     if (act.type === "move") act.dup = ev.altKey; // Option: drag a copy, the card stays
     const z = host.cam.z;
-    act.rect = act.type === "move" ? moveRect(act.r0, dxp / z, dyp / z) : resizeRect(act.r0, act.handle, dxp / z, dyp / z, minOf(act.entry.w.kind), (act.entry.w.kind === "video" && !!act.entry.w.config?.src) || ev.shiftKey, ev.altKey);
+    act.rect = act.type === "move" ? moveRect(act.r0, dxp / z, dyp / z) : resizeRect(act.r0, act.handle, dxp / z, dyp / z, minOf(act.entry.w.kind), (act.entry.w.kind === "video" && !!act.entry.w.config?.src) || ev.shiftKey, ev.altKey, host.blueprintEdge(ev));
     if (act.type === "resize" && act.entry.w.kind === "note" && act.entry.impl?.measure) {
       const size = act.entry.impl.measure(act.rect.w);
       const dy = act.rect.h - size.h;

@@ -5,7 +5,7 @@
 //
 // The proof: with checks on (tests: NODE_TEST_CONTEXT; `pnpm qa`'s servers: CANVAS_CHECK_ACTIONS=1), every write
 // runs its action through the shared apply (cloud/core/files/apply.ts) on the state before it, and the result must
-// match the state the edit wrote, key order included, after dropping local page backgrounds from the sidecar.
+// match the state the edit wrote, key order included, after dropping local page appearance from the sidecar.
 // An edit whose action falls short is refused loudly (ActionCheckError) instead of written.
 
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -13,7 +13,7 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { applyAction, isReject, nextProps, opRunner } from "../cloud/core/files/apply.ts";
-import { stripPageBackgrounds } from "../cloud/core/files/state.ts";
+import { stripPageAppearance } from "../cloud/core/files/state.ts";
 import { DESCENDANTS_PREFIX, type DocNode, type Json } from "../cloud/core/schema.ts";
 import { actionBytes, blobTypeOf, checkBlobPath, FILE_LIMITS, META_KEYS, type Action, type BlobPath, type FileOp, type MetaKey, type Val } from "../cloud/protocol-files.ts";
 import { DocTree, type DocLike, type Envelope } from "./cloud-files-tree.ts";
@@ -385,7 +385,7 @@ export function placements(cur: readonly string[], target: readonly string[]): {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 function cloudEnvelope(envelope: Envelope): Envelope {
-  const pages = stripPageBackgrounds(envelope.extra.pages);
+  const pages = stripPageAppearance(envelope.extra.pages);
   return pages === envelope.extra.pages ? envelope : { ...envelope, extra: { ...envelope.extra, pages } };
 }
 

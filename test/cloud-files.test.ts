@@ -19,18 +19,19 @@ const seed = () => new DocTree({ children: [
 ] });
 const send = (tree: DocTree, ops: FileOp[]) => applyAction(tree, makeAction(ops));
 
-test("Cloud page operations and initial state ignore local backgrounds", () => {
+test("Cloud page operations and initial state ignore local backgrounds and patterns", () => {
   const envelope = (pages: Json) => ({ widgets: [], extra: { pages } });
   const page = { id: "first", name: "First", boards: ["board"] };
   const plain = envelope([page]);
-  const colored = envelope([{ ...page, background: "#123ABC" }]);
+  const pattern = { kind: "blueprint", spacing: 8, major: 8, opacity: 35 };
+  const colored = envelope([{ ...page, background: "#123ABC", pattern }]);
   const empty = { widgets: [], extra: {} };
   assert.equal(JSON.stringify(envelopeFileOps(empty, colored)), JSON.stringify(envelopeFileOps(empty, plain)));
   assert.deepEqual(envelopeFileOps(plain, colored), []);
   assert.deepEqual(envelopeFileOps(colored, plain), []);
   const renamed = { ...page, name: "Renamed", boards: [] };
   assert.equal(
-    JSON.stringify(envelopeFileOps(colored, envelope([{ ...renamed, background: "#456DEF" }]))),
+    JSON.stringify(envelopeFileOps(colored, envelope([{ ...renamed, background: "#456DEF", pattern }]))),
     JSON.stringify(envelopeFileOps(plain, envelope([renamed]))),
   );
   assert.deepEqual(stateFromFiles({}, colored.extra), stateFromFiles({}, plain.extra));

@@ -29,6 +29,12 @@ sets:
 
 features:
   # ------------------------------------------------------------ canvas and render
+  - id: blueprint
+    name: Blueprint page background
+    area: canvas
+    driven: [page, native, mcp]
+    cases: [snap, persistence, zoom, inspector, undo]
+
   - id: render
     name: Every node type draws on the engine renderer
     area: canvas

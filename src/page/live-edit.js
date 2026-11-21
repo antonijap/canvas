@@ -9,7 +9,8 @@
 // the write before it answered, so a scene asked for after the answer has it). Equal values never count as an
 // acknowledgement: an old scene can match by chance. Overrides whose write never answers give up after HOLD_MS.
 
-import { nearestLine, guidesFor } from "./snap.js";
+import { nearestLine, guidesFor, gridOffset } from "./snap.js";
+import { rotateVec } from "./move-logic.js";
 
 /** A preview no write followed (a drag abandoned without a commit) is dropped after this. */
 export const PREVIEW_MS = 2000;
@@ -461,14 +462,36 @@ export function resizeRect(r0, handle, dx, dy, o = {}) {
  * Snapping for a resize: a function for resizeRect's `snap` that pulls a moving edge onto the nearest line of a
  * snap index (snap.js) within `px` screen pixels at zoom z.
  */
-export function edgeSnapper(index, z, px = 6) {
-  if (!index || !index.rects.length) return null;
+export function edgeSnapper(index, z, px = 6, spacing = 0) {
+  const objects = !!index?.rects.length;
+  if (!objects && !spacing) return null;
   const tol = px / (z > 0 ? z : 1);
   return (axis, v) => {
-    const ax = index[axis];
-    const j = nearestLine(ax.v, v, tol);
+    const ax = objects ? index[axis] : null;
+    const j = ax ? nearestLine(ax.v, v, tol) : -1;
+    const grid = gridOffset(v, spacing, tol);
+    if (grid !== null && (j < 0 || Math.abs(grid) < Math.abs(ax.v[j] - v))) return v + grid;
     return j < 0 ? v : ax.v[j];
   };
+}
+
+/** Snap a turned handle in world space, keeping a side handle on its own axis of travel. */
+export function snapTurnedHandle(rect, center, handle, angle, delta, spacing, tolerance) {
+  const x = handle.includes("w") ? -rect.w / 2 : handle.includes("e") ? rect.w / 2 : 0;
+  const y = handle.includes("n") ? -rect.h / 2 : handle.includes("s") ? rect.h / 2 : 0;
+  const point = rotateVec(x + (x ? delta.x : 0), y + (y ? delta.y : 0), -angle);
+  const sx = gridOffset(center.x + point.x, spacing, tolerance);
+  const sy = gridOffset(center.y + point.y, spacing, tolerance);
+  if (x && y) {
+    const correction = rotateVec(sx ?? 0, sy ?? 0, angle);
+    return { x: delta.x + correction.x, y: delta.y + correction.y };
+  }
+  const axis = rotateVec(x ? 1 : 0, y ? 1 : 0, -angle);
+  const dx = Math.abs(axis.x) > 1e-6 && sx !== null ? sx / axis.x : Infinity;
+  const dy = Math.abs(axis.y) > 1e-6 && sy !== null ? sy / axis.y : Infinity;
+  const distance = Math.abs(dx) <= Math.abs(dy) ? dx : dy;
+  if (Math.abs(distance) > tolerance) return delta;
+  return { x: delta.x + (x ? distance : 0), y: delta.y + (y ? distance : 0) };
 }
 
 /** The guides to draw for a rect after a resize (the lines its edges and centre share with indexed rects). */

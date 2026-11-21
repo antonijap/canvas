@@ -216,6 +216,10 @@ struct CanvasSettings: View {
                 SettingsDivider()
                 SettingsRow("Snap to pixel grid") { SettingsSwitch(isOn: $model.snap.pixel) }
                 SettingsDivider()
+                SettingsRow("Snap to blueprint") {
+                    SettingsSwitch(isOn: $model.snap.blueprint).qaID("snap-to-blueprint")
+                }
+                SettingsDivider()
                 SettingsRow("Show smart guides") { SettingsSwitch(isOn: $model.snap.guides) }
             }
             SettingsCard(title: "Nudge") {

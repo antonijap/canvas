@@ -19,13 +19,33 @@ import { docFileFor } from "./widgets.ts";
 import { storeFor, type WriteOpts } from "./widgets/store.ts";
 import { WidgetError, type Widget } from "./widgets/types.ts";
 
-export type Page = { id: string; name: string; boards: string[]; background?: string };
+export type Page = { id: string; name: string; boards: string[]; background?: string; pattern?: PagePattern };
+export type PagePattern = { kind: "blueprint"; spacing: number; major: number; opacity: number; lineColor?: string };
 export type ResolvedPages = { pages: Page[]; implicit: boolean };
 
 export const IMPLICIT_PAGE: Readonly<Page> = { id: "page-1", name: "Page 1", boards: [] };
 const PAGE_ID = /^[A-Za-z0-9_-]{1,40}$/;
 const MAX_PAGES = 200;
 const MAX_NAME = 120;
+
+/** Plain JS under its annotations: the page script embeds this with resolvePages. */
+export function readPagePattern(value: unknown): PagePattern | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const { kind, spacing, major, opacity, lineColor } = value as PagePattern;
+  if (kind !== "blueprint") return;
+  if (!Number.isInteger(spacing) || spacing < 4 || spacing > 256) return;
+  if (!Number.isInteger(major) || major < 1 || major > 32) return;
+  if (!Number.isInteger(opacity) || opacity < 0 || opacity > 100) return;
+  if (lineColor !== undefined && (typeof lineColor !== "string" || !/^#[0-9a-f]{6}$/i.test(lineColor))) return;
+  return { kind, spacing, major, opacity, ...(lineColor !== undefined ? { lineColor: lineColor.toUpperCase() } : {}) };
+}
+
+function patternOf(value: unknown, field = "pattern"): PagePattern {
+  const pattern = readPagePattern(value);
+  if (!pattern) throw new WidgetError(422, "invalid-pages",
+    `${field} must be null or a blueprint with integer spacing (4-256), major (1-32), opacity (0-100), and optional #RRGGBB lineColor`);
+  return pattern;
+}
 
 /**
  * The pages as shown for a document whose boards are `boardIds` (in document order). Each page lists the
@@ -41,7 +61,8 @@ export function resolvePages(stored: any, boardIds: any): any {
     seen.add(p.id);
     const page = { id: p.id, name: typeof p.name === "string" && p.name ? p.name : p.id, boards: [] as string[], ...(typeof p.background === "string" && /^#[0-9a-f]{6}$/i.test(p.background) ? { background: p.background.toUpperCase() } : {}) };
     for (const b of Array.isArray(p.boards) ? p.boards : []) if (typeof b === "string" && !owner.has(b)) owner.set(b, p.id);
-    list.push(page);
+    const pattern = readPagePattern(p.pattern);
+    list.push(pattern ? { ...page, pattern } : page);
   }
   const implicit = !list.length;
   if (implicit) list.push({ id: "page-1", name: "Page 1", boards: [] });
@@ -60,7 +81,8 @@ export function cleanPages(stored: unknown): Page[] {
     seen.add(p.id);
     const boards: string[] = [];
     for (const b of Array.isArray(p.boards) ? p.boards : []) if (typeof b === "string" && b && !owned.has(b)) { owned.add(b); boards.push(b); }
-    out.push({ id: p.id, name: typeof p.name === "string" && p.name ? p.name : p.id, boards, ...(typeof p.background === "string" && /^#[0-9a-f]{6}$/i.test(p.background) ? { background: p.background.toUpperCase() } : {}) });
+    const pattern = readPagePattern(p.pattern);
+    out.push({ id: p.id, name: typeof p.name === "string" && p.name ? p.name : p.id, boards, ...(typeof p.background === "string" && /^#[0-9a-f]{6}$/i.test(p.background) ? { background: p.background.toUpperCase() } : {}), ...(pattern ? { pattern } : {}) });
   }
   return out;
 }
@@ -77,6 +99,7 @@ export function validatePages(v: unknown): Page[] {
     if (ids.has(p.id)) throw bad(`two pages share the id "${p.id}"`);
     ids.add(p.id);
     if (p.background !== undefined && p.background !== null && (typeof p.background !== "string" || !/^#[0-9a-f]{6}$/i.test(p.background))) throw bad(`pages[${i}].background must be #RRGGBB or null`);
+    if (p.pattern !== undefined && p.pattern !== null) patternOf(p.pattern, `pages[${i}].pattern`);
     nameOf(p.name, `pages[${i}].name`);
     if (!Array.isArray(p.boards) || p.boards.some((b: unknown) => typeof b !== "string" || !b || b.length > 200)) throw bad(`pages[${i}].boards must be a list of board ids`);
   }
@@ -180,16 +203,22 @@ export async function createPage(file: string, input: { name?: unknown; index?: 
   });
 }
 
-export async function updatePage(file: string, id: string, patch: { name?: unknown; index?: unknown; background?: unknown }, boardIds: BoardIds, opts: Opts = {}) {
+export async function updatePage(file: string, id: string, patch: { name?: unknown; index?: unknown; background?: unknown; pattern?: unknown }, boardIds: BoardIds, opts: Opts = {}) {
   if (!patch || typeof patch !== "object") throw new WidgetError(400, "bad-body", "Send an object of changes");
   const changesBackground = Object.hasOwn(patch, "background");
-  if (changesBackground) requireLocalBackground(file);
+  const changesPattern = Object.hasOwn(patch, "pattern");
+  if (changesBackground || changesPattern) requireLocalBackground(file);
+  const pattern = changesPattern && patch.pattern !== null ? patternOf(patch.pattern) : undefined;
   return change(file, boardIds, opts, (pages) => {
     const p = pageAt(pages, id);
     if (changesBackground) {
       if (patch.background === null) delete p.background;
       else if (typeof patch.background === "string" && /^#[0-9a-f]{6}$/i.test(patch.background)) p.background = patch.background.toUpperCase();
       else throw new WidgetError(422, "invalid-pages", "background must be #RRGGBB or null");
+    }
+    if (changesPattern) {
+      if (pattern) p.pattern = pattern;
+      else delete p.pattern;
     }
     if (patch.name !== undefined) p.name = nameOf(patch.name);
     if (patch.index !== undefined) {
@@ -231,6 +260,7 @@ async function duplicatePage(file: string, id: string, boardIds: BoardIds, opts:
       name: source.name.slice(0, MAX_NAME - suffix.length).replace(/[\uD800-\uDBFF]$/, "") + suffix,
       boards: copied.copies.map((node) => String(node.id)),
       ...(source.background !== undefined ? { background: source.background } : {}),
+      ...(source.pattern !== undefined ? { pattern: { ...source.pattern } } : {}),
     };
     pages.splice(pages.indexOf(source) + 1, 0, page);
     const { state } = await store.mutateEnvelope((widgets, extra) => ({ widgets, extra: { ...extra, pages } }), { ifMatch: before.rev }).catch(async (error: unknown) => {
@@ -334,7 +364,7 @@ export async function settleBoards(file: string, fresh: string[], to: string | n
 
 export async function replacePages(file: string, pages: unknown, boardIds: BoardIds, opts: Opts = {}) {
   const next = validatePages(pages);
-  if (next.some((p) => p.background !== undefined)) requireLocalBackground(file);
+  if (next.some((p) => p.background !== undefined || p.pattern !== undefined)) requireLocalBackground(file);
   return change(file, boardIds, opts, (list, widgets) => {
     list.splice(0, list.length, ...next);
     // Widgets on pages that no longer exist fall back to the first page.
@@ -408,9 +438,9 @@ export async function handlePagesRoute(req: http.IncomingMessage, res: http.Serv
       const id = decodeURIComponent(sub);
       if (m === "PATCH") {
         const b = await body(req);
-        const changesBackground = Object.hasOwn(b, "background");
-        const label = changesBackground ? "Change Page Background" : b.name !== undefined && b.index === undefined ? "Rename Page" : b.name === undefined ? "Reorder Pages" : "Page Change";
-        const mergeKey = !changesBackground && b.index === undefined ? `page:${id}:name` : undefined;
+        const changesAppearance = Object.hasOwn(b, "background") || Object.hasOwn(b, "pattern");
+        const label = changesAppearance ? "Change Page Background" : b.name !== undefined && b.index === undefined ? "Rename Page" : b.name === undefined ? "Reorder Pages" : "Page Change";
+        const mergeKey = !changesAppearance && b.index === undefined ? `page:${id}:name` : undefined;
         return reply(200, await updatePage(file, id, b, boardIds, opts(label, mergeKey))), true;
       }
       if (m === "DELETE") return reply(200, await deletePage(file, id, boardIds, opts("Delete Page"), deleteBoards)), true;

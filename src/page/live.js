@@ -19,7 +19,7 @@
 // cached scene at display rate, the same math the server writes with; one write on release (/api/scale), one
 // undo step. Esc cancels a drag; K or V (or Esc) leaves the mode. The inspector's Scale field sends {cmd:"scale"}.
 
-import { LiveEdits, PAGE_OPS, covers, prepareEdit, findNode, CURSOR, handleAt, resizeRect, edgeSnapper, resizeGuides, boundsOf, fitRect, resizeWrites, textResizeWrites, flipWrites, rotatedResizeRect, rotatedTextWrites, keepsRatio as ratioKept } from "/page/live-edit.js";
+import { LiveEdits, PAGE_OPS, covers, prepareEdit, findNode, CURSOR, handleAt, resizeRect, edgeSnapper, snapTurnedHandle, resizeGuides, boundsOf, fitRect, resizeWrites, textResizeWrites, flipWrites, rotatedResizeRect, rotatedTextWrites, keepsRatio as ratioKept } from "/page/live-edit.js";
 import { scaleDrag, scaleRectAbout, scaleScene, ANCHORS, r2 } from "/page/scale.js";
 import { clampResize, minSize, sides } from "/page/autolayout-logic.js";
 import { rotateVec, rotatedResize, rotatedCursor, turnedGroupSize } from "/page/move-logic.js";
@@ -482,7 +482,7 @@ function start(host) {
     rz = {
       id: info.id, board: info.board, isBoard: info.isBoard, h, r0, r: r0, cx: e.clientX, cy: e.clientY, moved: false,
       index: host.snapIndex(info.isBoard ? "board" : "node", info.id), info, own: pos.own, positioned: pos.ok, keep: false, touched: new Set(),
-      ...(sh ? { rot: sh.r } : {}),
+      ...(sh ? { rot: sh.r, center: { x: r.w.x + r.w.w / 2, y: r.w.y + r.w.h / 2 } } : {}),
     };
     try { view.setPointerCapture(e.pointerId); } catch {}
     setCursor(cursorOf(h));
@@ -498,10 +498,11 @@ function start(host) {
     rz.moved = true;
     const snap = host.snap();
     if (rz.rot !== undefined) {
-      // Turned: the pointer's move in the layer's own frame; no snapping (the guides are the canvas's axes), no flip.
-      const d = rotateVec(dx, dy, rz.rot);
+      // For a turned layer, align the moving handle to the blueprint in world space before converting its delta.
+      const spacing = host.blueprintSpacing(e), delta = rotateVec(dx, dy, rz.rot);
+      const d = spacing ? snapTurnedHandle(rz.r0, rz.center, rz.h, rz.rot, delta, spacing, 6 / c.z) : delta;
       // An auto layout frame stops at its padding here too; rounding takes from the dragged side.
-      const r = rotatedResizeRect(rz.r0, rz.h, d.x, d.y, { shift: keepsRatio(e), alt: e.altKey, pixel: snap.pixel, min: rz.info.min });
+      const r = rotatedResizeRect(rz.r0, rz.h, d.x, d.y, { shift: keepsRatio(e), alt: e.altKey, pixel: snap.pixel && !spacing && !host.blueprintBypass(e), min: rz.info.min });
       if (!r) return;
       rz.r = r;
       showResize(0);
@@ -510,8 +511,8 @@ function start(host) {
       return;
     }
     // Control held: no snapping to objects for this drag.
-    const objects = snap.objects && !e.ctrlKey;
-    let r = resizeRect(rz.r0, rz.h, dx, dy, { shift: keepsRatio(e), alt: e.altKey, round: snap.pixel, snap: objects ? edgeSnapper(rz.index, c.z) : null });
+    const objects = snap.objects && !e.ctrlKey && !host.blueprintBypass(e);
+    let r = resizeRect(rz.r0, rz.h, dx, dy, { shift: keepsRatio(e), alt: e.altKey, round: snap.pixel && !host.blueprintBypass(e), snap: edgeSnapper(objects ? rz.index : null, c.z, undefined, host.blueprintSpacing(e)) });
     if (rz.info.min) r = clampResize(r, rz.r0, rz.h, rz.info.min); // an auto layout frame stops at its padding
     rz.r = r;
     rz.keep = e.metaKey;
@@ -861,8 +862,8 @@ function start(host) {
     if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 2) return;
     d.moved = true;
     const snap = host.snap();
-    const objects = snap.objects && !e.ctrlKey; // Control: no snapping to objects
-    const g = scaleDrag(sc.r0, d.h, (e.clientX - d.cx) / c.z, (e.clientY - d.cy) / c.z, { alt: e.altKey, round: snap.pixel, snap: objects ? edgeSnapper(d.index, c.z) : null });
+    const objects = snap.objects && !e.ctrlKey && !host.blueprintBypass(e); // Control: no snapping to objects
+    const g = scaleDrag(sc.r0, d.h, (e.clientX - d.cx) / c.z, (e.clientY - d.cy) / c.z, { alt: e.altKey, round: snap.pixel && !host.blueprintBypass(e), snap: edgeSnapper(objects ? d.index : null, c.z, undefined, host.blueprintSpacing(e)) });
     sc.f = g.f;
     sc.anchor = g.anchor;
     showScale(0);

@@ -37,7 +37,7 @@ import { handleCommentsRoute } from "./comments.ts";
 import { commentReads } from "./comment-reads.ts";
 import { handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
 import { scrubSecrets } from "./cloud-secrets.ts";
-import { handlePagesRoute, resolvePages } from "./pages.ts";
+import { handlePagesRoute, readPagePattern, resolvePages } from "./pages.ts";
 import { handleShaderRoute, settleShaderSources } from "./shaders.ts";
 import { handleImageRoute } from "./images.ts";
 import { handleVideoRoute } from "./videos.ts";
@@ -1218,7 +1218,7 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
   <h3>Variables</h3><div id="vars"></div>
 </aside>
 <main id="view"><div id="world"></div><div id="labels"></div><div id="hov"></div><div id="marquee"></div><div id="sel"><i></i><i></i><i></i><i></i><span id="seldim"></span></div><canvas id="guides"></canvas></main>
-<div id="snapPop" role="dialog" aria-label="Snapping"><label><input type="checkbox" data-k="objects"> Snap to objects</label><label><input type="checkbox" data-k="pixel"> Snap to pixel grid</label><label><input type="checkbox" data-k="guides"> Show smart guides</label><label>Big nudge <input type="number" min="1" max="1000" data-k="bigNudge"> px</label></div>
+<div id="snapPop" role="dialog" aria-label="Snapping"><label><input type="checkbox" data-k="objects"> Snap to objects</label><label><input type="checkbox" data-k="pixel"> Snap to pixel grid</label><label><input type="checkbox" data-k="blueprint"> Snap to blueprint</label><label><input type="checkbox" data-k="guides"> Show smart guides</label><label>Big nudge <input type="number" min="1" max="1000" data-k="bigNudge"> px</label></div>
 <aside id="props"><div id="propsBody">Click any node to inspect it.</div></aside>
 <div id="msg"></div>
 <div id="webhint" role="status" hidden><div class="wh-lines"><div class="wh-engine" hidden>Drawing with the fallback renderer. Run <code>pnpm build:engine</code>.</div><div class="wh-app" hidden>The Mac app is the main way to use Canvas. Run <code>pnpm app</code> to build and open it.</div></div><button type="button" aria-label="Hide" title="Hide">&#x2715;</button></div>
@@ -1261,6 +1261,7 @@ function rememberPage() {
   if (activePage && rememberedPage !== activePage) { rememberedPage = activePage; store.set(pageKey, activePage); }
 }
 let pagesStored = null, pagesReady = false, pendingDoc = null, pagesTimer = 0;
+let blueprint = null, drawBlueprint = null;
 let pageList = [{ id: "page-1", name: "Page 1", boards: [] }], pageImplicit = true, pageBoards = new Set();
 // Saved under the page's own id. The file's old key (from before pages) is read for the first page only.
 const camStoreKey = (p) => "canvas:" + file + "#" + (p || "page-1");
@@ -1373,7 +1374,7 @@ window.canvasHost = host;
 const isW = (id) => typeof id === "string" && id.startsWith("widget:");
 const pageMetas = () => (doc ? doc.boards.filter((b) => pageBoards.has(b.id)) : []);
 const docMsg = () => doc && ({ name: doc.name, revision: doc.revision, boards: pageMetas().map((b) => ({ id: b.id, name: b.name, width: b.width, height: b.height })), components: doc.components, styles: doc.styles, variables: doc.variables, tokens: doc.tokens });
-const pagesMsg = () => ({ active: activePage, implicit: pageImplicit, list: pageList.map((p) => ({ id: p.id, name: p.name, count: p.boards.length, background: p.background ?? null })) });
+const pagesMsg = () => ({ active: activePage, implicit: pageImplicit, list: pageList.map((p) => ({ id: p.id, name: p.name, count: p.boards.length, background: p.background ?? null, pattern: p.pattern ?? null })) });
 
 // ---------- camera loop ----------
 // Wheel, pointer and commands only change cam and ask for a frame. One rAF applies it: transform, labels,
@@ -1438,6 +1439,8 @@ function flushCam() {
   if (tween) { stepTween(performance.now()); camDirty = true; gestureTick(); }
   if (camDirty) { camDirty = false; camWork(); phDirty = true; }
   if (phDirty) drawPh();
+  if (blueprint && ev && typeof ev.engine.setBlueprint !== "function") engineFailed("rebuild the engine for Blueprint");
+  if (drawBlueprint) drawBlueprint(blueprint, cam, ev && ev.engine, VW, VH);
   if (mode === "engine" && ev) {
     // The engine draws in this same frame, after the overlays moved: one rAF for both.
     let more = false;
@@ -1627,8 +1630,8 @@ function drawPh() {
   g.fill();
 }
 function syncPh(b) {
-  // A held picture of an older version of the board must not outlive a key change.
-  if (b.snap && b.snap.el && b.snap.key !== b.meta.key) { URL.revokeObjectURL(b.snap.url); b.snap = null; }
+  // A held picture must match the board key; on Blueprint pages the live grid must show through.
+  if (b.snap && b.snap.el && (blueprint || b.snap.key !== b.meta.key)) { URL.revokeObjectURL(b.snap.url); b.snap = null; }
   const shown = boards.get(b.meta.id) === b && (mode === "engine" || mode === "pending");
   const drawing = engineBusy || camRaf || (ev && ev.imagesPending() > 0);
   const want = shown && (!b.loadedKey || (b.snap && b.snap.el && snapHold && drawing && performance.now() < b.snap.until));
@@ -2048,6 +2051,7 @@ function setDoc(d) {
     if (cam) { endTween(true); cam = null; restoredCam = false; zeroFit = false; if (sel) deselect(); }
     activePage = pg.id;
   }
+  blueprint = pg.pattern ?? null;
   view.style.backgroundColor = pg.background || "";
   if (ev) ev.syncBg();
   pageBoards = new Set(pg.boards);
@@ -2322,6 +2326,10 @@ const endSnapHold = () => { if (!snapHold) return; snapHold = false; for (const 
 for (const n of ["pointerdown", "wheel", "keydown"]) addEventListener(n, endSnapHold, { capture: true, passive: true });
 let picLib = null, snaps = null, snapT = 0, pruneT = 0;
 const bgNow = () => getComputedStyle(view).backgroundColor;
+import("/page/blueprint.js").then((m) => {
+  drawBlueprint = m.createBlueprintView(view, () => requestFlush(false));
+  requestFlush(false);
+});
 if (file && mode !== "dom") import("/page/snapshots.js").then((m) => { picLib = m; snaps = m.createSnapshots(file, { budget: Math.max(16, Number(prefs.snapshotMB) || 200) * 1048576 }); return snaps.ready(); }).then(() => showSnaps()).catch((err) => console.warn("[canvas] snapshots", err));
 // Settings > Performance: how much the snapshots take, and Clear (every file's; the store is shared by all pages).
 function snapshotsCmd(op) {
@@ -2332,7 +2340,7 @@ function snapshotsCmd(op) {
 }
 /** Boards near the view that the engine has not laid out yet: their snapshots, if any. */
 function showSnaps() {
-  if (!snaps || !cam || mode === "dom") return;
+  if (blueprint || !snaps || !cam || mode === "dom") return;
   const L = -VW * PREFETCH, T = -VH * PREFETCH, R = VW * (1 + PREFETCH), B = VH * (1 + PREFETCH);
   for (const b of boards.values()) {
     if (!snapUseful(b)) continue;
@@ -2343,7 +2351,7 @@ function showSnaps() {
 /** A board not laid out yet, or laid out at its key with images still decoding (before the person did anything). */
 const snapUseful = (b) => !b.gone && !b.snap && (!b.loadedKey || (snapHold && b.loadedKey === b.meta.key && !!ev && ev.imagesPending() > 0));
 function wantSnap(b) {
-  if (!snaps || !snapUseful(b) || mode === "dom") return;
+  if (blueprint || !snaps || !snapUseful(b) || mode === "dom") return;
   const key = b.meta.key, bg = bgNow();
   if (!snaps.meta(b.meta.id, key, bg)) return;
   const tok = (b.snap = { key, el: null, url: null, until: performance.now() + SNAP_HOLD_MS });
@@ -2354,7 +2362,7 @@ function wantSnap(b) {
     img.src = s.url;
     return img.decode().then(() => {
       const late = b.loadedKey && (b.loadedKey !== key || !snapHold || !(ev && ev.imagesPending() > 0)); // drawn whole meanwhile
-      if (b.snap !== tok || late || boards.get(b.meta.id) !== b || b.meta.key !== key) { URL.revokeObjectURL(s.url); if (b.snap === tok) b.snap = null; return; }
+      if (blueprint || b.snap !== tok || late || boards.get(b.meta.id) !== b || b.meta.key !== key) { URL.revokeObjectURL(s.url); if (b.snap === tok) b.snap = null; return; }
       tok.el = img; tok.url = s.url;
       if (!b.measured && s.ww > 0 && s.wh > 0) setBoardSize(b, s.ww, s.wh); // a Hug board's size before its layout
       perf.snapshots++;
@@ -2366,7 +2374,7 @@ function wantSnap(b) {
 function scheduleSnap() { if (snaps && !snapT) snapT = setTimeout(takeSnaps, 700); }
 function takeSnaps() {
   snapT = 0;
-  if (!snaps || !picLib || mode !== "engine" || !ev || !cam || document.hidden || gesturing || tween || drag || mv || engineBusy || camRaf) return;
+  if (blueprint || !snaps || !picLib || mode !== "engine" || !ev || !cam || document.hidden || gesturing || tween || drag || mv || engineBusy || camRaf) return;
   if (!window.__canvas.settled() || ev.imagesPending() > 0 || (host.textEdit && host.textEdit.active)) return;
   const bg = bgNow(), dpr = window.devicePixelRatio || 1;
   const cards = host.widgetsShown ? host.widgetsShown().map((w) => host.widgetRect(w.id)).filter(Boolean) : [];
@@ -2577,7 +2585,7 @@ view.addEventListener("pointerup", (e) => {
 // overlays follow by math; x/y are written once, on drop (/api/move, src/move.ts): one undo step. Snapping
 // (src/page/snap.js) aligns edges and centres with nearby boards, layers and widgets inside a screen-px
 // threshold, rounds to whole px and draws guides in screen space. Control or Cmd held skips object snapping.
-let snapLib = null, snapCfg = { objects: true, pixel: true, guides: true, bigNudge: 10 };
+let snapLib = null, snapCfg = { objects: true, pixel: true, blueprint: true, guides: true, bigNudge: 10 };
 let mv = null, mvDirty = false, selMove = null, selHold = null, renaming = null;
 // Space held during a layer drag (the layer keeps its parent). spaceKept: this Space press went to a drag, so
 // it never turns into the hand, even after the drop, until it is let go.
@@ -2651,6 +2659,14 @@ snapBtn.onclick = (e) => {
 snapPop.addEventListener("change", (e) => { const i = e.target; if (i && i.dataset && i.dataset.k) setSnap({ [i.dataset.k]: i.type === "checkbox" ? i.checked : Number(i.value) }, true); });
 addEventListener("pointerdown", (e) => { if (snapPop.style.display === "block" && !snapPop.contains(e.target) && e.target !== snapBtn) snapPop.style.display = "none"; }, true);
 host.snap = () => snapCfg;
+const blueprintBypass = (e) => !!(blueprint && metaOf(e));
+host.blueprintBypass = blueprintBypass;
+host.blueprintSpacing = (e) => blueprint && snapCfg.blueprint && !blueprintBypass(e) && !e?.ctrlKey ? blueprint.spacing : 0;
+host.blueprintEdge = (e) => {
+  const spacing = host.blueprintSpacing(e);
+  if (spacing && snapLib && cam) return (value) => value + (snapLib.gridOffset(value, spacing, snapLib.SNAP_PX / cam.z) ?? 0);
+  return blueprintBypass(e) ? (value) => value : null;
+};
 // The board whose title is under a window point.
 function titleAt(cx, cy) {
   const t = document.elementFromPoint(cx, cy), lb = t && t.closest && t.closest("#labels>div"), b = lb && labelBoard.get(lb);
@@ -2710,9 +2726,9 @@ function candsFor(kind, id) {
 function snapQuery(s, raw, e) {
   if (!snapLib || !cam) return { x: raw.x, y: raw.y, guides: [] };
   const t0 = performance.now();
-  const objects = snapCfg.objects && !snapLib.bypassSnap(e);
+  const objects = snapCfg.objects && !snapLib.bypassSnap(e) && !blueprintBypass(e);
   if (objects && !s.index) s.index = snapLib.snapIndex(candsFor(s.kind, s.id));
-  const out = snapLib.snapRect(objects ? s.index : null, raw, { z: cam.z, objects, pixel: snapCfg.pixel, guides: snapCfg.guides });
+  const out = snapLib.snapRect(objects ? s.index : null, raw, { z: cam.z, objects, pixel: snapCfg.pixel && !blueprintBypass(e), guides: snapCfg.guides, grid: host.blueprintSpacing(e), gridOrigin: s.kind === "board" });
   snapTimes.push(performance.now() - t0);
   if (snapTimes.length > 2000) snapTimes.splice(0, 1000);
   return out;
@@ -2865,6 +2881,7 @@ function movePointer(e) {
   const lock = e.shiftKey ? (Math.abs(dxp) >= Math.abs(dyp) ? "y" : "x") : null;
   if (lock === "y") dyp = 0; else if (lock === "x") dxp = 0;
   const s = snapQuery(mv, { x: mv.r0.x + dxp / cam.z, y: mv.r0.y + dyp / cam.z, w: mv.r0.w, h: mv.r0.h }, e);
+  mv.round = snapCfg.pixel && !host.blueprintSpacing(e) && !blueprintBypass(e);
   mv.pos = { x: lock === "x" ? mv.r0.x : s.x, y: lock === "y" ? mv.r0.y : s.y };
   mv.guides = lock ? s.guides.filter((g) => g.axis !== lock) : s.guides;
   // Where the drop lands is judged at the pointer as the layer carries it: with Shift, on the locked axis, not where
@@ -2968,7 +2985,7 @@ function groupApply(m) {
   paintGuides(m.guides);
 }
 function groupDrop(m, cancel) {
-  const round = (v) => (snapCfg.pixel ? Math.round(v) : v);
+  const round = (v) => (m.round ? Math.round(v) : v);
   const dx = m.pos.x - m.r0.x, dy = m.pos.y - m.r0.y;
   if (m.dup || m.shownDup) { dupEnd(m); if (m.dup && !cancel && (dx || dy)) { if (!groupDupInto(m, dx, dy)) dupDrop(m, dx, dy); return; } syncSel(); requestFlush(false); if (m.dup || cancel || (!dx && !dy)) return; }
   const cards = m.items.filter((i) => i.kind === "widget").map((i) => i.id);
@@ -3009,9 +3026,9 @@ function groupDrop(m, cancel) {
   const repar = new Set(pl ? pl.moves.map((x) => x.id) : []);
   const nodes = m.items.filter((i) => i.kind !== "widget" && !repar.has(i.id));
   // The layers stay drawn where they were dropped until the write answers (the server rounds when pixel snapping is on).
-  const gop = host.live ? host.live.nextOp() : 0, round1 = (v) => (snapCfg.pixel ? Math.round(v) : v);
-  const placed = gop ? nodes.filter((it) => it.kind === "node" && it.own && host.live.place(it.id, round1(it.own.x + dx), round1(it.own.y + dy), gop)) : [];
-  const move = () => (nodes.length ? sendMove({ file, items: nodes.map((i) => ({ id: i.id, dx, dy })), round: snapCfg.pixel, merge: key }) : Promise.resolve(null));
+  const gop = host.live ? host.live.nextOp() : 0;
+  const placed = gop ? nodes.filter((it) => it.kind === "node" && it.own && host.live.place(it.id, round(it.own.x + dx), round(it.own.y + dy), gop)) : [];
+  const move = () => (nodes.length ? sendMove({ file, items: nodes.map((i) => ({ id: i.id, dx, dy })), round: m.round, merge: key }) : Promise.resolve(null));
   // The reparenting goes first: history folds the plain moves (property changes) into a step that holds tree changes,
   // never tree changes into one that holds property changes, so the other order would make two undo steps.
   const write = repar.size ? host.reparent.apply(pl, { merge: key, keepSelection: true }).then(move) : move();
@@ -3108,7 +3125,7 @@ function endMove(cancel) {
     body = { file, id: m.id, x: m.pos.x, y: m.pos.y };
   } else {
     selHold = { id: m.id, rect: { x: m.pos.x, y: m.pos.y, w: m.r0.w, h: m.r0.h }, board: mode === "engine" && ev ? ev.boardOf(m.id) : null, armed: false };
-    body = { file, id: m.id, x: m.node0.x + m.pos.x - m.r0.x, y: m.node0.y + m.pos.y - m.r0.y, round: snapCfg.pixel };
+    body = { file, id: m.id, x: m.node0.x + m.pos.x - m.r0.x, y: m.node0.y + m.pos.y - m.r0.y, round: m.round };
   }
   const op = host.live ? host.live.nextOp() : 0;
   const drawn = op && m.kind === "node" ? host.live.place(m.id, movedTo(m).x, movedTo(m).y, op) : false;
@@ -3224,7 +3241,7 @@ function groupDupInto(m, dx, dy) {
   const gen = selGen;
   trackWrite(host.reparent.apply(pl, { copy: true, keepSelection: true, ...(merge ? { merge } : {}) }).then((j) => {
     const made = j && Array.isArray(j.select) ? j.select.slice() : [];
-    if (rest.length) { dupDrop({ kind: "group", items: rest }, dx, dy, merge, made); return; }
+    if (rest.length) { dupDrop({ kind: "group", items: rest, round: m.round }, dx, dy, merge, made); return; }
     if (made.length && selGen === gen) setSelection(made);
   }, () => {}));
   return true;
@@ -3244,7 +3261,7 @@ function dupDrop(m, dx, dy, merge0, made0) {
   syncSel();
   requestFlush(false);
   const made = made0 ? made0.slice() : [];
-  const w1 = nodes.length ? fetch("/api/structure", { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ file, page: activePage || undefined, op: "duplicate", ids: nodes, offset: { dx, dy }, round: snapCfg.pixel, ...(merge ? { merge } : {}) }) })
+  const w1 = nodes.length ? fetch("/api/structure", { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ file, page: activePage || undefined, op: "duplicate", ids: nodes, offset: { dx, dy }, round: m.round, ...(merge ? { merge } : {}) }) })
     .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }))
     .then((j) => { if (Array.isArray(j.select)) { made.push(...j.select); host.lastDuplicate = { src: nodes.slice(), copies: j.select.slice() }; } })
     : Promise.resolve();
@@ -3283,7 +3300,7 @@ function unlift(m) {
 /** A single drag's x/y as the file will have them (a layer's own x/y, not its world rect). */
 function movedTo(m) {
   if (m.kind === "board") return { x: m.pos.x, y: m.pos.y };
-  const r = (v) => (snapCfg.pixel ? Math.round(v) : v);
+  const r = (v) => (m.round ? Math.round(v) : v);
   return { x: r(m.node0.x + m.pos.x - m.r0.x), y: r(m.node0.y + m.pos.y - m.r0.y) };
 }
 // A moved layer's box stays where it was dropped until its board has redrawn with it there.
@@ -3650,6 +3667,7 @@ es.addEventListener("pages", (e) => {
   if (!pagesReady) pagesArrived();
   else if (doc) { setDoc(doc); host.emit("page", activePage); }
 });
+const readPagePattern = ${readPagePattern};
 const resolvePages = ${resolvePages};
 const loadBox = ${loadBox};
 const isComponentish = ${isComponentish};
@@ -3717,7 +3735,7 @@ window.canvasCmd = (c) => {
     applyCam();
   } else if (c.cmd === "select") select(c.id);
   else if (c.cmd === "deselect") deselect();
-  else if (c.cmd === "insets") { insets = { l: c.l, t: c.t, r: c.r, b: c.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); sizeGuides(); host.emit("cmd", c); }
+  else if (c.cmd === "insets") { insets = { l: c.l, t: c.t, r: c.r, b: c.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); sizeGuides(); requestFlush(); host.emit("cmd", c); }
   else if (c.cmd === "zoomCorner") {
     host.emit("cmd", c);
     // Keep geometry on the root even when the comments module has not loaded yet.
@@ -3833,6 +3851,7 @@ function historyStep(dir, plain) {
 })();
 </script>
 <script>${PAGE_BRIDGE_JS}</script>
+<script type="module" src="/page/draw.js"></script>
 <script type="module" src="/page/widgets.js"></script>
 <script type="module" src="/page/drops.js"></script>
 <script type="module" src="/page/shaders.js"></script>

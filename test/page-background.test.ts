@@ -75,3 +75,41 @@ test("HTTP validates colours without writes, and other page edits preserve the b
   assert.equal((await patch({ background: null })).status, 200);
   assert.equal(stored()[0].background, undefined);
 });
+
+test("page patterns are normalized and malformed patterns are rejected", () => {
+  const page = { id: "one", name: "Page 1", boards: [], background: "#123ABC" };
+  const pattern = { kind: "blueprint", spacing: 8, major: 4, opacity: 35, lineColor: "#aabbcc" };
+  const expected = { ...page, pattern: { ...pattern, lineColor: "#AABBCC" } };
+  assert.deepEqual(cleanPages([{ ...page, pattern }]), [expected]);
+  assert.deepEqual(resolvePages([{ ...page, pattern }], []).pages, [expected]);
+  assert.deepEqual(validatePages([{ ...page, pattern }]), [expected]);
+  for (const bad of [{}, [], { ...pattern, kind: "color" }, { ...pattern, spacing: 0 },
+    { ...pattern, major: 1.5 }, { ...pattern, opacity: 101 }, { ...pattern, lineColor: "red" }]) {
+    assert.throws(() => validatePages([{ ...page, pattern: bad }]), /pattern/);
+    assert.deepEqual(cleanPages([{ ...page, pattern: bad }]), [page]);
+    assert.deepEqual(resolvePages([{ ...page, pattern: bad }], []).pages, [page]);
+  }
+});
+
+test("MCP sets, lists, clears and undoes a pattern independently of the background", async () => {
+  const pattern = { kind: "blueprint", spacing: 16, major: 4, opacity: 30, lineColor: "#aabbcc" };
+  const normalized = { ...pattern, lineColor: "#AABBCC" };
+  assert.equal((await pages())[0].pattern, null);
+  await call("set_page_background", { file, page: "one", color: "#123456" });
+  await call("finish_work", { file, summary: "Set page background" });
+  await call("set_page_pattern", { file, page: "one", pattern });
+  await call("finish_work", { file, summary: "Set page pattern" });
+  assert.deepEqual(stored()[0].pattern, normalized);
+  assert.deepEqual((await pages())[0].pattern, normalized);
+  assert.equal((await pages())[0].background, "#123456");
+  await call("set_page_background", { file, page: "one", color: null });
+  await call("finish_work", { file, summary: "Reset page background" });
+  assert.deepEqual(stored()[0].pattern, normalized);
+  await call("set_page_pattern", { file, page: "one", pattern: null });
+  await call("finish_work", { file, summary: "Clear page pattern" });
+  assert.equal((await pages())[0].pattern, null);
+  assert.equal(stored()[0].pattern, undefined);
+  await call("undo", { file });
+  assert.deepEqual(stored()[0].pattern, normalized);
+  assert.equal(fs.readFileSync(path.join(file, "document.json"), "utf8"), document);
+});

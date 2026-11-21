@@ -59,9 +59,14 @@ export function camToReveal(r, viewW, viewH, insets, { pad = 70, minZ = 0.02, ma
  * or an edge "t" | "r" | "b" | "l" (an edge changes one dimension). The opposite corner or edge stays put.
  * Size never goes under `min`; Shift keeps the starting aspect ratio.
  */
-export function resizeRect(r, handle, dx, dy, min = { w: 40, h: 40 }, lockAspect = false, fromCentre = false) {
+export function resizeRect(r, handle, dx, dy, min = { w: 40, h: 40 }, lockAspect = false, fromCentre = false, snapEdge = null) {
   const left = handle.includes("l"), top = handle.includes("t");
   const sideways = handle !== "t" && handle !== "b", upways = handle !== "l" && handle !== "r";
+  if (snapEdge) {
+    const x = left ? r.x : r.x + r.w, y = top ? r.y : r.y + r.h;
+    if (sideways) dx = snapEdge(x + dx) - x;
+    if (upways) dy = snapEdge(y + dy) - y;
+  }
   // Option resizes about the centre: the pointer's travel counts on both sides of the axis.
   const k = fromCentre ? 2 : 1;
   let w = sideways ? r.w + (left ? -dx : dx) * k : r.w, h = upways ? r.h + (top ? -dy : dy) * k : r.h;
@@ -76,12 +81,13 @@ export function resizeRect(r, handle, dx, dy, min = { w: 40, h: 40 }, lockAspect
     w = Math.max(min.w, w);
     h = Math.max(min.h, h);
   }
-  w = Math.round(w);
-  h = Math.round(h);
+  const round = snapEdge ? (v) => v : Math.round;
+  w = round(w);
+  h = round(h);
   // Anchor: the opposite side stays; the centre with Option; an edge drag with Shift grows the other axis about the middle.
   const midX = fromCentre || (lockAspect && !sideways), midY = fromCentre || (lockAspect && !upways);
-  const x = midX ? Math.round(r.x + (r.w - w) / 2) : left ? r.x + r.w - w : r.x;
-  const y = midY ? Math.round(r.y + (r.h - h) / 2) : top ? r.y + r.h - h : r.y;
+  const x = midX ? round(r.x + (r.w - w) / 2) : left ? r.x + r.w - w : r.x;
+  const y = midY ? round(r.y + (r.h - h) / 2) : top ? r.y + r.h - h : r.y;
   return { x, y, w, h };
 }
 

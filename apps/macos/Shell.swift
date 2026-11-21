@@ -534,6 +534,7 @@ struct SidePanel: View {
 struct SnapSettings: Equatable {
     var objects = true
     var pixel = true
+    var blueprint = true
     var guides = true
     var bigNudge = 10
 
@@ -542,6 +543,7 @@ struct SnapSettings: Equatable {
         var s = SnapSettings()
         if d.object(forKey: "canvas.snap.objects") != nil { s.objects = d.bool(forKey: "canvas.snap.objects") }
         if d.object(forKey: "canvas.snap.pixel") != nil { s.pixel = d.bool(forKey: "canvas.snap.pixel") }
+        if d.object(forKey: "canvas.snap.blueprint") != nil { s.blueprint = d.bool(forKey: "canvas.snap.blueprint") }
         if d.object(forKey: "canvas.snap.guides") != nil { s.guides = d.bool(forKey: "canvas.snap.guides") }
         let big = d.integer(forKey: "canvas.snap.bigNudge")
         if big == SnapLimits.bigNudge(big) { s.bigNudge = big }
@@ -551,6 +553,7 @@ struct SnapSettings: Equatable {
         let d = UserDefaults.standard
         d.set(objects, forKey: "canvas.snap.objects")
         d.set(pixel, forKey: "canvas.snap.pixel")
+        d.set(blueprint, forKey: "canvas.snap.blueprint")
         d.set(guides, forKey: "canvas.snap.guides")
         d.set(bigNudge, forKey: "canvas.snap.bigNudge")
     }
