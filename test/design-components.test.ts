@@ -20,3 +20,7 @@ test('first insertion registers a reusable main and all placements are instances
   assert.equal(second.main,undefined); assert.equal(second.instance.ref,first.instance.ref);
   assert.notEqual(second.instance.id,first.instance.id);
 });
+test('status bar component binds ink to the file text token when available',()=>{
+ const plan=componentPlan({children:[],variables:{text:{type:'color',value:'#123456'}}},statusBar(),{});
+ assert.ok(plan.main!.children.every((n:any)=>(n.fill ?? n.stroke)==='$text'));
+});

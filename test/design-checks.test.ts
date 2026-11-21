@@ -72,3 +72,28 @@ test('rendered boxes are parent-relative; board positions stay in document coord
  const measured={board:{x:0,y:0,width:393,height:852},body:{x:20,y:10,width:100,height:20}};
  assert.equal(checkDesign(doc([root]),undefined,measured).some(i=>i.rule==='R-7-42'),false);
 });
+
+test('R-7-18 permits selected tab colours and compares only sibling icon slots',()=>{
+ const slots=[node({name:'Home active',children:[icon('home')]}),node({name:'Search',children:[{...icon('search'),fill:'$text-2'}]})];
+ const row=node({name:'Tab row',layout:'horizontal',children:slots});
+ assert.equal(has('R-7-18',[row]),false);
+ const nested=node({name:'Actions',layout:'horizontal',children:[row,node({name:'Other row',layout:'horizontal',children:[icon('small',20)]})]});
+ assert.equal(has('R-7-18',[nested]),false);
+ slots[1].children[0].width=20;slots[1].children[0].height=20;
+ assert.equal(has('R-7-18',[row]),true);
+});
+test('R-7-11 exempts only descendants of the reusable system status bar',()=>{
+ const main:Node={...statusBar(),reusable:true};
+ const instance={id:'status',type:'ref',ref:main.id};
+ assert.equal(has('R-7-11',[main,board([instance])]),false);
+ assert.equal(has('R-7-11',[main,board([instance,node({fill:'#123456'})])]),true);
+ assert.equal(has('R-7-11',[board([node({name:'Status bar',children:[node({fill:'#123456'})]})])]),true);
+});
+test('R-7-18 keeps nested horizontal rows independent',()=>{
+ const rows=[24,20].map((size,i)=>node({name:'Toolbar row',layout:'horizontal',children:[icon('nested'+i,size)]}));
+ assert.equal(has('R-7-18',[node({name:'Actions',layout:'horizontal',children:rows})]),false);
+});
+test('R-7-11 exempts the status bar main nested in the component board',()=>{
+ const main:Node={...statusBar(),reusable:true};
+ assert.equal(has('R-7-11',[node({type:'frame',name:'Design system',children:[main]})]),false);
+});

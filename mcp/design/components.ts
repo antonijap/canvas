@@ -20,6 +20,13 @@ export function statusBar(width: 375 | 393 = 393, theme: 'light' | 'dark' = 'lig
 }
 
 export function componentPlan(doc: Node, template: Node, position: Node) {
+  if(template.metadata?.designHelper?.startsWith('ios-status-bar:') && doc.variables?.text) {
+    template=structuredClone(template);
+    for(const layer of walk([template])) {
+      if(layer.fill) layer.fill='$text';
+      if(layer.stroke) layer.stroke='$text';
+    }
+  }
   const key = template.metadata.designHelper;
   const existing = walk(doc.children ?? []).find(n => n.reusable && n.metadata?.designHelper === key);
   const main: Node | undefined = existing ? undefined : {...template,reusable:true};

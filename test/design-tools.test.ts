@@ -31,7 +31,6 @@ test('image tool creates rectangles, fills existing frames, refuses invalid targ
  const source=path.join(dir,'photo.svg');fs.writeFileSync(source,svg);
  globalThis.fetch=(async(input:any,init:any)=>{
   const url=new URL(input);
-  if(url.hostname==='example.com')return new Response(svg);
   let result:any={};
   if(url.pathname==='/health')result={ok:true,headless:true,version:'test'};
   if(url.pathname==='/api/structure') {
@@ -47,7 +46,7 @@ test('image tool creates rectangles, fills existing frames, refuses invalid targ
   const newImage=await addImage({file,source,x:500,y:0,width:120,height:40});
   const created=walk(doc.children).find(n=>n.id===newImage.id)!;
   assert.equal(created.type,'rectangle');assert.equal(created.fill.mode,'fill');assert.equal(created.width,120);
-  const fill=await addImage({file,source:'https://example.com/photo.svg',nodeId:'screen'});
+  const fill=await addImage({file,source,nodeId:'screen'});
   assert.equal(fill.fill.url,newImage.fill.url);assert.equal(doc.children[0].fill.mode,'fill');
   await assert.rejects(addImage({file,source,nodeId:'missing'}),/existing frame/);
   await assert.rejects(addImage({file,source,nodeId:'screen',x:2}),/nodeId or/);

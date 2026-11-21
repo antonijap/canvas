@@ -4,6 +4,7 @@ export const topics = ['taste', 'feed', 'onboarding', 'permission', 'paywall', '
 export type Topic = typeof topics[number];
 const rules = fs.readFileSync(new URL('./rules.md', import.meta.url), 'utf8');
 const taste = rules.slice(rules.indexOf('## Taste'), rules.indexOf('## 1.'));
+const supporting = rules.slice(rules.indexOf('## 3.'), rules.indexOf('## 5.'));
 const checks = rules.slice(rules.indexOf('## 7.'));
 const recipes = rules.slice(rules.indexOf('### 6.1 '), rules.indexOf('## 7.')).split(/(?=^### 6\.)/m);
 const lines = rules.split('\n').filter(l => /^- `R-/.test(l));
@@ -20,5 +21,5 @@ export function getRecipe(topic: Topic = 'all'): string {
   }
   const selected = lines.filter(l => ids.has(l.match(/R-\d+-\d+/)![0]));
   const checkIds = new Set(selected.flatMap(l => l.match(/R-7-\d+/g) ?? []));
-  return [taste, recipe, '## Referenced rules', ...selected.filter(l => !recipe.includes(l)), '## Referenced checks', ...lines.filter(l => checkIds.has(l.match(/R-\d+-\d+/)![0]))].join('\n\n');
+  return [taste, supporting, recipe, '## Referenced rules', ...selected.filter(l => !recipe.includes(l)), '## Referenced checks', ...lines.filter(l => checkIds.has(l.match(/R-\d+-\d+/)![0]))].join('\n\n');
 }

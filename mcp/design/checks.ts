@@ -26,6 +26,7 @@ export function checkDesign(doc:Node, boards?:string[], measured:Record<string,B
     if(boards && !boards.includes(root.id)) continue;
     if(root.reusable) continue;
     const rb=boxes[root.id], nodes=walk([root]);
+    const systemLayers=new Set(nodes.filter(n=>mainIds.has(n.id) || mainIds.has(n.__ref)).flatMap(n=>walk([n]).map(c=>c.id)));
     const tab=nodes.find(n=>/tab bar/i.test(name(n)));
     const phone=(rb.width===393 && rb.height===852 || rb.width===375 && rb.height===812) && !/website|landing/i.test(name(root));
     if(phone) {
@@ -37,7 +38,7 @@ export function checkDesign(doc:Node, boards?:string[], measured:Record<string,B
       const b=boxes[n.id], children=n.children ?? [], descendants=walk(children);
       if(/^(frame|group|rectangle|ellipse|text|vector|line|image|copy)( \d+)?$/i.test(name(n)) || /_(text|rect|icon|frame)-\d+$/i.test(name(n))) add('R-7-24',n,'Give the layer a name describing its role.');
       if(!name(n).trim()) add('R-7-24',n,'Name the layer by its role.');
-      if(!image(n) && [n.fill,n.stroke,n.effect].some(hasRaw)) add('R-7-11',n,'Bind fill, stroke and effect colours to $variables.');
+      if(!systemLayers.has(n.id) && !image(n) && [n.fill,n.stroke,n.effect].some(hasRaw)) add('R-7-11',n,'Bind fill, stroke and effect colours to $variables.');
       if(n.enabled===false || n.opacity===0) add('R-7-42',n,'Remove hidden or zero-opacity layers.');
       if(n.type==='frame' && !children.length && !n.fill && !/spacer/i.test(name(n))) add('R-7-42',n,'Remove the empty frame or give it a visible purpose.');
       if(n!==root && b.width>0 && b.height>0 && !overlaps(rb,b)) add('R-7-42',n,'Layer is fully outside its board.');
@@ -66,8 +67,8 @@ export function checkDesign(doc:Node, boards?:string[], measured:Record<string,B
         if(b.width!==b.height || b.width<(state?32:16) || b.width>(state?64:28) || libraries.size>1) add('R-7-18',n,'Use square icons in the allowed size range and one library per file.');
       }
       if(n.layout==='horizontal' || /row|actions|tab bar/i.test(name(n))) {
-        const icons=descendants.filter(c=>c.type==='icon');
-        if(new Set(icons.map(c=>`${boxes[c.id].width}:${boxes[c.id].height}:${JSON.stringify(c.fill)}`)).size>1) add('R-7-18',n,'Icons in one row must share size and fill.');
+        const icons=children.flatMap((slot:Node)=>slot.type==='icon'?[slot]:slot.layout==='horizontal' || /row|actions|tab bar/i.test(name(slot))?[]:(slot.children ?? []).filter((c:Node)=>c.type==='icon'));
+        if(new Set(icons.map((c:Node)=>`${boxes[c.id].width}:${boxes[c.id].height}:${c.library}`)).size>1) add('R-7-18',n,'Sibling icon slots in one row must share size and library.');
       }
       if(/website|landing/i.test(name(root))) {
         if(/app store|google play|badge/i.test(name(n)) && (!image(n) || !n.metadata?.officialBadge)) add('R-7-51',n,'Insert the official store badge as an image.');

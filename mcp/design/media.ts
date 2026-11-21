@@ -1,26 +1,66 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { lookup } from 'node:dns/promises';
+import { BlockList, isIP } from 'node:net';
+import { request } from 'node:https';
+import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { resolveDocPath } from '../../src/docpath.ts';
 
-type Options = {home?:string; fetch?:(url:string, init?:RequestInit)=>Promise<Response>};
+type Address = {address:string; family:number};
+type Options = {home?:string; fetch?:(url:string, init?:RequestInit)=>Promise<Response>; lookup?:(host:string)=>Promise<Address[]>};
+const blocked = new BlockList();
+for(const [address,prefix] of [['0.0.0.0',8],['10.0.0.0',8],['100.64.0.0',10],['127.0.0.0',8],['169.254.0.0',16],['172.16.0.0',12],['192.0.0.0',24],['192.0.2.0',24],['192.168.0.0',16],['198.18.0.0',15],['198.51.100.0',24],['203.0.113.0',24],['224.0.0.0',3]] as const) blocked.addSubnet(address,prefix,'ipv4');
+for(const [address,prefix] of [['2001::',23],['2001:db8::',32],['2002::',16],['3fff::',20]] as const) blocked.addSubnet(address,prefix,'ipv6');
+const globalV6 = new BlockList(); globalV6.addSubnet('2000::',3,'ipv6');
+function publicAddress(address:string) {
+  const family=isIP(address);
+  return family===4 ? !blocked.check(address,'ipv4') : family===6 && globalV6.check(address,'ipv6') && !blocked.check(address,'ipv6');
+}
+async function addresses(url:URL, options:Options) {
+  const host=url.hostname.replace(/^\[|\]$/g,'');
+  const result=isIP(host)?[{address:host,family:isIP(host)}]:await (options.lookup ?? (host=>lookup(host,{all:true})))(host);
+  if(!result.length || result.some(a=>!publicAddress(a.address))) throw new Error('Image hosts must resolve only to public IP addresses');
+  return result;
+}
+// Pin the connection to a checked address while keeping the original host for TLS.
+function pinnedFetch(url:URL, address:Address):Promise<Response> {
+  return new Promise((resolve,reject)=>{
+    const req=request(url,{family:address.family,lookup:(_host,_options,callback)=>callback(null,address.address,address.family),signal:AbortSignal.timeout(20_000)},res=>{
+      const headers=new Headers();
+      for(const [key,value] of Object.entries(res.headers)) if(value!==undefined) headers.set(key,Array.isArray(value)?value.join(', '):value);
+      const body=[204,205,304].includes(res.statusCode!)?null:Readable.toWeb(res) as ReadableStream;
+      if(!body) res.resume();
+      resolve(new Response(body,{status:res.statusCode,headers}));
+    });
+    req.on('error',reject);req.end();
+  });
+}
 const LIMIT = 20 * 1024 * 1024;
 function https(source:string) {
   const url = new URL(source);
   if(url.protocol !== 'https:' || url.username || url.password) throw new Error('Image URLs must use https without credentials');
   return url;
 }
-async function download(source:string, options:Options):Promise<Buffer> {
+async function download(source:string, options:Options, contentType='image/'):Promise<Buffer> {
   let url=https(source);
   for(let i=0;i<6;i++) {
-    const r=await (options.fetch ?? fetch)(url.href,{redirect:'manual',signal:AbortSignal.timeout(20_000)});
-    if(r.status>=300 && r.status<400) {url=https(new URL(r.headers.get('location') ?? '',url).href);continue;}
-    if(!r.ok) throw new Error(`Image download failed (${r.status})`);
-    if(Number(r.headers.get('content-length'))>LIMIT) throw new Error('Image exceeds 20 MB');
+    const approved=await addresses(url,options);
+    const r=options.fetch ? await options.fetch(url.href,{redirect:'manual',signal:AbortSignal.timeout(20_000)}) : await pinnedFetch(url,approved[0]);
+    if(r.status>=300 && r.status<400) {
+      await r.body?.cancel();
+      const location=r.headers.get('location');
+      if(!location) throw new Error('Image redirect has no location');
+      url=https(new URL(location,url).href);continue;
+    }
+    if(!r.ok) {await r.body?.cancel();throw new Error(`Image download failed (${r.status})`);}
+    const mime=(r.headers.get('content-type') ?? '').toLowerCase().split(';')[0].trim();
+    if(!(contentType==='image/' ? /^image\/[a-z0-9.+-]+$/.test(mime) : mime===contentType)) {await r.body?.cancel();throw new Error('Unexpected image download content type');}
+    if(Number(r.headers.get('content-length'))>LIMIT) {await r.body?.cancel();throw new Error('Image exceeds 20 MB');}
     const chunks:Uint8Array[]=[];let size=0;
     if(!r.body) throw new Error('Image download was empty');
-    for await(const chunk of r.body) {size+=chunk.length;if(size>LIMIT) {await r.body.cancel().catch(()=>{});throw new Error('Image exceeds 20 MB');}chunks.push(chunk);}
+    for await(const chunk of r.body) {size+=chunk.length;if(size>LIMIT) {throw new Error('Image exceeds 20 MB');}chunks.push(chunk);}
     return Buffer.concat(chunks);
   }
   throw new Error('Too many image redirects');
@@ -81,14 +121,14 @@ export async function badgeImage(file:string,kind:'app-store-badge'|'google-play
     let url='https://tools.applemarketingtools.com/api/badges/download-on-the-app-store/black/en-us';
     if(kind==='google-play-badge') {
       const page='https://play.google.com/intl/en_us/badges/';
-      const html=(await download(page,options)).toString();
+      const html=(await download(page,options,'text/html')).toString();
       const src=html.match(/(?:src|href)=["']([^"']*(?:en_badge_web_generic|google-play-badge)[^"']*\.png)["']/i)?.[1];
       if(src) url=new URL(src,page).href;
       else {
         const endpoint=html.slice(html.indexOf('id="badges"')).match(/data-asset-endpoint=["']([^"']+)/)?.[1];
         if(!endpoint) throw new Error('Official badge page did not provide its English badge image');
         const assetUrl=new URL(endpoint.replaceAll('&amp;','&'),'https://partnermarketinghub.withgoogle.com').href;
-        const assets=JSON.parse((await download(assetUrl,options)).toString()).assets;
+        const assets=JSON.parse((await download(assetUrl,options,'application/json')).toString()).assets;
         const asset=assets?.find((a:any)=>typeof a.url==='string' && /googleplay-badge-01-getit.*\.png/.test(a.url));
         if(!asset) throw new Error('Official badge page has no download badge image');
         url=asset.url;
