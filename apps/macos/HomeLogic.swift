@@ -2,6 +2,7 @@
 // team server it is shared to), the cards' order, filter and search, the labels, and where a thumbnail is kept.
 // Tests/HomeLogicTests.swift runs all of it (built with SettingsLogic.swift, for the Cloud addresses). Home.swift draws it.
 
+import CryptoKit
 import Foundation
 
 /// Copy shared by the Cloud file page, its actions and the host's settings.
@@ -42,36 +43,6 @@ enum CloudFilesText {
         if date == nil { iso.formatOptions = [.withInternetDateTime]; date = iso.date(from: timestamp) }
         guard let date else { return "" }
         return "Edited " + HomeLogic.ago(date.timeIntervalSince1970, now: now.timeIntervalSince1970)
-    }
-}
-
-/// A package in the Cloud cache uses the Cloud key and file ID as its path.
-struct CloudFilePath {
-    let key: String
-    let id: String
-
-    init?(_ path: String) {
-        var url = URL(fileURLWithPath: path)
-        if url.lastPathComponent == "document.json" { url.deleteLastPathComponent() }
-        let cloud = url.deletingLastPathComponent(), cache = cloud.deletingLastPathComponent()
-        let id = url.deletingPathExtension().lastPathComponent
-        guard url.pathExtension == "canvas", UUID(uuidString: id) != nil,
-              cache.lastPathComponent == "cloud-files", cache.deletingLastPathComponent().lastPathComponent == "Canvas",
-              cloud.lastPathComponent.range(of: "^[0-9a-f]{16}$", options: .regularExpression) != nil else { return nil }
-        self.key = cloud.lastPathComponent
-        self.id = id
-    }
-
-    static func key(for cloud: String) -> String {
-        SHA256.hash(data: Data(cloud.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
-    }
-
-    func displayName(_ name: String?) -> String? {
-        guard let name else { return nil }
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed.caseInsensitiveCompare(id) != .orderedSame,
-              trimmed.caseInsensitiveCompare(id + ".canvas") != .orderedSame else { return nil }
-        return name
     }
 }
 
