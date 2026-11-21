@@ -85,6 +85,23 @@ async function share(t: NT, region: { x: number; y: number; w: number; h: number
   const px = await t.cmd("qa.pixels", { region, colors, tol });
   return px.count / Math.max(1, px.total);
 }
+
+sc("icons", "bundled icons draw in the app web view", { covers: ["icons:app"] }, async (t: NT) => {
+  const icons = [
+    { id: "qa-phosphor", library: "phosphor", icon: "heart-fill", x: 16 },
+    { id: "qa-material", library: "Material Symbols Outlined", icon: "favorite", x: 96 },
+  ].map((icon) => ({ ...icon, type: "icon", y: 16, width: 64, height: 64, fill: "#D00040" }));
+  const board = { type: "frame", id: "qa-icons", name: "Icons", layout: "none", width: 176, height: 96, fill: "#FFFFFF", children: icons };
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [board] });
+  await t.waitJs("window.__canvas.boardPos('qa-icons')", "the icon board");
+  const { x, y } = await t.js<{ x: number; y: number }>("return window.__canvas.boardPos('qa-icons');");
+  await t.look(x, y);
+  for (const icon of icons) {
+    const ink = await share(t, await t.rect(icon.id), ["#D00040"], 30);
+    t.ok(ink > 0.03, `${icon.library} has no foreground in the app web view`);
+  }
+});
+
 /** A w x h PNG on disk: a two-colour diagonal gradient (qa/scenarios-drops.ts). */
 function tmpPng(name: string, w: number, h: number) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-qa-native-img-"));

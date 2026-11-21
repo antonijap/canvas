@@ -571,11 +571,6 @@ export function nodeHtml(raw: DocNode, parent: ParentCtx, o: HtmlOptions, famili
       o.warnings.push(`${n.id}: no icon "${n.icon}" in ${n.library}`);
       return `${open()}</div>`;
     }
-    if (art.kind === "url") {
-      s.background = color;
-      s.mask = `url("${art.url}") center/contain no-repeat`;
-      return `${open()}</div>`;
-    }
     s.color = color;
     const weight = num(n.weight);
     const body = weight ? art.body.replace(/stroke-width="[\d.]+"/g, `stroke-width="${(2 * weight) / 400}"`) : art.body;

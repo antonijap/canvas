@@ -11,6 +11,7 @@ import { PLAYGROUND } from "./playground.ts";
 import "./scenarios-drops.ts";
 import "./scenarios-keys.ts";
 import "./scenarios-fills.ts";
+import "./scenarios-icons.ts";
 import "./scenarios-moving.ts";
 import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";

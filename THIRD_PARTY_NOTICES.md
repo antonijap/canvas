@@ -54,13 +54,15 @@ SOFTWARE.
 
 ## npm packages the server and Canvas MCP run on
 
-The runtime dependencies in `package.json` and everything they pull in (`pnpm licenses list --prod`), 94 packages. Each package's licence text ships inside it, in `node_modules/<name>`.
+The runtime dependencies in `package.json` and everything they pull in (`pnpm licenses list --prod`), 96 packages. Licence metadata ships with the packages in `node_modules`.
 
 | Package | Version | Licence |
 |---|---|---|
 | @hono/node-server | 2.1.8 | MIT |
 | @iconify-json/feather | 1.2.1 | MIT |
 | @iconify-json/lucide | 1.2.151 | ISC |
+| @iconify-json/material-symbols | 1.2.101 | Apache-2.0 |
+| @iconify-json/ph | 1.2.2 | MIT |
 | @iconify/types | 2.0.0 | MIT |
 | @modelcontextprotocol/sdk | 1.32.2 | MIT |
 | accepts | 2.0.0 | MIT |

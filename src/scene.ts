@@ -164,32 +164,11 @@ export function svgShapes(body: string, warnings: string[] = [], where = "icon")
   return out;
 }
 
-const remoteIcons = new Map<string, Promise<{ size: number; body: string } | undefined>>();
-
-function remoteIcon(url: string): Promise<{ size: number; body: string } | undefined> {
-  let p = remoteIcons.get(url);
-  if (!p) {
-    p = (async () => {
-      try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
-        if (!r.ok) return undefined;
-        const svg = await r.text();
-        const vb = /viewBox\s*=\s*"([^"]+)"/.exec(svg)?.[1].split(/[\s,]+/).map(Number);
-        return { size: vb && vb.length === 4 ? Math.max(vb[2], vb[3]) : 24, body: svg };
-      } catch {
-        return undefined;
-      }
-    })();
-    remoteIcons.set(url, p);
-  }
-  return p;
-}
-
 // ---------------------------------------------------------------- tree
 
 /** What text a board draws per family, weight and style: the code points decide which subsets and fallbacks it needs. */
 type TextUse = { family: string; weight: number; style: "normal" | "italic"; cps: Set<number> };
-type Ctx = { doc: CanvasDoc; baseDir: string; warnings: string[]; fonts: Map<string, TextUse>; images: Set<string>; file: string; icons: Promise<void>[]; transient?: boolean };
+type Ctx = { doc: CanvasDoc; baseDir: string; warnings: string[]; fonts: Map<string, TextUse>; images: Set<string>; file: string; transient?: boolean };
 
 function assetUrl(url: string, baseDir: string, file: string): string {
   if (isCloudFile(file)) { const abs = cloudAsset(file, url); return abs ? `/asset?p=${encodeURIComponent(abs)}` : ""; }
@@ -273,21 +252,12 @@ function sceneNode(raw: DocNode, theme: Theme, c: Ctx): DocNode | undefined {
   if (type === "icon") {
     const art = iconArt(String(n.library ?? "lucide"), String(n.icon ?? ""));
     if (!art) c.warnings.push(`${n.id}: no icon "${n.icon}" in ${n.library}`);
-    else if (art.kind === "svg") {
+    else {
       const weight = num(n.weight);
       const body = weight ? art.body.replace(/stroke-width="[\d.]+"/g, `stroke-width="${(2 * weight) / 400}"`) : art.body;
       out.iconSize = art.size;
       out.iconMode = "svg";
       out.iconShapes = svgShapes(body, c.warnings, String(n.id)) as unknown as Json;
-    } else {
-      out.iconMode = "mask";
-      c.icons.push(
-        remoteIcon(art.url).then((r) => {
-          if (!r) return void c.warnings.push(`${n.id}: icon ${art.url} could not be fetched`);
-          out.iconSize = r.size;
-          out.iconShapes = svgShapes(r.body, c.warnings, String(n.id)) as unknown as Json;
-        }),
-      );
     }
   }
   const kids = Array.isArray(raw.children) ? (raw.children as DocNode[]) : [];
@@ -405,10 +375,9 @@ export async function sceneOf(doc: CanvasDoc, file: string, id: string): Promise
   const raw = doc.children.find((n) => String(n.id) === id);
   if (!raw) throw new Error(`no board "${id}"`);
   const warnings: string[] = [];
-  const c: Ctx = { doc, baseDir: path.dirname(file), warnings, fonts: new Map(), images: new Set(), file, icons: [] };
+  const c: Ctx = { doc, baseDir: path.dirname(file), warnings, fonts: new Map(), images: new Set(), file };
   const root = sceneNode(expand(indexOf(doc), raw, warnings), defaultTheme(doc), c);
   if (!root) throw new Error(`board "${id}" is disabled`);
-  await Promise.all(c.icons);
   const fonts = await fontRefs([...c.fonts.values()], c);
   const scene: SceneBoard = { version: SCENE_VERSION, id, x: num(raw.x) ?? 0, y: num(raw.y) ?? 0, root, fonts, images: [...c.images], warnings };
   if (c.transient) transientScenes.add(scene);
