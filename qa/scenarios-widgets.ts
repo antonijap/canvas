@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "./lib.ts";
 import { sc, type T } from "./harness.ts";
+import { overlaps, type Rect } from "../src/placement.ts";
 import { fakeServer } from "../test/helpers.ts";
 
 
@@ -10,6 +11,40 @@ const themes = ["light", "dark"] as const;
 const tones = ["plain", "yellow", "green", "blue", "pink"];
 const mode = (t: T, value: typeof themes[number]) => t.page.send("Emulation.setEmulatedMedia", {
   features: [{ name: "prefers-color-scheme", value }, { name: "prefers-reduced-motion", value: "reduce" }],
+});
+
+sc("widgets", "Page from the picker clears boards and cards", { covers: ["card-add:card-note"], skip: { visual } }, async (t: T) => {
+  await t.focus("lay_auto");
+  const board = await t.ev<Rect>('window.canvasHost.boxOf("lay_auto")');
+  const { widget: neighbor } = await t.a.post("/api/widgets", {
+    kind: "metric", allowOverlap: true, x: board.x + board.w + 40, y: board.y - 200, w: 300, h: 600,
+  });
+  const before = t.widgets().widgets.map((w) => w.id);
+  const boards = await t.ev<Rect[]>(`(() => {
+    const h = window.canvasHost, i = h.insets, v = h.view;
+    h.setCam({ z: 2,
+      x: (v.clientWidth + i.l - i.r) / 2 - 2 * (${board.x} + ${board.w} / 2),
+      y: (v.clientHeight + i.t - i.b) / 2 - 2 * (${board.y} + ${board.h} / 2) });
+    return h.pages.find((p) => p.id === h.page).boards.map((id) => h.boxOf(id)).filter(Boolean);
+  })()`);
+  const cam = await t.ev<{ x: number; y: number; z: number }>("window.canvasHost.cam");
+  // The SwiftUI picker sends this command when its Page tile is clicked.
+  await t.ev('window.canvasCmd({ cmd: "addWidget", kind: "note" })');
+  const id = await t.waitFor<string>('window.canvasHost.selection()[0]?.startsWith("widget:") && window.canvasHost.selection()[0]', "the new Page is selected");
+  const card = t.widgets().widgets.find((w) => "widget:" + w.id === id);
+  t.ok(card?.kind === "note" && !before.includes(card.id), "the picker added a Page");
+  t.ok(boards.length && boards.every((r) => !overlaps(card, r)), "the Page clears every board");
+  const neighbors = t.widgets().widgets.filter((w) => w.id !== card.id && w.page === card.page);
+  t.ok(neighbors.some((w) => w.id === neighbor.id) && neighbors.every((w) => !overlaps(card, w)), "the Page clears every other card");
+  const next = await t.ev<typeof cam>("window.canvasHost.cam");
+  t.ok(next.x !== cam.x || next.y !== cam.y, "the camera pans to the relocated Page");
+  t.eq(next.z, cam.z, "panning keeps the current zoom");
+  t.ok(await t.ev(`(() => {
+    const h = window.canvasHost, i = h.insets, v = h.view;
+    const r = document.querySelector('.wd[data-id="${id}"]').getBoundingClientRect(), b = v.getBoundingClientRect();
+    return r.left >= b.left + i.l - 1 && r.top >= b.top + i.t - 1
+      && r.right <= b.right - i.r + 1 && r.bottom <= b.bottom - i.b + 1;
+  })()`), "the Page fits in the visible canvas");
 });
 
 sc("widgets", "Page fits long text, shrinks on edit and keeps one undo step", { covers: ["note:card-note"], skip: { visual } }, async (t: T) => {

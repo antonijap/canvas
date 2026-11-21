@@ -19,7 +19,8 @@ import { syncPageName } from "./widgets/kinds/note.ts";
 import { readLocalWidget } from "./widgets/local.ts";
 import { Poller } from "./widgets/poller.ts";
 import { ID_RE, kindList, kindOf, mergeConfig } from "./widgets/registry.ts";
-import { cleanPages } from "./pages.ts";
+import { cleanPages, resolvePages, type ResolvedPages } from "./pages.ts";
+import { BOARD_GAP, clearCardSpot, obstacles, type Rect } from "./placement.ts";
 import { GROUP_MERGE_MS, isGroupMerge } from "./move.ts";
 import { storeFor, type Store, type StoreState, type WriteOpts } from "./widgets/store.ts";
 import { approve, approveLocalWidget, approveSource, isLocalWidgetApproved, isSourceApproved } from "./widgets/trust.ts";
@@ -84,7 +85,7 @@ export function docFileFor(file: unknown): string {
 
 // ---------- facade (HTTP and MCP both call these) ----------
 
-export type WidgetInput = { kind: string; name?: string; x?: number; y?: number; w?: number; h?: number; locked?: boolean; config?: Config; id?: string; index?: number; page?: string };
+export type WidgetInput = { kind: string; name?: string; x?: number; y?: number; w?: number; h?: number; locked?: boolean; config?: Config; id?: string; index?: number; page?: string; allowOverlap?: boolean; rects?: Record<string, Rect> };
 /** `page: null` puts the widget back on the first page. */
 export type WidgetPatch = { name?: string; x?: number; y?: number; w?: number; h?: number; locked?: boolean; config?: Config; page?: string | null };
 type Opts = WriteOpts;
@@ -115,10 +116,10 @@ export function kinds(picker = false) {
   }));
 }
 
-/** Right of every board, 80 px away, stacking down past what is already there. */
-/** Where autoPlace reads the boards from. The server swaps in its snapshot cache; the default reads the file. */
+/** Where placement reads the boards from. The server swaps in its snapshot cache; the default reads the file. */
 export const widgetHooks: { docOf: (docFile: string) => CanvasDoc } = { docOf: (docFile) => loadDoc(docFile).doc };
 
+/** Legacy fallback for a pasted card without a position. */
 function autoPlace(docFile: string, existing: Widget[], size: { w: number; h: number }): { x: number; y: number } {
   let right = 0;
   let top = 0;
@@ -139,22 +140,52 @@ function autoPlace(docFile: string, existing: Widget[], size: { w: number; h: nu
   }
 }
 
+function cardPosition(file: string, input: WidgetInput, size: { w: number; h: number }, list: Widget[], pages: unknown) {
+  const { x, y } = input;
+  const exact = input.allowOverlap === true || (input.id !== undefined && input.index !== undefined);
+  if (x !== undefined && y !== undefined && exact) return { x, y };
+
+  let children: CanvasDoc["children"] = [];
+  try { children = widgetHooks.docOf(file).children; } catch { /* An unreadable document can still hold cards. */ }
+  const { pages: resolved }: ResolvedPages = resolvePages(pages, children.map((n) => String(n.id)));
+  const byId = new Map(resolved.map((p) => [p.id, p]));
+  const pageOf = (id: unknown) => (typeof id === "string" ? byId.get(id) : undefined) ?? resolved[0];
+  const page = pageOf(input.page);
+  const measured = (id: string) => {
+    const r = input.rects?.[id];
+    return r && [r.x, r.y, r.w, r.h].every(Number.isFinite) && r.w >= 0 && r.h >= 0 ? r : undefined;
+  };
+  const rects: Record<string, Rect> = Object.fromEntries(page.boards.flatMap((id) => {
+    const r = measured(id);
+    return r ? [[id, r]] : [];
+  }));
+  const boards = obstacles({ children }, new Set(), new Set(page.boards), rects);
+  const cards = list.filter((w) => pageOf(w.page) === page).map((w) => measured("widget:" + w.id) ?? w);
+  const others = [...boards, ...cards];
+  const want = {
+    x: x ?? (others.length ? Math.max(...others.map((r) => r.x + r.w)) + BOARD_GAP : 0),
+    y: y ?? (boards.length ? Math.min(...boards.map((r) => r.y)) : 0),
+    ...size,
+  };
+  return exact ? want : clearCardSpot(want, others);
+}
+
 export async function addWidget(file: string, input: WidgetInput, opts: Opts = {}) {
   const p = docFileFor(file);
   const k = kindOf(String(input?.kind));
   if (!k) throw new WidgetError(422, "unknown-kind", `Unknown widget kind "${String(input?.kind)}". Known: ${kindList().map((x) => x.id).join(", ")}`);
   if (input.id !== undefined && (typeof input.id !== "string" || !ID_RE.test(input.id))) throw new WidgetError(422, "invalid-widget", "id must be 1-40 letters, digits, - or _");
   if (input.config !== undefined && (typeof input.config !== "object" || input.config === null || Array.isArray(input.config))) throw new WidgetError(422, "invalid-widget", "config must be an object");
-  const { state, result } = await store(p).mutate<Widget>((list) => {
+  const { state, result } = await store(p).mutateEnvelope<Widget>((list, extra) => {
     const size = { w: input.w ?? k.defaultSize.w, h: input.h ?? k.defaultSize.h };
-    const at = input.x !== undefined && input.y !== undefined ? { x: input.x, y: input.y } : autoPlace(p, list, size);
+    const at = cardPosition(p, input, size, list, extra.pages);
     const config = k.validate(mergeConfig(k.defaults(), input.config ?? {}));
     const widget: Widget = {
       id: input.id ?? newId(),
       kind: k.id,
       name: k.id === "note" ? syncPageName(config, input.name) : input.name ?? k.title,
-      x: input.x ?? at.x,
-      y: input.y ?? at.y,
+      x: at.x,
+      y: at.y,
       w: size.w,
       h: size.h,
       locked: input.locked === true,
@@ -164,7 +195,7 @@ export async function addWidget(file: string, input: WidgetInput, opts: Opts = {
     if (list.some((w) => w.id === widget.id)) throw new WidgetError(409, "id-exists", `A widget "${widget.id}" already exists`);
     const index = typeof input.index === "number" ? Math.max(0, Math.min(list.length, Math.trunc(input.index))) : list.length;
     list.splice(index, 0, widget);
-    return { widgets: list, result: widget };
+    return { widgets: list, extra, result: widget };
   }, opts);
   countUsage(k.local ? "widget.add.local" : `widget.add.${k.id}`);
   return { rev: state.rev, widget: state.widgets.find((w) => w.id === result!.id)!, ...(k.local ? { local: true } : {}) };

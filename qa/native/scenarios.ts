@@ -12,6 +12,7 @@ import { PLAYGROUND } from "../playground.ts";
 import { execFileSync } from "node:child_process";
 import { ROOT, copyDir, gradientPng, sleep } from "../lib.ts";
 import { buildLink, parseLink } from "../../src/page/link-logic.js";
+import { overlaps, type Rect } from "../../src/placement.ts";
 import { fakeServer, sendJson } from "../../test/helpers.ts";
 import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";
@@ -82,13 +83,20 @@ sc("widgets", "widget picker shows drawn previews in a two-column grid", { cover
 sc("widgets", "widget picker in Quick actions previews and adds Metric", { covers: ["palette:keyboard"] }, async (t: NT) => {
   await t.section("Layers");
   await t.click(CANVAS_SPOT);
+  const board = await t.js<Rect>(`
+    const h = window.canvasHost, i = h.insets, v = h.view, r = h.boxOf("lay_auto");
+    h.setCam({ z: 1, x: (v.clientWidth + i.l - i.r - r.w) / 2 - r.x,
+      y: (v.clientHeight + i.t - i.b - r.h) / 2 - r.y });
+    return r;
+  `);
   await t.key("k", ["cmd"]);
   await t.waitState((s) => s.palette.open, "Quick actions opens");
   await t.type("add metric");
   const preview = await t.mark({ id: "widget-preview-metric" });
   t.ok(preview.w >= 80 && preview.h >= 40, "the result has a drawn thumbnail");
   await t.key("Return");
-  await t.waitDisk(() => t.widgets().widgets.some((w: any) => w.kind === "metric"), "Metric is added from Quick actions");
+  const metric = await t.waitDisk(() => t.widgets().widgets.find((w: any) => w.kind === "metric" && !w.page), "Metric is added from Quick actions");
+  t.ok(!overlaps(metric, board), "the Metric clears the board under the camera center");
 });
 
 sc("widgets", "approve a shared metric from the inspector", { covers: ["widget-source-approval:inspector"] }, async (t: NT) => {

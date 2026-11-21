@@ -101,6 +101,26 @@ export function clearSpot(want: Rect, others: (Rect & { name?: string })[], gap 
   return { x: r2(x), y: r2(want.y), hit };
 }
 
+/** First clear position along each axis. Take the shorter move, going right on ties. */
+export function clearCardSpot(want: Rect, others: Rect[]): { x: number; y: number } {
+  const firstClear = (start: number, size: number, spans: [number, number][]) => {
+    let at = start;
+    for (const [from, to] of spans.sort((a, b) => a[0] - b[0])) {
+      if (from >= at + size) break;
+      if (to > at) at = to + BOARD_GAP;
+    }
+    return at;
+  };
+  const right: [number, number][] = [], below: [number, number][] = [];
+  for (const r of others) {
+    if (r.y < want.y + want.h && r.y + r.h > want.y) right.push([r.x, r.x + r.w]);
+    if (r.x < want.x + want.w && r.x + r.w > want.x) below.push([r.y, r.y + r.h]);
+  }
+  const x = firstClear(want.x, want.w, right);
+  const y = firstClear(want.y, want.h, below);
+  return x - want.x <= y - want.y ? { x, y: want.y } : { x: want.x, y };
+}
+
 /**
  * The top-level ids that share a page with `page` (a page id) or with the board `board`; null: the file has one
  * implicit page, every board is on it. A page id the file lacks means the first page (where an unlisted board shows).

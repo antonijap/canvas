@@ -196,7 +196,7 @@ function serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
 }
 
 /** preset: a Paper shader id ("mesh-gradient") or id/variant ("mesh-gradient/Ink"); variant: one of its presets; params: overrides. */
-export type ShaderInput = { source?: string; name?: string; x?: number; y?: number; w?: number; h?: number; autoplay?: boolean; page?: string; preset?: string; variant?: string; params?: Record<string, unknown>; /** id of a shader card to copy: its source, uniforms and settings */ copyFrom?: string };
+export type ShaderInput = { source?: string; name?: string; x?: number; y?: number; w?: number; h?: number; autoplay?: boolean; page?: string; allowOverlap?: boolean; preset?: string; variant?: string; params?: Record<string, unknown>; /** id of a shader card to copy: its source, uniforms and settings */ copyFrom?: string };
 export type ShaderPatch = { source?: string; name?: string; x?: number; y?: number; w?: number; h?: number; autoplay?: boolean; quarantined?: boolean; preset?: string; variant?: string; params?: Record<string, unknown> };
 type Who = { source?: "user" | "mcp"; session?: string; mergeKey?: string; mergeMs?: number; label?: string };
 
@@ -254,6 +254,7 @@ async function createShaderNow(file: string, input: ShaderInput, who: Who = {}) 
   try {
     const { widget } = await addWidget(file, {
       kind: "shader", id, name: input.name ?? from?.name ?? (made ? `${paperShader(made.paper.shader)!.name}${made.paper.preset !== "Default" ? ` (${made.paper.preset})` : ""}` : undefined), x: input.x, y: input.y, w: input.w, h: input.h, page: input.page,
+      allowOverlap: input.allowOverlap === true || !!from,
       config: from ? { ...from.config, rev, source: immutableSource(id, source) } : { rev, source: immutableSource(id, source), autoplay: input.autoplay ?? (made ? made.animated : true), quarantined: false, ...(made ? { paper: made.paper, uniforms: made.uniforms } : {}) },
     }, { record: { label: "Add Shader", ...who } });
     return { widget, rev, problems: lintWgsl(source) };

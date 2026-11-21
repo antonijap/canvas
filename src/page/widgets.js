@@ -3,7 +3,7 @@
 // world and keeps one .wd card per widget. Pan and zoom never touch widget DOM beyond one class
 // toggle and lazy mounting; the camera transform on #world moves everything.
 
-import { CARD_RADIUS, LEASE_MARGIN, MOUNT_MARGIN, NudgeQueue, camToReveal, idsInView, lodCrossing, moveRect, placeCentered, rectsIntersect, resizeRect, resizeZone, sameSet, viewToWorld, visibleWorldRect, ZONE_CURSOR } from "./geometry.js";
+import { CARD_RADIUS, LEASE_MARGIN, MOUNT_MARGIN, NudgeQueue, camToReveal, clamp, idsInView, lodCrossing, moveRect, placeCentered, rectsIntersect, rectToView, resizeRect, resizeZone, sameSet, viewToWorld, visibleWorldRect, ZONE_CURSOR } from "./geometry.js";
 import { pageName } from "./widget-page.js";
 import { updateWidgetAges } from "./widget-live.js";
 import { localCard } from "./widget-local.js";
@@ -514,7 +514,7 @@ function start(host) {
       if (pixel) { x = Math.round(x); y = Math.round(y); }
       const config = Object.assign({}, e.w.config || {});
       if ("link" in config) config.link = null; // a copy of a linked video card is a free card where it was dropped
-      const body = { kind: e.w.kind, name: e.w.kind === "note" ? undefined : e.w.name, x, y, w: r.w, h: r.h, config, ...(e.w.page ? { page: e.w.page } : {}) };
+      const body = { kind: e.w.kind, name: e.w.kind === "note" ? undefined : e.w.name, x, y, w: r.w, h: r.h, config, allowOverlap: true, ...(e.w.page ? { page: e.w.page } : {}) };
       // A shader card's source is a file named by its id: the server copies it (a plain POST would give the copy the template).
       const made = e.w.kind === "shader" ? call("POST", "/api/shaders", { copyFrom: e.id, name: e.w.name, x, y, w: r.w, h: r.h, ...(e.w.page ? { page: e.w.page } : {}) }, headers) : call("POST", "/api/widgets", body, headers);
       return made.then((j) => { merge(j.widget); return PREFIX + j.widget.id; }, (err) => { toast("Could not duplicate: " + err.message); return null; });
@@ -551,10 +551,33 @@ function start(host) {
   // ---------- add + reveal (native commands) ----------
   const sizeOf = (kind) => { const k = kinds.get(kind); return (k && k.defaultSize) || { w: 240, h: 200 }; };
   const pageField = () => { const first = host.pages && host.pages[0] && host.pages[0].id; return host.page && host.page !== first ? { page: host.page } : {}; };
-  async function addWidget(kind, at = placeCentered(host.cam, view.clientWidth, view.clientHeight, host.insets, sizeOf(kind))) {
+  function placementRects() {
+    const rects = Object.create(null);
+    for (const [id, board] of host.boards) if (board.measured) rects[id] = host.boxOf(id);
+    for (const w of shown()) {
+      const r = shownRect(w);
+      if (r !== w) rects[PREFIX + w.id] = { x: r.x, y: r.y, w: r.w, h: r.h };
+    }
+    return rects;
+  }
+  function keepInView(r) {
+    const cam = host.cam, i = host.insets, w = view.clientWidth, h = view.clientHeight;
+    const box = rectToView(cam, r);
+    const dx = clamp(0, i.l - box.x, w - i.r - box.x - box.w);
+    const dy = clamp(0, i.t - box.y, h - i.b - box.y - box.h);
+    if (box.w > w - i.l - i.r || box.h > h - i.t - i.b) {
+      host.setCam(camToReveal(r, w, h, i, { maxZ: cam.z, pad: 24 }));
+    } else if (dx || dy) {
+      host.setCam({ ...cam, x: cam.x + dx, y: cam.y + dy });
+    }
+  }
+  async function addWidget(kind, drop) {
+    const at = drop ?? placeCentered(host.cam, view.clientWidth, view.clientHeight, host.insets, sizeOf(kind));
     try {
-      const r = await call("POST", "/api/widgets", { kind, x: at.x, y: at.y, ...pageField() });
+      const r = await track(call("POST", "/api/widgets", { kind, ...at, ...pageField(), ...(drop ? { allowOverlap: true } : { rects: placementRects() }) }));
       merge(r.widget);
+      if (!onPage(r.widget)) return;
+      if (!drop) keepInView(shownRect(r.widget));
       host.selectId(PREFIX + r.widget.id);
     } catch (err) { toast("Could not add: " + err.message); }
   }
@@ -572,7 +595,7 @@ function start(host) {
     const at = { x: Math.round(p.x - size.w / 2), y: Math.round(p.y - size.h / 2) };
     if (!c.preset) return addWidget(c.kind, at);
     try {
-      const r = await call("POST", "/api/shaders", { preset: c.preset, x: at.x, y: at.y, ...pageField() });
+      const r = await call("POST", "/api/shaders", { preset: c.preset, x: at.x, y: at.y, allowOverlap: true, ...pageField() });
       merge(r.widget);
       host.selectId(PREFIX + r.widget.id);
     } catch (err) { toast("Could not add: " + err.message); }

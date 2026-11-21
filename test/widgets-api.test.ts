@@ -152,9 +152,9 @@ describe("widgets API", () => {
     assert.equal(a.status, 201);
     todoId = a.body.widget.id;
     assert.match(todoId, /^w_[a-z0-9]{8}$/);
-    assert.deepEqual([a.body.widget.x, a.body.widget.y, a.body.widget.w, a.body.widget.h], [1180, 0, 280, 160]);
+    assert.deepEqual([a.body.widget.x, a.body.widget.y, a.body.widget.w, a.body.widget.h], [1140, 0, 280, 160]);
     const b = await jcall("POST", `/api/widgets${q()}`, { kind: "note", name: "Memo", config: { text: "hello", tone: "yellow" } });
-    assert.equal(b.body.widget.y, 184, "stacks below the first");
+    assert.deepEqual([b.body.widget.x, b.body.widget.y], [1460, 0], "starts to the right of the first card");
     const list = await jcall("GET", `/api/widgets${q()}`);
     assert.deepEqual(list.body.widgets.map((w: any) => w.name), ["Today", "hello"]);
     assert.equal((await jcall("GET", `/api/widgets/${todoId}${q()}`)).body.widget.name, "Today");
@@ -173,6 +173,7 @@ describe("widgets API", () => {
     assert.equal((await jcall("GET", `/api/widgets/${todoId}${q()}`)).status, 404);
     const undo = await jcall("POST", `/api/widgets${q()}`, { ...patched.body.widget, index: del.body.index });
     assert.equal(undo.status, 201);
+    assert.deepEqual([undo.body.widget.x, undo.body.widget.y], [20, 30], "restore keeps the exact position");
     assert.deepEqual((await jcall("GET", `/api/widgets${q()}`)).body.widgets.map((w: any) => w.id)[0], todoId);
     assert.equal((await jcall("POST", `/api/widgets${q()}`, patched.body.widget)).status, 409, "restoring over an existing id");
   });

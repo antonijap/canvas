@@ -177,6 +177,7 @@ async function createVideoNow(file: string, input: VideoInput, who: Who = {}) {
   for (const k of ["autoplay", "loop", "muted", "posterTime", "link"] as const) if (input[k] !== undefined) config[k] = input[k];
   const { widget } = await addWidget(file, {
     kind: "video", name: input.name ?? path.basename(f.src, path.extname(f.src)), x: input.x, y: input.y, w: input.w, h: input.h, page: input.page, config,
+    allowOverlap: typeof input.link === "string" && input.link.length > 0,
   }, { record: { label: "Add Video", ...who } });
   return { widget };
 }
