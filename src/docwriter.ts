@@ -856,7 +856,7 @@ function nodeDiffOf(id: string, b: DocNode, a: DocNode): NodeOp | undefined {
 }
 
 /** The document-level keys (variables, themes, fonts, anything but the boards) a change set, added or removed. */
-function docKeysEffect(before: CanvasDoc, after: CanvasDoc): DocOp[] {
+export function docKeysEffect(before: CanvasDoc, after: CanvasDoc): DocOp[] {
   const ops: DocOp[] = [];
   for (const k of new Set([...Object.keys(before), ...Object.keys(after)])) {
     if (k === "children" || before[k] === after[k] || same(before[k], after[k])) continue;

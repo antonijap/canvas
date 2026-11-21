@@ -48,6 +48,45 @@ test('R-7-33 text height respects lines',()=>{
  assert.equal(has('R-7-33',[{...text,height:20}]),true);
  assert.equal(has('R-7-33',[{...text,content:'Read\nthis',height:24}]),true);
 });
+test('R-7-18 uses only ancestor frames below the board for empty-state sizes',()=>{
+ const state=node({type:'frame',name:'Empty state',children:[icon('illustration',40),icon('small-state',24)]});
+ const group=node({type:'group',name:'Error group',children:[icon('group-icon')]});
+ const root=board([{...icon('toolbar'),name:'Empty inbox icon'},state,group,icon('large-toolbar',40)],{name:'Feed / Empty'});
+ assert.deepEqual(checkDesign(doc([root])).filter(i=>i.rule==='R-7-18').map(i=>i.nodeId),['small-state','large-toolbar']);
+});
+test('screen checks skip library boards and reusable mains while general checks still apply',()=>{
+ const children=[
+  node({name:'Tab bar',y:400}),
+  node({name:'Empty state',y:80}),
+  node({name:'Top button',y:10}),
+  node({name:'Bottom link',y:830}),
+  node({name:'Rectangle',fill:'#123456'}),
+  icon('oversized',80),
+ ];
+ const rules=['R-7-4','R-7-26','R-7-50','R-7-2'];
+ const check=(root:Node)=>checkDesign(doc([root]));
+ for(const props of [{name:'Design system'},{name:'Components / buttons'},{name:'Tokens'},{reusable:true}]) {
+  const library=check(board(children,props));
+  assert.deepEqual(library.filter(i=>rules.includes(i.rule)),[],JSON.stringify(props));
+  for(const rule of ['R-7-11','R-7-24','R-7-18']) assert.equal(library.some(i=>i.rule===rule),true,rule);
+ }
+ const screen=check(board(children));
+ for(const rule of rules) assert.equal(screen.some(i=>i.rule===rule),true,rule);
+ assert.deepEqual(screen.filter(i=>i.rule==='R-7-2').map(i=>i.nodeId),[children[2].id,children[3].id]);
+ const main=board(children,{id:'main',name:'Samples',reusable:true});
+ const nested=check(board([main]));
+ assert.deepEqual(nested.filter(i=>rules.includes(i.rule) && i.nodeId!=='board'),[]);
+ assert.ok(nested.some(i=>i.rule==='R-7-24' && i.nodeId===children[4].id));
+});
+test('R-7-2 uses board-relative safe bands and exempts status and tab bar controls',()=>{
+ const root=board([
+  node({name:'Status bar',type:'frame',children:[node({name:'Status button'})]}),
+  node({name:'Tab bar',type:'frame',y:729,height:83,children:[node({name:'Home tab',y:60,height:20})]}),
+  node({name:'Header button',y:44}),
+  node({name:'Footer link',y:738}),
+ ],{x:800,y:900,width:375,height:812});
+ assert.deepEqual(checkDesign(doc([root])).filter(i=>i.rule==='R-7-2'),[]);
+});
 test('R-7-42 hidden, empty and outside layers',()=>{
  assert.equal(has('R-7-42',[board([node()])]),false);
  for(const props of [{enabled:false},{opacity:0},{x:400},{type:'frame',fill:undefined,children:[]}]) assert.equal(has('R-7-42',[board([node(props)])]),true);

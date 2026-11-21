@@ -72,7 +72,7 @@ export function register(server:McpServer) {
   tool(server,'add_image','Copy a local image inside the user home or an https image into file media. Fill an existing frame/rectangle with nodeId, or create a rectangle using x, y, width, height. Local paths and symlinks outside home and non-https URLs are refused.',{
     file:S.file,source:z.string().min(1),nodeId:z.string().optional(),x:z.number().optional(),y:z.number().optional(),width:z.number().positive().optional(),height:z.number().positive().optional(),
   },addImage);
-  tool(server,'check_design','Read-only mechanical design checks and Canvas facts: tabs, status bar, empty-state centring, colour tokens, layer names, row icons, clipped text, hidden/outside layers, official badges, mobile text alignment and board/label overlap. Returns issues with rule, nodeId and message. Other recipe checks require visual review.',{
+  tool(server,'check_design','Read-only mechanical design checks and Canvas facts: tabs, status bar, safe bands, empty-state centring, colour tokens, layer names, row icons, clipped text, hidden/outside layers, official badges, mobile text alignment and board/label overlap. Returns issues with rule, nodeId and message. Other recipe checks require visual review.',{
     file:S.file,boards:z.array(z.string()).optional(),
   },async a=>({issues:await designIssues(a.file,a.boards)}),{readOnlyHint:true});
 }

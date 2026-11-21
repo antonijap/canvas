@@ -2,7 +2,8 @@
 import { forgetStore } from "./widgets/store.ts";
 import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers } from "./cloud-files.ts";
 import { readOnlyRoute } from "./cloud-files-gate.ts";
-import { applyView } from "./docwriter.ts";
+import { applyView, docKeysEffect } from "./docwriter.ts";
+import { updateVariables, variableEditBody } from "./doc/variables.ts";
 // Canvas: a lightweight local design surface for .canvas documents.
 // Agents design through Canvas MCP (it edits the file through this server); Canvas watches the file and
 // redraws the changed boards in place. Pan by drag or scroll, zoom by pinch or Cmd+scroll,
@@ -760,6 +761,25 @@ export function startServer(port = PORT()): Promise<http.Server> {
           await writeSettled(f, 25);
         }
         return json(res, { error: "the document kept changing; Canvas's state and the file did not settle", code: "not_saved" }, 503);
+      }
+      if (url.pathname === "/api/variables" && req.method === "POST") {
+        if (req.headers["x-canvas"] !== "1") return json(res, { error: "forbidden" }, 403);
+        const raw = await readBodyText(req, 1_000_000);
+        if (raw === null) return json(res, { error: "too large" }, 413);
+        const parsed = variableEditBody.safeParse(JSON.parse(raw || "{}"));
+        if (!parsed.success) return json(res, { error: parsed.error.message, code: "invalid" }, 400);
+        const body = parsed.data;
+        await prime(body.file);
+        const file = resolveDocPath(body.file);
+        const { result: ops, write } = await editDoc(file, { touches: [] }, (doc) => {
+          const before = { ...doc };
+          updateVariables(doc, body);
+          return docKeysEffect(before, doc);
+        });
+        const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
+        record(file, ops, { label: "Set variables", source: by === "mcp" ? "mcp" : "user", session: String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined, edit: write.edit, ...write.history }, write.revision);
+        if (write.revision) docChanged(file, write.revision, by);
+        return json(res, { ok: true, revision: write.revision });
       }
       if (url.pathname === "/api/update" && req.method === "POST") {
         if (req.headers["x-canvas"] !== "1") return json(res, { error: "forbidden" }, 403);

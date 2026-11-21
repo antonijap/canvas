@@ -33,7 +33,8 @@ test('official badges fetch at insertion time, preserve aspect, and report offli
       const r=await badgeImage(path.join(dir,'Work.canvas'),kind,{lookup:publicLookup,fetch:async(url)=>{calls.push(String(url));return new Response(String(url).endsWith('/badges/')?'<img src="static/images/badges/en_badge_web_generic.png">':svg,{headers:{'content-type':url.endsWith('/badges/')?'text/html':'image/svg+xml'}});}});
       assert.equal(r.width/r.height,3);
       assert.equal(calls.length,kind==='app-store-badge'?1:2);
-      assert.match(calls[0],kind==='app-store-badge'?/applemarketingtools/:/play.google/);
+      if(kind==='app-store-badge') assert.equal(calls[0],'https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us');
+      else assert.match(calls[0],/play\.google/);
       await assert.rejects(badgeImage(path.join(dir,'Work.canvas'),kind,{lookup:publicLookup,fetch:async()=>{throw new Error('network');}}),/offline|download/i);
     }
   } finally {await fs.rm(dir,{recursive:true,force:true});}

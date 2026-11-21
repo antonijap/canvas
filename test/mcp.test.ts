@@ -93,7 +93,7 @@ const TOOLS = [
   "get_recipe", "insert_component", "add_image", "check_design",
   "list_clouds", "list_cloud_files", "create_cloud_file",
   "canvas_status", "launch_canvas", "list_tabs", "open_file", "close_tab", "get_current_file", "get_theme", "set_theme",
-  "get_document_summary", "get_fonts", "list_installed_fonts", "lookup_nodes", "inspect_node",
+  "get_document_summary", "set_variables", "get_fonts", "list_installed_fonts", "lookup_nodes", "inspect_node",
   "get_selection", "select_nodes", "clear_selection", "wait_for_selection", "highlight_nodes", "clear_highlights", "get_events",
   "get_viewport", "fit_view", "set_zoom", "pan_view", "screenshot_view", "render_node", "export_nodes", "set_node_props", "move_board", "scale_nodes", "undo", "redo",
   "swap_instance", "reset_overrides", "push_overrides",
@@ -159,6 +159,55 @@ describe("errors", () => {
 });
 
 describe("disk tools", () => {
+  test("set_variables updates a closed file, preserves its themes and supports undo and redo", async () => {
+    const target = path.join(dir, "variables.canvas.json");
+    const initial = { ...FIXTURE, themes: { appearance: ["light", "dark"], density: ["compact"] }, variables: { obsolete: { type: "number", value: 1 }, gap: { type: "number", value: 4 } } };
+    fs.writeFileSync(target, JSON.stringify(initial));
+    const read = async () => {
+      const summary = await call("get_document_summary", { file: target });
+      assert.equal(summary.isError, false, summary.text);
+      return {
+        themes: summary.json.themes,
+        variables: Object.fromEntries(summary.json.variables.map(({ name, ...definition }: { name: string; type: string; value: unknown }) => [name, definition])),
+      };
+    };
+    const r = await call("set_variables", {
+      file: target,
+      variables: { surface: { light: "#FFFFFF", dark: "#111111" }, gap: 12, label: "Continue" },
+      remove: ["obsolete"],
+    });
+    assert.equal(r.isError, false, r.text);
+    const changed = await read();
+    assert.deepEqual(changed.variables, {
+      gap: { type: "number", value: 12 },
+      label: { type: "string", value: "Continue" },
+      surface: { type: "color", value: [{ value: "#FFFFFF", theme: { appearance: "light" } }, { value: "#111111", theme: { appearance: "dark" } }] },
+    });
+    assert.deepEqual(changed.themes, initial.themes);
+    const undo = await call("undo", { file: target });
+    assert.equal(undo.isError, false, undo.text);
+    assert.deepEqual((await read()).variables, initial.variables);
+    const redo = await call("redo", { file: target });
+    assert.equal(redo.isError, false, redo.text);
+    assert.deepEqual((await read()).variables, changed.variables);
+    const invalid = await call("set_variables", { file: target, variables: { gap: { light: 12, dark: "large" } }, remove: ["label"] });
+    assert.equal(invalid.isError, true);
+    assert.deepEqual((await read()).variables, changed.variables);
+  });
+
+  test("set_variables adds a light/dark axis to files without one", async () => {
+    const target = path.join(dir, "new-themes.canvas.json");
+    fs.writeFileSync(target, JSON.stringify(FIXTURE));
+    const r = await call("set_variables", { file: target, variables: { gap: { light: 8, dark: 12 } } });
+    assert.equal(r.isError, false, r.text);
+    const read = async () => (await call("get_document_summary", { file: target })).json;
+    assert.deepEqual((await read()).themes, { mode: ["light", "dark"] });
+    const undo = await call("undo", { file: target });
+    assert.equal(undo.isError, false, undo.text);
+    assert.deepEqual((await read()).themes, {});
+    assert.deepEqual((await read()).variables, []);
+  });
+
   test("summary, lookup, inspect, fonts work with no page open", async () => {
     const s = await call("get_document_summary", { file });
     assert.equal(s.json.boards.length, 2);

@@ -5,6 +5,7 @@ import { z } from "zod";
 import { api, cmd, ensureServer, resolveFile, ToolError } from "../client.ts";
 import * as S from "../schemas.ts";
 import { tool } from "../tool.ts";
+import { variableEdit } from "../../src/doc/variables.ts";
 
 const enc = encodeURIComponent;
 
@@ -25,6 +26,14 @@ export function register(server: McpServer) {
     await ensureServer();
     return api("GET", `/api/summary?file=${enc(await resolveFile(a.file))}`);
   }, { readOnlyHint: true });
+
+  tool(server, "set_variables", "Create or update file variables. Keys are names without $. Values are numbers, strings, hex colours, or a {light, dark} pair of the same type. Optional remove names are deleted before setting new values. One batch in Canvas undo history. Pass file to work with Canvas closed.", {
+    file: S.file, ...variableEdit,
+  }, async (a) => {
+    await ensureServer();
+    const file = await resolveFile(a.file);
+    return api("POST", "/api/variables", { file, variables: a.variables, remove: a.remove });
+  }, { destructiveHint: true });
 
   tool(server, "get_fonts", "Fonts a file uses and whether each is installed on this Mac, embedded in the file, drawn from the web (Google Fonts) or missing. onlyMissing keeps the ones that are not installed or embedded.", {
     file: S.file,

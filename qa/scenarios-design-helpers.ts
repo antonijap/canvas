@@ -18,14 +18,19 @@ sc('design helpers','agent builds and repairs a feed', {covers:['design-helpers:
     };
     const recipe:any=await client.callTool({name:'get_recipe',arguments:{topic:'feed'}});
     t.ok(recipe.content[0].text.includes('## Taste'),'agent reads the feed recipe');
-    await call('add_nodes',{nodes:[{id:'feed',type:'frame',name:'Feed empty',width:393,height:852,layout:'none',fill:'#FFFFFF',children:[
+    t.ok(recipe.content[0].text.includes('set_variables'),'recipe explains how to create tokens');
+    await call('set_variables',{variables:{surface:{light:'#FFFFFF',dark:'#111111'},ink:'#000000'}});
+    const summary=await call('get_document_summary');
+    t.ok(summary.variables.some((v:any)=>v.name==='surface' && v.type==='color'),'file lists the new colour variable');
+    await call('add_nodes',{nodes:[{id:'feed',type:'frame',name:'Feed / Empty',width:393,height:852,layout:'none',fill:'$surface',children:[
       {id:'drawn-status',type:'frame',name:'Status bar',width:393,height:54,children:[{id:'drawn-time',type:'text',name:'Clock',content:'9:41',fontFamily:'SF Pro',fontSize:17,fontWeight:'600',width:54,height:22,x:54,y:19,fill:'#000000'}]},
-      {id:'top',type:'frame',name:'Top bar',y:59,width:393,height:48,fill:'#FFFFFF'},
+      {id:'top',type:'frame',name:'Top bar',y:59,width:393,height:48,fill:'$surface',children:[{id:'home-icon',type:'icon',name:'Home icon',library:'lucide',icon:'house',width:24,height:24,fill:'$ink'}]},
       {id:'empty',type:'frame',name:'Empty state',x:46.5,y:180,width:300,height:150,children:[{id:'title',type:'text',name:'Empty headline',content:'A quiet moment',fontSize:20,fontFamily:'SF Pro',fontWeight:'600',width:300,height:24,textAlign:'center',fill:'#000000'}]},
       {id:'tabs',type:'frame',name:'Tab bar',x:0,y:769,width:393,height:83,layout:'horizontal',children:['Home active','Search','Profile'].map((name,i)=>({id:'tab'+i,type:'frame',name,width:'fill_container',height:49,children:[{id:'label'+i,type:'text',name:'Tab label',content:name,fontFamily:'SF Pro',fontSize:10,fontWeight:'400',width:70,height:12,fill:'#000000'}]}))},
     ]}]});
     const before=await call('check_design',{boards:['feed']});
     for(const rule of ['R-7-50','R-7-4','R-7-26']) t.ok(before.issues.some((i:any)=>i.rule===rule),`reports ${rule}`);
+    t.ok(!before.issues.some((i:any)=>i.rule==='R-7-18'),'toolbar icon keeps regular sizing on the empty feed');
     await call('delete_nodes',{ids:['drawn-status']});
     const inserted=await call('insert_component',{kind:'ios-status-bar',parent:'feed'});
     t.ok(inserted.registered,'first call registers component');

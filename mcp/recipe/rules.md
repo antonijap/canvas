@@ -22,7 +22,7 @@ What separates a top app from generic AI output. Read it first, check against it
 - Today's platform look. Bars and controls look like iOS now: a plain tab bar that runs to the bottom edge, ink for the active tab, no outlined or boxed bars.
 - Official over drawn. Use the real platform pieces: the iOS status bar (9:41, signal, Wi-Fi, battery at Apple's positions) and the official App Store and Google Play badges. A hand-drawn look-alike reads as fake at once.
 - Centred on small screens. On a phone-width marketing page, headlines, short copy, feature blocks and controls are centred or full width; left-aligned blocks with a side icon look lazy there.
-- System first. Build the tokens and components before the screens; screens only place instances. The design with a real system won round 2.
+- System first. Read file variables with `get_document_summary` and create missing tokens with `set_variables`. Build components before the screens; screens only place instances.
 - Show life. At least one post is in an interacted state, like a filled heart with its count.
 - Real voice. Names, captions and counts that sound like people ("Took the long way home"), not "Lorem", "User 1" or "Check out this amazing post!".
 - Short buttons. A verb and at most 2 more words, centred by layout with label line height 100 percent, never nudged by hand, no decorative icon.
@@ -302,6 +302,8 @@ Checklist:
 
 Run on every top-level board and its descendants; expand `type: "ref"` instances with overrides; resolve `$name` through the file's variables. Name patterns are case-insensitive. A file's own variables extend the scales. [MUST] checks fail the board. [DEFAULT] checks warn: the agent fixes the value or keeps it with a one-line reason. A check never asks to remove or shrink content the task requested.
 
+Skip safe bands, tab bars, empty-state centring and status bars on boards named /design system|components|tokens/ and within reusable component definitions.
+
 - `R-7-1` [MUST] **Board size.** Why: R-3-1. Applies to: top-level boards. Check: width in {375, 393} and height in {812, 852}, or height >= 852 for a board named /full/.
 - `R-7-2` [MUST] **Safe bands.** Why: R-3-2. Applies to: iPhone boards. Check: no node named /button|tab|input|link|chip/ outside "Status bar" has absolute y < 59 (44 on 812); none has bottom edge > height - 34 unless inside "Tab bar".
 - `R-7-3` [DEFAULT] **App bar and region sum.** Why: R-3-5, R-6-2. Applies to: boards with a child named /top bar|app bar|header/. Check: height 44 to 56; on feed boards Status bar, Top bar, optional switch, Feed list and Tab bar heights sum to the board height (this part MUST).
@@ -319,7 +321,7 @@ Run on every top-level board and its descendants; expand `type: "ref"` instances
 - `R-7-15` [DEFAULT] **Spacing scale.** Why: R-4-1. Applies to: frames. Check: gap and padding values in the spacing list or a spacing variable.
 - `R-7-16` [DEFAULT] **Radius scale.** Why: R-3-13. Applies to: nodes with cornerRadius. Check: in the radius list or min(width, height)/2; media wider than 380 has radius 0.
 - `R-7-17` [DEFAULT] **Avatars.** Why: R-3-10. Applies to: nodes named /avatar/. Check: 24 to 96 and round; width = height and one size per list (both MUST).
-- `R-7-18` [MUST] **Icons.** Why: R-3-11, R-4-8, R-1-10. Applies to: icon nodes. Check: width = height; one library across the file; sibling icons in one row share size and fill; size 16 to 28 in bars, rows and buttons, 32 to 64 in nodes named /state|empty|error|illustration/. Values inside those ranges pass; off the defaults is not a warning.
+- `R-7-18` [MUST] **Icons.** Why: R-3-11, R-4-8, R-1-10. Applies to: icon nodes. Check: width = height; one library across the file; sibling icons in one row share size and fill; size 32 to 64 inside ancestor frames named /state|empty|error|illustration/ below the board, otherwise 16 to 28. Values inside those ranges pass; off the defaults is not a warning.
 - `R-7-19` [DEFAULT] **Separators.** Why: R-3-14. Applies to: nodes named /separator|divider|hairline/. Check: full parent inner width; height <= 1 or 4 to 8; all separators in one Feed list share height and fill.
 - `R-7-20` [DEFAULT] **Side margins.** Why: R-3-6. Applies to: text and control frames in content columns. Check: left inset 12 to 16; text beside a leading avatar may start after it; only /media|image|photo|video|rail|grid/ start at x 0. One inset value for every text column on a board (MUST).
 - `R-7-21` [DEFAULT] **Grouping distances.** Why: R-1-8. Applies to: vertical frames whose children are frames with a gap. Check: child gap * 2 <= parent gap when parent gap > 0.
