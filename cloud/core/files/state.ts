@@ -30,6 +30,18 @@ export interface FileState {
 const isObj = (v: unknown): v is Record<string, Json> => !!v && typeof v === "object" && !Array.isArray(v);
 const PLACEHOLDERS = new Set<string>(["children", ...DOC_VALUE_KEYS]);
 
+/** Page colours belong to the local package. Keep every other page field in its original order. */
+export function stripPageBackgrounds(pages: unknown): unknown {
+  if (!Array.isArray(pages)) return pages;
+  const hasBackground = (page: unknown): page is Record<string, Json> => isObj(page) && Object.hasOwn(page, "background");
+  if (!pages.some(hasBackground)) return pages;
+  return pages.map((page) => {
+    if (!hasBackground(page)) return page;
+    const { background, ...rest } = page;
+    return rest;
+  });
+}
+
 /** A Canvas document and its sidecar envelope (widgets.json) as a FileState. Pages that are not in the shape page ops
  *  describe ride along as the `pages` meta key. */
 export function stateFromFiles(document: Record<string, Json>, envelope: Record<string, Json> = {}): FileState {
@@ -44,7 +56,7 @@ export function stateFromFiles(document: Record<string, Json>, envelope: Record<
   const children = Array.isArray(document.children) ? (document.children as DocNode[]) : [];
   const meta: Record<string, Json> = {};
   let pages: PageRow[] | null = null;
-  const rawPages = envelope.pages;
+  const rawPages = stripPageBackgrounds(envelope.pages) as Json | undefined;
   if (Array.isArray(rawPages) && rawPages.every((p) => isObj(p) && typeof p.id === "string" && typeof p.name === "string" && Array.isArray(p.boards) && Object.keys(p).length === 3)) {
     pages = rawPages.map((p) => ({ id: (p as Record<string, Json>).id as string, name: (p as Record<string, Json>).name as string, boards: [...((p as Record<string, Json>).boards as string[])] }));
   } else if (rawPages !== undefined) meta.pages = rawPages;

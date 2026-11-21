@@ -9,6 +9,7 @@ import { bodyChunks } from "./body.ts";
 // camera, in the page's localStorage), never stored here.
 
 import { asOneAction } from "./cloud-files-ops.ts";
+import { isCloudFile } from "./cloud-files-runtime.ts";
 import { randomBytes } from "node:crypto";
 import type http from "node:http";
 import { relabelTop } from "./history.ts";
@@ -179,9 +180,11 @@ export async function createPage(file: string, input: { name?: unknown; index?: 
 
 export async function updatePage(file: string, id: string, patch: { name?: unknown; index?: unknown; background?: unknown }, boardIds: BoardIds, opts: Opts = {}) {
   if (!patch || typeof patch !== "object") throw new WidgetError(400, "bad-body", "Send an object of changes");
+  const changesBackground = Object.hasOwn(patch, "background");
+  if (changesBackground) requireLocalBackground(file);
   return change(file, boardIds, opts, (pages) => {
     const p = pageAt(pages, id);
-    if (Object.hasOwn(patch, "background")) {
+    if (changesBackground) {
       if (patch.background === null) delete p.background;
       else if (typeof patch.background === "string" && /^#[0-9a-f]{6}$/i.test(patch.background)) p.background = patch.background.toUpperCase();
       else throw new WidgetError(422, "invalid-pages", "background must be #RRGGBB or null");
@@ -278,6 +281,7 @@ export async function settleBoards(file: string, fresh: string[], to: string | n
 
 export async function replacePages(file: string, pages: unknown, boardIds: BoardIds, opts: Opts = {}) {
   const next = validatePages(pages);
+  if (next.some((p) => p.background !== undefined)) requireLocalBackground(file);
   return change(file, boardIds, opts, (list, widgets) => {
     list.splice(0, list.length, ...next);
     // Widgets on pages that no longer exist fall back to the first page.
@@ -285,6 +289,10 @@ export async function replacePages(file: string, pages: unknown, boardIds: Board
     for (const w of widgets) if (typeof w.page === "string" && (!ids.has(w.page) || w.page === next[0].id)) delete w.page;
     return next.length;
   });
+}
+
+function requireLocalBackground(file: string): void {
+  if (isCloudFile(docFileFor(file))) throw new WidgetError(422, "invalid", "Page colours stay on local files for now");
 }
 
 // ---------- HTTP: /api/pages ----------

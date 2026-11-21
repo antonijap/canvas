@@ -5,14 +5,15 @@
 //
 // The proof: with checks on (tests: NODE_TEST_CONTEXT; `pnpm qa`'s servers: CANVAS_CHECK_ACTIONS=1), every write
 // runs its action through the shared apply (cloud/core/files/apply.ts) on the state before it, and the result must
-// be the very state the edit wrote, key order included (the document's JSON, the sidecar's bytes). An edit whose
-// action falls short is refused loudly (ActionCheckError) instead of written.
+// match the state the edit wrote, key order included, after dropping local page backgrounds from the sidecar.
+// An edit whose action falls short is refused loudly (ActionCheckError) instead of written.
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { applyAction, isReject, nextProps, opRunner } from "../cloud/core/files/apply.ts";
+import { stripPageBackgrounds } from "../cloud/core/files/state.ts";
 import { DESCENDANTS_PREFIX, type DocNode, type Json } from "../cloud/core/schema.ts";
 import { actionBytes, blobTypeOf, checkBlobPath, FILE_LIMITS, META_KEYS, type Action, type BlobPath, type FileOp, type MetaKey, type Val } from "../cloud/protocol-files.ts";
 import { DocTree, type DocLike, type Envelope } from "./cloud-files-tree.ts";
@@ -383,6 +384,11 @@ export function placements(cur: readonly string[], target: readonly string[]): {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+function cloudEnvelope(envelope: Envelope): Envelope {
+  const pages = stripPageBackgrounds(envelope.extra.pages);
+  return pages === envelope.extra.pages ? envelope : { ...envelope, extra: { ...envelope.extra, pages } };
+}
+
 /** A page list in the shape page ops describe: {id, name, boards} each, ids unique, every board on one page. */
 export function pagesInShape(v: unknown): v is { id: string; name: string; boards: string[] }[] {
   if (!Array.isArray(v)) return false;
@@ -400,6 +406,10 @@ export function pagesInShape(v: unknown): v is { id: string; name: string; board
 
 /** The file ops that take the sidecar from `before` to `after`: cards, pages and the other kept keys. */
 export function envelopeFileOps(before: Envelope, after: Envelope): FileOp[] {
+  return diffEnvelope(cloudEnvelope(before), cloudEnvelope(after));
+}
+
+function diffEnvelope(before: Envelope, after: Envelope): FileOp[] {
   const tree = new DocTree({ children: [] }, before);
   const { out, push } = stepper(tree);
   // Cards: gone ones go, then each one placed (or changed in place) in the order `after` has them.
@@ -612,23 +622,25 @@ export function docEditAction(docFile: string, before: DocLike, after: DocLike, 
  */
 export function envelopeEditAction(before: Envelope, after: Envelope, bytes: string, serialize: (widgets: never[], extra: Record<string, unknown>) => string): FileOp[] | null {
   if (!wantActions()) return null;
+  const cloudBefore = cloudEnvelope(before), cloudAfter = cloudEnvelope(after);
   const fail = (msg: string) => {
     console.error(`[canvas] action check (cards and pages): ${msg}`);
     throw new ActionCheckError(`The edit's action is incomplete: ${msg}`);
   };
   let fileOps: FileOp[];
   try {
-    fileOps = envelopeFileOps(before, after);
+    fileOps = diffEnvelope(cloudBefore, cloudAfter);
   } catch (e) {
     if (!actionChecks.enabled) return null;
     return fail((e as Error).message);
   }
   if (actionChecks.enabled) {
-    const tree = new DocTree({ children: [] }, before);
+    const tree = new DocTree({ children: [] }, cloudBefore);
     const r = applyAction(tree, makeAction(fileOps), { limits: null });
     if (isReject(r)) return fail(`the shared apply refused it: ${r.message}`);
     const got = serialize(tree.envelope.widgets as never[], tree.envelope.extra);
-    if (got !== bytes) return fail(`applied to the state before, it gives other bytes: ${firstDifference(JSON.parse(got), JSON.parse(bytes))}`);
+    const expected = cloudAfter === after ? bytes : serialize(cloudAfter.widgets as never[], cloudAfter.extra);
+    if (got !== expected) return fail(`applied to the state before, it gives other bytes: ${firstDifference(JSON.parse(got), JSON.parse(expected))}`);
     actionChecks.checked.envelope++;
   }
   return fileOps;
@@ -636,6 +648,8 @@ export function envelopeEditAction(before: Envelope, after: Envelope, bytes: str
 
 /** A write's ops, once it landed: to the step it is part of, or as an action of its own. */
 export function deliverOps(docFile: string, ops: FileOp[] | null, before?: Envelope, after?: Envelope): void {
+  if (before) before = cloudEnvelope(before);
+  if (after) after = cloudEnvelope(after);
   const scope = activeScope();
   if (scope?.docFile === docFile && before && after) {
     scope.envelopeBefore ??= before;

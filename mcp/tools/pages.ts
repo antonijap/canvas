@@ -42,7 +42,7 @@ export function register(server: McpServer) {
     return api("POST", `/api/pages?file=${enc(await resolveFile(a.file))}`, { name: a.name, index: a.index, boards: a.boards });
   });
 
-  tool(server, "set_page_background", "Set a page's canvas background to #RRGGBB, used in both themes. Pass color: null to reset to the theme canvas colour. Stored with the page in the .canvas package. Uses Canvas undo history; MCP edits group until finish_work. Rendering only; board exports are unchanged. Works with Canvas closed and in background/headless mode with an explicit file.", {
+  tool(server, "set_page_background", "Set a local file's page background to #RRGGBB, used in both themes. Pass color: null to reset to the theme canvas colour. Stored with the page in the .canvas package. Uses Canvas undo history; MCP edits group until finish_work. Rendering only; board exports are unchanged. Works with Canvas closed and in background/headless mode with an explicit file.", {
     file: S.file,
     page: pageId,
     color: z.string().regex(/^#[0-9a-f]{6}$/i).nullable(),

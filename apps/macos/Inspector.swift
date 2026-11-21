@@ -44,6 +44,7 @@ private struct PageInspector: View {
     @Environment(\.colorScheme) private var scheme
 
     private var color: String { page.background ?? (scheme == .dark ? "#18181B" : "#F6F6F6") }
+    private let cloudHint = "Page colours stay on local files for now"
     private func write(_ color: String) { model.setPageBackground(color, page: page.id) }
 
     var body: some View {
@@ -51,15 +52,18 @@ private struct PageInspector: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Background").font(Typography.label).foregroundStyle(Palette.mutedFg).qaText("Background")
                 HStack(spacing: 4) {
-                    ColorAlphaField(model: model, value: color, enabled: !model.cloudReadOnly,
-                                    swatch: AnyView(ColorSwatchButton(value: color, enabled: !model.cloudReadOnly,
+                    ColorAlphaField(model: model, value: color, enabled: !model.isCloudFile,
+                                    swatch: AnyView(ColorSwatchButton(value: color, enabled: !model.isCloudFile,
                                                                      onChange: { _ in }, onCommit: write)),
                                     showsOpacity: false, allowsTokens: false, write: write)
                     MiniButton(symbol: "arrow.uturn.backward", help: "Reset background to default") {
                         model.setPageBackground(nil, page: page.id)
                     }
-                    .disabled(page.background == nil || model.cloudReadOnly)
+                    .disabled(page.background == nil || model.isCloudFile)
                     .qaID("page-background-reset")
+                }
+                if model.isCloudFile {
+                    Text(cloudHint).font(Typography.label).foregroundStyle(Palette.mutedFg).qaText(cloudHint)
                 }
             }
         }

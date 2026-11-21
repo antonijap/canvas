@@ -154,6 +154,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var allFiles: [FileEntry] = []
     @Published var openFiles: [String] = UserDefaults.standard.stringArray(forKey: "canvas.openFiles") ?? []
     @Published var cloudFileNames: [String: String] = [:]
+    @Published private(set) var isCloudFile = false
     @Published var cloudReadOnly = false
     @Published var currentFile: String?
     /// The Home tab is the shown one (Home.swift): the shown file's page stays alive underneath, hidden, and takes no keys.
@@ -276,12 +277,14 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
 
     func apply(_ m: [String: Any]) {
         if let open = m["commentsSidebar"] as? Bool { commentsSidebarOpen = open }
-        if let cloud = m["cloudFile"] as? [String: Any] {
-            cloudReadOnly = (cloud["role"] as? String).map { $0 != "owner" && $0 != "editor" } ?? false
-            if let file = currentFile, let name = cloud["name"] as? String { cloudFileNames[file] = name }
-        }
         if m["cloudRemoved"] as? Bool == true, let file = currentFile { close(file); flash("Your access to this Cloud was removed"); return }
         if let file = m["file"] as? String, file != currentFile { noteOpened(file) }
+        if m.keys.contains("cloudFile") {
+            let cloud = m["cloudFile"] as? [String: Any]
+            isCloudFile = cloud != nil
+            cloudReadOnly = (cloud?["role"] as? String).map { $0 != "owner" && $0 != "editor" } ?? false
+            if let file = currentFile, let name = cloud?["name"] as? String { cloudFileNames[file] = name }
+        }
         if let z = m["zoom"] as? Double, let v = JSONNumber.int(z) { zoom = v }
         if m.keys.contains("selBoard") { selectedBoard = m["selBoard"] as? String }
         if let p = m["pages"] as? [String: Any] {
@@ -421,6 +424,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         let m = PanelMemory.next(sectionByFile, leaving: currentFile, current: section, opening: file)
         sectionByFile = m.saved
         if let r = m.section { section = r }
+        isCloudFile = false
         cloudReadOnly = false
         currentFile = file
         if widgetKinds.isEmpty { fetchKinds() }
@@ -1077,7 +1081,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// The boards list: select the board and fly the camera to it.
     func fly(_ id: String) { run("{cmd:'fly',id:\(jsString(id))}"); focusCanvas() }
     func setPageBackground(_ color: String?, page: String) {
-        guard !cloudReadOnly, let file = currentFile,
+        guard !isCloudFile, let file = currentFile,
               let index = pages.firstIndex(where: { $0.id == page }) else { return }
         let background = color.flatMap { PaintLogic.withAlpha($0, percent: 100) }?.uppercased()
         guard color == nil || background?.range(of: "^#[0-9A-F]{6}$", options: .regularExpression) != nil else { return }

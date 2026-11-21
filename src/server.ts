@@ -3660,7 +3660,7 @@ es.addEventListener("doc", (e) => { docGen++; onDoc(JSON.parse(e.data)); });
 let cloudReadOnly = false;
 es.addEventListener("cloudfile", (e) => {
   const info = JSON.parse(e.data); window.canvasCloudFile = info; cloudReadOnly = !!info && info.role !== "owner" && info.role !== "editor";
-  if (native) post({ cloudFile: info || { role: "editor" } });
+  if (native) post({ file, cloudFile: info });
   document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });
 });
 es.addEventListener("cloudremoved", () => {
@@ -3744,7 +3744,7 @@ window.canvasCmd = (c) => {
 // The app shows this tab again: everything its chrome shows from this page, said once more.
 function resync() {
   if (!native) return;
-  if (doc) post({ file, doc: docMsg(), pages: pagesMsg(), history: { undo: history.undo, redo: history.redo, repeat: history.repeat ? history.repeat.label : null }, selBoard: selBoard ? selBoard.meta.id : null });
+  if (doc) post({ file, cloudFile: window.canvasCloudFile ?? null, doc: docMsg(), pages: pagesMsg(), history: { undo: history.undo, redo: history.redo, repeat: history.repeat ? history.repeat.label : null }, selBoard: selBoard ? selBoard.meta.id : null });
   postedPct = -1; postZoom();
   if (multi) showMulti(multi); else if (sel) select(sel.id, true); else post({ selection: null });
   post({ snapHello: true });

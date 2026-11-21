@@ -519,7 +519,7 @@ features:
     name: Page canvas background and properties with nothing selected
     area: page background
     driven: [page, native, mcp]
-    cases: [set, reset, themes, undo, persistence, empty-selection]
+    cases: [set, reset, themes, undo, persistence, empty-selection, cloud]
   - id: page-crud
     name: Create, rename, reorder and delete pages (delete takes its boards, one undo)
     area: pages
