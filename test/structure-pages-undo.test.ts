@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
+import { storeFor } from "../src/widgets/store.ts";
+import { WidgetError } from "../src/widgets/types.ts";
 import { tmpDir } from "./helpers.ts";
 
 const dir = tmpDir("structpages");
@@ -91,6 +93,51 @@ describe("structure ops and the page list share one undo step", () => {
       later();
     }
     assert.equal(fs.readFileSync(sidecar, "utf8"), before);
+  });
+
+  test("duplicate a page remaps boards, component ids and instances together, with one undo and redo", async () => {
+    const { docFile, q, sidecar } = await setup("pagecopy");
+    await call("PUT", `/api/pages${q}`, { pages: [
+      { id: "layout", name: "Layout", boards: [] },
+      { id: "components", name: "Components", boards: ["lay", "cmp_main"], background: "#2468AC" },
+    ] });
+    history.resetHistory();
+    const before = fs.readFileSync(sidecar, "utf8");
+    const r = await call("POST", `/api/pages/components/duplicate${q}`);
+    assert.equal(r.status, 201, JSON.stringify(r.body));
+    const [original, copy] = r.body.pages.slice(1);
+    assert.equal(copy.name, "Components copy");
+    assert.equal(copy.background, original.background);
+    assert.notEqual(copy.id, original.id);
+    assert.equal(copy.boards.length, 2);
+    assert.ok(copy.boards.every((id: string) => !original.boards.includes(id)));
+    const [board, componentBoard] = copy.boards.map((id: string) => currentDoc(docFile).doc.children.find((n) => n.id === id));
+    assert.deepEqual([board.x, board.y], [0, 0]);
+    assert.notEqual(board.children[0].id, "inst");
+    assert.notEqual(componentBoard.children[0].id, "btn");
+    assert.equal(componentBoard.children[0].reusable, true);
+    assert.equal(board.children[0].ref, componentBoard.children[0].id);
+    assert.equal(history.entries(docFile).undo.length, 1);
+    assert.equal((await call("POST", `/api/history/undo${q}`)).status, 200);
+    assert.deepEqual(topIds(docFile), ["lay", "cmp_main"]);
+    assert.equal(fs.readFileSync(sidecar, "utf8"), before);
+    assert.equal((await call("POST", `/api/history/redo${q}`)).status, 200);
+    assert.deepEqual(listed(sidecar).slice(-2), copy.boards);
+    assert.equal(JSON.parse(fs.readFileSync(sidecar, "utf8")).pages[2].background, original.background);
+    assert.ok(copy.boards.every((id: string) => topIds(docFile).includes(id)));
+  });
+
+  test("a failed page save rolls back the copied boards", async (t) => {
+    const { docFile, q, sidecar } = await setup("pagecopy-conflict");
+    const before = fs.readFileSync(sidecar, "utf8");
+    t.mock.method(storeFor(docFile), "mutateEnvelope", async () => {
+      throw new WidgetError(409, "rev-mismatch", "The pages changed since you read them");
+    });
+    const r = await call("POST", `/api/pages/components/duplicate${q}`);
+    assert.equal(r.status, 409, JSON.stringify(r.body));
+    assert.deepEqual(topIds(docFile), ["lay", "cmp_main"]);
+    assert.equal(fs.readFileSync(sidecar, "utf8"), before);
+    assert.equal(history.entries(docFile).undo.length, 0);
   });
 
   test("duplicate a board on page 2, undo: its copy leaves the page list too", async () => {

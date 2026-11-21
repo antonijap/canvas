@@ -48,7 +48,7 @@ import { agentLabel, cursorActions } from "./agent-cursor.ts";
 import { GROUP_MERGE_MS, handleMoveRoute, isGroupMerge, moveModeOf, moveNodes, MoveError } from "./move.ts";
 import { handleResizeRoute } from "./resize.ts";
 import { handleScaleRoute } from "./scale.ts";
-import { handleStructureRoute, isDeletedHolder, keepOnPage, runStructure } from "./structure.ts";
+import { copyPageBoards, handleStructureRoute, isDeletedHolder, keepOnPage, runStructure } from "./structure.ts";
 import { handleVariationsRoute, type VarCtx } from "./variations.ts";
 import { handleExportRoute } from "./export.ts";
 import { handleCopyAsRoute } from "./copy-as.ts";
@@ -624,7 +624,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
         if (r.revision) docChanged(docFile, r.revision, by, { id: null, structure: "Delete" });
         if (by !== "mcp") bridgeEmit("user_edit", { file: displayPath(docFile), id: null, ids: boards, structure: "Delete", props: [], remove: [] });
         return boards.length;
-      })) return;
+      }, copyPageBoards)) return;
       if (await handleHistoryRoute(req, res, url, (f) => resolveDocPath(f), { docWritten: (docFile, rev) => docChanged(docFile, rev, "inspector", { undo: true }) })) return;
       // Board drags, arrow-key nudges and the MCP's move_board (src/move.ts).
       if (await handleMoveRoute(req, res, url, {

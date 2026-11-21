@@ -108,6 +108,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var boards: [Board] = []
     @Published var pages: [PageInfo] = []
     @Published var activePage: String?
+    var pageShortcutTarget: (file: String, id: String)?
     /// The board the selection is on: its row in the boards list shows as current.
     @Published var selectedBoard: String?
     @Published var components: [Component] = []

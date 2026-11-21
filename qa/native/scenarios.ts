@@ -232,20 +232,74 @@ sc("widgets", "Cmd+V with a screenshot on the pasteboard pastes an image layer",
   await waitDrawn(t, String(kids[0].id), "#FEF3C7", "the pasted image");
 });
 
-sc("pages", "reorder pages by drag, no drop line left", { covers: ["page-crud:board", "pages:mouse"] }, async (t: NT) => {
+sc("pages", "page-row reorder and recovery", { covers: ["page-crud:board", "pages:mouse", "pages:board"] }, async (t: NT) => {
   await t.section("Layers");
-  const cards = await t.pageRow("cards"), layout = await t.pageRow("layout");
-  const r = await t.drag(center(cards.r), { x: layout.r.x + layout.r.w / 2, y: layout.r.y + 5 });
-  t.ok(r.systemDrag && r.drop.performed, `the page drag did not drop (${JSON.stringify(r)})`);
-  await t.waitState((s) => s.pages[0]?.id === "cards", "Cards to be the first page");
-  const order = await t.waitDisk(() => { const p = t.widgets().pages.map((x: any) => x.id); return p[0] === "cards" && p; }, "the new page order");
-  t.eq(order, ["cards", "layout", "components", "style"], "page order on disk");
-  // The blue drop line goes once the drag ends.
-  await sleep(700);
-  const rows = await t.rows();
-  const top = rows.pages[0].r, bottom = rows.pages[rows.pages.length - 1].r;
-  const px = await t.cmd("qa.pixels", { region: { x: top.x, y: top.y - 4, w: top.w, h: bottom.y + bottom.h - top.y + 8 }, colors: SEL_BLUE, tol: 30 });
-  t.ok(px.count < 20, `a blue drop line stayed in the pages list (${px.count} blue pixels)`);
+  await t.showPage("style");
+  const style = await t.pageRow("style"), layout = await t.pageRow("layout");
+  const original = ["layout", "components", "style", "cards"];
+  const first = ["style", "layout", "components", "cards"];
+  const second = ["layout", "style", "components", "cards"];
+  const order = async (ids: string[], why: string) => {
+    await t.waitState(s => s.pages.map((p: any) => p.id).join() === ids.join(), `${why} in the app`);
+    await t.waitDisk(() => t.widgets().pages.map((p: any) => p.id).join() === ids.join(), `${why} on disk`);
+  };
+  const release = { x: layout.r.x + layout.r.w / 2, y: layout.r.y - 1 };
+  await Promise.all([
+    t.drag(center(style.r), release, { dwellMs: 1200 }),
+    t.waitFor(async () => {
+      const [line, label] = await Promise.all([t.marks({ id: "page-insertion" }), t.marks({ id: "text", label: "Layout" })]);
+      return line.length === 1 && label.some(m => m.y > layout.r.y + layout.r.h);
+    }, "an insertion line and room for page three", 3000),
+  ]);
+  await order(first, "page three above page one");
+  await t.waitFor(async () => (await t.marks({ id: "page-insertion" })).length === 0, "the insertion line to clear");
+
+  await t.click(center((await t.pageRow("style")).r));
+  await t.key("ArrowDown", ["alt", "cmd"]);
+  await order(second, "the selected page moved down by key");
+  await t.key("ArrowDown", ["alt", "cmd"]);
+  await order(original, "the selected page moved down again");
+  await t.key("z", ["cmd"]);
+  await order(second, "one undo reverses only the second move");
+  await t.key("z", ["cmd"]);
+  await order(first, "a second undo reverses the first move");
+
+  const pageMenu = async (action: string) => {
+    await t.click(center((await t.pageRow("style")).r), { right: true });
+    const menu = await t.waitState(s => s.menu, "the page menu");
+    t.ok(menu.menu.items.includes("Duplicate Page") && menu.menu.items.every((title: string) => !/(?:\.\.\.|…)$/.test(title)), "page menu titles");
+    await t.pickMenu(action);
+  };
+  await pageMenu("Move Down");
+  await order(second, "the page moved down by menu");
+  await pageMenu("Move Up");
+  await order(first, "the page moved back up by menu");
+
+  await pageMenu("Rename");
+  await t.key("a", ["cmd"]);
+  await t.type("Studio");
+  await t.key("Return");
+  await t.waitState(s => s.pages[0]?.name === "Studio", "the renamed page");
+  await pageMenu("Move Down");
+  await order(second, "the renamed page moved down");
+  await t.click(center((await t.pageRow("style")).r));
+  await t.key("ArrowUp", ["alt", "cmd"]);
+  await order(first, "the renamed page moved up by key");
+  await pageMenu("Duplicate Page");
+  const duplicated = await t.waitState(s => s.pages[1]?.name === "Studio copy", "the copy after the original");
+  const copyId = duplicated.pages[1].id;
+  await order(["style", copyId, "layout", "components", "cards"], "the duplicated page after the original");
+  const copiedBoards = t.widgets().pages[1].boards as string[];
+  t.eq(copiedBoards.length, 3, "the copy includes three boards");
+  t.ok(copiedBoards.every(id => !t.widgets().pages[0].boards.includes(id)), "copied boards have new IDs");
+  await t.waitDisk(() => copiedBoards.every(id => t.node(id)), "copied boards in the design file");
+  await t.key("z", ["cmd"]);
+  await order(first, "one undo removes the copy");
+  await t.waitDisk(() => copiedBoards.every(id => !t.node(id)), "one undo removes the copied boards");
+
+  const board = await t.layerRow("sty_vars"), cards = await t.pageRow("cards");
+  await t.drag(center(board.r), center(cards.r));
+  await t.waitDisk(() => t.widgets().pages.find((p: any) => p.id === "cards")?.boards.includes("sty_vars"), "a board can still be dropped onto a page");
 });
 
 sc("pages", "drag a board onto another page", { covers: ["pages:board", "pages:other-page", "pages:mouse"] }, async (t: NT) => {

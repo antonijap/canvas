@@ -12,7 +12,9 @@ import { asOneAction } from "./cloud-files-ops.ts";
 import { isCloudFile } from "./cloud-files-runtime.ts";
 import { randomBytes } from "node:crypto";
 import type http from "node:http";
-import { relabelTop } from "./history.ts";
+import { editDoc } from "./docwriter.ts";
+import type { CanvasDoc, DocNode } from "./engine.ts";
+import { envelopeOps, invertOps, record, relabelTop, replayOps, type Op } from "./history.ts";
 import { docFileFor } from "./widgets.ts";
 import { storeFor, type WriteOpts } from "./widgets/store.ts";
 import { WidgetError, type Widget } from "./widgets/types.ts";
@@ -198,6 +200,57 @@ export async function updatePage(file: string, id: string, patch: { name?: unkno
   });
 }
 
+type CopyPageBoards = (doc: CanvasDoc, ids: ReadonlySet<string>) => { ops: Op[]; copies: DocNode[] };
+
+async function duplicatePage(file: string, id: string, boardIds: BoardIds, opts: Opts, copyBoards: CopyPageBoards) {
+  const docFile = docFileFor(file);
+  return asOneAction(docFile, async () => {
+    const store = storeFor(docFile);
+    const before = store.snapshot();
+    if (before.invalid) throw new WidgetError(409, "sidecar-invalid", "Fix the widgets file before duplicating a page");
+    if (opts.ifMatch && opts.ifMatch !== before.rev) throw new WidgetError(409, "rev-mismatch", "The pages changed since you read them");
+    const boards = boardIds(docFile);
+    const pages = storedOf(before.extra);
+    if (!pages.length) pages.push({ ...IMPLICIT_PAGE, boards: [...boards] });
+    const source = pageAt(pages, id);
+    if (pages.length >= MAX_PAGES) throw new WidgetError(422, "invalid-pages", `at most ${MAX_PAGES} pages`);
+    const listed = new Set(pages.flatMap((page) => page.boards));
+    const owned = new Set(source.boards);
+    let copied: ReturnType<CopyPageBoards> = { ops: [], copies: [] };
+    const { write } = await editDoc(docFile, {
+      touches: [null], urgent: true, recorded: () => copied.ops,
+      replay: (doc) => replayOps(doc, copied.ops),
+    }, (doc) => {
+      // Unlisted boards belong to the first page, including boards hidden in the design file.
+      if (source === pages[0]) for (const node of doc.children) if (!listed.has(String(node.id))) owned.add(String(node.id));
+      copied = copyBoards(doc, owned);
+    });
+    const suffix = " copy";
+    const page: Page = {
+      id: newId(),
+      name: source.name.slice(0, MAX_NAME - suffix.length).replace(/[\uD800-\uDBFF]$/, "") + suffix,
+      boards: copied.copies.map((node) => String(node.id)),
+      ...(source.background !== undefined ? { background: source.background } : {}),
+    };
+    pages.splice(pages.indexOf(source) + 1, 0, page);
+    const { state } = await store.mutateEnvelope((widgets, extra) => ({ widgets, extra: { ...extra, pages } }), { ifMatch: before.rev }).catch(async (error: unknown) => {
+      // A sidecar conflict must not leave unassigned copies on the first page.
+      if (copied.ops.length) {
+        const reverse = invertOps(copied.ops);
+        await editDoc(docFile, { touches: [null, ...page.boards], urgent: true, recorded: () => reverse }, (doc) => {
+          replayOps(doc, reverse);
+        });
+      }
+      throw error;
+    });
+    record(docFile, [...copied.ops, ...envelopeOps(before, state)], {
+      label: "Duplicate Page", source: opts.record?.source, session: opts.record?.session, edit: write.edit, docOrders: write.history?.docOrders,
+    }, write.revision);
+    const visible = copied.copies.filter((node) => node.enabled !== false).map((node) => String(node.id));
+    return { ...view(state.rev, pages, [...boards, ...visible]), result: page.id };
+  });
+}
+
 /**
  * Deletes the boards of a page from the design file as one structure step (src/structure.ts), recorded under `merge` so the
  * page's own removal joins it: one undo brings back the boards, their layers, the page and its cards. The server
@@ -319,9 +372,10 @@ async function body(req: http.IncomingMessage): Promise<Record<string, unknown>>
 /**
  * GET /api/pages, PUT /api/pages {pages}, POST /api/pages {name?, index?, boards?}, PATCH|DELETE /api/pages/:id (a
  * delete takes the page's boards and cards with it),
- * POST /api/pages/move {boards, to}. Writes need x-canvas: 1 and honour If-Match (the envelope rev).
+ * POST /api/pages/:id/duplicate, POST /api/pages/move {boards, to}.
+ * Writes need x-canvas: 1 and honour If-Match (the envelope rev).
  */
-export async function handlePagesRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, boardIds: BoardIds, deleteBoards?: DeleteBoards): Promise<boolean> {
+export async function handlePagesRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, boardIds: BoardIds, deleteBoards?: DeleteBoards, copyBoards?: CopyPageBoards): Promise<boolean> {
   if (url.pathname !== "/api/pages" && !url.pathname.startsWith("/api/pages/")) return false;
   const reply = (status: number, v: unknown) => {
     res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" });
@@ -347,12 +401,17 @@ export async function handlePagesRoute(req: http.IncomingMessage, res: http.Serv
     } else if (sub === "move" && m === "POST") {
       const b = await body(req);
       return reply(200, await moveBoardsToPage(file, b.boards, String(b.to ?? ""), boardIds, opts(Array.isArray(b.boards) && b.boards.length === 1 ? "Move Board to Page" : "Move Boards to Page"))), true;
+    } else if (m === "POST" && copyBoards && /^[^/]+\/duplicate$/.test(sub)) {
+      const copied = await duplicatePage(file, decodeURIComponent(sub.split("/")[0]), boardIds, opts("Duplicate Page"), copyBoards);
+      return reply(201, copied), true;
     } else if (sub && !sub.includes("/")) {
       const id = decodeURIComponent(sub);
       if (m === "PATCH") {
         const b = await body(req);
-        const label = Object.hasOwn(b, "background") ? "Change Page Background" : b.name !== undefined && b.index === undefined ? "Rename Page" : b.name === undefined ? "Reorder Pages" : "Page Change";
-        return reply(200, await updatePage(file, id, b, boardIds, opts(label, Object.hasOwn(b, "background") ? undefined : `page:${id}:${Object.keys(b).sort().join(",")}`))), true;
+        const changesBackground = Object.hasOwn(b, "background");
+        const label = changesBackground ? "Change Page Background" : b.name !== undefined && b.index === undefined ? "Rename Page" : b.name === undefined ? "Reorder Pages" : "Page Change";
+        const mergeKey = !changesBackground && b.index === undefined ? `page:${id}:name` : undefined;
+        return reply(200, await updatePage(file, id, b, boardIds, opts(label, mergeKey))), true;
       }
       if (m === "DELETE") return reply(200, await deletePage(file, id, boardIds, opts("Delete Page"), deleteBoards)), true;
     }

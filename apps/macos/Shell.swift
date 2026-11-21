@@ -227,10 +227,10 @@ struct TopBar: View {
             for title in group {
                 menu.action(title) {
                     switch title {
-                    case "Rename...": beginRename(file)
+                    case "Rename": beginRename(file)
                     case "Show in Finder": NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)])
                     case "Duplicate": model.duplicateFile(file)
-                    case "Move to Cloud...": CloudAccount.shared.moveOpenFile(model, file: file)
+                    case "Move to Cloud": CloudAccount.shared.moveOpenFile(model, file: file)
                     case "Copy Link":
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString("canvas://open?file=" + DocURL.encode(file), forType: .string)

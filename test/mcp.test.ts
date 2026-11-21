@@ -103,7 +103,7 @@ const TOOLS = [
   "list_shaders", "list_shader_presets", "create_shader", "update_shader", "export_shader",
   "list_videos", "add_video", "video_frame",
   "notify_user", "finish_work",
-  "list_pages", "set_page_background", "create_page", "rename_page", "delete_page", "move_boards_to_page", "set_active_page",
+  "list_pages", "set_page_background", "create_page", "rename_page", "duplicate_page", "delete_page", "move_boards_to_page", "set_active_page",
   "make_variations", "list_variations", "keep_variation", "discard_variations", "get_product_brief", "set_product_brief", "get_design_context", "check_variation", "mark_variation",
   "resolve_link",
   "list_comments", "add_comment", "reply_comment", "resolve_comment",
@@ -780,7 +780,7 @@ describe("finish_work", () => {
 });
 
 describe("pages", () => {
-  test("list_pages, create_page, rename_page, move_boards_to_page, delete_page, and the summary", async () => {
+  test("list_pages, create_page, rename_page, duplicate_page, move_boards_to_page, delete_page, and the summary", async () => {
     const l0 = await call("list_pages", { file });
     assert.equal(l0.isError, false, l0.text);
     assert.equal(l0.json.implicit, true);
@@ -791,11 +791,21 @@ describe("pages", () => {
     assert.deepEqual(c.json.pages.map((p: any) => [p.name, p.boards]), [["Page 1", ["Scr01"]], ["Proposal", ["Scr02"]]]);
     const r = await call("rename_page", { file, id: pid, name: "Proposals", index: 0 });
     assert.deepEqual(r.json.pages.map((p: any) => p.name), ["Proposals", "Page 1"]);
+    const down = await call("rename_page", { file, id: pid, index: 1 });
+    assert.deepEqual(down.json.pages.map((p: any) => p.name), ["Page 1", "Proposals"]);
+    await call("rename_page", { file, id: pid, index: 0 });
     const m = await call("move_boards_to_page", { file, boards: ["Scr01"], page: pid });
     assert.deepEqual(m.json.pages.map((p: any) => p.boards), [["Scr01", "Scr02"], []]);
     assert.match((await call("move_boards_to_page", { file, boards: ["Nope"], page: pid })).text, /^not_found: /);
     const sum = await call("get_document_summary", { file });
     assert.deepEqual(sum.json.pages.map((p: any) => p.name), ["Proposals", "Page 1"]);
+    const copy = await call("duplicate_page", { file, id: pid });
+    assert.equal(copy.isError, false, copy.text);
+    assert.equal(copy.json.pages[1].name, "Proposals copy");
+    assert.equal(copy.json.pages[1].boards.length, 2);
+    assert.ok(copy.json.pages[1].boards.every((id: string) => !m.json.pages[0].boards.includes(id)));
+    const restore = await call("delete_page", { file, id: copy.json.result });
+    assert.equal(restore.isError, false, restore.text);
     const d = await call("delete_page", { file, id: m.json.pages[1].id });
     assert.equal(d.isError, false, d.text);
     assert.equal(d.json.pages.length, 1);

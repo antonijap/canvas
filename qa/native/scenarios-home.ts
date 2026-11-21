@@ -527,15 +527,15 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   await t.click(point(await tab("tab-actions")), { right: true });
   await t.waitState((s) => s.menu, "tab context menu");
   const items = (await t.state()).menu.items as string[];
-  t.eq(items, ["Rename...", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab actions in order");
+  t.eq(items, ["Rename", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab actions in order");
   await t.cmd("qa.menu", { cancel: true });
   await t.cmd("qa.cloud", { url: "http://127.0.0.1:1" });
   await t.click(point(await tab("tab-actions")), { right: true });
   await t.waitState((s) => s.menu, "configured Cloud tab menu");
-  t.eq((await t.state()).menu.items, ["Rename...", "Show in Finder", "Duplicate", "Move to Cloud...", "Copy Link", "Close", "Close Other Tabs"], "Cloud adds its share action");
+  t.eq((await t.state()).menu.items, ["Rename", "Show in Finder", "Duplicate", "Move to Cloud", "Copy Link", "Close", "Close Other Tabs"], "Cloud adds its share action");
   await t.cmd("qa.cloud", { url: prefs.cloudUrl, devEmail: prefs.cloudDevEmail, name: prefs.cloudName });
   t.eq((await t.state()).openFiles, order, "right click leaves the tab order alone");
-  await t.pickMenu("Rename...");
+  await t.pickMenu("Rename");
   const menuEdit = await t.mark({ id: "tab-rename" }).catch(async (error) => {
     throw new Error(`${error}; tabRename=${JSON.stringify((await t.state()).tabRename)}; editors=${JSON.stringify((await t.views()).filter((v) => v.kind === "text" && v.y < 70))}`);
   });
@@ -623,8 +623,8 @@ sc('home-cloud-menu', 'Cloud sidebar context menu renames and confirms leaving',
     await t.waitState(s => !!s.menu, 'Cloud context menu');
   };
   await menu('Studio');
-  t.eq((await t.state()).menu.items, ['Rename...', 'Settings...', 'Leave Cloud...'], 'server Cloud actions');
-  await t.pickMenu('Rename...');
+  t.eq((await t.state()).menu.items, ['Rename', 'Settings', 'Leave Cloud'], 'server Cloud actions');
+  await t.pickMenu('Rename');
   await t.waitState(s => !!s.modal, 'rename dialog');
   await t.type('Studio team', {window:'modal'});
   const rename = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Rename');
@@ -632,13 +632,13 @@ sc('home-cloud-menu', 'Cloud sidebar context menu renames and confirms leaving',
   await t.click(center(rename!), {window:'modal'});
   await t.waitState(s => !s.modal, 'rename closes');
   await menu('Studio team');
-  await t.pickMenu('Leave Cloud...');
+  await t.pickMenu('Leave Cloud');
   await t.waitState(s => !!s.modal, 'leave confirmation');
   const cancel = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Cancel');
   await t.click(center(cancel!), {window:'modal'});
   await t.waitState(s => !s.modal, 'cancel leaves Cloud intact');
   await menu('Studio team');
-  await t.pickMenu('Leave Cloud...');
+  await t.pickMenu('Leave Cloud');
   await t.waitState(s => !!s.modal, 'leave confirmation again');
   const leave = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Leave');
   t.ok(leave, 'leave button');
@@ -646,8 +646,8 @@ sc('home-cloud-menu', 'Cloud sidebar context menu renames and confirms leaving',
   await t.waitFor(async () => (await t.cmd('qa.cloud', {})).clouds.length === 0, 'confirmed leave removes the Cloud');
   await t.cmd('qa.cloud', {clouds:[{url:'canvas-cloud://11111111-1111-4111-8111-111111111111',name:'Studio host',kind:'hosted'}]});
   await menu('Studio host');
-  t.eq((await t.state()).menu.items, ['Rename...', 'Settings...', 'Delete Cloud...'], 'host deletes rather than leaves');
-  await t.pickMenu('Delete Cloud...');
+  t.eq((await t.state()).menu.items, ['Rename', 'Settings', 'Delete Cloud'], 'host deletes rather than leaves');
+  await t.pickMenu('Delete Cloud');
   await t.waitState(s => !!s.modal, 'owner deletion confirmation');
   t.ok((await t.views('modal')).some(v => v.kind === 'button' && v.title === 'Delete'), 'owner confirms Delete');
   const keep = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Cancel');

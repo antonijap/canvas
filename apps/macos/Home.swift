@@ -320,13 +320,13 @@ private struct HomeSidebar: View {
                         }
                         .help(e.adapterTooltip)
                         .contextMenu {
-                            Button("Rename...") { RunLoop.main.perform { MainActor.assumeIsolated { account.renameCloud(model, e) } } }
-                            Button("Settings...") {
+                            Button("Rename") { RunLoop.main.perform { MainActor.assumeIsolated { account.renameCloud(model, e) } } }
+                            Button("Settings") {
                                 account.selected = e.id
                                 SettingsWindow.shared.show(model, tab: .cloud)
                             }
                             if account.isHosting(e) {
-                                Button("Copy Invite...") { RunLoop.main.perform { MainActor.assumeIsolated { account.copyInvite(model, e) } } }
+                                Button("Copy Invite") { RunLoop.main.perform { MainActor.assumeIsolated { account.copyInvite(model, e) } } }
                             }
                             Divider()
                             Button(HomeLogic.cloudRemovalTitle(kind: e.kind), role: .destructive) {

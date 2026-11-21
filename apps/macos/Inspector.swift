@@ -211,7 +211,7 @@ struct InspectorBody: View {
         if let ref = str(n["ref"]) { Button("Copy Main Component ID") { copy(ref) } }
         if editable, s.context?.media ?? (!s.isComponent && (str(n["type"]) == "frame" || str(n["type"]) == "rectangle")) {
             Divider()
-            Button("Embed Video Here…") { model.embedVideo(over: s.id, hint: s.context?.videoHint) }
+            Button("Embed Video Here") { model.embedVideo(over: s.id, hint: s.context?.videoHint) }
         }
     }
 

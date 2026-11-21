@@ -58,6 +58,20 @@ extension CanvasModel {
     func moveBoards(_ boards: [String], toPage page: String) { pagesCall("POST", "api/pages/move", ["boards": boards, "to": page]) }
     /// Puts a page at `index` in the list (one undo step on the server).
     func reorderPage(_ id: String, to index: Int) { pagesCall("PATCH", "api/pages/\(id)", ["index": index]) }
+    func pageMoveIndex(_ id: String, by step: Int) -> Int? {
+        guard !cloudReadOnly, let from = pages.firstIndex(where: { $0.id == id }) else { return nil }
+        return PageDrag.step(from: from, by: step, count: pages.count)
+    }
+    func movePage(_ id: String, by step: Int) {
+        if let to = pageMoveIndex(id, by: step) { reorderPage(id, to: to) }
+    }
+    func duplicatePage(_ id: String) {
+        pagesCall("POST", "api/pages/\(id)/duplicate")
+    }
+    func selectPageRow(_ id: String) {
+        pageShortcutTarget = currentFile.map { ($0, id) }
+        showPage(id)
+    }
 }
 
 /// The Pages list: the shown page is filled; double-click or "Rename" edits the name in place.
@@ -68,63 +82,38 @@ struct PagesSection: View {
     @State private var editingFile: String?
     @State private var draft = ""
     @State private var confirmDelete: PageInfo?
-    /// Where a drag over the list would land.
+    @State private var dragging: String?
     @State private var dropTarget: PageDropTarget?
+    @State private var dropWatch: Task<Void, Never>?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focused: Bool
 
     var body: some View {
-        HStack(spacing: 0) {
-            SectionHeader(title: "Pages")
-            IconButton(symbol: "plus", help: "Add page", bounce: model.pages.count) {
-                model.addPage { id, name in startRename(PageInfo(id: id, name: name, count: 0)) }
-            }.qaID("page-add",label:"Add page").disabled(model.cloudReadOnly)
-        }
-        ForEach(model.pages) { p in
-            Group {
-                if editing == p.id {
-                    // The page icon stays while the name is edited, so the name does not jump left.
-                    HStack(spacing: 8) {
-                        Image(systemName: "rectangle.portrait").symbolRenderingMode(.hierarchical)
-                            .font(.system(size: GlyphSize.row, weight: .medium)).foregroundStyle(Palette.mutedFg).frame(width: 16)
-                        TextField("Page name", text: $draft)
-                            .textFieldStyle(.plain).font(Typography.body).foregroundStyle(Palette.fg)
-                            .focused($focused)
-                    }
-                        .padding(.horizontal, 12).frame(height: Metric.row)
-                        .background(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).fill(Palette.active))
-                        .onSubmit { commit(p.id) }
-                        .onExitCommand { editing = nil }
-                        .onChange(of: focused) { _, f in if !f { commit(p.id) } }
-                } else {
-                    ListRow(title: p.name, symbol: "rectangle.portrait",
-                            active: p.id == model.activePage) { model.showPage(p.id) }
-                        .simultaneousGesture(TapGesture(count: 2).onEnded { startRename(p) })
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                SectionHeader(title: "Pages")
+                IconButton(symbol: "plus", help: "Add page", bounce: model.pages.count) {
+                    model.addPage { id, name in startRename(PageInfo(id: id, name: name, count: 0)) }
+                }.qaID("page-add",label:"Add page").disabled(model.cloudReadOnly)
+            }
+            VStack(spacing: PageDrag.spacing) {
+                ForEach(Array(model.pages.enumerated()), id: \.element.id) { i, page in
+                    pageRow(page, at: i)
                 }
             }
-            // Drag a page onto another to reorder; drop boards dragged from the Layers panel to move them here.
-            .onDrag {
-                guard !model.cloudReadOnly else { return NSItemProvider() }
-                LayersStore.of(model).dragging = [] // a layer drag that ended elsewhere must not pass for this one
-                return NSItemProvider(object: PageDrag.payload(page: p.id) as NSString)
-            }
-            .onDrop(of: [.text], delegate: PageDrop(model: model, page: p, target: $dropTarget))
-            // A reorder that landed: no line may stay behind (SwiftUI can update the target once more after the drop).
-            .onChange(of: model.pages.map(\.id)) { _, _ in dropTarget = nil }
-            .overlay(alignment: .top) { if dropTarget == PageDropTarget(page: p.id, zone: .above) { Rectangle().fill(Palette.sel).frame(height: 2) } }
-            .overlay(alignment: .bottom) { if dropTarget == PageDropTarget(page: p.id, zone: .below) { Rectangle().fill(Palette.sel).frame(height: 2) } }
-            .overlay { if dropTarget == PageDropTarget(page: p.id, zone: .onto) {
-                RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).stroke(Palette.sel, lineWidth: 1.5)
-            } }
-            .contextMenu {
-                Button("Rename") { startRename(p) }.disabled(model.cloudReadOnly)
-                // Deleting a page deletes its boards; an empty page goes without asking. One undo brings it all back.
-                Button(p.count > 0 ? "Delete…" : "Delete", role: .destructive) {
-                    if p.count > 0 { confirmDelete = p } else { model.deletePage(p.id) }
-                }.disabled(model.cloudReadOnly || model.pages.count < 2)
-            }
+            // The list owns the hit area, including the gaps and the insertion boundary above the first row.
+            .padding(.vertical, PageDrag.spacing)
+            .contentShape(Rectangle())
+            .onDrop(of: [.text], delegate: PageDrop(model: model, dragging: $dragging, target: $dropTarget, watch: watchDrop))
         }
-        // Another document shown: a rename in progress belonged to the old one and is dropped.
-        .onChange(of: model.currentFile) { _, _ in editing = nil; editingFile = nil; confirmDelete = nil }
+        .onChange(of: model.currentFile) { _, _ in
+            editing = nil
+            editingFile = nil
+            confirmDelete = nil
+            clearDrop()
+        }
+        .onChange(of: model.pages.map(\.id)) { _, _ in clearDrop() }
+        .onDisappear { clearDrop() }
         .confirmationDialog(confirmDelete.map { "Delete page and its \($0.count) board\($0.count == 1 ? "" : "s")?" } ?? "", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } })) {
             if let p = confirmDelete {
                 Button("Delete", role: .destructive) { model.deletePage(p.id); confirmDelete = nil }
@@ -136,6 +125,99 @@ struct PagesSection: View {
         }
     }
 
+    @ViewBuilder private func pageRow(_ p: PageInfo, at i: Int) -> some View {
+        Group {
+            if editing == p.id {
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.portrait").symbolRenderingMode(.hierarchical)
+                        .font(.system(size: GlyphSize.row, weight: .medium)).foregroundStyle(Palette.mutedFg).frame(width: 16)
+                    TextField("Page name", text: $draft)
+                        .textFieldStyle(.plain).font(Typography.body).foregroundStyle(Palette.fg)
+                        .focused($focused)
+                }
+                .padding(.horizontal, 12).frame(height: Metric.row)
+                .background(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).fill(Palette.active))
+                .onSubmit { commit(p.id) }
+                .onExitCommand { editing = nil }
+                .onChange(of: focused) { _, f in if !f { commit(p.id) } }
+            } else {
+                let row = ListRow(title: p.name, symbol: "rectangle.portrait", active: p.id == model.activePage) { model.selectPageRow(p.id) }
+                    .simultaneousGesture(TapGesture(count: 2).onEnded { startRename(p) })
+                if model.cloudReadOnly {
+                    row
+                } else {
+                    row.onDrag {
+                        LayersStore.of(model).dragging = []
+                        dragging = p.id
+                        watchDrop()
+                        return NSItemProvider(object: PageDrag.payload(page: p.id) as NSString)
+                    } preview: {
+                        ListRow(title: p.name, symbol: "rectangle.portrait", active: p.id == model.activePage)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .background(Palette.popover, in: RoundedRectangle(cornerRadius: Metric.radiusRow))
+                            .shadow(color: .black.opacity(0.25), radius: 5, y: 3)
+                            .padding(8)
+                    }
+                }
+            }
+        }
+        .overlay {
+            if dropTarget == .boards(p.id) {
+                RoundedRectangle(cornerRadius: Metric.radiusRow).stroke(Palette.sel, lineWidth: 1.5).allowsHitTesting(false)
+            }
+        }
+        .opacity(dragging == p.id ? 0 : 1)
+        .offset(y: rowOffset(i))
+        .animation(reduceMotion ? nil : Motion.fast, value: dropTarget)
+        .overlay(alignment: .top) {
+            if dropTarget == .reorder(i) {
+                Rectangle().fill(Palette.sel).frame(height: 2).padding(.horizontal, 4).offset(y: -1)
+                    .allowsHitTesting(false)
+                    .qaID("page-insertion")
+            }
+        }
+        .qaID("page-row", label: p.id)
+        .contextMenu {
+            Button("Rename") { startRename(p) }.disabled(model.cloudReadOnly)
+            Button("Duplicate Page") { model.duplicatePage(p.id) }.disabled(model.cloudReadOnly)
+            Divider()
+            Button("Move Up") { model.movePage(p.id, by: -1) }
+                .keyboardShortcut(.upArrow, modifiers: [.option, .command])
+                .disabled(model.pageMoveIndex(p.id, by: -1) == nil)
+            Button("Move Down") { model.movePage(p.id, by: 1) }
+                .keyboardShortcut(.downArrow, modifiers: [.option, .command])
+                .disabled(model.pageMoveIndex(p.id, by: 1) == nil)
+            Divider()
+            Button("Delete", role: .destructive) {
+                if p.count > 0 { confirmDelete = p } else { model.deletePage(p.id) }
+            }.disabled(model.cloudReadOnly || model.pages.count < 2)
+        }
+    }
+
+    private func rowOffset(_ i: Int) -> CGFloat {
+        guard let dragging, let from = model.pages.firstIndex(where: { $0.id == dragging }), case let .reorder(to) = dropTarget else { return 0 }
+        let stride = Metric.row + PageDrag.spacing
+        return CGFloat(PageDrag.shift(row: i, from: from, to: to)) * stride
+    }
+
+    private func watchDrop() {
+        guard dropWatch == nil else { return }
+        dropWatch = Task { @MainActor in
+            repeat {
+                try? await Task.sleep(for: .milliseconds(200))
+                if Task.isCancelled { return }
+            } while NSEvent.pressedMouseButtons & 1 != 0
+            clearDrop()
+        }
+    }
+
+    private func clearDrop() {
+        dragging = nil
+        dropTarget = nil
+        dropWatch?.cancel()
+        dropWatch = nil
+    }
+
     private func startRename(_ p: PageInfo) { guard !model.cloudReadOnly else { return }; draft = p.name; editing = p.id; editingFile = model.currentFile; DispatchQueue.main.async { focused = true } }
     private func commit(_ id: String) {
         guard editing == id else { return }
@@ -144,17 +226,17 @@ struct PagesSection: View {
     }
 }
 
-struct PageDropTarget: Equatable {
-    enum Zone { case above, below, onto }
-    let page: String
-    let zone: Zone
+private enum PageDropTarget: Equatable {
+    case reorder(Int)
+    case boards(String)
 }
 
-/// A drop on a page row: another page reorders (line above or below), boards from the Layers panel move onto it.
-struct PageDrop: DropDelegate {
+/// Page drags cross the whole list. Board drags still land on a specific row.
+private struct PageDrop: DropDelegate {
     let model: CanvasModel
-    let page: PageInfo
+    @Binding var dragging: String?
     @Binding var target: PageDropTarget?
+    let watch: () -> Void
 
     private var draggedBoards: [String] {
         PageDrag.boards(dragged: LayersStore.of(model).dragging, text: nil, boards: model.boards.map(\.id))
@@ -162,60 +244,52 @@ struct PageDrop: DropDelegate {
 
     func validateDrop(info: DropInfo) -> Bool { !model.cloudReadOnly && info.hasItemsConforming(to: [.text]) }
 
-    /// Bumped by every update: a line whose drag has ended (no update for a moment and no button held) goes away,
-    /// whatever order SwiftUI sent the drop, exit and update in. Without it a line could stay after the drop.
-    private static var updates = 0
-    private func clearWhenIdle() {
-        Self.updates += 1
-        let mine = Self.updates, clear = $target
-        func check() {
-            guard Self.updates == mine else { return }
-            if NSEvent.pressedMouseButtons & 1 == 0 { clear.wrappedValue = nil }
-            else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { check() } }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { check() }
+    private func boardPage(at y: CGFloat) -> String? {
+        guard let index = PageDrag.row(at: y, height: Metric.row, count: model.pages.count) else { return nil }
+        let id = model.pages[index].id
+        return id == model.activePage ? nil : id
+    }
+
+    private func destination(_ id: String, at y: CGFloat) -> Int? {
+        guard let from = model.pages.firstIndex(where: { $0.id == id }) else { return nil }
+        return PageDrag.index(from: from, y: y, height: Metric.row, count: model.pages.count)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        clearWhenIdle()
-        // Boards (the Layers panel's drag) land on the page; anything else is a page being reordered.
-        let boards = draggedBoards
-        if !boards.isEmpty {
-            guard page.id != model.activePage else { target = nil; return DropProposal(operation: .forbidden) }
-            target = PageDropTarget(page: page.id, zone: .onto)
-            return DropProposal(operation: .move)
+        watch()
+        if let dragging {
+            target = destination(dragging, at: info.location.y).map(PageDropTarget.reorder)
+        } else {
+            target = boardPage(at: info.location.y).map(PageDropTarget.boards)
         }
-        target = PageDropTarget(page: page.id, zone: info.location.y > Metric.row / 2 ? .below : .above)
-        return DropProposal(operation: .move)
+        return DropProposal(operation: target == nil ? .forbidden : .move)
     }
 
-    func dropExited(info: DropInfo) { if target?.page == page.id { target = nil } }
+    func dropExited(info: DropInfo) { target = nil }
 
     func performDrop(info: DropInfo) -> Bool {
+        defer { dragging = nil; target = nil }
         guard !model.cloudReadOnly else { return false }
-        let zone = target?.zone
-        target = nil
+        if let dragging {
+            guard let index = destination(dragging, at: info.location.y) else { return false }
+            model.reorderPage(dragging, to: index)
+            return true
+        }
+        guard let page = boardPage(at: info.location.y) else { return false }
         let boards = draggedBoards
         if !boards.isEmpty {
-            guard page.id != model.activePage else { return false }
             LayersStore.of(model).dragging = []
-            model.moveBoards(boards, toPage: page.id)
+            model.moveBoards(boards, toPage: page)
             return true
         }
         guard let item = info.itemProviders(for: [.text]).first else { return false }
-        let pages = model.pages
+        let file = model.currentFile
         _ = item.loadObject(ofClass: NSString.self) { obj, _ in
-            guard let s = obj as? String else { return }
+            guard let text = obj as? String else { return }
             DispatchQueue.main.async {
-                if let id = PageDrag.page(s) {
-                    guard let from = pages.firstIndex(where: { $0.id == id }), let onto = pages.firstIndex(where: { $0.id == page.id }),
-                          let to = PageDrag.index(from: from, onto: onto, below: zone == .below, count: pages.count) else { return }
-                    model.reorderPage(id, to: to)
-                } else {
-                    // A board id dragged as text (another source than the Layers panel's own drag).
-                    let ids = PageDrag.boards(dragged: [], text: s, boards: model.boards.map(\.id))
-                    if !ids.isEmpty, page.id != model.activePage { model.moveBoards(ids, toPage: page.id) }
-                }
+                guard file == model.currentFile else { return }
+                let ids = PageDrag.boards(dragged: [], text: text, boards: model.boards.map(\.id))
+                if !ids.isEmpty { model.moveBoards(ids, toPage: page) }
             }
         }
         return true

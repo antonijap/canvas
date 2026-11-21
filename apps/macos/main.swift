@@ -683,6 +683,18 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
   window.makeFirstResponder(model.webView)
   return e
 }
+// A page selected in the sidebar uses these keys to reorder. On the canvas they still rotate layers.
+NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+  guard e.window === window, window.attachedSheet == nil, !(window.firstResponder is NSText), !model.textEditing,
+        model.section == .boards, let page = model.pageShortcutTarget,
+        page.file == model.currentFile, page.id == model.activePage,
+        e.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command, .option] else { return e }
+  switch e.keyCode {
+  case 126: model.movePage(page.id, by: -1); return nil
+  case 125: model.movePage(page.id, by: 1); return nil
+  default: return e
+  }
+}
 // A paint row picked in the inspector (InspectorPaint.swift): Esc lets it go and Delete removes that paint, instead
 // of the canvas deselecting or deleting the layer. Any click in the window lets it go; a click on a row's left area
 // picks that row again once the click ends.
@@ -696,7 +708,10 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
   }
 }
 NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { e in
-  if model.paintRow != nil, e.window === window { model.paintRow = nil }
+  if e.window === window {
+    if model.paintRow != nil { model.paintRow = nil }
+    model.pageShortcutTarget = nil
+  }
   return e
 }
 // Cmd+scroll zooms the canvas (src/pagelogic.ts wheelAction). The page reads the Command key off each wheel event,

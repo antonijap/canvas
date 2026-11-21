@@ -163,7 +163,7 @@ struct HomeCard: Identifiable, Equatable {
 
 enum HomeLogic {
     static func cloudRemovalTitle(kind: CloudKind) -> String {
-        kind == .hosted ? "Delete Cloud..." : "Leave Cloud..."
+        kind == .hosted ? "Delete Cloud" : "Leave Cloud"
     }
 
     static func cloudRename(_ value: String) -> String? {

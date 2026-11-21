@@ -172,27 +172,31 @@ export class NT {
   /** AppKit views that take input (text fields, switches, segmented controls) and SwiftUI's drop targets. */
   async views(window: Win = "main"): Promise<any[]> { return (await this.cmd("qa.views", { window })).views; }
 
-  /** The left panel's row rects (pages, then layers), from the drop target SwiftUI lays over each row. */
+  /** Page rows are marked separately from the single drop target that covers the list and its gaps. */
   async rows(): Promise<{ pages: { id: string; name: string; r: Rect }[]; layers: { id: string; name: string; depth: number; r: Rect }[] }> {
-    // SwiftUI lays the rows' drop targets out a moment after the outline changes (later on a busy Mac): read until
-    // two reads a beat apart agree, with the state read between them, so rows and ids match.
-    const read = async () => (await this.views()).filter((v) => v.dropTypes && v.class.includes("PlatformDraggingDestination") && v.x < 400).sort((a, b) => a.y - b.y);
+    const read = async () => {
+      const [marks, views] = await Promise.all([this.marks({ id: "page-row" }), this.views()]);
+      const bottom = Math.max(0, ...marks.map((r) => r.y + r.h));
+      const drops = views.filter((v) => v.dropTypes && v.class.includes("PlatformDraggingDestination") && v.x < 400 && v.y >= bottom).sort((a, b) => a.y - b.y);
+      return { marks, drops };
+    };
     let st = await this.state();
-    let drops = await read();
+    let { marks, drops } = await read();
     for (let i = 0; i < 30; i++) {
       await sleep(80);
       const st2 = await this.state();
       const next = await read();
-      const same = next.length === drops.length && next.every((d, k) => Math.abs(d.y - drops[k].y) < 0.5) &&
+      const same = next.drops.length === drops.length && next.drops.every((d, k) => Math.abs(d.y - drops[k].y) < 0.5) &&
         JSON.stringify(st2.layers.map((l: any) => l.id)) === JSON.stringify(st.layers.map((l: any) => l.id));
       st = st2;
-      drops = next;
-      if (same && drops.length >= st.pages.length + Math.min(st.layers.length, 1)) break;
+      ({ marks, drops } = next);
+      if (same && marks.length >= st.pages.length && drops.length >= Math.min(st.layers.length, 1)) break;
     }
-    const n = st.pages.length;
-    if (drops.length < n) throw new Fail(`the left panel shows ${drops.length} rows, fewer than the ${n} pages`);
-    const pages = st.pages.map((p: any, i: number) => ({ id: p.id, name: p.name, r: drops[i] }));
-    const layers = st.layers.slice(0, drops.length - n).map((l: any, i: number) => ({ id: l.id, name: l.name, depth: l.depth, r: drops[n + i] }));
+    const pages = st.pages.flatMap((p: any) => {
+      const r = marks.find((m) => m.label === p.id);
+      return r ? [{ id: p.id, name: p.name, r }] : [];
+    });
+    const layers = st.layers.slice(0, drops.length).map((l: any, i: number) => ({ id: l.id, name: l.name, depth: l.depth, r: drops[i] }));
     return { pages, layers };
   }
   async layerRow(id: string) {
@@ -201,9 +205,10 @@ export class NT {
     return r;
   }
   async pageRow(id: string) {
-    const r = (await this.rows()).pages.find((p) => p.id === id);
-    if (!r) throw new Fail(`no row for page ${id}`);
-    return r;
+    const r = await this.mark({ id: "page-row", label: id, exact: true });
+    const page = (await this.state()).pages.find((p: any) => p.id === id);
+    if (!page) throw new Fail(`no row for page ${id}`);
+    return { id, name: page.name as string, r };
   }
 
   /** The rail's buttons: the panel toggle, then Layers, Components, Styles, Widgets (fixed layout, top left). */

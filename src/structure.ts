@@ -490,6 +490,16 @@ export function deleteNodes(doc: Doc, ids: string[], cut = false): OpResult {
  *  exact: on top of its original (a copy that a place moves next). Neither: Cmd+D's spots. */
 export type DuplicateOpts = { offset?: { dx: number; dy: number }; exact?: boolean; round?: boolean };
 
+/** Copy whole boards in place, including main components and their references inside the copied page. */
+export function copyPageBoards(doc: CanvasDoc, ids: ReadonlySet<string>): { ops: Op[]; copies: DocNode[] } {
+  const d = doc as unknown as Doc;
+  const boards = d.children.filter((n) => ids.has(String(n.id)) && !isDeletedHolder(n));
+  const copies = freshCopies(boards, allIds(doc), buildIndex(doc));
+  const rec = new Recorder(d);
+  for (const copy of copies) rec.insert(null, d.children.length, copy);
+  return { ops: rec.ops, copies };
+}
+
 /**
  * Duplicate. Default (Cmd+D): boards go to the right of the selection with a gap, layers in auto layout right after
  * themselves, others in place on top of their original (a repeated Cmd+D uses the last offset). With opts.offset every board and absolutely placed layer lands at its

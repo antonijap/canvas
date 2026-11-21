@@ -97,7 +97,7 @@ export function detectHarnesses(force = false): HarnessInfo[] {
 /** Canvas MCP tools a run may not use: they leave the selection (files, camera, selection, pages, widgets, history). */
 export const DENIED_TOOLS = [
   "launch_canvas", "open_file", "close_tab", "set_theme", "fit_view", "set_zoom", "pan_view",
-  "create_page", "set_page_background", "rename_page", "delete_page", "move_boards_to_page", "set_active_page",
+  "create_page", "set_page_background", "rename_page", "duplicate_page", "delete_page", "move_boards_to_page", "set_active_page",
   "select_nodes", "clear_selection", "wait_for_selection", "get_events",
   "add_widget", "update_widget", "remove_widget", "widget_action", "refresh_widget", "reveal_widget",
   "add_video", "create_shader", "update_shader", "export_shader", "export_nodes", "undo", "redo",

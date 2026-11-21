@@ -744,7 +744,7 @@ enum ContextMenuLayout {
     }
 
     static func fileTab(cloud: Bool) -> [[String]] {
-        [["Rename...", "Show in Finder", "Duplicate"] + (cloud ? ["Move to Cloud..."] : []) + ["Copy Link"],
+        [["Rename", "Show in Finder", "Duplicate"] + (cloud ? ["Move to Cloud"] : []) + ["Copy Link"],
          ["Close", "Close Other Tabs"]]
     }
 
@@ -978,9 +978,34 @@ enum ZoomInput {
 /// Dragging in the Pages list (Pages.swift): a page row onto another reorders, boards dragged from the Layers panel
 /// onto a page move there. Payloads are plain text: "canvas-page:<id>" for a page, a board id for a board.
 enum PageDrag {
-    static let prefix = "canvas-page:"
-    static func payload(page id: String) -> String { prefix + id }
-    static func page(_ s: String) -> String? { s.hasPrefix(prefix) && s.count > prefix.count ? String(s.dropFirst(prefix.count)) : nil }
+    static let spacing: CGFloat = 2
+    static func payload(page id: String) -> String { "canvas-page:" + id }
+
+    /// The list has one gap above and below the rows, and one between each pair.
+    static func row(at y: CGFloat, height: CGFloat, count: Int) -> Int? {
+        let stride = height + spacing
+        guard count > 0, height > 0, (0...(CGFloat(count) * stride + spacing)).contains(y) else { return nil }
+        return min(count - 1, Int(max(0, y - spacing / 2) / stride))
+    }
+
+    static func index(from: Int, y: CGFloat, height: CGFloat, count: Int) -> Int? {
+        guard let onto = row(at: y, height: height, count: count) else { return nil }
+        let middle = spacing + CGFloat(onto) * (height + spacing) + height / 2
+        return index(from: from, onto: onto, below: y > middle, count: count)
+    }
+
+    static func step(from: Int, by direction: Int, count: Int) -> Int? {
+        guard (0..<count).contains(from), direction == -1 || direction == 1 else { return nil }
+        let to = from + direction
+        return (0..<count).contains(to) ? to : nil
+    }
+
+    /// Shift rows between the source and destination by one row to open a gap.
+    static func shift(row: Int, from: Int, to: Int) -> Int {
+        if row > from && row <= to { return -1 }
+        if row < from && row >= to { return 1 }
+        return 0
+    }
 
     /// The index to PATCH (the server removes the page, then inserts it there) when page `from` is dropped on row
     /// `onto`, in its upper half (`below` false) or lower half. Nil when nothing moves.

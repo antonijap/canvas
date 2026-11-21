@@ -521,7 +521,7 @@ features:
     driven: [page, native, mcp]
     cases: [set, reset, themes, undo, persistence, empty-selection, cloud]
   - id: page-crud
-    name: Create, rename, reorder and delete pages (delete takes its boards, one undo)
+    name: Create, rename, reorder, duplicate and delete pages with their boards
     area: pages
     driven: [native, mcp]
     cases: [empty, board, agent]
@@ -692,7 +692,7 @@ features:
     name: Page tools
     area: mcp
     driven: [mcp]
-    cases: [list_pages, create_page, rename_page, delete_page, move_boards_to_page, set_active_page]
+    cases: [list_pages, create_page, rename_page, duplicate_page, delete_page, move_boards_to_page, set_active_page]
   - id: mcp-cards
     name: Widget, shader and video tools
     area: mcp

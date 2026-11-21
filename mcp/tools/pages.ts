@@ -51,7 +51,7 @@ export function register(server: McpServer) {
     return api("PATCH", `/api/pages/${enc(a.page)}?file=${enc(await resolveFile(a.file))}`, { background: a.color });
   });
 
-  tool(server, "rename_page", "Rename a page, and optionally move it to another position (index).", {
+  tool(server, "rename_page", "Rename a page, move it to a zero-based index, or do both.", {
     file: S.file,
     id: pageId,
     name: z.string().min(1).max(120).optional(),
@@ -59,6 +59,14 @@ export function register(server: McpServer) {
   }, async (a) => {
     await ensureServer();
     return api("PATCH", `/api/pages/${enc(a.id)}?file=${enc(await resolveFile(a.file))}`, { name: a.name, index: a.index });
+  });
+
+  tool(server, "duplicate_page", "Copy a page and its boards after the original, with fresh ids, as one undo step. result is the new page id.", {
+    file: S.file,
+    id: pageId,
+  }, async (a) => {
+    await ensureServer();
+    return api("POST", `/api/pages/${enc(a.id)}/duplicate?file=${enc(await resolveFile(a.file))}`);
   });
 
   tool(server, "delete_page", "Delete a page and everything on it: its boards (with their layers) go from the design file and its cards from the canvas, as one undo step. To keep boards, move_boards_to_page first. The last page cannot be deleted. Answers { result: { boards, widgets } } with how many went.", {

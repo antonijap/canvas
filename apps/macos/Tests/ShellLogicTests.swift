@@ -95,8 +95,14 @@ struct ShellLogicTests {
     }
 
     static func fileTabs() {
-        check(ContextMenuLayout.fileTab(cloud: false).flatMap { $0 } == ["Rename...", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab menu order")
-        check(ContextMenuLayout.fileTab(cloud: true) == [["Rename...", "Show in Finder", "Duplicate", "Move to Cloud...", "Copy Link"], ["Close", "Close Other Tabs"]], "cloud action and separator")
+        let contextTitles = ContextMenuLayout.fileTab(cloud: true).flatMap { $0 }
+            + ContextMenuLayout.fileTab(cloud: false).flatMap { $0 }
+            + (ContextMenuLayout.node + ContextMenuLayout.canvas).flatMap { $0.map(\.title) }
+        for title in contextTitles {
+            check(!title.contains("...") && !title.contains("…"), "no ellipsis in context menu title: \(title)")
+        }
+        check(ContextMenuLayout.fileTab(cloud: false).flatMap { $0 } == ["Rename", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab menu order")
+        check(ContextMenuLayout.fileTab(cloud: true) == [["Rename", "Show in Finder", "Duplicate", "Move to Cloud", "Copy Link"], ["Close", "Close Other Tabs"]], "cloud action and separator")
         for name in ["", " ", ".hidden", "../Other", "a/b", "a\0b", ".canvas"] {
             check(TabRename.name(name) == nil, "invalid package name")
         }
@@ -656,7 +662,14 @@ struct ShellLogicTests {
 
     // QA item 10: pages reorder by drag, boards dragged from Layers move to a page.
     static func pageDrag() {
-        check(PageDrag.page(PageDrag.payload(page: "p2")) == "p2" && PageDrag.page("B1") == nil && PageDrag.page("canvas-page:") == nil, "page payloads")
+        check(PageDrag.index(from: 2, y: 1, height: 32, count: 3) == 0, "gap above row one accepts page three")
+        check(PageDrag.index(from: 0, y: 103, height: 32, count: 3) == 2, "gap below the final row accepts page one")
+        check(PageDrag.index(from: 2, y: 35, height: 32, count: 3) == 1, "gap between rows accepts a page")
+        check(PageDrag.index(from: 2, y: -1, height: 32, count: 3) == nil, "outside the list does not move")
+        check(PageDrag.step(from: 1, by: -1, count: 3) == 0 && PageDrag.step(from: 1, by: 1, count: 3) == 2, "step from the middle")
+        check(PageDrag.step(from: 0, by: -1, count: 3) == nil && PageDrag.step(from: 2, by: 1, count: 3) == nil, "step stays in bounds")
+        check((0..<4).map { PageDrag.shift(row: $0, from: 2, to: 0) } == [1, 1, 0, 0], "rows shift down to make room")
+        check((0..<4).map { PageDrag.shift(row: $0, from: 0, to: 2) } == [0, -1, -1, 0], "rows shift up to make room")
         check(PageDrag.index(from: 0, onto: 2, below: false, count: 3) == 1, "first page dropped on the top half of the third: before it")
         check(PageDrag.index(from: 0, onto: 2, below: true, count: 3) == 2, "below the last: last")
         check(PageDrag.index(from: 2, onto: 0, below: false, count: 3) == 0, "last to the top")

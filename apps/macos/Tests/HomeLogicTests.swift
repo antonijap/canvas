@@ -21,9 +21,9 @@ struct HomeLogicTests {
     }
 
     static func cloudMenu() {
-        check(HomeLogic.cloudRemovalTitle(kind: .hosted) == "Delete Cloud...", "host deletes")
-        check(HomeLogic.cloudRemovalTitle(kind: .joined) == "Leave Cloud...", "joined leaves")
-        check(HomeLogic.cloudRemovalTitle(kind: .server) == "Leave Cloud...", "server disconnects")
+        check(HomeLogic.cloudRemovalTitle(kind: .hosted) == "Delete Cloud", "host deletes")
+        check(HomeLogic.cloudRemovalTitle(kind: .joined) == "Leave Cloud", "joined leaves")
+        check(HomeLogic.cloudRemovalTitle(kind: .server) == "Leave Cloud", "server disconnects")
         check(HomeLogic.cloudRename("  Studio  ") == "Studio", "trim Cloud name")
         check(HomeLogic.cloudRename(" \n ") == nil, "reject empty Cloud name")
         check(HomeLogic.cloudRename(String(repeating: "a", count: 300))?.count == SettingsLimits.serverName, "limit Cloud name")

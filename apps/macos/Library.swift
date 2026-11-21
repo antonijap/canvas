@@ -305,7 +305,7 @@ extension CanvasModel {
             if !c.id.contains("/") { menu.action("Push changes to main component") { self.pushOverrides(c.id) } }
         }
         if c.media {
-            menu.action("Embed video here…") { self.embedVideo(over: c.id, hint: c.videoHint) }
+            menu.action("Embed video here") { self.embedVideo(over: c.id, hint: c.videoHint) }
             head = true
         }
         if head { menu.separator() }
@@ -362,7 +362,7 @@ extension CanvasModel {
                 m.separator()
             }
         }
-        menu.action("Export with settings\u{2026}", key: "e", mods: [.command, .shift]) { self.exportWithSettings(targets) }
+        menu.action("Export with settings", key: "e", mods: [.command, .shift]) { self.exportWithSettings(targets) }
         menu.separator()
         menu.action("Copy ID") { self.copy(c.id, "ID") }
         menu.action("Copy name") { self.copy(c.name, "name") }
