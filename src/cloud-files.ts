@@ -9,11 +9,15 @@ import type http from 'node:http';
 import { target } from './cloud.ts';
 import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump } from './cloud-config.ts';
 import { FileStateStore } from './cloud-files-store.ts';
+import { DocTree } from './cloud-files-tree.ts';
+import { documentOf, envelopeOf } from '../cloud/core/files/state.ts';
 import { cloudFileHooks } from './cloud-files-runtime.ts';
 import { asOneAction, adoptWriters, onAction, envelopeFileOps } from './cloud-files-ops.ts';
 import { loadManifest, type Manifest } from '../cloud/core/files/snapshots.ts';
 import { type ObjectStore, fromUtf8 } from '../cloud/core/files/objects.ts';
 import { type Action, type FileServerMessage, type FileOp, CAN_EDIT, checkBlobPath } from '../cloud/protocol-files.ts';
+import { createPackage, targetPath } from './docpath.ts';
+import { type BlobRow } from '../cloud/core/files/seam.ts';
 import { readBodyText } from './body.ts';
 import { applyOp, type OpEnvelope, type Thread } from '../cloud/protocol.ts';
 import { prepareMove } from './cloud-files-move.ts';
@@ -181,15 +185,19 @@ function objects(cloud: string, file: string): ObjectStore {
     };
 }
 async function cacheBlobs(s: Session) {
-    const { cloud, file } = s.store.meta; const g=generation(cloud);
-    for (const [rel, b] of Object.entries(s.store.replica.tree.state().blobs)) {
+    const { cloud, file } = s.store.meta;
+    const g = generation(cloud);
+    await downloadBlobs(cloud, file, s.store.pkg, s.store.replica.tree.state().blobs, () => s.stopped || generation(cloud) !== g);
+}
+async function downloadBlobs(cloud: string, file: string, pkg: string, blobs: Record<string, BlobRow>, cancelled: () => boolean) {
+    for (const [rel, b] of Object.entries(blobs)) {
         if (checkBlobPath(rel))
             throw new Error('Invalid blob path');
-        const parent = path.join(s.store.pkg, rel.split('/')[0]);
-        for (const p of [s.store.pkg, parent, path.join(s.store.pkg, rel), path.join(s.store.pkg, rel) + '.tmp'])
+        const parent = path.join(pkg, rel.split('/')[0]);
+        for (const p of [pkg, parent, path.join(pkg, rel), path.join(pkg, rel) + '.tmp'])
             if (fs.lstatSync(p, { throwIfNoEntry: false })?.isSymbolicLink())
                 throw new Error('Cloud cache path is a link');
-        const dest = path.join(s.store.pkg, rel);
+        const dest = path.join(pkg, rel);
         if (fs.existsSync(dest) && !fs.lstatSync(dest).isSymbolicLink() && createHash('sha256').update(fs.readFileSync(dest)).digest('hex') === b.sha256)
             continue;
         if (b.bytes > 100 * 1024 * 1024)
@@ -197,7 +205,7 @@ async function cacheBlobs(s: Session) {
         const bytes = await boundedBytes(await request(cloud, `/v1/files/${file}/blobs/${b.sha256}`), b.bytes);
         if (createHash('sha256').update(bytes).digest('hex') !== b.sha256 || bytes.length !== b.bytes)
             throw new Error('Blob hash mismatch');
-        if(s.stopped || revoked.has(cloud) || generation(cloud)!==g)throw new Error('Cloud membership was removed during download');
+        if (cancelled() || revoked.has(cloud)) throw new Error('Cloud membership was removed during download');
         fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
         fs.writeFileSync(dest + '.tmp', bytes, { mode: 0o600 });
         fs.renameSync(dest + '.tmp', dest);
@@ -414,18 +422,55 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
         s = fileSession(pkg)!;
         await cacheBlobs(s);
     }
+    if (importingName === undefined && s.store.meta.name !== item.name) {
+        s.store.meta.name = item.name;
+        s.store.commit();
+    }
     evictClosedPackages(root(),new Set([...sessions.values()].map(s=>s.store.pkg)));
     return { id, file: pkg, name: item.name, cloud, role: s.store.meta.role };
 }
+async function downloadCloudFile(cloud: string, id: string, target: unknown) {
+    cloud = resolveCloud(cloud);
+    const targetFile = targetPath(target);
+    const g = generation(cloud);
+    const cancelled = () => generation(cloud) !== g;
+    const manifest = await cloudJson(await request(cloud, `/v1/files/${id}/manifest`)) as Manifest;
+    if (manifest.file !== id) throw new Error('Manifest names another file');
+    const { state } = await loadManifest(objects(cloud, id), JSON.stringify(manifest));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-cloud-download-'));
+    try {
+        await downloadBlobs(cloud, id, dir, state.blobs, cancelled);
+        await request(cloud, `/v1/files/${id}`);
+        if (cancelled()) fail(403, 'removed', 'Cloud membership was removed during download');
+        const tree = DocTree.fromState(state);
+        const file = createPackage(targetFile, tmp => {
+            fs.writeFileSync(path.join(tmp, 'document.json'), JSON.stringify(documentOf(tree)));
+            fs.writeFileSync(path.join(tmp, 'widgets.json'), JSON.stringify(envelopeOf(tree)));
+            for (const rel of Object.keys(state.blobs)) {
+                const dest = path.join(tmp, rel);
+                fs.mkdirSync(path.dirname(dest), { recursive: true });
+                fs.copyFileSync(path.join(dir, rel), dest, fs.constants.COPYFILE_FICLONE);
+            }
+        });
+        return { file };
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+}
+async function renameCloudFileById(cloud: string, id: string, name: unknown) {
+    await request(cloud, `/v1/files/${id}`, 'PATCH', { name });
+    for (const s of sessions.values()) {
+        if (s.store.meta.cloud !== cloud || s.store.meta.file !== id) continue;
+        s.store.meta.name = String(name);
+        s.store.commit();
+        render(s);
+    }
+}
 export async function renameCloudFile(file: string, name: unknown) {
     const s = fileSession(file);
-    if (!s)
-        fail(404, 'not_found', 'No such Cloud file');
-    await request(s!.store.meta.cloud, `/v1/files/${s!.store.meta.file}`, 'PATCH', { name });
-    s!.store.meta.name = String(name);
-    s!.store.commit();
-    render(s!);
-    return s!.store.pkg;
+    if (!s) return fail(404, 'not_found', 'No such Cloud file');
+    await renameCloudFileById(s.store.meta.cloud, s.store.meta.file, name);
+    return s.store.pkg;
 }
 export async function createCloudFile(cloud: string, name: string) {
     cloud = resolveCloud(cloud);
@@ -491,7 +536,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             if (p === '/api/cloud/usage')
                 return out(200, await cloudJson(await request(url.searchParams.get('cloud')!, '/v1/usage')));
             if (p === '/api/cloud/files')
-                return out(200, await cloudFiles(url.searchParams.get('cloud')!, url.searchParams.get('query') ?? ''));
+                return out(200, { ...await cloudFiles(url.searchParams.get('cloud')!, url.searchParams.get('query') ?? '') as object, key: cloudKey(resolveCloud(url.searchParams.get('cloud')!)) });
             if (p === '/api/comments') {
                 const s = fileSession(url.searchParams.get('file')!)!;
                 const people = await cloudMembers(s.store.meta.cloud);
@@ -512,6 +557,17 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             return out(201, await createCloudFile(b.cloud, b.name));
         if (p === '/api/cloud/files/open')
             return out(200, await openCloudFile(b.cloud, b.id));
+        if (['duplicate', 'rename', 'delete', 'download'].some(action => p === '/api/cloud/files/' + action)) {
+            if (req.method !== 'POST') return out(405, { code: 'invalid' });
+            if (typeof b.id !== 'string' || !UUID.test(b.id)) fail(400, 'invalid', 'Invalid file id');
+            const cloud = resolveCloud(b.cloud), id = b.id;
+            const route = `/v1/files/${id}`;
+            if (p.endsWith('/download')) return out(200, await downloadCloudFile(cloud, id, b.target));
+            if (p.endsWith('/duplicate')) return out(201, await cloudJson(await request(cloud, route + '/duplicate', 'POST', {})));
+            if (p.endsWith('/delete')) return out(200, await cloudJson(await request(cloud, route, 'DELETE', {})));
+            await renameCloudFileById(cloud, id, b.name);
+            return out(200, { ok: true });
+        }
         if (p === '/api/cloud/files/move') {
             if (fileInfo(url.searchParams.get('file')!))
                 return out(409, { code: 'conflict', error: 'This file already belongs to a Cloud' });

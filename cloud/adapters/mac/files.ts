@@ -14,7 +14,7 @@ import { LeaseBank, RoomLeases } from "../../core/files/leases.ts";
 import { StorageLedger, reserveUpload, putUpload, UploadError, UPLOAD_GRACE_MS } from "../../core/files/uploads.ts";
 import { buildSnapshot, recoverSnapshots, compact, type Manifest } from "../../core/files/snapshots.ts";
 import { collectGarbage } from "../../core/files/gc.ts";
-import { stateFromFiles } from "../../core/files/state.ts";
+import { stateFromFiles, stateOf } from "../../core/files/state.ts";
 import { type ObjectStore, boardKey, versKey, blobKey } from "../../core/files/objects.ts";
 import { Operations } from "../../core/operations.ts";
 import type { Me } from "./host.ts";
@@ -322,6 +322,50 @@ export class MacFiles {
         error(429, 'quota', "This Cloud is full. Delete files to make room."); }
     private disk() { const s = fs.statfsSync(this.root); return s.bavail * s.bsize; }
     private storage(): number { return fs.readdirSync(path.join(this.root, 'files')).reduce((n, f) => n + fs.statSync(path.join(this.root, 'files', f)).size, 0) + this.ledger.held(); }
+    private async duplicate(source: Row, me: Me) {
+        const room = this.room(source.id).core;
+        return room.exclusive(async () => {
+            const editor = this.edit(me);
+            const row = this.row(source.id, editor);
+            if (row.state !== 'live') error(404, 'not_found', 'No such Cloud file');
+            const id = randomUUID(), name = row.name.slice(0, 195) + ' copy';
+            const state = stateOf(room.tree);
+            state.vers = {};
+            this.capacity(1024 * 1024);
+            const now = new Date(this.now()).toISOString();
+            this.db.sql.exec("INSERT INTO files VALUES(?,?,'importing',?,?,?)", id, name, editor.id, now, now);
+            try {
+                const blobs = new Map(Object.values(state.blobs).map(blob => [blob.sha256, blob]));
+                for (const { sha256, bytes } of blobs.values()) {
+                    if (this.bodies >= 4 || this.inFlight + bytes > 256 * 1024 * 1024)
+                        error(503, 'quota', 'Uploads are busy; try again');
+                    this.bodies++;
+                    this.inFlight += bytes;
+                    try {
+                        const data = await this.objects.get(blobKey(row.id, sha256));
+                        if (!data || data.length !== bytes) throw new Error('Missing Cloud file asset');
+                        this.edit(me);
+                        await this.objects.putIfAbsent(blobKey(id, sha256), data);
+                    } finally {
+                        this.bodies--;
+                        this.inFlight -= bytes;
+                    }
+                }
+                const dest = this.room(id).core;
+                dest.seedState(state);
+                await buildSnapshot(dest);
+                this.edit(me);
+                if (this.row(row.id, me).state !== 'live') error(404, 'not_found', 'No such Cloud file');
+                this.db.sql.exec("UPDATE files SET state='live' WHERE id=?", id);
+                return { id, name };
+            } catch (e) {
+                this.discardImport(id);
+                throw e;
+            } finally {
+                this.accountDatabase(path.join(this.root, 'files', id + '.sqlite'));
+            }
+        });
+    }
     async route(req: http.IncomingMessage, res: http.ServerResponse, url: URL, me: Me, body: () => Promise<any>): Promise<boolean> {
         if (!(url.pathname === '/v1/usage' || url.pathname === '/v1/files' || url.pathname.startsWith('/v1/files/')))
             return false;
@@ -368,17 +412,21 @@ export class MacFiles {
             if (!sub && method === 'GET') return json(200, row);
             if ((sub === 'import' || sub === 'import/complete') && row.state !== 'importing')
                 return json(409, { code: 'conflict', message: 'This file is already published' });
+            if (sub === 'duplicate' && method === 'POST') {
+                await body();
+                return json(201, await this.duplicate(row, me));
+            }
             if (!sub && method === 'PATCH') {
                 const b = await body();
                 this.edit(me);
                 if (typeof b.name !== 'string' || !b.name.trim() || b.name.length > 200)
                     return json(400, { code: 'invalid' });
-                this.db.sql.exec('UPDATE files SET name=? WHERE id=?', b.name, file);
+                if (this.row(file, me).state !== 'live') return json(404, { code: 'not_found' });
+                this.db.sql.exec('UPDATE files SET name=?, updated_at=? WHERE id=?', b.name, new Date(this.now()).toISOString(), file);
                 return json(200, { ok: true });
             }
             if (!sub && method === 'DELETE') {
-                if (me.role !== 'owner' && row.created_by !== me.id)
-                    return json(403, { code: 'forbidden' });
+                if (row.state !== 'live') return json(404, { code: 'not_found' });
                 this.db.sql.exec("UPDATE files SET state='trash' WHERE id=?", file);
                 const r = this.rooms.get(file);
                 if (r)

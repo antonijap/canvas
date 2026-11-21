@@ -199,7 +199,7 @@ export class DocError extends Error {
   }
 }
 
-const targetPath = (t: unknown): string => {
+export const targetPath = (t: unknown): string => {
   if (typeof t !== "string" || !t) throw new DocError(400, "target is required");
   const p = plain(t);
   if (!p.endsWith(PACKAGE_EXT)) throw new DocError(400, `The new document must end in ${PACKAGE_EXT}`);

@@ -132,6 +132,21 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 fs.rmSync(moved.file, { recursive: true });
                 const reopened = await call('/api/cloud/files/open', { cloud: host.url, id: moved.id });
                 check(reopened.file);
+                if (fixture === 'media') {
+                    await call('/api/cloud/files/rename', { cloud: host.url, id: moved.id, name: 'Board' });
+                    const duplicate = await call('/api/cloud/files/duplicate', { cloud: host.url, id: moved.id });
+                    assert.equal(duplicate.name, 'Board copy');
+                    const copy = await call('/api/cloud/files/open', { cloud: host.url, id: duplicate.id });
+                    check(copy.file);
+                    const target = path.join(dir, 'Download.canvas');
+                    const downloaded = await call('/api/cloud/files/download', { cloud: host.url, id: duplicate.id, target });
+                    assert.equal(downloaded.file, target);
+                    assert.equal(fs.existsSync(path.join(target, '.cloud')), false);
+                    check(target);
+                    await call('/api/cloud/files/delete', { cloud: host.url, id: duplicate.id });
+                    const list = await (await fetch(server.base + '/api/cloud/files?cloud=' + encodeURIComponent(host.url))).json() as { files: { id: string }[] };
+                    assert.deepEqual(list.files.map(file => file.id), [moved.id]);
+                }
             });
         }
         const rejectionHost = await call('/api/cloud/host/start', { name: 'Studio', label: 'Editor' });

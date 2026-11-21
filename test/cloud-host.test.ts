@@ -585,3 +585,30 @@ test('viewer directory has no invite data and removed members get forbidden', as
   h.remove(invite.personId);
   assert.equal((await fetch(base + '/v1/members', { headers: bearer(viewer.token) })).status, 403);
 });
+
+test("file card routes enforce Cloud roles and duplicate the saved design", async () => {
+  const { h, base } = await host();
+  const editor = bearer((await join(base, h.invite("anna@studio.test", "editor").code)).token);
+  const viewer = bearer((await join(base, h.invite("Ben", "viewer").code)).token);
+  const owner = bearer(h.ownerDevice("Anna"));
+  const created = await post(base, "/v1/files", { name: "Board" }, owner);
+  assert.equal(created.status, 201);
+  const { id } = await created.json() as { id: string };
+  const route = "/v1/files/" + id;
+  const change = (method: string, headers: Record<string, string>) =>
+    fetch(base + route, { method, headers: { ...headers, "content-type": "application/json" }, ...(method === "PATCH" ? { body: JSON.stringify({ name: "Renamed" }) } : {}) });
+  assert.equal((await post(base, route + "/duplicate", {}, viewer)).status, 403);
+  assert.equal((await change("PATCH", viewer)).status, 403);
+  assert.equal((await change("DELETE", viewer)).status, 403);
+  assert.equal((await change("PATCH", editor)).status, 200);
+  const duplicated = await post(base, route + "/duplicate", {}, editor);
+  assert.equal(duplicated.status, 201);
+  const copy = await duplicated.json() as { id: string; name: string };
+  assert.equal(copy.name, "Renamed copy");
+  assert.notEqual(copy.id, id);
+  const manifest = await fetch(base + "/v1/files/" + copy.id + "/manifest", { headers: viewer });
+  assert.equal(manifest.status, 200);
+  assert.equal((await manifest.json() as { file: string }).file, copy.id);
+  assert.equal((await change("DELETE", editor)).status, 200);
+  assert.equal((await fetch(base + route, { headers: owner })).status, 404);
+});
