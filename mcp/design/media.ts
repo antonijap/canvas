@@ -118,7 +118,7 @@ function dimensions(bytes:Buffer, ext:string) {
 }
 export async function badgeImage(file:string,kind:'app-store-badge'|'google-play-badge',options:Options={}) {
   try {
-    let url='https://tools.applemarketingtools.com/api/badges/download-on-the-app-store/black/en-us';
+    let url='https://toolbox.marketingtools.apple.com/api/v2/badges/download-on-the-app-store/black/en-us';
     if(kind==='google-play-badge') {
       const page='https://play.google.com/intl/en_us/badges/';
       const html=(await download(page,options,'text/html')).toString();

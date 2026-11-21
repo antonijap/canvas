@@ -21,21 +21,36 @@ export function checkDesign(doc:Node, boards?:string[], measured:Record<string,B
   const image=(n:Node)=>[n.fill].flat().some(f=>f?.type==='image');
   const hasRaw=(v:any):boolean=> typeof v==='string' ? /^#|^rgba?\(|^hsla?\(/i.test(v) : Array.isArray(v)?v.some(hasRaw):v && typeof v==='object'?Object.entries(v).some(([k,x])=>['color','fill','stroke','stops','colors'].includes(k)&&hasRaw(x)):false;
   const overlaps=(a:Box,b:Box)=>a.x<b.x+b.width && a.x+a.width>b.x && a.y<b.y+b.height && a.y+a.height>b.y;
-  const mainIds=new Set(walk(doc.children ?? []).filter(n=>n.reusable && n.metadata?.designHelper?.startsWith('ios-status-bar:')).map(n=>n.id));
+  const mains=walk(doc.children ?? []).filter(n=>n.reusable);
+  const reusableIds=new Set(mains.map(n=>n.id));
+  const mainIds=new Set(mains.filter(n=>n.metadata?.designHelper?.startsWith('ios-status-bar:')).map(n=>n.id));
   for(const root of roots) {
     if(boards && !boards.includes(root.id)) continue;
-    if(root.reusable) continue;
     const rb=boxes[root.id], nodes=walk([root]);
+    const screenLayers=new Map<Node,{status:boolean;tabs:boolean}>();
+    const stateIcons=new Set<Node>();
+    function visit(n:Node, screen:boolean, state:boolean, status:boolean, tabs:boolean) {
+      screen=screen && !n.reusable && !reusableIds.has(n.id);
+      status=status || /status bar/i.test(name(n));
+      tabs=tabs || /tab bar/i.test(name(n));
+      if(screen) screenLayers.set(n,{status,tabs});
+      if(n.type==='icon' && state) stateIcons.add(n);
+      const inState=state || n!==root && n.type==='frame' && /state|empty|error|illustration/i.test(name(n));
+      for(const child of n.children ?? []) visit(child,screen,inState,status,tabs);
+    }
+    visit(root,!/design system|components|tokens/i.test(name(root)),false,false,false);
+    const screenNodes=[...screenLayers.keys()];
     const systemLayers=new Set(nodes.filter(n=>mainIds.has(n.id) || mainIds.has(n.__ref)).flatMap(n=>walk([n]).map(c=>c.id)));
-    const tab=nodes.find(n=>/tab bar/i.test(name(n)));
-    const phone=(rb.width===393 && rb.height===852 || rb.width===375 && rb.height===812) && !/website|landing/i.test(name(root));
+    const tab=screenNodes.find(n=>/tab bar/i.test(name(n)));
+    const phone=screenLayers.has(root) && (rb.width===393 && rb.height===852 || rb.width===375 && rb.height===812) && !/website|landing/i.test(name(root));
     if(phone) {
-      const bar=nodes.find(n=>/status bar/i.test(name(n)));
+      const bar=screenNodes.find(n=>/status bar/i.test(name(n)));
       const time=bar && walk([bar]).find(n=>n.type==='text' && n.content==='9:41');
       if(!bar || boxes[bar.id].y!==rb.y || boxes[bar.id].width!==rb.width || boxes[bar.id].height!==(rb.width===375?44:54) || !time || num(time.fontSize)!==17 || num(time.fontWeight)!==600 || !mainIds.has(bar.__ref)) add('R-7-50',bar ?? root,'Use insert_component ios-status-bar at the top edge, at the board width.');
     }
     for(const n of nodes) {
       const b=boxes[n.id], children=n.children ?? [], descendants=walk(children);
+      const screen=screenLayers.get(n);
       if(/^(frame|group|rectangle|ellipse|text|vector|line|image|copy)( \d+)?$/i.test(name(n)) || /_(text|rect|icon|frame)-\d+$/i.test(name(n))) add('R-7-24',n,'Give the layer a name describing its role.');
       if(!name(n).trim()) add('R-7-24',n,'Name the layer by its role.');
       if(!systemLayers.has(n.id) && !image(n) && [n.fill,n.stroke,n.effect].some(hasRaw)) add('R-7-11',n,'Bind fill, stroke and effect colours to $variables.');
@@ -46,24 +61,28 @@ export function checkDesign(doc:Node, boards?:string[], measured:Record<string,B
         const lines=String(n.content ?? '').split('\n').length;
         if(typeof n.height==='number' && b.height+0.1<num(n.fontSize)*(num(n.lineHeight)||1.2)*lines || /clip|overflow/i.test(b.problems ?? '')) add('R-7-33',n,'Text is clipped; allow enough height for its font and lines.');
       }
-      if(/tab bar/i.test(name(n))) {
+      if(phone && screen && n!==root && /button|tab|input|link|chip/i.test(name(n))) {
+        const top=rb.y+(rb.width===375?44:59), bottom=rb.y+rb.height-34;
+        if((!screen.status && b.y<top) || (!screen.tabs && b.y+b.height>bottom)) add('R-7-2',n,'Keep controls out of the system safe bands.');
+      }
+      if(screen && /tab bar/i.test(name(n))) {
         const row=children.find((c:Node)=>/row|slots/i.test(name(c))) ?? n;
         const slots=(row.children ?? []).filter((c:Node)=>!/home (band|indicator)|spacer/i.test(name(c)));
         const active=slots.filter((s:Node)=>/\b(active|selected)\b/i.test(name(s)) || walk([s]).some(c=>c.type==='icon' && (c.variant==='filled' || /filled|solid/.test(String(c.icon)))));
         const bad=slots.length<3 || slots.length>5 || slots.some((s:Node)=>s.width!=='fill_container' || !walk([s]).some(c=>c.type==='icon'||c.type==='path') || !walk([s]).some(c=>c.type==='text'));
-        const homeBand=nodes.find(c=>/home band/i.test(name(c)) && boxes[c.id].height===34 && Math.abs(boxes[c.id].y-(b.y+b.height))<1);
+        const homeBand=screenNodes.find(c=>/home band/i.test(name(c)) && boxes[c.id].height===34 && Math.abs(boxes[c.id].y-(b.y+b.height))<1);
         const strokeBad=n.stroke && (typeof n.strokeWidth==='object' ? num(n.strokeWidth.top)>1 || ['left','right','bottom'].some(k=>num(n.strokeWidth[k])>0) : num(n.strokeWidth)>0);
         if(bad || active.length!==1 || !(b.height===83 || b.height===49 && homeBand) || Math.abs(b.y+b.height+(b.height===49?34:0)-(rb.y+rb.height))>0.5 || descendants.some(c=>[c.fill].flat().includes('$accent')) || strokeBad) add('R-7-4',n,'Use 3 to 5 equal tab slots with icon and label, exactly one active, and a continuous bar to the bottom edge.');
       }
-      if(/empty (state|block)|empty-state/i.test(name(n))) {
+      if(screen && /empty (state|block)|empty-state/i.test(name(n))) {
         const inside=new Set(walk([n]).map(c=>c.id));
-        const above=nodes.filter(c=>!inside.has(c.id) && c!==root && boxes[c.id].y+boxes[c.id].height<=b.y && c.enabled!==false);
+        const above=screenNodes.filter(c=>!inside.has(c.id) && c!==root && boxes[c.id].y+boxes[c.id].height<=b.y && c.enabled!==false);
         const top=Math.max(rb.y,...above.map(c=>boxes[c.id].y+boxes[c.id].height));
         const bottom=tab?boxes[tab.id].y:rb.y+rb.height-34;
         if(Math.abs(b.y+b.height/2-(top+bottom)/2)>24 || Math.abs(b.x+b.width/2-(rb.x+rb.width/2))>24) add('R-7-26',n,'Centre the empty-state block in the free space above the tab bar.');
       }
       if(n.type==='icon') {
-        const state=nodes.some(p=>/state|empty|error|illustration/i.test(name(p)) && walk([p]).includes(n));
+        const state=stateIcons.has(n);
         if(b.width!==b.height || b.width<(state?32:16) || b.width>(state?64:28) || libraries.size>1) add('R-7-18',n,'Use square icons in the allowed size range and one library per file.');
       }
       if(n.layout==='horizontal' || /row|actions|tab bar/i.test(name(n))) {

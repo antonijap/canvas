@@ -20,7 +20,7 @@ export const LINK_TARGETS: Record<string, LinkTarget> = {
   pan_view: "nodeId",
   lookup_nodes: "within",
   set_active_page: "page",
-  get_document_summary: "file", list_pages: "file", get_fonts: "file", list_widgets: "file", get_product_brief: "file", open_file: "file",
+  get_document_summary: "file", set_variables: "file", list_pages: "file", get_fonts: "file", list_widgets: "file", get_product_brief: "file", open_file: "file",
 };
 
 export const linkArg = z.string().max(20_000).optional().describe("A canvas:// link (Cmd+L in Canvas): sets file and the nodes");
