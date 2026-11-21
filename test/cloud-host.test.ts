@@ -7,8 +7,11 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
 import { CloudHost, INVITE_MS, newSecret, parseSecret } from "../cloud/adapters/mac/host.ts";
+import { blobKey } from "../cloud/core/files/objects.ts";
 import { acceptKey, ServerSocket } from "../cloud/adapters/mac/websocket.ts";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -588,18 +591,19 @@ test('viewer directory has no invite data and removed members get forbidden', as
 
 test("file card routes enforce Cloud roles and duplicate the saved design", async () => {
   const { h, base } = await host();
-  const editor = bearer((await join(base, h.invite("anna@studio.test", "editor").code)).token);
-  const viewer = bearer((await join(base, h.invite("Ben", "viewer").code)).token);
-  const owner = bearer(h.ownerDevice("Anna"));
+  const editor = bearer((await join(base, h.invite("Editor", "editor").code, "Editor device")).token);
+  const viewer = bearer((await join(base, h.invite("Viewer", "viewer").code, "Viewer device")).token);
+  const owner = bearer(h.ownerDevice("Owner device"));
   const created = await post(base, "/v1/files", { name: "Board" }, owner);
   assert.equal(created.status, 201);
   const { id } = await created.json() as { id: string };
   const route = "/v1/files/" + id;
-  const change = (method: string, headers: Record<string, string>) =>
-    fetch(base + route, { method, headers: { ...headers, "content-type": "application/json" }, ...(method === "PATCH" ? { body: JSON.stringify({ name: "Renamed" }) } : {}) });
+  const change = (method: string, headers: Record<string, string>, file = id) =>
+    fetch(base + "/v1/files/" + file, { method, headers: { ...headers, "content-type": "application/json" }, ...(method === "PATCH" ? { body: JSON.stringify({ name: "Renamed" }) } : {}) });
   assert.equal((await post(base, route + "/duplicate", {}, viewer)).status, 403);
   assert.equal((await change("PATCH", viewer)).status, 403);
   assert.equal((await change("DELETE", viewer)).status, 403);
+  assert.equal((await change("DELETE", editor)).status, 403);
   assert.equal((await change("PATCH", editor)).status, 200);
   const duplicated = await post(base, route + "/duplicate", {}, editor);
   assert.equal(duplicated.status, 201);
@@ -609,6 +613,60 @@ test("file card routes enforce Cloud roles and duplicate the saved design", asyn
   const manifest = await fetch(base + "/v1/files/" + copy.id + "/manifest", { headers: viewer });
   assert.equal(manifest.status, 200);
   assert.equal((await manifest.json() as { file: string }).file, copy.id);
-  assert.equal((await change("DELETE", editor)).status, 200);
+  const other = await host();
+  const otherOwner = bearer(other.h.ownerDevice("Owner device"));
+  for (const action of ["duplicate", "rename", "delete", "manifest"]) {
+    const method = { duplicate: "POST", rename: "PATCH", delete: "DELETE", manifest: "GET" }[action];
+    const suffix = action === "duplicate" || action === "manifest" ? "/" + action : "";
+    const response = await fetch(other.base + route + suffix, {
+      method, headers: { ...otherOwner, "content-type": "application/json" },
+      body: method === "PATCH" ? JSON.stringify({ name: "Renamed" }) : method === "POST" ? "{}" : undefined,
+    });
+    assert.equal(response.status, 404, action);
+  }
+  assert.equal((await change("DELETE", editor, copy.id)).status, 200);
+  assert.equal((await change("DELETE", owner)).status, 200);
   assert.equal((await fetch(base + route, { headers: owner })).status, 404);
+  assert.equal((await post(base, route + "/duplicate", {}, owner)).status, 404);
+  assert.equal((await change("PATCH", owner)).status, 404);
+});
+
+test("rename removes controls and bidi overrides before checking the name", async () => {
+  const { h, base } = await host();
+  const owner = bearer(h.ownerDevice("Owner device"));
+  const { id } = await (await post(base, "/v1/files", { name: "Board" }, owner)).json() as { id: string };
+  const url = base + "/v1/files/" + id;
+  const rename = (name: string) => fetch(url, {
+    method: "PATCH", headers: { ...owner, "content-type": "application/json" }, body: JSON.stringify({ name }),
+  });
+  assert.equal((await rename(" \tBo\u0000ard\u202e 2\u2069 \n")).status, 200);
+  assert.equal((await rename(" \u0085\u202e \u2066 ")).status, 400);
+  assert.equal((await rename("A".repeat(201))).status, 400);
+  const file = await (await fetch(url, { headers: owner })).json() as { name: string };
+  assert.equal(file.name, "Board 2");
+});
+
+test("duplicate refuses the combined size of its blobs before copying", async t => {
+  const { h, dir, base } = await host();
+  const owner = bearer(h.ownerDevice("Owner device"));
+  const { id } = await (await post(base, "/v1/files", { name: "Board" }, owner)).json() as { id: string };
+  const size = 768 * 1024;
+  const db = new DatabaseSync(path.join(dir, "files", id + ".sqlite"));
+  try {
+    for (const n of [1, 2]) {
+      const data = Buffer.alloc(size, n);
+      const sha = createHash("sha256").update(data).digest("hex");
+      await h.files.objects.putIfAbsent(blobKey(id, sha), data);
+      db.prepare("INSERT INTO blobs (path,sha256,bytes,type,added_seq) VALUES (?,?,?,?,0)").run(`media/${n}.png`, sha, size, "image/png");
+    }
+  } finally { db.close(); }
+  // Each blob and the initial file allowance fit, but the pair does not.
+  const usage = await (await fetch(base + "/v1/usage", { headers: owner })).json() as { storageBytes: number };
+  Object.assign(h.files, { cap: usage.storageBytes + 1280 * 1024 });
+  const read = t.mock.method(h.files.objects, "get");
+  const response = await post(base, "/v1/files/" + id + "/duplicate", {}, owner);
+  assert.equal(response.status, 429);
+  assert.equal(read.mock.callCount(), 0, "no source blob was read");
+  const listing = await (await fetch(base + "/v1/files", { headers: owner })).json() as { files: { id: string }[] };
+  assert.deepEqual(listing.files.map(file => file.id), [id]);
 });

@@ -458,13 +458,15 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown) {
     }
 }
 async function renameCloudFileById(cloud: string, id: string, name: unknown) {
-    await request(cloud, `/v1/files/${id}`, 'PATCH', { name });
+    const renamed = await cloudJson(await request(cloud, `/v1/files/${id}`, 'PATCH', { name })) as { name?: string };
+    const savedName = renamed.name ?? String(name);
     for (const s of sessions.values()) {
         if (s.store.meta.cloud !== cloud || s.store.meta.file !== id) continue;
-        s.store.meta.name = String(name);
+        s.store.meta.name = savedName;
         s.store.commit();
         render(s);
     }
+    return savedName;
 }
 export async function renameCloudFile(file: string, name: unknown) {
     const s = fileSession(file);
@@ -565,8 +567,8 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             if (p.endsWith('/download')) return out(200, await downloadCloudFile(cloud, id, b.target));
             if (p.endsWith('/duplicate')) return out(201, await cloudJson(await request(cloud, route + '/duplicate', 'POST', {})));
             if (p.endsWith('/delete')) return out(200, await cloudJson(await request(cloud, route, 'DELETE', {})));
-            await renameCloudFileById(cloud, id, b.name);
-            return out(200, { ok: true });
+            const name = await renameCloudFileById(cloud, id, b.name);
+            return out(200, { ok: true, name });
         }
         if (p === '/api/cloud/files/move') {
             if (fileInfo(url.searchParams.get('file')!))

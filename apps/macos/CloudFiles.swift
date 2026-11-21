@@ -7,6 +7,7 @@ private struct CloudFileItem: Identifiable {
     let id: String
     let name: String
     let updated: String?
+    let canDelete: Bool?
 }
 
 struct CloudFilesView: View {
@@ -27,6 +28,9 @@ struct CloudFilesView: View {
     @State private var targeted = false
 
     private var canEdit: Bool { loaded && !offline && CloudFilesText.canEdit(role) }
+    private func canDelete(_ item: CloudFileItem) -> Bool {
+        canEdit && (item.canDelete ?? (role == "owner"))
+    }
     private var busy: Bool { opening || account.busy.contains(entry.url) }
     private var visible: [CloudFileItem] {
         let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
@@ -49,7 +53,7 @@ struct CloudFilesView: View {
         if let rows = j["files"] as? [[String: Any]] {
             files = rows.compactMap { r in
                 guard let id = r["id"] as? String, let name = r["name"] as? String else { return nil }
-                return CloudFileItem(id: id, name: name, updated: r["updated_at"] as? String)
+                return CloudFileItem(id: id, name: name, updated: r["updated_at"] as? String, canDelete: r["can_delete"] as? Bool)
             }
             role = j["role"] as? String ?? "viewer"
             key = j["key"] as? String ?? ""
@@ -94,6 +98,9 @@ struct CloudFilesView: View {
 
     private func perform(_ action: String, item: CloudFileItem, with values: [String: Any] = [:]) {
         guard !busy, !offline, action == "download" || canEdit else { return }
+        if action == "delete" {
+            guard let current = files.first(where: { $0.id == item.id }), canDelete(current) else { return }
+        }
         opening = true
         Task {
             defer { opening = false }
@@ -115,7 +122,7 @@ struct CloudFilesView: View {
             }
             if action == "delete" {
                 for file in Set(cached) { model.close(file); home.remove(file) }
-            } else if action == "rename", let name = values["name"] as? String {
+            } else if action == "rename", let name = j["name"] as? String {
                 for file in Set(cached) { model.setCloudFileName(name, for: file) }
             }
             await refresh()
@@ -136,7 +143,7 @@ struct CloudFilesView: View {
             }
         }.disabled(busy || offline)
         Divider()
-        Button("Delete", role: .destructive) { deleteItem = item }.disabled(busy || !canEdit)
+        Button("Delete", role: .destructive) { deleteItem = item }.disabled(busy || !canDelete(item))
     }
 
     private var revealedID: String? {

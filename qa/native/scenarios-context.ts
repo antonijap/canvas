@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ROOT, startServer } from '../lib.ts';
 import { center, NT, sc } from './harness.ts';
 
 sc('context-actions', 'context canvas menu creates a component', { covers: ['create-component:menu', 'component-navigation:component'] }, async (t: NT) => {
@@ -102,8 +106,8 @@ sc('context-actions', 'context board menu moves a board to another page', { cove
 });
 
 sc('context-actions', 'context Cloud file card opens, copies a link and duplicates on the host', { covers: ['cloud-files:open'] }, async (t: NT) => {
-  const post = async (p: string, body: unknown) => {
-    const r = await fetch(t.app.base + p, { method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const post = async (p: string, body: unknown, base = t.app.base) => {
+    const r = await fetch(base + p, { method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(body) });
     return { status: r.status, j: await r.json() as any };
   };
   await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
@@ -146,6 +150,37 @@ sc('context-actions', 'context Cloud file card opens, copies a link and duplicat
     await cardMenu();
     await t.pickMenu('Open');
     await t.waitState(s => s.file === opened.file && !s.homeShown, 'card menu opened file');
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-card-editor-'));
+    let remote: Awaited<ReturnType<typeof startServer>> | undefined;
+    try {
+      remote = await startServer(dir, {
+        HOME: dir, CANVAS_STATE_DIR: path.join(dir, 'state'), CANVAS_CLOUD_SECRETS_FILE: path.join(dir, 'secrets.json'),
+        CANVAS_COMMENT_NAME: 'Owner', CANVAS_TUNNEL_BIN: path.join(ROOT, 'test/fixtures/fake-tunnel.sh'),
+        CANVAS_FAKE_TUNNEL_DIR: path.join(t.app.dir, 'tunnels'), CANVAS_FAKE_TUNNEL_NODE: process.execPath, CANVAS_FAKE_TUNNEL_ANY_PORT: '1',
+      });
+      const team = await post('/api/cloud/host/start', { name: 'Team', label: 'Owner' }, remote.base);
+      t.eq(team.status, 200, 'second Cloud starts');
+      const cloud = team.j.url;
+      t.eq((await post('/api/cloud/files/create', { cloud, name: 'Owner file' }, remote.base)).status, 201, 'owner creates a file');
+      const invite = await post('/api/cloud/host/invite', { hostId: team.j.hostId, label: 'Editor', role: 'editor' }, remote.base);
+      t.eq(invite.status, 200, 'editor invited');
+      t.eq((await post('/api/cloud/join', { link: invite.j.link, device: 'Editor device' })).status, 200, 'editor joins');
+      t.eq((await post('/api/cloud/files/create', { cloud, name: 'Editor file' })).status, 201, 'editor creates a file');
+      const { clouds: [teamEntry] } = await t.cmd('qa.cloud', { clouds: [{ url: cloud, name: 'Team' }] });
+      await t.click(center(await t.mark({ id: 'home-tab' })));
+      await t.cmd('qa.cloud', { home: teamEntry.id });
+      for (const [name, canDelete] of [['Owner file', false], ['Editor file', true]] as const) {
+        await t.click(center(await t.mark({ id: 'cloud-file', label: name, exact: true }, 8000)), { right: true });
+        const menu = (await t.cmd('qa.menu')).items as { title: string; enabled: boolean }[];
+        t.eq(menu.find(item => item.title === 'Delete')?.enabled, canDelete, `editor Delete on ${name}`);
+        t.eq(menu.find(item => item.title === 'Rename')?.enabled, true, `editor Rename on ${name}`);
+        await t.cmd('qa.menu', { cancel: true });
+      }
+    } finally {
+      await remote?.stop();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   } finally {
     await post('/api/cloud/host/stop', { hostId: host.j.hostId });
     await post('/api/cloud/host/wipe', { hostId: host.j.hostId });

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -24,12 +25,13 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
         CANVAS_FAKE_TUNNEL_ANY_PORT: '1',
         CANVAS_COMMENT_NAME: 'Editor',
     });
-    const call = async (route: string, body: unknown) => {
+    const call = async (route: string, body: unknown, expectedStatus?: number) => {
         const response = await fetch(server.base + route, {
             method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(body),
         });
         const result = await response.json() as any;
-        assert.ok(response.ok, `${response.status}: ${JSON.stringify(result)}`);
+        if (expectedStatus !== undefined) assert.equal(response.status, expectedStatus, JSON.stringify(result));
+        else assert.ok(response.ok, `${response.status}: ${JSON.stringify(result)}`);
         return result;
     };
     try {
@@ -132,8 +134,23 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 fs.rmSync(moved.file, { recursive: true });
                 const reopened = await call('/api/cloud/files/open', { cloud: host.url, id: moved.id });
                 check(reopened.file);
+                if (fixture === 'playground') {
+                    const invalid = await call('/api/cloud/files/create', { cloud: host.url, name: 'Invalid manifest' });
+                    const db = new DatabaseSync(path.join(dir, 'state', 'cloud-host', 'files', invalid.id + '.sqlite'));
+                    try {
+                        const { manifest } = db.prepare("SELECT manifest FROM snapshots WHERE seq=0").get() as { manifest: string };
+                        const data = JSON.parse(manifest);
+                        data.blobs = [{ path: '/media/fixture.png', sha256: 'a'.repeat(64), bytes: 1, type: 'image/png' }];
+                        db.prepare('UPDATE snapshots SET manifest=? WHERE seq=0').run(JSON.stringify(data));
+                    } finally { db.close(); }
+                    const target = path.join(dir, 'Invalid.canvas');
+                    const refusal = await call('/api/cloud/files/download', { cloud: host.url, id: invalid.id, target }, 400);
+                    assert.match(refusal.error, /invalid blob path/);
+                    assert.equal(fs.existsSync(target), false);
+                }
                 if (fixture === 'media') {
-                    await call('/api/cloud/files/rename', { cloud: host.url, id: moved.id, name: 'Board' });
+                    const renamed = await call('/api/cloud/files/rename', { cloud: host.url, id: moved.id, name: ' \u202eBo\u0000ard ' });
+                    assert.equal(renamed.name, 'Board');
                     const duplicate = await call('/api/cloud/files/duplicate', { cloud: host.url, id: moved.id });
                     assert.equal(duplicate.name, 'Board copy');
                     const copy = await call('/api/cloud/files/open', { cloud: host.url, id: duplicate.id });
@@ -142,6 +159,8 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     const downloaded = await call('/api/cloud/files/download', { cloud: host.url, id: duplicate.id, target });
                     assert.equal(downloaded.file, target);
                     assert.equal(fs.existsSync(path.join(target, '.cloud')), false);
+                    check(target);
+                    await call('/api/cloud/files/download', { cloud: host.url, id: moved.id, target }, 409);
                     check(target);
                     await call('/api/cloud/files/delete', { cloud: host.url, id: duplicate.id });
                     const list = await (await fetch(server.base + '/api/cloud/files?cloud=' + encodeURIComponent(host.url))).json() as { files: { id: string }[] };

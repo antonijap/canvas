@@ -117,6 +117,7 @@ interface Row extends Record<string, string | number | null> {
     created_by: string;
     updated_at: string;
 }
+const canDelete = (row: Row, me: Me) => me.role === 'owner' || (me.role === 'editor' && row.created_by === me.id);
 interface Room {
     leases: RoomLeases;
     store: SqliteStore;
@@ -331,12 +332,17 @@ export class MacFiles {
             const id = randomUUID(), name = row.name.slice(0, 195) + ' copy';
             const state = stateOf(room.tree);
             state.vers = {};
-            this.capacity(1024 * 1024);
+            const blobs = new Map(Object.values(state.blobs).map(blob => [blob.sha256, blob]));
+            const blobBytes = [...blobs.values()].reduce((total, blob) => total + blob.bytes, 0);
+            this.capacity(1024 * 1024 + blobBytes);
+            const teamDb = path.join(this.root, 'team.sqlite');
+            const copyDb = path.join(this.root, 'files', id + '.sqlite');
             const now = new Date(this.now()).toISOString();
             this.db.sql.exec("INSERT INTO files VALUES(?,?,'importing',?,?,?)", id, name, editor.id, now, now);
             try {
-                const blobs = new Map(Object.values(state.blobs).map(blob => [blob.sha256, blob]));
+                this.accountDatabase(teamDb);
                 for (const { sha256, bytes } of blobs.values()) {
+                    this.capacity(bytes);
                     if (this.bodies >= 4 || this.inFlight + bytes > 256 * 1024 * 1024)
                         error(503, 'quota', 'Uploads are busy; try again');
                     this.bodies++;
@@ -351,18 +357,22 @@ export class MacFiles {
                         this.inFlight -= bytes;
                     }
                 }
-                const dest = this.room(id).core;
-                dest.seedState(state);
-                await buildSnapshot(dest);
+                const dest = this.room(id);
+                this.bounded(dest, () => dest.core.seedState(state));
+                await buildSnapshot(dest.core);
                 this.edit(me);
                 if (this.row(row.id, me).state !== 'live') error(404, 'not_found', 'No such Cloud file');
+                this.accountDatabase(copyDb);
                 this.db.sql.exec("UPDATE files SET state='live' WHERE id=?", id);
+                this.accountDatabase(teamDb);
+                this.capacity(0);
                 return { id, name };
             } catch (e) {
                 this.discardImport(id);
                 throw e;
             } finally {
-                this.accountDatabase(path.join(this.root, 'files', id + '.sqlite'));
+                this.accountDatabase(copyDb);
+                this.accountDatabase(teamDb);
             }
         });
     }
@@ -382,8 +392,13 @@ export class MacFiles {
                 return json(200, { adapter: 'mac', storageBytes, freeDisk, peopleConnected: new Set([...this.rooms.values()].flatMap(r => [...r.sockets.values()].map(m => m.id))).size, ...stats, estimated: true, tone: macUsageTone(freeDisk, storageBytes, stats.restartsHour), brake: freeDisk < 5 * GB ? 'storage' : 'none' });
             }
             if (p === '/v1/files') {
-                if (method === 'GET')
-                    return json(200, { files: this.db.sql.exec<Row>("SELECT * FROM files WHERE state='live' ORDER BY updated_at DESC,id").toArray().filter(r => !url.searchParams.get('q') || r.name.toLowerCase().includes(url.searchParams.get('q')!.toLowerCase())), role: me.role });
+                if (method === 'GET') {
+                    const query = url.searchParams.get('q')?.toLowerCase() ?? '';
+                    const files = this.db.sql.exec<Row>("SELECT * FROM files WHERE state='live' ORDER BY updated_at DESC,id").toArray()
+                        .filter(row => row.name.toLowerCase().includes(query))
+                        .map(row => ({ ...row, can_delete: canDelete(row, me) }));
+                    return json(200, { files, role: me.role });
+                }
                 if (method !== 'POST')
                     return json(405, { code: 'invalid' });
                 this.edit(me);
@@ -419,19 +434,26 @@ export class MacFiles {
             if (!sub && method === 'PATCH') {
                 const b = await body();
                 this.edit(me);
-                if (typeof b.name !== 'string' || !b.name.trim() || b.name.length > 200)
+                const name = typeof b?.name === 'string' ? b.name.replace(/[\p{Cc}\p{Bidi_Control}]/gu, '').trim() : '';
+                if (!name || name.length > 200)
                     return json(400, { code: 'invalid' });
                 if (this.row(file, me).state !== 'live') return json(404, { code: 'not_found' });
-                this.db.sql.exec('UPDATE files SET name=?, updated_at=? WHERE id=?', b.name, new Date(this.now()).toISOString(), file);
-                return json(200, { ok: true });
+                this.db.sql.exec('UPDATE files SET name=?, updated_at=? WHERE id=?', name, new Date(this.now()).toISOString(), file);
+                return json(200, { ok: true, name });
             }
             if (!sub && method === 'DELETE') {
                 if (row.state !== 'live') return json(404, { code: 'not_found' });
-                this.db.sql.exec("UPDATE files SET state='trash' WHERE id=?", file);
-                const r = this.rooms.get(file);
-                if (r)
+                if (!canDelete(row, me)) return json(403, { code: 'forbidden' });
+                const r = this.room(file);
+                await r.core.exclusive(async () => {
+                    const editor = this.edit(me);
+                    const current = this.row(file, editor);
+                    if (current.state !== 'live') error(404, 'not_found', 'No such Cloud file');
+                    if (!canDelete(current, editor)) error(403, 'forbidden', 'Only the creator or Cloud owner can delete this file');
+                    this.db.sql.exec("UPDATE files SET state='trash' WHERE id=?", file);
                     for (const ws of r.sockets.keys())
                         ws.close(1008, 'File is in Trash');
+                });
                 return json(200, { ok: true });
             }
             if (sub === 'import' && method === 'DELETE') {
