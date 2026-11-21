@@ -19,6 +19,7 @@ import { resolveDoc } from "./docpath.ts";
 import { agentSettings } from "./settings.ts";
 import { hooks, isShared, NIL_DOC as NIL, queueLocal, viewOf, withDoc, type SyncFile } from "./cloud-sync.ts";
 import { countUsage } from "./usage-counts.ts";
+import { commentReads, unreadThreads } from "./comment-reads.ts";
 
 /** An envelope that says "the document of the file this request names". */
 export const NIL_DOC = NIL;
@@ -127,6 +128,8 @@ export function readThreads(pkg: string): { doc: string | null; threads: Thread[
   return { doc: f.doc, threads: viewOf(f, { name: localName() }), sync: hooks.info(pkg, f as SyncFile) };
 }
 
+const readerOf = (sync: unknown): Author => (sync as { me?: Author } | undefined)?.me || { name: localName() };
+
 /** Builds the ops a client would send for one new thread (the page and canvas-mcp build theirs the same way). */
 export function threadCreateEnvelope(anchor: Thread["anchor"], body: string, at = new Date()): OpEnvelope {
   return { opId: randomUUID(), doc: NIL_DOC, at: at.toISOString(), op: { kind: "thread.create", thread: randomUUID(), anchor, comment: randomUUID(), body } };
@@ -134,7 +137,7 @@ export function threadCreateEnvelope(anchor: Thread["anchor"], body: string, at 
 
 /** Answers /api/comments*. Returns false for anything else. `changed` tells the open pages of that file. */
 export async function handleCommentsRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, changed?: (file: string, pkg: string) => void): Promise<boolean> {
-  if (url.pathname !== "/api/comments" && url.pathname !== "/api/comments/ops") return false;
+  if (!["/api/comments", "/api/comments/ops", "/api/comments/read"].includes(url.pathname)) return false;
   const out = (status: number, body: unknown): true => {
     res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" });
     res.end(JSON.stringify(body));
@@ -161,23 +164,43 @@ export async function handleCommentsRoute(req: http.IncomingMessage, res: http.S
           }
         } catch { /* Offline: keep comments readable. */ }
       }
-      return out(200, { ...threads, me: localName(), ...(cloud ? { people } : {}) });
+      const unread = unreadThreads(threads.doc, readerOf(threads.sync), threads.threads);
+      return out(200, { ...threads, unread, me: localName(), ...(cloud ? { people } : {}) });
     }
     if (req.method !== "POST") return out(405, { error: "method not allowed" });
     if (req.headers["x-canvas"] !== "1") return out(403, { error: "forbidden", code: "forbidden" });
     const raw = await readBodyText(req, MAX_BODY);
     if (raw === null) return out(413, { error: "too large" });
-    let body: { ops?: unknown };
+    let body: { ops?: unknown; thread?: unknown; unread?: unknown };
     try {
       body = JSON.parse(raw || "{}");
+      if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error();
     } catch {
       return out(400, { error: "The request body must be JSON" });
+    }
+    if (url.pathname === "/api/comments/read") {
+      // Omit the thread to mark the whole document read.
+      const id = body.thread;
+      if ((id !== undefined && typeof id !== "string") || (body.unread !== undefined && typeof body.unread !== "boolean") || (id === undefined && body.unread)) {
+        return out(400, { error: "Invalid comment read mark" });
+      }
+      const { doc, threads, sync } = readThreads(pkg);
+      const { fileInfo } = await import("./cloud-files.ts");
+      const me = fileInfo(file)?.author || readerOf(sync);
+      const selected = id === undefined ? threads : threads.filter(t => t.id === id && !t.deletedAt);
+      if (id !== undefined && !selected.length) return out(404, { error: "This comment is no longer available" });
+      if (!doc) return out(200, { unread: [] });
+      const reads = commentReads();
+      reads.mark(doc, me, selected, body.unread === true);
+      changed?.(file, pkg);
+      return out(200, { unread: reads.unread(doc, me, threads) });
     }
     const r = applyEnvelopes(pkg, body.ops, authorOf(req));
     for (const c of r.counts) countUsage(c);
     if (r.applied.length && changed) changed(file, pkg);
     const sync = r.queued ? readThreads(pkg).sync : undefined;
-    return out(200, { doc: r.doc, applied: r.applied, rejected: r.rejected, threads: r.threads, me: localName(), ...(sync ? { sync } : {}) });
+    const unread = unreadThreads(r.doc, readerOf(sync), r.threads);
+    return out(200, { doc: r.doc, applied: r.applied, rejected: r.rejected, threads: r.threads, unread, me: localName(), ...(sync ? { sync } : {}) });
   } catch (e) {
     if (e instanceof CommentsError) return out(e.status, { error: e.message, code: e.code });
     return out(500, { error: (e as Error).message });

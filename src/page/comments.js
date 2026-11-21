@@ -83,13 +83,19 @@ function start(host) {
   css.textContent = `
 .cm-layer{position:absolute;left:0;top:0;width:100%;height:100%;z-index:14;pointer-events:none;overflow:hidden;font-family:var(--c-font-sans);-webkit-font-smoothing:antialiased;
   --cm-card:0 0 0 .5px #0000000f,0 1px 3px #00000014,0 12px 32px -6px #0000002e;--cm-pin:0 0 0 .5px #00000014,0 1px 2px #0000001f,0 4px 10px -2px #00000033;
-  --cm-chip:var(--c-hover);--cm-line:var(--c-stroke);--cm-body:color-mix(in srgb,var(--c-fg) 80%,transparent);--cm-time:color-mix(in srgb,var(--c-muted-fg) 80%,transparent)}
+  --cm-chip:var(--c-hover);--cm-line:var(--c-stroke);--cm-body:color-mix(in srgb,var(--c-fg) 80%,transparent);--cm-time:color-mix(in srgb,var(--c-muted-fg) 80%,transparent);
+  --cm-unread-fill:#2165d9;--cm-unread-text:#1859c6;--cm-unread-row:#e9f1ff;--cm-unread-hover:#dceaff}
 .cm-layer *{box-sizing:border-box}
 @media (prefers-color-scheme: dark){.cm-layer{--cm-card:0 0 0 .5px #00000099,0 1px 3px #00000066,0 12px 32px -6px #000000a6;--cm-pin:0 0 0 .5px #00000099,0 1px 2px #00000066,0 4px 10px -2px #00000080}}
+@media (prefers-color-scheme: dark){.cm-layer{--cm-unread-text:#8cbaff;--cm-unread-row:#203453;--cm-unread-hover:#283f62}}
 .cm-pin{position:absolute;left:0;top:0;width:${PIN}px;height:${PIN}px;border:0;padding:0;border-radius:14px 14px 14px 3px;background:var(--c-popover);color:var(--c-fg);font:600 12px/100% var(--c-font-sans);display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;box-shadow:var(--cm-pin);will-change:transform}
 .cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1.06}
 .cm-pin.open{color:var(--c-fg)}
-.cm-pin.resolved:not(.open){opacity:.6}
+.cm-pin.resolved:not(.open,.unread){opacity:.6}
+.cm-pin.unread{background:var(--cm-unread-fill);color:white;opacity:1}
+.cm-pin.unread :is(.cm-av,.cm-agent){box-shadow:0 0 0 1px white}
+.cm-pin.unread .cm-agent{background:var(--cm-unread-fill);color:white}
+.cm-pin.unread::after{content:"";position:absolute;top:-2px;right:-2px;width:7px;height:7px;border-radius:50%;background:var(--cm-unread-fill);box-shadow:0 0 0 1.5px white}
 .cm-av{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:11px;color:#fff;font:600 11px/100% var(--c-font-sans);flex:none;transition:scale .12s ease-out}
 .cm-agent{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;background:var(--cm-chip);color:var(--c-fg);flex:none;transition:scale .12s ease-out}
 .cm-ui{pointer-events:auto}
@@ -99,9 +105,15 @@ function start(host) {
 .cm-sidebar{position:fixed;right:0;top:0;bottom:0;width:var(--c-props-width);display:flex;flex-direction:column;gap:8px;padding:16px;overflow:auto;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:13px;line-height:18px}
 .native .cm-sidebar{right:var(--c-inset,18px);top:calc(var(--c-inset,18px) + var(--c-pill,36px) + var(--c-island-gap,10px));bottom:var(--c-inset,18px);border-radius:16px}
 .cm-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.cm-sidebar-head strong{margin-right:auto}
+.cm-sidebar h3{margin:4px 0 0;font:600 12px/18px var(--c-font-sans);color:var(--c-muted-fg)}
 .cm-thread-row{display:flex;flex-direction:column;gap:8px;flex:none;width:100%;padding:12px;text-align:left;border:0;border-radius:10px;background:transparent;color:inherit;font:inherit;cursor:pointer}
 .cm-thread-row:hover,.cm-thread-row[aria-current=true]{background:var(--cm-chip)}
 .cm-thread-row span{white-space:pre-wrap;overflow-wrap:anywhere}
+.cm-thread-row.unread{background:var(--cm-unread-row)}
+.cm-thread-row.unread span::first-line{font-weight:600}
+.cm-thread-row.unread:is(:hover,[aria-current=true]){background:var(--cm-unread-hover)}
+.cm-new{color:var(--cm-unread-text);font-weight:600}
 body.cm-sidebar-open #props{visibility:hidden}
 .cm-chip{display:inline-flex;align-items:center;gap:5px;height:22px;min-width:0;padding:0 7px 0 6px;border-radius:7px;background:var(--cm-chip);color:color-mix(in srgb,var(--c-fg) 75%,transparent);font:500 12px/100% var(--c-font-sans)}
 .cm-chip svg{flex:none;color:var(--c-muted-fg)}
@@ -152,6 +164,10 @@ body.cm-sidebar-open #props{visibility:hidden}
 .cm-menu{position:absolute;left:0;top:0;min-width:150px;padding:4px;border-radius:10px;background:var(--c-popover);box-shadow:var(--cm-card);z-index:2}
 .cm-menu button{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--c-danger);font:500 12px/100% var(--c-font-sans);cursor:pointer;text-align:left}
 .cm-menu button:hover{background:var(--c-hover)}
+.cm-pin-menu{min-width:166px;z-index:4}
+.cm-pin-menu button:not(.danger){color:var(--c-fg)}
+.cm-pin-menu button:disabled{opacity:.45;cursor:default}
+.cm-pin-menu p{margin:4px 8px;color:var(--c-muted-fg);font-size:12px}
 .cm-gone{display:flex;flex-direction:column;gap:10px;padding:12px 10px 10px 14px;border-radius:16px 16px 0 0;background:#fff7ed;color:#c2410c}
 .cm-gone .cm-top{display:flex;align-items:center;gap:10px;min-height:22px}
 .cm-gone .cm-acts{display:flex;align-items:center;gap:6px}
@@ -231,7 +247,11 @@ body.cm-sidebar-open #props{visibility:hidden}
     sidebar.hidden = !open;
     document.body.classList.toggle("cm-sidebar-open", open);
     if (host.native) host.post({ commentsSidebar: open });
-    if (open) { setMode(false); openThread(null); drawSidebar(); }
+    if (open) {
+      setMode(false);
+      openThread(null);
+      sidebar.querySelector(".cm-thread-row.unread")?.scrollIntoView({ block: "nearest" });
+    }
     else bar.focus();
     schedule();
   }
@@ -241,18 +261,31 @@ body.cm-sidebar-open #props{visibility:hidden}
     const head = h("div", "cm-sidebar-head");
     const close = txtBtn("cm-btn txt", "Close");
     close.onclick = () => showList(false);
-    head.append(h("strong", "", "Comments"), close);
+    close.setAttribute("aria-label", "Close");
+    const read = txtBtn("cm-btn txt", "Mark all as read");
+    read.setAttribute("aria-label", "Mark all as read");
+    read.onclick = () => setRead();
+    head.append(h("strong", "", "Comments"));
+    if (st.unread.size) head.append(read);
+    head.append(close);
     sidebar.append(head);
-    const threads = L.visibleThreads(st.threads, showResolved);
+    const threads = L.visibleThreads(st.threads, true);
+    const unread = threads.filter(t => st.unread.has(t.id));
+    const readThreads = threads.filter(t => !st.unread.has(t.id) && (showResolved || !t.resolvedAt));
+    if (unread.length) sidebar.append(h("h3", "", "Unread"));
+    for (const thread of unread) drawRow(thread, true);
+    if (unread.length && readThreads.length) sidebar.append(h("h3", "", "Read"));
+    for (const thread of readThreads) drawRow(thread, false);
     if (!threads.length) sidebar.append(h("p", "", "No comments yet"));
-    for (const thread of threads) {
+    function drawRow(thread, unread) {
       const first = L.liveComments(thread)[0];
-      if (!first) continue;
-      const row = h("button", "cm-thread-row");
+      if (!first) return;
+      const row = h("button", "cm-thread-row" + (unread ? " unread" : ""));
       row.type = "button";
-      row.title = "Open comment from " + (first.author?.name || "Someone");
+      row.title = (unread ? "Unread comment from " : "Open comment from ") + (first.author?.name || "Someone");
       row.dataset.thread = thread.id;
       row.setAttribute("aria-current", String(st.open === thread.id));
+      if (unread) row.setAttribute("aria-label", row.title + ": " + first.body);
       row.append(h("strong", "", first.author?.name || "Someone"), h("span", "", first.body));
       row.onclick = async () => {
         const page = L.pageOf(thread, (board) => host.pageOfBoard(board), firstPage());
@@ -269,6 +302,7 @@ body.cm-sidebar-open #props{visibility:hidden}
         const z = Math.max(0.25, Math.min(1, host.cam.z));
         host.setCam({ z, x: ((ins.l || 0) + right) / 2 - spot.x * z,
           y: ((ins.t || 0) + v.height - (ins.b || 0)) / 2 - spot.y * z });
+        if (thread.resolvedAt) showResolved = true;
         openThread(thread.id);
       };
       sidebar.append(row);
@@ -277,7 +311,7 @@ body.cm-sidebar-open #props{visibility:hidden}
   if (!host.native) { const toolbar = document.querySelector("#bar .island:last-child"); if (toolbar) { toolbar.prepend(shared); shared.classList.add("toolbar"); } }
 
   /** doc: the file's comment identity (null until the first comment); threads: every thread, tombstones too. repin: a thread waiting for a new layer. */
-  const st = { doc: null, threads: [], sync: null, me: "", mode: false, open: null, draft: null, repin: null, menu: false, people: [] };
+  const st = { doc: null, threads: [], unread: new Set(), sync: null, me: "", mode: false, open: null, draft: null, repin: null, menu: false, people: [] };
   const pins = new Map(); // thread id (or "draft") -> {el, x, y, vis}
   const gone = new Map(); // node id -> {rev, at, gone} what the file said about a layer with no drawing now
   const asked = new Set();
@@ -295,6 +329,7 @@ body.cm-sidebar-open #props{visibility:hidden}
     if (Array.isArray(j.people)) st.people = j.people;
     if (j.doc !== undefined) st.doc = j.doc;
     if (Array.isArray(j.threads)) { st.threads = j.threads; if (j.sync !== undefined) st.sync = j.sync || null; }
+    if (Array.isArray(j.unread)) st.unread = new Set(j.unread);
     if (typeof j.me === "string") st.me = j.me;
     render();
   }
@@ -302,6 +337,21 @@ body.cm-sidebar-open #props{visibility:hidden}
   function load() {
     const n = ++loading;
     return fetch("/api/comments?file=" + encodeURIComponent(file)).then((r) => (r.ok ? r.json() : null)).then((j) => { if (j && n === loading) apply(j); }).catch(() => {});
+  }
+  let readQueue = Promise.resolve();
+  function setRead(id, unread = false) {
+    readQueue = readQueue.then(async () => {
+      const r = await fetch("/api/comments/read?file=" + encodeURIComponent(file), {
+        method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" },
+        body: JSON.stringify({ thread: id, unread }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      ++loading;
+      apply(j);
+      void load();
+    }).catch((e) => tell(e.message));
+    return readQueue;
   }
   const env = (op) => ({ opId: crypto.randomUUID(), doc: st.doc || "00000000-0000-4000-8000-000000000000", at: new Date().toISOString(), op });
   const thread = (id) => st.threads.find((t) => t.id === id);
@@ -360,6 +410,12 @@ body.cm-sidebar-open #props{visibility:hidden}
     el.title = "Open comment";
     el.style.display = "none";
     el.addEventListener("click", (e) => { e.stopPropagation(); if (id === "draft" || dragged === id) return; openThread(st.open === id ? null : id); });
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = thread(id);
+      if (t && !drag?.moving) showPinMenu(t, e.clientX, e.clientY);
+    });
     el.addEventListener("pointerdown", (e) => pressPin(e, id));
     el.addEventListener("pointermove", (e) => dragPin(e));
     el.addEventListener("pointerup", (e) => dropPin(e));
@@ -392,7 +448,9 @@ body.cm-sidebar-open #props{visibility:hidden}
       drawPin(p, t, first && first.author, st.open === t.id);
       p.el.classList.toggle("resolved", !!t.resolvedAt);
       p.el.classList.toggle("open", st.open === t.id);
-      p.el.setAttribute("aria-label", `Comment from ${first && first.author ? first.author.name : "someone"}${first ? ": " + first.body.slice(0, 80) : ""}`);
+      const unread = st.unread.has(t.id);
+      p.el.classList.toggle("unread", unread);
+      p.el.setAttribute("aria-label", `${unread ? "Unread comment" : "Comment"} from ${first && first.author ? first.author.name : "someone"}${first ? ": " + first.body.slice(0, 80) : ""}`);
     }
     if (st.draft) {
       // The add pin stays where the click left it while the comment is written: the cursor's own shape, set down.
@@ -515,7 +573,7 @@ body.cm-sidebar-open #props{visibility:hidden}
   host.beforeFrame(() => { if (pins.size || st.draft || hovId) place(); });
   host.on("render", schedule);
   host.on("visible", schedule);
-  host.on("page", () => { st.open = null; closeDraft(); render(); });
+  host.on("page", () => { st.open = null; closePinMenu(); closeDraft(); render(); });
   host.on("cmd", (c) => {
     if (c && c.cmd === "insets") schedule();
     if (c && c.cmd === "comment") setMode(!st.mode);
@@ -623,6 +681,9 @@ body.cm-sidebar-open #props{visibility:hidden}
     return { name: (info && info.name) || (a.preview && a.preview.name) || a.nodeId, gone: isGoneNow(t) };
   }
   let popFor = null, popKey = "";
+  function resolveThread(t) {
+    return sendOps([env({ kind: "thread.resolve", thread: t.id, resolved: !t.resolvedAt })]).catch((e) => tell(e.message));
+  }
   function drawThread() {
     const t = st.open && thread(st.open);
     if (!t || !L.stillOpen(st.open, st.threads, showResolved)) {
@@ -645,7 +706,7 @@ body.cm-sidebar-open #props{visibility:hidden}
     const resolveBtn = () => {
       const b = btnEl("cm-btn cm-res" + (t.resolvedAt ? " on" : ""), ICON.check, t.resolvedAt ? "Reopen thread" : "Resolve thread");
       b.title = t.resolvedAt ? "Reopen" : "Resolve";
-      b.onclick = () => sendOps([env({ kind: "thread.resolve", thread: t.id, resolved: !t.resolvedAt })]).then(() => { if (!showResolved && !t.resolvedAt) { st.open = null; render(); } }).catch((e) => tell(e.message));
+      b.onclick = () => resolveThread(t);
       return b;
     };
     if (where.gone) {
@@ -699,7 +760,12 @@ body.cm-sidebar-open #props{visibility:hidden}
     const ta = field("Reply", (v, el) => {
       el.disabled = true;
       sendOps([env({ kind: "comment.add", thread: t.id, comment: crypto.randomUUID(), body: v, mentions: el.mentions() })], () => el.clearDraft())
-        .then((j) => { el.disabled = false; if (!j.rejected?.length && st.open === t.id) pop.querySelector(".cm-field")?.focus(); })
+        .then((j) => {
+          el.disabled = false;
+          if (j.rejected?.length) return;
+          setRead(t.id);
+          if (st.open === t.id) pop.querySelector(".cm-field")?.focus();
+        })
         .catch((e) => { el.disabled = false; tell(e.message); });
     }, () => openThread(null), (ready) => send.classList.toggle("ready", ready));
     ta.value = draftText;
@@ -736,11 +802,68 @@ body.cm-sidebar-open #props{visibility:hidden}
     m.style.top = Math.max(4, Math.min(st.menu.y, pop.clientHeight - m.offsetHeight - 4)) + "px";
   }
   function openThread(id) {
+    closePinMenu();
     st.open = id;
     st.menu = false;
     closeDraft();
     render();
-    if (id) focusSoon(pop.querySelector(".cm-field"));
+    if (id) { setRead(id); focusSoon(pop.querySelector(".cm-field")); }
+  }
+
+  let pinMenu = null;
+  function closePinMenu() {
+    pinMenu?.remove();
+    pinMenu = null;
+  }
+  function showPinMenu(t, x, y, confirming = false) {
+    closePinMenu();
+    const menu = h("div", "cm-menu cm-pin-menu cm-ui");
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Comment actions");
+    const canComment = st.sync?.role !== "viewer";
+    const focusPin = () => pins.get(t.id)?.el.focus();
+    const item = (label, action, { danger = false, disabled = false } = {}) => {
+      const b = h("button", danger ? "danger" : "", label);
+      b.type = "button";
+      b.setAttribute("role", "menuitem");
+      b.disabled = disabled;
+      b.onclick = () => { closePinMenu(); focusPin(); action(); };
+      menu.append(b);
+    };
+    if (confirming) {
+      menu.append(h("p", "", "Delete this thread and its replies?"));
+      item("Cancel", () => {});
+      item("Delete Thread", () => sendOps([env({ kind: "thread.delete", thread: t.id })]).catch((e) => tell(e.message)), { danger: true });
+    } else {
+      item("Reply", () => openThread(t.id), { disabled: !canComment });
+      item(t.resolvedAt ? "Reopen" : "Resolve", () => resolveThread(t), { disabled: !canComment });
+      const unread = st.unread.has(t.id);
+      item(unread ? "Mark as Read" : "Mark as Unread", () => setRead(t.id, !unread));
+      item("Copy Text", async () => {
+        const text = L.liveComments(t).map(c => c.body).join("\n\n");
+        try {
+          if (host.native) host.post({ clipboard: text });
+          else await navigator.clipboard.writeText(text);
+        } catch { tell("Could not copy comment text"); }
+      });
+      item("Delete Thread", () => showPinMenu(t, x, y, true), { danger: true, disabled: !canComment });
+    }
+    menu.addEventListener("keydown", (e) => {
+      const items = [...menu.querySelectorAll("button:enabled")];
+      const index = items.indexOf(document.activeElement);
+      if (e.key === "Escape") { closePinMenu(); focusPin(); }
+      else if (e.key === "ArrowDown") items[(index + 1) % items.length].focus();
+      else if (e.key === "ArrowUp") items[(index + items.length - 1) % items.length].focus();
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    const bounds = layer.getBoundingClientRect();
+    layer.append(menu);
+    menu.style.left = Math.max(4, Math.min(x - bounds.left, layer.clientWidth - menu.offsetWidth - 4)) + "px";
+    menu.style.top = Math.max(4, Math.min(y - bounds.top, layer.clientHeight - menu.offsetHeight - 4)) + "px";
+    pinMenu = menu;
+    menu.querySelector("button:enabled")?.focus();
   }
 
   // ---------- a new thread ----------
@@ -838,6 +961,9 @@ body.cm-sidebar-open #props{visibility:hidden}
     if (show) {
       const m = h("span"); m.innerHTML = ICON.bubble; m.style.display = "flex";
       bar.append(m, h("span", "", `${n.open} ${n.open === 1 ? "comment" : "comments"}`));
+      const unread = st.threads.filter(t => !t.deletedAt && st.unread.has(t.id)).length;
+      bar.setAttribute("aria-label", unread ? `Open comments, ${unread} new` : "Open comments");
+      if (unread) bar.append(h("span", "cm-new", `${unread} new`));
       if (n.resolved) {
         const b = txtBtn("cm-btn txt dim", showResolved ? `Hide ${n.resolved} resolved` : `Show ${n.resolved} resolved`);
         b.setAttribute("aria-pressed", String(showResolved));
@@ -925,6 +1051,7 @@ body.cm-sidebar-open #props{visibility:hidden}
 
   addEventListener("keydown", (e) => {
     if (e.defaultPrevented) return;
+    if (pinMenu?.contains(e.target)) return;
     if (e.key === "Escape" && !typing(e.target)) {
       if (drag) { const moving = drag.moving; cancelDrag(); if (moving) { e.preventDefault(); e.stopPropagation(); return; } }
       if (st.menu && st.open) { st.menu = false; drawMenu(); e.preventDefault(); e.stopPropagation(); return; }
@@ -946,6 +1073,7 @@ body.cm-sidebar-open #props{visibility:hidden}
   let pressed = null;
   const mine = (e) => st.mode && !host.hand && e.button === 0 && view.contains(e.target) && !inUi(e.target);
   addEventListener("pointerdown", (e) => {
+    if (pinMenu && !pinMenu.contains(e.target)) closePinMenu();
     if (!inUi(e.target) && (st.open || st.draft) && view.contains(e.target) && !st.mode) { st.menu = false; openThread(null); closeDraft(); render(); }
     if (!mine(e)) { pressed = null; return; }
     e.preventDefault(); e.stopImmediatePropagation();

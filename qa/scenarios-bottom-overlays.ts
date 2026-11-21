@@ -31,6 +31,7 @@ sc('comments', 'Comment pill opens sidebar list and centers the chosen pin', { c
   await t.io.key('Enter');
   await t.waitFor('window.canvasHost.comments.threads.length === 1', 'saved comment');
   await t.io.key('Escape');
+  await t.waitFor("!!document.querySelector('.cm-bar.on')?.style.top", "the comment pill is positioned");
   const click = async (selector: string) => {
     const p = await t.ev<any>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
     await t.io.click(p.x, p.y);
@@ -45,7 +46,7 @@ sc('comments', 'Comment pill opens sidebar list and centers the chosen pin', { c
   t.near(g.x, g.cx, 2, 'pin tip centered horizontally in free canvas');
   t.near(g.y, g.cy, 2, 'pin tip centered vertically in free canvas');
   fs.writeFileSync(path.join(process.cwd(), 'qa/out/comments-sidebar-navigation.png'), await t.shot());
-  await click('.cm-sidebar-head button');
+  await click('.cm-sidebar-head [aria-label="Close"]');
   await t.waitFor("document.querySelector('.cm-sidebar').hidden", 'sidebar closes');
   await click('.cm-bar');
   await t.waitFor("!document.querySelector('.cm-sidebar').hidden && !window.canvasHost.comments.open", 'pill returns to list');

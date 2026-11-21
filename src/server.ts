@@ -34,6 +34,7 @@ import { cssVariables } from "./tokens.ts";
 import { codeRootId, version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
+import { commentReads } from "./comment-reads.ts";
 import { handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
 import { scrubSecrets } from "./cloud-secrets.ts";
 import { handlePagesRoute, resolvePages } from "./pages.ts";
@@ -1090,6 +1091,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   // Usage counts (src/usage-counts.ts): written on the way out, sent once a day by a release build.
   process.on("exit", () => usage.flush());
   usage.start();
+  // Record the upgrade cutoff even when this session never opens a document.
+  try { commentReads(); } catch { /* A comments request can retry if the state directory becomes writable. */ }
   startServer().then((s) => {
     const port = (s.address() as { port: number }).port;
     const url = `http://127.0.0.1:${port}/${file ? `?file=${encodeURIComponent(file)}` : ""}`;

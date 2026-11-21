@@ -12,7 +12,8 @@ import { tmpDir } from "./helpers.ts";
 
 const dir = tmpDir("comments");
 process.env.CANVAS_ROOTS = dir;
-process.env.CANVAS_COMMENT_NAME = "Ana Test";
+process.env.CANVAS_STATE_DIR = path.join(dir, "state");
+process.env.CANVAS_COMMENT_NAME = "Anna";
 const DOC = {
   version: "2.21",
   children: [
@@ -59,7 +60,7 @@ const onDisk = (p: string) => JSON.parse(fs.readFileSync(path.join(p, "comments.
 describe("routes", () => {
   test("a file with no comments has no comments.json, and the first comment makes it with a new doc uuid", async () => {
     const p = pkg("first");
-    assert.deepEqual(await get(p), { doc: null, threads: [], me: "Ana Test" });
+    assert.deepEqual(await get(p), { doc: null, threads: [], unread: [], me: "Anna" });
     assert.ok(!fs.existsSync(path.join(p, "comments.json")), "reading creates nothing");
     const { thread, e } = create();
     const r = await post(p, [e]);
@@ -75,10 +76,33 @@ describe("routes", () => {
     assert.equal(f.server, undefined);
     assert.equal(f.threads[0].id, thread);
     assert.equal(f.threads[0].doc, f.doc);
-    assert.deepEqual(f.threads[0].comments[0].author, { name: "Ana Test" });
+    assert.deepEqual(f.threads[0].comments[0].author, { name: "Anna" });
     assert.equal(f.threads[0].comments[0].body, "Make this bigger");
     assert.deepEqual((await get(p)).threads.map((t: any) => t.id), [thread]);
     assert.equal((await get(p)).doc, f.doc);
+  });
+
+  test("read marks are local, require a mutation header and never rewrite comments", async () => {
+    const p = pkg("read-marks");
+    const { thread, e } = create();
+    await post(p, [e], { "x-canvas-source": "mcp", "x-canvas-agent": "Ben" });
+    assert.deepEqual((await get(p)).unread, [thread]);
+    const comments = path.join(p, "comments.json");
+    const before = fs.readFileSync(comments, "utf8");
+    const endpoint = `${base}/api/comments/read?file=${q(p)}`;
+    const mark = (body: object, allowed = true) => fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(allowed && { "x-canvas": "1" }) },
+      body: JSON.stringify(body),
+    });
+    assert.equal((await mark({ thread }, false)).status, 403);
+    assert.equal((await mark({ unread: true })).status, 400);
+    assert.equal((await mark({ thread: uuid() })).status, 404);
+    assert.deepEqual(await (await mark({ thread })).json(), { unread: [] });
+    assert.deepEqual(await (await mark({ thread, unread: true })).json(), { unread: [thread] });
+    assert.deepEqual(await (await mark({})).json(), { unread: [] });
+    assert.deepEqual((await get(p)).unread, []);
+    assert.equal(fs.readFileSync(comments, "utf8"), before);
   });
 
   test("replies, resolve and reopen apply; the document in an envelope may be the file's own doc", async () => {
@@ -92,7 +116,7 @@ describe("routes", () => {
     let t = onDisk(p).threads[0];
     assert.equal(t.comments.length, 2);
     assert.ok(t.resolvedAt);
-    assert.deepEqual(t.resolvedBy, { name: "Ana Test" });
+    assert.deepEqual(t.resolvedBy, { name: "Anna" });
     await post(p, [env({ kind: "thread.resolve", thread, resolved: false })]);
     t = onDisk(p).threads[0];
     assert.equal(t.resolvedAt, undefined);
@@ -191,7 +215,7 @@ describe("routes", () => {
     const d = create("from another");
     await post(p, [d.e], { "x-canvas-source": "mcp", "x-canvas-agent": "Some Tool <b>markup</b>" });
     const names = onDisk(p).threads.map((t) => t.createdBy);
-    assert.deepEqual(names, [{ name: "Ana Test" }, { name: "Claude Code", agent: true }, { name: "Codex", agent: true }, { name: "Some Tool b markup b", agent: true }]);
+    assert.deepEqual(names, [{ name: "Anna" }, { name: "Claude Code", agent: true }, { name: "Codex", agent: true }, { name: "Some Tool b markup b", agent: true }]);
     assert.equal(C.agentName(undefined), "Agent");
   });
 
@@ -311,7 +335,7 @@ describe("MCP tools", () => {
     const listed = await run(c, "list_comments", { file: p });
     assert.equal(listed.json.threads.length, 2);
     const first = listed.json.threads.find((x: any) => x.id === t.id);
-    assert.deepEqual(first.comments.map((x: any) => [x.author, x.body]), [["Claude Code", "Is this the right size?"], ["Ana Test", "No, smaller"]]);
+    assert.deepEqual(first.comments.map((x: any) => [x.author, x.body]), [["Claude Code", "Is this the right size?"], ["Anna", "No, smaller"]]);
     assert.deepEqual(first.layer, { name: "Title", type: "text" });
 
     const rep = await run(c, "reply_comment", { file: p, threadId: t.id, body: "Done" });

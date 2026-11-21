@@ -386,3 +386,120 @@ sc('comments', 'Mentions in replies filter people and persist a picked token', {
   await t.waitFor('!!document.querySelector(".cm-mentions:not([hidden]) button")', 'suggestions at the start');
   await t.io.key('Escape');
 });
+
+sc("comments", "Unread comments and the pin menu", { covers: ["comments:unread", "comments:pin-menu"], skip: { visual: "Unread appearances are captured separately in light and dark." } }, async (t: T) => {
+  const shell = new AbortController();
+  const headers = { "x-canvas": "1", "content-type": "application/json" };
+  const name = (commentName: string) => fetch(t.srv.base + "/api/state", {
+    method: "POST", headers, body: JSON.stringify({ client: "qa-comments", role: "shell", settings: { commentName } }),
+  });
+  const api = t.srv.base + "/api/comments?file=" + encodeURIComponent(t.file);
+  try {
+    await t.ev("localStorage.removeItem('canvas:comments:showResolved')");
+    await t.open();
+    await fetch(t.srv.base + "/api/bridge/events?client=qa-comments&role=shell", { signal: shell.signal });
+    t.eq((await name("Anna")).status, 200, "Anna is the local commenter");
+    await t.focus("lay_nest");
+    await t.ev("window.canvasHost.comments.reload()");
+    const r = await t.center("r_free");
+    const create = async (body: string, x: number) => {
+      const id = crypto.randomUUID();
+      const res = await fetch(api.replace("/api/comments?", "/api/comments/ops?"), {
+        method: "POST", headers, body: JSON.stringify({ ops: [{
+          opId: crypto.randomUUID(), doc: "00000000-0000-4000-8000-000000000000", at: new Date().toISOString(),
+          op: { kind: "thread.create", thread: id, comment: crypto.randomUUID(), body,
+            anchor: { page: await t.ev("window.canvasHost.page"), x, y: await t.ev(`(${r.y} - window.canvasHost.cam.y) / window.canvasHost.cam.z`) } },
+        }] }),
+      });
+      t.eq((await res.json()).rejected, [], "comment saved");
+      return id;
+    };
+    const x = await t.ev<number>(`(${r.x} - window.canvasHost.cam.x) / window.canvasHost.cam.z`);
+    const own = await create("Anna's note", x - 90);
+    await name("Ben");
+    const id = await create("Ben's note", x);
+    await name("Anna");
+    await t.ev("window.canvasHost.comments.reload()");
+    const pin = `.cm-pin[data-thread="${id}"]`;
+    await t.waitFor(`document.querySelector('${pin}')?.classList.contains("unread")`, "Ben's unread pin for Anna");
+    t.ok(await t.ev(`!document.querySelector('.cm-pin[data-thread="${own}"]').classList.contains('unread')`), "Anna's pin stays read");
+    await t.waitFor(`document.querySelector('.cm-bar .cm-new')?.textContent === '1 new'`, "the count pill shows one new thread");
+    await t.ev(`document.querySelector('.cm-bar .cm-new').click()`);
+    await t.waitFor(`document.querySelector('.cm-sidebar .cm-thread-row.unread')?.dataset.thread === "${id}"`, "the unread row sorts first");
+    for (const theme of ["light", "dark"]) {
+      await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
+      await t.frames(3);
+      await shot(t, `comments-unread-${theme}`);
+    }
+    await t.ev(`document.querySelector('.cm-sidebar [data-thread="${id}"]').click()`);
+    await t.waitFor(`!document.querySelector('${pin}')?.classList.contains("unread") && !document.querySelector('.cm-pop').hidden`, "opening clears unread");
+    await t.io.type("Anna's reply");
+    await t.io.key("Enter");
+    await until(t, () => file(t).threads.find((item: { id: string }) => item.id === id).comments.length === 2, "Anna's reply");
+    await t.waitFor(`document.querySelector('.cm-pop').innerText.includes("Anna's reply")`, "Anna's reply appears");
+    t.ok(await t.ev(`!document.querySelector('${pin}').classList.contains('unread')`), "own reply stays read");
+
+    const openMenu = async () => {
+      const p = await pinOf(t, id);
+      const where = { x: p.x + p.w / 2, y: p.y + p.h / 2, button: "right" };
+      await t.page.send("Input.dispatchMouseEvent", { ...where, type: "mousePressed", buttons: 2, clickCount: 1 });
+      await t.page.send("Input.dispatchMouseEvent", { ...where, type: "mouseReleased", buttons: 0, clickCount: 1 });
+      await t.waitFor("!!document.querySelector('.cm-pin-menu')", "the pin menu");
+    };
+    const choose = (label: string) => t.ev(`[...document.querySelectorAll('.cm-pin-menu button')].find(b => b.textContent === ${JSON.stringify(label)}).click()`);
+    await t.ev(`document.querySelector('.cm-sidebar-head [aria-label="Close"]').click()`);
+    await t.io.key("Escape");
+    await openMenu();
+    t.eq(await t.ev(`[...document.querySelectorAll('.cm-pin-menu button')].map(b => b.textContent)`),
+      ["Reply", "Resolve", "Mark as Unread", "Copy Text", "Delete Thread"], "pin menu labels");
+    await t.ev(`navigator.clipboard.writeText = async (text) => { window.copiedComment = text; }`);
+    await choose("Copy Text");
+    t.eq(await t.ev("window.copiedComment"), "Ben's note\n\nAnna's reply", "copy includes the live messages");
+    await openMenu();
+    await choose("Resolve");
+    await until(t, () => !!file(t).threads.find((item: { id: string }) => item.id === id).resolvedAt, "resolved from the pin menu");
+    await t.waitFor(`!document.querySelector('${pin}')`, "resolved pin is hidden");
+    await t.ev(`[...document.querySelectorAll('.cm-bar button')].find(b => b.textContent === 'Show 1 resolved').click()`);
+    await t.waitFor(`!!document.querySelector('${pin}.resolved')`, "resolved pin is visible");
+    await openMenu();
+    await choose("Reopen");
+    await until(t, () => !file(t).threads.find((item: { id: string }) => item.id === id).resolvedAt, "reopened from the pin menu");
+    await t.waitFor(`!document.querySelector('${pin}')?.classList.contains('resolved')`, "reopened pin is updated");
+    await openMenu();
+    await choose("Mark as Unread");
+    await t.waitFor(`document.querySelector('.cm-bar').innerText.includes('1 new')`, "the count pill shows unread threads");
+    await openMenu();
+    await choose("Mark as Read");
+    await t.waitFor(`!document.querySelector('.cm-bar .cm-new')`, "the pin menu clears unread");
+    await openMenu();
+    await choose("Mark as Unread");
+    await t.waitFor(`document.querySelector('${pin}').classList.contains('unread')`, "the pin becomes unread again");
+    await openMenu();
+    await choose("Reply");
+    await t.waitFor(`!document.querySelector('${pin}').classList.contains('unread') && document.activeElement === document.querySelector('.cm-pop textarea')`, "reply opens and reads the thread");
+    await t.io.key("Escape");
+    await openMenu();
+    await choose("Mark as Unread");
+    await t.waitFor(`!!document.querySelector('.cm-bar .cm-new')`, "unread is saved");
+    await t.open();
+    await t.waitFor(`document.querySelector('.cm-bar').innerText.includes('1 new')`, "the read mark survives reload");
+    await t.ev(`document.querySelector('.cm-bar').click()`);
+    await t.ev(`document.querySelector('.cm-sidebar-head [aria-label="Mark all as read"]').click()`);
+    await t.waitFor(`!document.querySelector('.cm-bar').innerText.includes('1 new')`, "mark all clears the count");
+    await t.ev(`document.querySelector('.cm-sidebar-head [aria-label="Close"]').click()`);
+    await t.focus("lay_nest");
+    await openMenu();
+    await choose("Delete Thread");
+    t.ok(!file(t).threads.find((item: { id: string }) => item.id === id).deletedAt, "delete waits for confirmation");
+    await choose("Cancel");
+    await openMenu();
+    await choose("Delete Thread");
+    await choose("Delete Thread");
+    await until(t, () => !!file(t).threads.find((item: { id: string }) => item.id === id).deletedAt, "confirmed deletion");
+    t.ok(!("unread" in file(t)), "read marks stay outside the shared comments file");
+  } finally {
+    await t.ev("localStorage.removeItem('canvas:comments:showResolved')").catch(() => {});
+    await name("").catch(() => {});
+    shell.abort();
+  }
+});

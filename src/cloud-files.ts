@@ -20,6 +20,7 @@ import { prepareMove } from './cloud-files-move.ts';
 import { checkPresence, stripIdentity, keep, type Presence, type PeerPresence } from '../cloud/core/presence.ts';
 import { createPresenceSender } from './page/presence-client.js';
 import { pendingStates, retry, discard, type RefusedOp } from './cloud-sync.ts';
+import { unreadThreads } from './comment-reads.ts';
 async function boundedBytes(response: Response, limit: number): Promise<Uint8Array> {
     if (Number(response.headers.get('content-length')) > limit) {
         await response.body?.cancel();
@@ -477,6 +478,7 @@ function removeCaches(cloud: string) {
 onCloudsChanged((removed,back) => { for (const cloud of removed) removeCaches(cloud);for(const cloud of back)revoked.delete(cloud); });
 export async function handleCloudFiles(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<boolean> {
     const p = url.pathname;
+    if (p === '/api/comments/read') return false;
     if (!p.startsWith('/api/cloud/files') && p !== '/api/cloud/usage' && !(p.startsWith('/api/comments') && url.searchParams.get('file') && fileSession(url.searchParams.get('file')!)))
         return false;
     const out = (status: number, j: unknown) => { res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify(j)); return true; };
@@ -492,7 +494,11 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                 return out(200, await cloudFiles(url.searchParams.get('cloud')!, url.searchParams.get('query') ?? ''));
             if (p === '/api/comments') {
                 const s = fileSession(url.searchParams.get('file')!)!;
-                return out(200, { me: s.store.meta.author.name, people: await cloudMembers(s.store.meta.cloud), doc: s.store.meta.file, threads: JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8')).threads, sync: { me: s.store.meta.author, status: s.status, role: s.store.meta.role, url:s.store.meta.cloud, connected:s.status==='connected', ...pendingStates(commentState(s), s.comments) } });
+                const people = await cloudMembers(s.store.meta.cloud);
+                const { file: doc, author } = s.store.meta;
+                const { threads } = JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8'));
+                const unread = unreadThreads(doc, author, threads);
+                return out(200, { me: author.name, people, doc, threads, unread, sync: { me: author, status: s.status, role: s.store.meta.role, url:s.store.meta.cloud, connected:s.status==='connected', ...pendingStates(commentState(s), s.comments) } });
             }
             return out(404, { error: 'No such route' });
         }
@@ -592,7 +598,10 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             saveComments(s);
             if (s.ws?.readyState === WebSocket.OPEN && s.status !== 'quota')
                 s.ws.send(JSON.stringify({ type: 'comments', ops }));
-            return out(200, { doc: s.store.meta.file, threads: JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8')).threads, applied: ops.map((e: OpEnvelope) => ({ opId: e.opId, seq: 0 })), rejected: [] });
+            const { file: doc, author } = s.store.meta;
+            const { threads } = JSON.parse(fs.readFileSync(path.join(s.store.pkg, 'comments.json'), 'utf8'));
+            const unread = unreadThreads(doc, author, threads);
+            return out(200, { doc, threads, unread, applied: ops.map((e: OpEnvelope) => ({ opId: e.opId, seq: 0 })), rejected: [] });
         }
         return out(404, { code: 'not_found' });
     }

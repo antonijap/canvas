@@ -204,7 +204,7 @@ features:
     name: C pins a comment thread to the layer under the pointer
     area: comments
     driven: [page, mcp]
-    cases: [pin, page-point, follows-layer, move, add-pin, reply, resolve, show-resolved, list-navigation, layer-deleted, reopen, keyboard, light, dark, shared-bar, pending, rejected, alignment]
+    cases: [pin, page-point, follows-layer, move, add-pin, reply, resolve, show-resolved, list-navigation, unread, pin-menu, layer-deleted, reopen, keyboard, light, dark, shared-bar, pending, rejected, alignment]
   - id: scale-tool
     name: K scales a layer with its contents
     area: resize
