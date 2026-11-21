@@ -233,7 +233,7 @@ describe("widgets and pages", () => {
     fs.writeFileSync(f, JSON.stringify(j, null, 2));
     const r = await undo();
     assert.equal(r.status, 409);
-    assert.match(r.body.error, /widget "Note"/);
+    assert.match(r.body.error, /widget "Page"/);
     assert.equal((await undo()).body.skipped, true);
     // Undoing the add would delete a widget someone has changed since: refused too.
     assert.equal((await undo()).status, 409);

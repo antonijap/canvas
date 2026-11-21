@@ -132,12 +132,15 @@ describe("hunt 5: data loss", () => {
   test("codex-server 4: a mixed Undo whose cards' write fails puts the layers back and can run again", async () => {
     const docFile = await freshDoc("mixed");
     const q = `?file=${encodeURIComponent(docFile)}`;
-    const w = await call("POST", `/api/widgets${q}`, { kind: "note", name: "N0", x: 0, y: 0 }, user);
+    const w = await call("POST", `/api/widgets${q}`, { kind: "note", config: { text: "N0" }, x: 0, y: 0 }, user);
     const id = w.body.widget.id;
     later();
     await call("POST", "/api/update", { file: docFile, id: "Scr01", props: { opacity: 0.5 } }, agent("mix"));
-    await call("PATCH", `/api/widgets/${id}${q}`, { name: "N1" }, agent("mix"));
+    const changed = await call("PATCH", `/api/widgets/${id}${q}`, { config: { text: "N1" } }, agent("mix"));
+    assert.equal(changed.status, 200);
+    assert.equal(changed.body.widget.name, "N1");
     const fill = () => JSON.parse(fs.readFileSync(docFile, "utf8")).children[0].opacity;
+    const card = () => JSON.parse(fs.readFileSync(docFile.replace(/\.canvas\.json$/, ".widgets.json"), "utf8")).widgets[0];
     storeTestHooks.beforeCommit = () => { throw new Error("disk full"); };
     let r;
     try {
@@ -148,11 +151,13 @@ describe("hunt 5: data loss", () => {
     assert.notEqual(r.status, 200);
     const { currentDoc } = await import("../src/docwriter.ts");
     assert.equal((currentDoc(docFile).doc.children[0] as DocNode).opacity, 0.5, "the layers' half was put back");
+    assert.equal(card().config.text, "N1");
     const again = await call("POST", `/api/history/undo${q}`);
     assert.equal(again.status, 200, JSON.stringify(again.body));
     await new Promise((res) => setTimeout(res, 400));
     assert.equal(fill(), undefined);
-    assert.equal(JSON.parse(fs.readFileSync(docFile.replace(/\.canvas\.json$/, ".widgets.json"), "utf8")).widgets[0].name, "N0");
+    assert.equal(card().config.text, "N0");
+    assert.equal(card().name, "N0");
   });
 
   test("codex-server 5: a duplicate of a component and its instance replays (component inserted after the instance)", () => {

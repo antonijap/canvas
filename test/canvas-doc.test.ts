@@ -106,14 +106,15 @@ describe("documents served from a package", () => {
   });
 
   test("widgets read and write widgets.json, not a sidecar", async () => {
-    const r = await post(`/api/widgets?file=${encodeURIComponent(pkg)}`, { kind: "note", name: "N" });
+    const r = await post(`/api/widgets?file=${encodeURIComponent(pkg)}`, { kind: "note", config: { text: "# N\nBody" } });
     assert.equal(r.status, 201);
     const stored = JSON.parse(fs.readFileSync(path.join(pkgReal, "widgets.json"), "utf8"));
     assert.equal(stored.widgets.length, 1);
     assert.equal(stored.widgets[0].name, "N");
+    assert.equal(stored.widgets[0].config.text, "# N\nBody");
     assert.deepEqual(fs.readdirSync(dir).filter((n) => n.endsWith(".widgets.json")), []);
     const list = await get(`/api/widgets?file=${encodeURIComponent(pkg)}`);
-    assert.equal(list.widgets.length, 1);
+    assert.deepEqual(list.widgets, stored.widgets);
   });
 });
 
