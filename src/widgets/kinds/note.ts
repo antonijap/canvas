@@ -1,9 +1,19 @@
+import { pageName, withPageName } from "../../page/widget-page.js";
 import { extras, int, oneOf, str } from "../check.ts";
 import type { Config, WidgetKind } from "../types.ts";
 
 const TONES = ["plain", "yellow", "green", "blue", "pink"] as const;
 const KNOWN = ["text", "tone", "pageWidth"];
 // text is Markdown, one line per block (src/page/note-doc.js; the MCP tools in mcp/tools/widgets.ts describe it).
+
+export function syncPageName(config: Config, name?: string, replaceFirstLine = false) {
+  const text = str(config.text, "text", "", 50_000);
+  if (name !== undefined) {
+    const next = withPageName(text, str(name, "name", "", 120), replaceFirstLine);
+    if (next !== text) config.text = next;
+  }
+  return pageName(String(config.text ?? ""));
+}
 
 export const note: WidgetKind = {
   id: "note",

@@ -286,25 +286,62 @@ describe("live", () => {
   });
 });
 
+describe("Page widget names", () => {
+  test("creating a named Page writes a heading when its first line is empty", async () => {
+    for (const [text, expected] of [["", "# Example"], [" \nBody", "# Example\nBody"]]) {
+      const r = await req("POST", `/api/widgets${q()}`, { kind: "note", name: "Example", config: { text } });
+      assert.equal(r.status, 201);
+      assert.equal(r.body.widget.name, "Example");
+      assert.equal(r.body.widget.config.text, expected);
+    }
+    const { body: { widget } } = await req("POST", `/api/widgets${q()}`, { kind: "note" });
+    const r = await req("PATCH", `/api/widgets/${widget.id}${q()}`, { name: "Example", config: { text: "" } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.widget.name, "Example");
+    assert.equal(r.body.widget.config.text, "# Example");
+  });
+
+  test("renaming a Page replaces its first line and keeps the body", async () => {
+    const { body: { widget } } = await req("POST", `/api/widgets${q()}`, { kind: "note", config: { text: "## Before\n\n- Body" } });
+    const r = await req("PATCH", `/api/widgets/${widget.id}${q()}`, { name: "After **literal**" });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.widget.name, "After **literal**");
+    assert.equal(r.body.widget.config.text, "## After \\*\\*literal\\*\\*\n\n- Body");
+  });
+
+  test("a supplied first line wins over the name on create and update", async () => {
+    const text = "# **Content**\nBody";
+    const r = await req("POST", `/api/widgets${q()}`, { kind: "note", name: "Example", config: { text } });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.widget.name, "Content");
+    assert.equal(r.body.widget.config.text, text);
+    const next = "## Updated\nBody";
+    const patch = await req("PATCH", `/api/widgets/${r.body.widget.id}${q()}`, { name: "Example", config: { text: next } });
+    assert.equal(patch.status, 200);
+    assert.equal(patch.body.widget.name, "Updated");
+    assert.equal(patch.body.widget.config.text, next);
+  });
+});
+
 describe("hunt-1 #9", () => {
   test("reordering pages or inserting one first keeps widgets and boards on the page they were on", async () => {
     const p2 = path.join(dir, "reorder.canvas.json");
     fs.writeFileSync(p2, JSON.stringify(DOC, null, 2));
     const side2 = path.join(dir, "reorder.widgets.json");
     fs.writeFileSync(side2, JSON.stringify({ version: 1, pages: [{ id: "one", name: "One", boards: ["A"] }, { id: "two", name: "Two", boards: ["C"] }], widgets: [] }));
-    const w = await req("POST", `/api/widgets${q(p2)}`, { kind: "note" });
+    const w = await req("POST", `/api/widgets${q(p2)}`, { kind: "note", name: "Implicit" });
     assert.equal(w.status, 201, JSON.stringify(w.body));
     assert.equal(w.body.widget.page, undefined);
     const r = await req("PATCH", `/api/pages/two${q(p2)}`, { index: 0 });
     assert.equal(r.status, 200);
     const s = JSON.parse(fs.readFileSync(side2, "utf8"));
     assert.deepEqual(s.pages.map((p: any) => p.id), ["two", "one"]);
-    assert.equal(s.widgets.find((x: any) => x.id === w.body.widget.id).page, "one", "the widget stays on page One");
+    assert.equal(s.widgets.find((x: any) => x.name === "Implicit").page, "one", "the widget stays on page One");
     assert.deepEqual(r.body.pages.map((p: any) => [p.id, p.boards]), [["two", ["C"]], ["one", ["A", "B"]]], "unlisted board B stays on One");
     const ins = await req("POST", `/api/pages${q(p2)}`, { name: "Zero", id: "zero", index: 0 });
     assert.equal(ins.status, 201);
     const s2 = JSON.parse(fs.readFileSync(side2, "utf8"));
-    assert.equal(s2.widgets.find((x: any) => x.id === w.body.widget.id).page, "one");
+    assert.equal(s2.widgets.find((x: any) => x.name === "Implicit").page, "one");
     assert.deepEqual(ins.body.pages.map((p: any) => [p.id, p.boards]), [["zero", []], ["two", ["C"]], ["one", ["A", "B"]]]);
     fs.unwatchFile(p2);
   });
@@ -316,13 +353,12 @@ describe("hunt-1 #9 (Codex follow-up)", () => {
     fs.writeFileSync(p3, JSON.stringify(DOC, null, 2));
     const side3 = path.join(dir, "replace.widgets.json");
     fs.writeFileSync(side3, JSON.stringify({ version: 1, pages: [{ id: "one", name: "One", boards: ["A"] }, { id: "two", name: "Two", boards: ["C"] }], widgets: [] }));
-    const w = await req("POST", `/api/widgets${q(p3)}`, { kind: "note", page: "two" });
+    const w = await req("POST", `/api/widgets${q(p3)}`, { kind: "note", name: "OnTwo", page: "two" });
     assert.equal(w.status, 201);
-    assert.equal(w.body.widget.page, "two");
     const r = await req("PUT", `/api/pages${q(p3)}`, { pages: [{ id: "two", name: "Two", boards: ["C"] }, { id: "one", name: "One", boards: ["A", "B"] }] });
     assert.equal(r.status, 200);
     const s = JSON.parse(fs.readFileSync(side3, "utf8"));
-    assert.equal(s.widgets.find((x: any) => x.id === w.body.widget.id).page, undefined, "on Two, now the first page (implicit)");
+    assert.equal(s.widgets.find((x: any) => x.name === "OnTwo").page, undefined, "on Two, now the first page (implicit)");
     fs.unwatchFile(p3);
   });
 });

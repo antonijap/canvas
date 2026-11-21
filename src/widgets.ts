@@ -15,6 +15,7 @@ import { pageName } from "./page/widget-page.js";
 import { pathExists } from "./docpath.ts";
 import { redact } from "./widgets/ctx.ts";
 import { clearSecret, hasSecret, parseRef } from "./widgets/keychain.ts";
+import { syncPageName } from "./widgets/kinds/note.ts";
 import { readLocalWidget } from "./widgets/local.ts";
 import { Poller } from "./widgets/poller.ts";
 import { ID_RE, kindList, kindOf, mergeConfig } from "./widgets/registry.ts";
@@ -151,7 +152,7 @@ export async function addWidget(file: string, input: WidgetInput, opts: Opts = {
     const widget: Widget = {
       id: input.id ?? newId(),
       kind: k.id,
-      name: k.id === "note" ? pageName(String(config.text ?? "")) : input.name ?? k.title,
+      name: k.id === "note" ? syncPageName(config, input.name) : input.name ?? k.title,
       x: input.x ?? at.x,
       y: input.y ?? at.y,
       w: size.w,
@@ -213,17 +214,20 @@ export async function updateWidget(file: string, id: string, patch: WidgetPatch,
       if (locked) throw new WidgetError(409, "locked", "This widget is locked; unlock it to move or resize it");
       w[k] = patch[k] as number;
     }
-    if (patch.name !== undefined) w.name = patch.name;
+    if (w.kind !== "note" && patch.name !== undefined) w.name = patch.name;
     if (patch.locked !== undefined) w.locked = patch.locked;
     if (patch.page === null || patch.page === "") delete w.page;
     else if (patch.page !== undefined) w.page = patch.page;
     if (patch.config !== undefined) {
       if (typeof patch.config !== "object" || patch.config === null || Array.isArray(patch.config)) throw new WidgetError(422, "invalid-widget", "config must be an object");
       w.config = mergeConfig(w.config, patch.config);
-      if (w.kind === "note" && Object.hasOwn(patch.config, "text")) w.name = pageName(String(w.config.text ?? ""));
     }
-    if (w.kind === "note" && patch.w !== undefined && !Object.hasOwn(patch.config ?? {}, "text") && !Object.hasOwn(patch.config ?? {}, "pageWidth")) {
-      w.config.pageWidth = Math.max(280, Number(patch.w));
+    if (w.kind === "note") {
+      const hasText = Object.hasOwn(patch.config ?? {}, "text");
+      if (hasText || patch.name !== undefined) w.name = syncPageName(w.config, patch.name, !hasText);
+      if (patch.w !== undefined && !hasText && !Object.hasOwn(patch.config ?? {}, "pageWidth")) {
+        w.config.pageWidth = Math.max(280, Number(patch.w));
+      }
     }
     return { widgets: list };
   }, opts);

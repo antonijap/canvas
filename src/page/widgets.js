@@ -514,7 +514,7 @@ function start(host) {
       if (pixel) { x = Math.round(x); y = Math.round(y); }
       const config = Object.assign({}, e.w.config || {});
       if ("link" in config) config.link = null; // a copy of a linked video card is a free card where it was dropped
-      const body = { kind: e.w.kind, name: e.w.name, x, y, w: r.w, h: r.h, config, ...(e.w.page ? { page: e.w.page } : {}) };
+      const body = { kind: e.w.kind, name: e.w.kind === "note" ? undefined : e.w.name, x, y, w: r.w, h: r.h, config, ...(e.w.page ? { page: e.w.page } : {}) };
       // A shader card's source is a file named by its id: the server copies it (a plain POST would give the copy the template).
       const made = e.w.kind === "shader" ? call("POST", "/api/shaders", { copyFrom: e.id, name: e.w.name, x, y, w: r.w, h: r.h, ...(e.w.page ? { page: e.w.page } : {}) }, headers) : call("POST", "/api/widgets", body, headers);
       return made.then((j) => { merge(j.widget); return PREFIX + j.widget.id; }, (err) => { toast("Could not duplicate: " + err.message); return null; });
@@ -527,6 +527,7 @@ function start(host) {
     const e = entries.get(selId);
     if (!e) return;
     const snapshot = JSON.parse(JSON.stringify(e.w));
+    if (snapshot.kind === "note") delete snapshot.name;
     let res;
     try { res = await call("DELETE", "/api/widgets/" + e.id); } catch (err) { toast("Could not delete: " + err.message); return; }
     list = list.filter((w) => w.id !== e.id);
