@@ -68,7 +68,7 @@ async function runOne(app: QaApp, s: NativeScenario, k: number): Promise<Result>
   let status: Result["status"] = "PASS", msg = "";
   try {
     await t.cmd("qa.cloud", { commentName: "Anna" });
-    await app.cmd({ op: "open", args: { file }, timeoutMs: 15_000 });
+    await app.openShown(file);
     await t.waitState((st) => st.file === file && st.pages.length > 0, "the file to open", 15_000);
     await t.settle();
     const st = await t.state();

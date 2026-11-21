@@ -16,12 +16,13 @@ for (const event of ['resync', 'visibilitychange']) {
       const handlers = new Map<string, (() => void)[]>();
       const listen = (name: string, fn: () => void) => handlers.set(name, [...(handlers.get(name) || []), fn]);
       const messages: any[] = [];
+      const sidebarMessages: boolean[] = [];
       const element = () => ({ classList: { toggle() {} }, style: {}, dataset: {}, append() {}, replaceChildren() {}, setAttribute() {} });
       const context = vm.createContext({
         window: { canvasCloudFile: cloud ? { status: 'connected', role: 'editor', author: { name: 'First tab' } } : null },
-        st: { sync: null }, shared: element(), h: element, lbl: (text: string) => text,
+        sidebar: { hidden: !cloud }, st: { sync: null }, shared: element(), h: element, lbl: (text: string) => text,
         L: { colorOf: () => '#123456', initialOf: () => 'F' },
-        host: { native: true, presence: { people: [] }, on: listen, post: (message: any) => messages.push(message) },
+        host: { native: true, presence: { people: [] }, on: listen, post: (message: any) => { if (message.peopleStrip) messages.push(message); if (typeof message.commentsSidebar === 'boolean') sidebarMessages.push(message.commentsSidebar); } },
         document: { hidden: false, addEventListener: listen }, schedule() {},
       });
       vm.runInContext(`${peopleCode}\nfunction load() { drawShared(); }\n${eventsCode}\ndrawShared(); drawShared();`, context);
@@ -31,6 +32,7 @@ for (const event of ['resync', 'visibilitychange']) {
       for (const handler of handlers.get(event) || []) handler();
       assert.equal(JSON.stringify(messages.at(-1)), expected, 'shown tab restores its own people even with an unchanged roster');
       assert.equal(messages.length, 3, 'one forced resend');
+      if (event === 'resync') assert.deepEqual(sidebarMessages, [cloud], 'shown tab restores its own sidebar state');
     });
   }
 }

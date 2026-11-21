@@ -181,6 +181,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// Claude Code or Codex is installed, so an error toast can offer Ask agent (/api/agent/harnesses).
     @Published var agentReady = false
     @Published var inspectorOpen = true
+    @Published var commentsSidebarOpen = false
     /// The left panel is open (the rail's sidebar button; Rename opens it).
     @Published var panelOpen = true
     /// View > Hide UI: only the canvas and the tabs show.
@@ -277,6 +278,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func apply(_ m: [String: Any]) {
+        if let open = m["commentsSidebar"] as? Bool { commentsSidebarOpen = open }
         if let cloud = m["cloudFile"] as? [String: Any] {
             cloudReadOnly = (cloud["role"] as? String).map { $0 != "owner" && $0 != "editor" } ?? false
             if let file = currentFile, let name = cloud["name"] as? String { cloudFileNames[file] = name }
@@ -645,6 +647,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// Everything that belongs to one document: dropped when another loads, so no edit can reach the wrong file.
     /// The lists the left panel shows, emptied: the shown tab's page fills them again (apply, or resync).
     func clearSidebarState() {
+        commentsSidebarOpen = false
         boards = []; pages = []; activePage = nil; components = []; styles = []; variables = []; tokenSections = []; styleEntries = []; widgets = []; revision = ""
         selectedBoard = nil
     }

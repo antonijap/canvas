@@ -15,9 +15,18 @@ struct HomeLogicTests {
     }
 
     static func main() {
-        recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles()
+        cloudMenu(); recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func cloudMenu() {
+        check(HomeLogic.cloudRemovalTitle(kind: .hosted) == "Delete Cloud...", "host deletes")
+        check(HomeLogic.cloudRemovalTitle(kind: .joined) == "Leave Cloud...", "joined leaves")
+        check(HomeLogic.cloudRemovalTitle(kind: .server) == "Leave Cloud...", "server disconnects")
+        check(HomeLogic.cloudRename("  Studio  ") == "Studio", "trim Cloud name")
+        check(HomeLogic.cloudRename(" \n ") == nil, "reject empty Cloud name")
+        check(HomeLogic.cloudRename(String(repeating: "a", count: 300))?.count == SettingsLimits.serverName, "limit Cloud name")
     }
 
     static func cloudFiles() {

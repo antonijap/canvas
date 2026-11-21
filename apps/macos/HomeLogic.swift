@@ -162,6 +162,15 @@ struct HomeCard: Identifiable, Equatable {
 }
 
 enum HomeLogic {
+    static func cloudRemovalTitle(kind: CloudKind) -> String {
+        kind == .hosted ? "Delete Cloud..." : "Leave Cloud..."
+    }
+
+    static func cloudRename(_ value: String) -> String? {
+        let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : String(name.prefix(SettingsLimits.serverName))
+    }
+
     /// "Pricing page" for ".../Pricing page.canvas".
     static func name(_ path: String) -> String { URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent }
 

@@ -95,7 +95,14 @@ function start(host) {
 .cm-ui{pointer-events:auto}
 .cm-pop,.cm-comp{position:absolute;left:0;top:0;border-radius:16px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:13px;line-height:18px;-webkit-user-select:text;user-select:text;cursor:default}
 .cm-pop{width:340px}.cm-comp{width:320px}
-.cm-pop[hidden],.cm-comp[hidden]{display:none}
+.cm-pop[hidden],.cm-comp[hidden],.cm-sidebar[hidden]{display:none}
+.cm-sidebar{position:fixed;right:0;top:0;bottom:0;width:var(--c-props-width);display:flex;flex-direction:column;gap:8px;padding:16px;overflow:auto;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:13px;line-height:18px}
+.native .cm-sidebar{right:var(--c-inset,18px);top:calc(var(--c-inset,18px) + var(--c-pill,36px) + var(--c-island-gap,10px));bottom:var(--c-inset,18px);border-radius:16px}
+.cm-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.cm-thread-row{display:flex;flex-direction:column;gap:8px;flex:none;width:100%;padding:12px;text-align:left;border:0;border-radius:10px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.cm-thread-row:hover,.cm-thread-row[aria-current=true]{background:var(--cm-chip)}
+.cm-thread-row span{white-space:pre-wrap;overflow-wrap:anywhere}
+body.cm-sidebar-open #props{visibility:hidden}
 .cm-chip{display:inline-flex;align-items:center;gap:5px;height:22px;min-width:0;padding:0 7px 0 6px;border-radius:7px;background:var(--cm-chip);color:color-mix(in srgb,var(--c-fg) 75%,transparent);font:500 12px/100% var(--c-font-sans)}
 .cm-chip svg{flex:none;color:var(--c-muted-fg)}
 .cm-chip span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:3px 0;margin:-3px 0}
@@ -209,7 +216,64 @@ function start(host) {
   const hint = h("div", "cm-hint");
   const shared = h("div", "cm-shared cm-ui");
   const bar = h("div", "cm-bar cm-ui");
-  layer.append(hov, pop, comp, hint, bar, shared);
+  const sidebar = h("aside", "cm-sidebar cm-ui");
+  sidebar.hidden = true;
+  sidebar.setAttribute("aria-label", "Comments");
+  layer.append(hov, pop, comp, hint, bar, shared, sidebar);
+  bar.setAttribute("role", "button");
+  bar.tabIndex = 0;
+  bar.setAttribute("aria-label", "Open comments");
+  bar.addEventListener("click", (e) => { if (!e.target.closest("button")) showList(true); });
+  bar.addEventListener("keydown", (e) => {
+    if (e.target === bar && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); showList(true); }
+  });
+  function showList(open) {
+    sidebar.hidden = !open;
+    document.body.classList.toggle("cm-sidebar-open", open);
+    if (host.native) host.post({ commentsSidebar: open });
+    if (open) { setMode(false); openThread(null); drawSidebar(); }
+    else bar.focus();
+    schedule();
+  }
+  function drawSidebar() {
+    if (sidebar.hidden) return;
+    sidebar.replaceChildren();
+    const head = h("div", "cm-sidebar-head");
+    const close = txtBtn("cm-btn txt", "Close");
+    close.onclick = () => showList(false);
+    head.append(h("strong", "", "Comments"), close);
+    sidebar.append(head);
+    const threads = L.visibleThreads(st.threads, showResolved);
+    if (!threads.length) sidebar.append(h("p", "", "No comments yet"));
+    for (const thread of threads) {
+      const first = L.liveComments(thread)[0];
+      if (!first) continue;
+      const row = h("button", "cm-thread-row");
+      row.type = "button";
+      row.title = "Open comment from " + (first.author?.name || "Someone");
+      row.dataset.thread = thread.id;
+      row.setAttribute("aria-current", String(st.open === thread.id));
+      row.append(h("strong", "", first.author?.name || "Someone"), h("span", "", first.body));
+      row.onclick = async () => {
+        const page = L.pageOf(thread, (board) => host.pageOfBoard(board), firstPage());
+        if (page && page !== pageNow()) await host.setPage(page);
+        // Load an offscreen layer before asking for its pin's world point.
+        if (thread.anchor?.nodeId && !host.worldRectOf(thread.anchor.nodeId) && window.canvasBridge) {
+          try { await window.canvasBridge.ensureLoaded(thread.anchor.nodeId, thread.anchor.board ? { [thread.anchor.nodeId]: thread.anchor.board } : undefined); }
+          catch (error) { if (error.code !== "not_found") { tell(error.message); return; } }
+        }
+        const spot = spotOf(thread, new Map());
+        if (!spot) { tell("This comment's layer is not available yet"); return; }
+        const v = view.getBoundingClientRect(), ins = host.insets || {};
+        const right = Math.min(v.width - (ins.r || 0), sidebar.getBoundingClientRect().left - v.left);
+        const z = Math.max(0.25, Math.min(1, host.cam.z));
+        host.setCam({ z, x: ((ins.l || 0) + right) / 2 - spot.x * z,
+          y: ((ins.t || 0) + v.height - (ins.b || 0)) / 2 - spot.y * z });
+        openThread(thread.id);
+      };
+      sidebar.append(row);
+    }
+  }
   if (!host.native) { const toolbar = document.querySelector("#bar .island:last-child"); if (toolbar) { toolbar.prepend(shared); shared.classList.add("toolbar"); } }
 
   /** doc: the file's comment identity (null until the first comment); threads: every thread, tombstones too. repin: a thread waiting for a new layer. */
@@ -338,6 +402,7 @@ function start(host) {
     if (st.open && !L.stillOpen(st.open, list, true)) st.open = null;
     drawThread();
     drawBars();
+    drawSidebar();
     schedule();
   }
 
@@ -455,7 +520,7 @@ function start(host) {
     if (c && c.cmd === "insets") schedule();
     if (c && c.cmd === "comment") setMode(!st.mode);
   });
-  host.on("resync", () => { resyncPeople(); load(); });
+  host.on("resync", () => { if (host.native) host.post({ commentsSidebar: !sidebar.hidden }); resyncPeople(); load(); });
   if (host.es) host.es.addEventListener("comments", () => load());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { resyncPeople(); load(); } });
 
@@ -772,7 +837,7 @@ function start(host) {
     bar.style.paddingRight = "";
     if (show) {
       const m = h("span"); m.innerHTML = ICON.bubble; m.style.display = "flex";
-      bar.append(m, h("span", "", `${n.open} open`));
+      bar.append(m, h("span", "", `${n.open} ${n.open === 1 ? "comment" : "comments"}`));
       if (n.resolved) {
         const b = txtBtn("cm-btn txt dim", showResolved ? `Hide ${n.resolved} resolved` : `Show ${n.resolved} resolved`);
         b.setAttribute("aria-pressed", String(showResolved));

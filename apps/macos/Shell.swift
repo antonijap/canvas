@@ -80,19 +80,21 @@ struct RootView: View {
     @ObservedObject var model: CanvasModel
     @State private var windowWidth: CGFloat = 0
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden && !model.homeShown }
-    private var inspectorShown: Bool { model.hasInspectable && model.inspectorOpen && !model.uiHidden && !model.homeShown }
+    private var inspectorShown: Bool { model.hasInspectable && model.inspectorOpen && !model.commentsSidebarOpen && !model.uiHidden && !model.homeShown }
+
+    private var rightSidebarShown: Bool { inspectorShown || (model.commentsSidebarOpen && !model.uiHidden && !model.homeShown) }
 
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
     private var panelWidth: CGFloat? {
         guard windowWidth > 0 else { return model.sidebarWidth }
-        return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, inspector: inspectorShown,
+        return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, inspector: rightSidebarShown,
                                         inset: Metric.inset, rail: Metric.railWidth, gap: Metric.islandGap, props: Metric.propsWidth, minWidth: Metric.sidebarMin)
     }
 
     /// The widest the panel may be dragged in this window: the maximum, or the room the window leaves.
     private var panelMax: CGFloat {
         guard windowWidth > 0 else { return Metric.sidebarMax }
-        let room = ShellLayout.room(window: windowWidth, inspector: inspectorShown, inset: Metric.inset, rail: Metric.railWidth,
+        let room = ShellLayout.room(window: windowWidth, inspector: rightSidebarShown, inset: Metric.inset, rail: Metric.railWidth,
                                     gap: Metric.islandGap, props: Metric.propsWidth)
         return min(Metric.sidebarMax, room)
     }
@@ -163,7 +165,7 @@ struct RootView: View {
     /// The free rectangle the canvas should fit into, so boards never hide under an island.
     private var insets: [CGFloat] {
         let shown = panelOpen && model.section != nil ? panelWidth : nil
-        let i = CanvasInsets.compute(panel: shown, inspector: inspectorShown, inset: Metric.inset,
+        let i = CanvasInsets.compute(panel: shown, inspector: rightSidebarShown, inset: Metric.inset,
                                      rail: Metric.railWidth, gap: Metric.islandGap, pill: Metric.pill, props: Metric.propsWidth)
         return [i.l, i.t, i.r, i.b]
     }

@@ -146,6 +146,11 @@ export class QaApp {
   }
 
   /** One bridge op on this instance's shell. */
+  /** Show the scenario's tab. QA suppresses application activation, while quiet open only adds a background tab. */
+  openShown(file: string) {
+    return this.cmd({ op: "open", args: { file, focus: true }, timeoutMs: 15_000 });
+  }
+
   async cmd<R = any>(c: Cmd): Promise<R> {
     const timeoutMs = c.timeoutMs ?? 20_000;
     const r = await fetch(`${this.base}/api/bridge/cmd`, {

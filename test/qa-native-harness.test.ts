@@ -175,3 +175,11 @@ test("mark never returns a stale click target that disappeared while settling", 
   const t = new NT(app as unknown as QaApp, "example.canvas");
   await assert.rejects(t.mark({ id: "cloud-row" }), /disappeared/);
 });
+
+test('native scenarios open the document in the shown tab', async () => {
+  const app = new QaApp(tmpDir('shown-tab'), 1);
+  let request: unknown;
+  app.cmd = async (command) => { request = command; return {} as any; };
+  await app.openShown('/Users/you/Studio.canvas');
+  assert.deepEqual(request, { op: 'open', args: { file: '/Users/you/Studio.canvas', focus: true }, timeoutMs: 15_000 });
+});

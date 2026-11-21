@@ -201,7 +201,7 @@ sc("comments", "reply, resolve and Show resolved", { covers: ["comments:reply", 
   await until(t, () => !!file(t).threads[0].resolvedAt, "resolved on disk");
   await t.waitFor(`![...document.querySelectorAll(".cm-pin")].some((e) => e.dataset.thread === ${JSON.stringify(id)} && e.style.display !== "none")`, "the pin hidden");
   // Show resolved brings it back, faded; Reopen puts it back.
-  await t.waitFor(`document.querySelector(".cm-bar.on")?.innerText.includes("0 open")`, "the bar says 0 open");
+  await t.waitFor(`document.querySelector(".cm-bar.on")?.innerText.includes("0 comments")`, "the bar says 0 comments");
   await t.ev(`[...document.querySelectorAll(".cm-bar button")].find((b) => b.textContent.startsWith("Show 1 resolved")).click()`);
   await t.waitFor(`(() => { const p = document.querySelector('.cm-pin[data-thread="${id}"]'); return p?.classList.contains("resolved") && p.style.display !== "none"; })()`, "the resolved pin shown");
   await openThread(t, id);

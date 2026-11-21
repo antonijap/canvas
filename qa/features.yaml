@@ -199,7 +199,7 @@ features:
     name: C pins a comment thread to the layer under the pointer
     area: comments
     driven: [page, mcp]
-    cases: [pin, page-point, follows-layer, move, add-pin, reply, resolve, show-resolved, layer-deleted, reopen, keyboard, light, dark, shared-bar, pending, rejected, alignment]
+    cases: [pin, page-point, follows-layer, move, add-pin, reply, resolve, show-resolved, list-navigation, layer-deleted, reopen, keyboard, light, dark, shared-bar, pending, rejected, alignment]
   - id: scale-tool
     name: K scales a layer with its contents
     area: resize
@@ -769,7 +769,7 @@ features:
     name: Home, the pinned first tab (recents, files on this Mac, a team server, first launch)
     area: chrome
     driven: [native]
-    cases: [pinned, shortcut, recents, card-open, remove, first-launch, server, server-name, clouds, thumbnail, alignment, $themes]
+    cases: [pinned, shortcut, recents, card-open, remove, first-launch, server, server-name, clouds, cloud-context-menu, thumbnail, alignment, $themes]
   - id: tabs
     name: File tabs drag left and right to reorder (a short move is a click, Home stays first), the order is kept, and Shift+Cmd+[ and ] follow it
     area: chrome

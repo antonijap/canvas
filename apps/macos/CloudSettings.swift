@@ -347,6 +347,42 @@ final class CloudAccount: ObservableObject {
 
     // MARK: Removing
 
+    /// Settings and the sidebar edit the same local display name.
+    func setCloudName(_ model: CanvasModel, _ e: CloudEntry, _ value: String) {
+        guard let i = model.prefs.clouds.firstIndex(where: { $0.id == e.id }) else { return }
+        model.prefs.clouds[i].name = String(value.prefix(SettingsLimits.serverName))
+    }
+
+    func renameCloud(_ model: CanvasModel, _ e: CloudEntry) {
+        let alert = NSAlert()
+        alert.messageText = "Rename Cloud"
+        let field = NSTextField(string: HomeLogic.cloudName(e))
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        field.setAccessibilityLabel("Cloud name")
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        field.selectText(nil)
+        guard alert.runModal() == .alertFirstButtonReturn, let name = HomeLogic.cloudRename(field.stringValue) else { return }
+        setCloudName(model, e, name)
+    }
+
+    func copyInvite(_ model: CanvasModel, _ e: CloudEntry) {
+        let alert = NSAlert()
+        alert.messageText = "Copy Invite"
+        alert.informativeText = "Enter the name or email of the person joining this Cloud."
+        let field = NSTextField(string: "")
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        field.setAccessibilityLabel("Name or email")
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Copy Invite")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        invite(model, e, label: String(field.stringValue.prefix(120)))
+    }
+
     /// What Remove (or Delete, for a Cloud this Mac hosts) says before it happens: what stops, what stays, and where.
     static func removeText(_ e: CloudEntry, name: String, hosting: Bool) -> String {
         switch e.kind {
@@ -363,13 +399,13 @@ final class CloudAccount: ObservableObject {
     /// Remove a Cloud (Delete, for one this Mac hosts): asked first, then nothing more goes to it (the server tears
     /// down its sockets, tunnel and token), its sign-in is deleted from the Keychain, a hosted Cloud's data on this Mac
     /// is deleted, and its entry goes. Files shared there keep their comments here.
-    func removeCloud(_ model: CanvasModel, _ e: CloudEntry) {
+    func removeCloud(_ model: CanvasModel, _ e: CloudEntry, leaving: Bool = false) {
         let name = HomeLogic.cloudName(e)
         let a = NSAlert()
-        a.messageText = e.kind == .hosted ? "Delete \(name)?" : "Remove \(name)?"
+        a.messageText = e.kind == .hosted ? "Delete \(name)?" : leaving ? "Leave \(name)?" : "Remove \(name)?"
         a.informativeText = CloudAccount.removeText(e, name: name, hosting: isHosting(e))
         if e.kind == .hosted { a.alertStyle = .warning }
-        a.addButton(withTitle: e.kind == .hosted ? "Delete" : "Remove")
+        a.addButton(withTitle: e.kind == .hosted ? "Delete" : leaving ? "Leave" : "Remove")
         a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
         busy.insert(e.url)
@@ -826,7 +862,7 @@ struct CloudPage: View {
                 SettingsRow("Name") {
                     FieldBox {
                         TextField(ServerName.display(e.url), text: Binding(get: { entry.name }, set: { v in
-                            if let i = model.prefs.clouds.firstIndex(where: { $0.id == entry.id }) { model.prefs.clouds[i].name = String(v.prefix(SettingsLimits.serverName)) }
+                            account.setCloudName(model, entry, v)
                         }))
                         .textFieldStyle(.plain).font(Typography.body)
                         .accessibilityLabel("Cloud name").qaID("cloud-name")

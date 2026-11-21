@@ -614,3 +614,72 @@ sc('comments', 'Bottom overlays share the free canvas center and zoom center', {
   const hint = await t.js<any>("const r = document.querySelector('.cm-hint').getBoundingClientRect(); return {bottom:r.bottom}");
   t.ok(hint.bottom < text.y, 'hint stacks above the toast');
 });
+
+sc('home-cloud-menu', 'Cloud sidebar context menu renames and confirms leaving', { covers: ['home:cloud-context-menu'] }, async (t: NT) => {
+  await t.cmd('qa.cloud', { clouds: [{url:'http://127.0.0.1:1',name:'Studio'}] });
+  await t.click(center(await t.mark({id:'home-tab'})));
+  const menu = async (name: string) => {
+    await t.click(center(await t.mark({id:'home-row',label:name,exact:true})), {right:true});
+    await t.waitState(s => !!s.menu, 'Cloud context menu');
+  };
+  await menu('Studio');
+  t.eq((await t.state()).menu.items, ['Rename...', 'Settings...', 'Leave Cloud...'], 'server Cloud actions');
+  await t.pickMenu('Rename...');
+  await t.waitState(s => !!s.modal, 'rename dialog');
+  await t.type('Studio team', {window:'modal'});
+  const rename = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Rename');
+  t.ok(rename, 'rename button');
+  await t.click(center(rename!), {window:'modal'});
+  await t.waitState(s => !s.modal, 'rename closes');
+  await menu('Studio team');
+  await t.pickMenu('Leave Cloud...');
+  await t.waitState(s => !!s.modal, 'leave confirmation');
+  const cancel = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Cancel');
+  await t.click(center(cancel!), {window:'modal'});
+  await t.waitState(s => !s.modal, 'cancel leaves Cloud intact');
+  await menu('Studio team');
+  await t.pickMenu('Leave Cloud...');
+  await t.waitState(s => !!s.modal, 'leave confirmation again');
+  const leave = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Leave');
+  t.ok(leave, 'leave button');
+  await t.click(center(leave!), {window:'modal'});
+  await t.waitFor(async () => (await t.cmd('qa.cloud', {})).clouds.length === 0, 'confirmed leave removes the Cloud');
+  await t.cmd('qa.cloud', {clouds:[{url:'canvas-cloud://11111111-1111-4111-8111-111111111111',name:'Studio host',kind:'hosted'}]});
+  await menu('Studio host');
+  t.eq((await t.state()).menu.items, ['Rename...', 'Settings...', 'Delete Cloud...'], 'host deletes rather than leaves');
+  await t.pickMenu('Delete Cloud...');
+  await t.waitState(s => !!s.modal, 'owner deletion confirmation');
+  t.ok((await t.views('modal')).some(v => v.kind === 'button' && v.title === 'Delete'), 'owner confirms Delete');
+  const keep = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Cancel');
+  await t.click(center(keep!), {window:'modal'});
+  await t.waitState(s => !s.modal, 'cancel keeps hosted Cloud');
+  await t.cmd('qa.cloud', {clouds:[]});
+  await t.app.openShown(t.file);
+  await t.waitState(s => s.file === t.file && !s.homeShown, 'restore the file after Home');
+});
+
+sc('comments-list-navigation', 'Native comment pill shows list instead of properties and centers pin', { covers: ['comments:list-navigation'] }, async (t: NT) => {
+  await t.waitJs('!!window.canvasHost.comments', 'comments ready');
+  await t.js(`const h=window.canvasHost;
+    const op={opId:crypto.randomUUID(),doc:h.comments.doc||'00000000-0000-4000-8000-000000000000',at:new Date().toISOString(),op:{kind:'thread.create',thread:crypto.randomUUID(),comment:crypto.randomUUID(),anchor:{x:120,y:80,page:h.page},body:'Review this spacing'}};
+    const r=await fetch('/api/comments/ops?file='+encodeURIComponent(h.file),{method:'POST',headers:{'x-canvas':'1','content-type':'application/json'},body:JSON.stringify({ops:[op]})});
+    const result=await r.json(); if(!r.ok || result.rejected?.length) throw new Error(JSON.stringify(result)); await h.comments.reload();`);
+  await t.waitJs("document.querySelector('.cm-bar').classList.contains('on')", 'comment pill');
+  const click = async (selector: string) => {
+    const p = await t.js<any>(`const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}`);
+    await t.click(p);
+  };
+  await click('.cm-bar');
+  await t.waitJs("!!document.querySelector('.cm-sidebar:not([hidden]) .cm-thread-row')", 'native comments list');
+  await t.settle();
+  await click('.cm-thread-row');
+  await t.waitJs('!!window.canvasHost.comments.open', 'thread opens');
+  await t.settle();
+  const g = await t.js<any>(`const h=window.canvasHost,v=h.view.getBoundingClientRect(),s=document.querySelector('.cm-sidebar').getBoundingClientRect(),p=document.querySelector('.cm-pin').getBoundingClientRect();return {x:p.x,y:p.bottom,cx:(v.left+h.insets.l+Math.min(v.right-h.insets.r,s.left))/2,cy:(v.top+h.insets.t+v.bottom-h.insets.b)/2,r:h.insets.r}`);
+  t.ok(g.r > 200, 'native shell reserves the sidebar width');
+  t.near(g.x,g.cx,2,'pin horizontally centered');
+  t.near(g.y,g.cy,2,'pin vertically centered');
+  await t.shot(path.join(process.cwd(), 'qa/out/native/comments-sidebar-navigation.png'));
+  await click('.cm-sidebar-head button');
+  await t.waitJs("document.querySelector('.cm-sidebar').hidden", 'list closes');
+});
