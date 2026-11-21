@@ -542,6 +542,11 @@ struct LayerRowView: View, Equatable {
         }
         .onDrop(of: [.text], delegate: LayerDrop(store: store, row: row))
         .contextMenu {
+            Button("Reveal on Canvas") { model.reveal(row.id, board: row.board) }
+            Button("Select Children") {
+                model.run("{cmd:'layers',op:'select',ids:[\(jsString(row.id))]}")
+                model.run("{cmd:'structure',op:'children'}")
+            }.keyboardShortcut(.return, modifiers: []).disabled(!row.hasChildren)
             if row.kind != "component" && row.kind != "instance" && !LayersLogic.insideInstance(row.id) {
                 Button("Create Component") { rowCommand("{cmd:'shortcut',op:'component'}") }
                     .keyboardShortcut("k", modifiers: [.command, .option]).disabled(model.cloudReadOnly)
@@ -550,13 +555,21 @@ struct LayerRowView: View, Equatable {
                 .keyboardShortcut("d", modifiers: .command).disabled(model.cloudReadOnly || LayersLogic.insideInstance(row.id))
             Button("Group") { rowCommand("{cmd:'structure',op:'group'}") }
                 .keyboardShortcut("g", modifiers: .command).disabled(model.cloudReadOnly || LayersLogic.insideInstance(row.id))
-            Button("Reveal on Canvas") { model.reveal(row.id, board: row.board) }
-            Divider()
             Button("Rename") { startRename() }.disabled(model.cloudReadOnly || LayersLogic.insideInstance(row.id))
-            if row.isBoard { MoveToPageMenu(model: model, board: row.id).disabled(model.cloudReadOnly) }
-            else { Button(row.hidden ? "Show" : "Hide") { store.setHidden(row, !row.hidden) }.disabled(model.cloudReadOnly) }
             Button(row.locked ? "Unlock" : "Lock") { store.setLocked([row.id], !row.locked) }
+                .keyboardShortcut("l", modifiers: [.command, .shift])
                 .disabled(model.cloudReadOnly || row.lockedAbove || LayersLogic.insideInstance(row.id))
+            if !row.isBoard {
+                Button(row.hidden ? "Show" : "Hide") { store.setHidden(row, !row.hidden) }
+                    .keyboardShortcut("h", modifiers: [.command, .shift]).disabled(model.cloudReadOnly)
+            }
+            Button("Copy Link to Layer") { model.copyLayerLink(row.id, page: model.activePage) }
+                .keyboardShortcut("l", modifiers: .command)
+            if row.isBoard { MoveToPageMenu(model: model, board: row.id).disabled(model.cloudReadOnly) }
+            Divider()
+            Button("Delete", role: .destructive) { rowCommand("{cmd:'structure',op:'delete'}") }
+                .keyboardShortcut(.delete, modifiers: [])
+                .disabled(model.cloudReadOnly || row.locked || row.lockedAbove || LayersLogic.insideInstance(row.id))
         }
         // VoiceOver: a row is a button that selects, with expand, rename and hide as its actions.
         .accessibilityElement(children: .ignore)

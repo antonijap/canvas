@@ -866,7 +866,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }.resume()
     }
 
-    private func savePanel(title: String, name: String) -> URL? {
+    func savePanel(title: String, name: String) -> URL? {
         let panel = NSSavePanel()
         panel.title = title
         panel.allowedContentTypes = [Self.canvasType]
@@ -1360,6 +1360,19 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func clearToast() { run("{cmd:'bottomToast',shown:false}"); toast = nil; toastActions = []; toastCopy = nil; toastHovered = false }
 
     /// A click on a toast with a path or an error: its text on the pasteboard, and the toast says so.
+    func copyFileLink(_ file: String) { copyDocumentLink(CanvasLink.fileURL(file)) }
+
+    func copyLayerLink(_ id: String, page: String?) {
+        guard currentFile != nil else { return }
+        run("{cmd:'copyLink',node:\(JSONText.string(id)),page:\(page.map(JSONText.string) ?? "null")}")
+    }
+
+    func copyDocumentLink(_ text: String) {
+        canvasPasteboard.clearContents()
+        canvasPasteboard.setString(text, forType: .string)
+        flash("Link copied", level: "link")
+    }
+
     func copyToast() {
         guard let text = toastCopy else { return }
         canvasPasteboard.clearContents()
@@ -1393,7 +1406,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         let real = { (p: String) in URL(fileURLWithPath: p).resolvingSymlinksInPath().path }
         let want = real(link.file)
         let file = openFiles.first { real($0) == want } ?? link.file
-        if currentFile != file { open(file) }
+        if currentFile != file || homeShown { open(file) }
         linkToken += 1
         revealLink(link, file: file, token: linkToken, deadline: Date().addingTimeInterval(20))
     }

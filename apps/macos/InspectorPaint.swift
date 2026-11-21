@@ -200,7 +200,7 @@ extension InspectorBody {
             if tokenName(c) != nil {
                 colorField(c, enabled: enabled) { write(PaintLogic.withColor(e, $0)) }
             } else {
-                ColorAlphaField(model: model, value: c, enabled: enabled, swatch: AnyView(PaintSwatchButton(model: model, paint: e, enabled: enabled, strokes: strokes, write: write))) { write(PaintLogic.withColor(e, $0)) }
+                ColorAlphaField(model: model, value: c, enabled: enabled, defaultValue: strokes ? "#000000" : "#D9D9D9", swatch: AnyView(PaintSwatchButton(model: model, paint: e, enabled: enabled, strokes: strokes, write: write))) { write(PaintLogic.withColor(e, $0)) }
             }
         } else {
             HStack(spacing: 4) {
@@ -406,6 +406,7 @@ struct ColorAlphaField: View {
     @ObservedObject var model: CanvasModel
     let value: String
     var enabled = true
+    var defaultValue: String? = nil
     /// A paint row's swatch (PaintSwatchButton: the type tabs and the picker) instead of the plain colour swatch.
     var swatch: AnyView? = nil
     var showsOpacity = true
@@ -424,7 +425,7 @@ struct ColorAlphaField: View {
                 // Shift+Up / Shift+Down: lighter or darker, the opacity kept.
                 HexField(value: rgb, enabled: enabled, onStep: { up, big in
                     if let h = PaintLogic.lighter(value, by: (up ? 1 : -1) * (big ? 0.1 : 0.01)) { write(h) }
-                }) { hex in
+                }, defaultValue: defaultValue.map { $0 + "FF" }, copyValue: value) { hex in
                     // A six-digit hex keeps the opacity the colour had; eight digits say their own.
                     let h = hex.dropFirst().count == 6 && (alpha ?? 100) < 100 ? (PaintLogic.withAlpha(hex, percent: alpha ?? 100) ?? hex) : hex
                     write(h)
@@ -440,7 +441,7 @@ struct ColorAlphaField: View {
             .onHover { hovering = $0 }
             // "100" and the % fit at the panel's width (no glyph: the % is the scrub handle).
             if showsOpacity {
-                NumberField(prefix: "", value: alpha, suffix: "%", enabled: enabled && alpha != nil, minimum: 0, maximum: 100) { p in
+                NumberField(prefix: "", value: alpha, suffix: "%", enabled: enabled && alpha != nil, minimum: 0, maximum: 100, defaultValue: 100) { p in
                     if let h = PaintLogic.withAlpha(value, percent: p) { write(h) }
                 }
                 .frame(width: FieldWidth.percent).help("Opacity")

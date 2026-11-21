@@ -685,6 +685,95 @@ struct FieldBox<Content: View>: View {
     }
 }
 
+struct FieldValueMenu<Value>: ViewModifier {
+    let value: Value?
+    let enabled: Bool
+    var defaultValue: Value? = nil
+    let format: (Value) -> String
+    let parse: (String) -> Value?
+    let apply: (Value) -> Void
+    @Environment(\.isEnabled) private var fieldEnabled
+
+    func body(content: Content) -> some View {
+        content.background {
+            FieldMenuArea { view, event in
+                let menu = NSMenu()
+                func add(_ title: String, enabled: Bool, _ run: @escaping () -> Void) {
+                    let action = MenuAction(run, enabled: enabled)
+                    let item = NSMenuItem(title: title, action: #selector(MenuAction.fire), keyEquivalent: "")
+                    item.target = action
+                    item.representedObject = action
+                    menu.addItem(item)
+                }
+                add("Copy Value", enabled: value != nil) {
+                    guard let value else { return }
+                    canvasPasteboard.clearContents()
+                    canvasPasteboard.setString(format(value), forType: .string)
+                }
+                let pasted = canvasPasteboard.string(forType: .string).flatMap(parse)
+                let canEdit = enabled && fieldEnabled
+                add("Paste Value", enabled: canEdit && pasted != nil) { if canEdit, let pasted { apply(pasted) } }
+                if let defaultValue {
+                    add("Reset to Default", enabled: canEdit) { if canEdit { apply(defaultValue) } }
+                }
+                NSMenu.popUpContextMenu(menu, with: event, for: view)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+/// A text field's editor would otherwise take the right-click and show its text-editing menu.
+private struct FieldMenuArea: NSViewRepresentable {
+    let show: (NSView, NSEvent) -> Void
+
+    func makeNSView(context: Context) -> Surface { Surface() }
+    func updateNSView(_ view: Surface, context: Context) { view.show = show }
+    static func dismantleNSView(_ view: Surface, coordinator: ()) { view.stop() }
+
+    final class Surface: NSView {
+        var show: ((NSView, NSEvent) -> Void)?
+        private var monitor: Any?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil { stop(); return }
+            guard monitor == nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { [weak self] event in
+                guard let self, let show, let window, event.windowNumber == window.windowNumber,
+                      event.type == .rightMouseDown || event.modifierFlags.contains(.control),
+                      !isHiddenOrHasHiddenAncestor else { return event }
+                let point = convert(event.locationInWindow, from: nil)
+                guard bounds.contains(point), visibleRect.contains(point) else { return event }
+                show(self, event)
+                return nil
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        }
+    }
+}
+
+extension FieldValueMenu where Value == Double {
+    static func number(_ value: Double?, enabled: Bool, defaultValue: Double? = nil, suffix: String = "",
+                       apply: @escaping (Double) -> Void) -> Self {
+        Self(value: value, enabled: enabled, defaultValue: defaultValue, format: {
+            let text = String($0)
+            return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
+        }, parse: {
+            var text = $0.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !suffix.isEmpty && text.hasSuffix(suffix) { text = String(text.dropLast(suffix.count)).trimmingCharacters(in: .whitespaces) }
+            guard let number = Double(text), number.isFinite else { return nil }
+            return number
+        }, apply: apply)
+    }
+}
+
 /// A number with a prefix glyph or letter. The glyph scrubs (drag left and right), Up and Down step,
 /// Return or leaving commits, Esc reverts, the text takes arithmetic (see NumericInput). A value the
 /// file does not hold (auto size, layout-driven position) shows as a disabled placeholder.
@@ -704,6 +793,7 @@ struct NumberField: View {
     var onRelative: ((String) -> Void)? = nil
     /// Applied to a typed or stepped value before it is written (rotation normalises to -180...180).
     var normalize: ((Double) -> Double)? = nil
+    var defaultValue: Double? = nil
     let onCommit: (Double) -> Void
     @Environment(\.editTarget) private var target
     @Environment(\.bindButtonShown) private var bindShown
@@ -749,6 +839,12 @@ struct NumberField: View {
             }
         }
         .qaID("number-field")
+        .modifier(FieldValueMenu.number(value, enabled: live, defaultValue: defaultValue, suffix: suffix) { raw in
+            let v = NumericInput.clean(NumericInput.clamp(normalize?(raw) ?? raw, minimum, maximum))
+            text = Self.format(v)
+            draft.show(text, for: target)
+            if v != value { onCommit(v) }
+        })
         // Option over the label or the input, then drag: a scrub with speed by height (NumericInput.swift).
         .overlay { OptionScrub(enabled: live && value != nil, begin: beginScrub,
                                move: { dx, step, speed in if let s = scrub { text = Self.format(s.move(dx, step: step, speed: speed)) } },

@@ -35,7 +35,7 @@ function start(host) {
     const x = e.clientX, y = e.clientY;
     const card = e.target && e.target.closest ? e.target.closest(".wd[data-id]") : null;
     const leaf = card ? card.dataset.id : host.pick ? host.pick(x, y) : null;
-    // Empty canvas: a short menu (Paste here, Select all, Zoom to fit). The selection stays as it is.
+    // Empty canvas: a short menu for creating a board, pasting, selecting and zooming. The selection stays as it is.
     if (!leaf) { host.post({ context: { x, y, target: null, canvas: true } }); return; }
     if (leaf.startsWith("widget:")) {
       const selected = host.selection ? host.selection() : [];
@@ -142,7 +142,25 @@ function start(host) {
 
   host.on("deselect", () => { if (marks.ids.length) clearUsage(); });
   host.on("cmd", (c) => {
-    if (c.cmd === "reveal") reveal(c.id, c.board, c);
+    if (c.cmd === "newBoardHere") {
+      const cam = host.cam;
+      if (!cam || !Number.isFinite(c.x) || !Number.isFinite(c.y)) return;
+      const node = {
+        type: "frame", name: "Board", layout: "none", fill: "#FFFFFF",
+        x: Math.round((c.x - cam.x) / cam.z), y: Math.round((c.y - cam.y) / cam.z),
+        width: 320, height: 240, children: [],
+      };
+      const page = host.page;
+      fetch("/api/structure", {
+        method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" },
+        body: JSON.stringify({ file: host.file, page, op: "add", nodes: [node], place: { parent: null } }),
+      }).then(async (r) => {
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || "Could not create the board");
+        if (host.page === page && j.select?.length) host.selectId(j.select[0]);
+      }).catch((err) => host.post({ toast: err.message }));
+    }
+    else if (c.cmd === "reveal") reveal(c.id, c.board, c);
     else if (c.cmd === "usage") showUsage(c).catch(() => host.post({ usage: null }));
     else if (c.cmd === "clearUsage") clearUsage();
     else if (c.cmd === "selectLayer" && typeof c.id === "string") host.selectId(c.id);

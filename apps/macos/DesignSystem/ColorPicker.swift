@@ -454,6 +454,7 @@ private struct ChannelField: View {
                         apply(base + n * step)
                     })
             }
+            .modifier(FieldValueMenu.number(value, enabled: true, defaultValue: label == "A" ? 100 : nil, suffix: suffix, apply: apply))
             Text(label).font(.system(size: 9, weight: .medium)).foregroundStyle(Palette.mutedFg)
         }
         .frame(maxWidth: .infinity)
@@ -518,6 +519,7 @@ private struct PickerHexField: View {
                         apply(RGBA(hsv: h, a: color.a))
                     })
             }
+            .modifier(FieldValueMenu(value: color, enabled: true, format: { $0.hex }, parse: { CSSColor.parse($0) }, apply: apply))
             Text("Hex").font(.system(size: 9, weight: .medium)).foregroundStyle(Palette.mutedFg)
         }
         .frame(maxWidth: .infinity)

@@ -40,14 +40,14 @@ function start(host) {
   }
 
   /** The link for what Cmd+L means now. */
-  function currentLink() {
-    let nodes = host.selection ? host.selection() : host.sel ? [host.sel] : [];
+  function currentLink(target) {
+    let nodes = target?.node ? [target.node] : host.selection ? host.selection() : host.sel ? [host.sel] : [];
     if (!nodes.length) {
       const rects = [...host.boards.keys()].map((id) => { const r = host.boxOf(id); return r ? { id, x: r.x, y: r.y, w: r.w, h: r.h } : null; }).filter(Boolean);
       const b = boardInView(rects, viewWorld());
       nodes = b ? [b] : [];
     }
-    return buildLink({ ...(window.canvasCloudFile ? {cloud:window.canvasCloudFile.key,cloudFile:window.canvasCloudFile.file} : {}), file: host.file, page: host.pageImplicit ? null : host.page, nodes });
+    return buildLink({ ...(window.canvasCloudFile ? {cloud:window.canvasCloudFile.key,cloudFile:window.canvasCloudFile.file} : {}), file: host.file, page: target?.page || (host.pageImplicit ? null : host.page), nodes });
   }
 
   async function write(text) {
@@ -65,8 +65,8 @@ function start(host) {
     return ok;
   }
 
-  async function copyLink() {
-    const text = currentLink();
+  async function copyLink(target) {
+    const text = currentLink(target);
     if (!text) { tell("This file has no path to link to"); return; }
     host.lastLink = { text, written: false };
     const ok = await write(text);
@@ -105,7 +105,7 @@ function start(host) {
 
   host.on("cmd", (c) => {
     if (!c) return;
-    if (c.cmd === "copyLink") copyLink().catch((e) => console.error(e));
+    if (c.cmd === "copyLink") copyLink(c).catch((e) => console.error(e));
     else if (c.cmd === "openLink") openLink(c).catch((e) => console.error(e));
   });
 

@@ -515,9 +515,12 @@ sc("comments", "Comment hint shares the canvas center and zoom center", { covers
 });
 
 sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["tabs:context-menu", "tabs:rename-menu", "tabs:rename-double-click", "tabs:close-others", "tabs:drag-after-rename"] }, async (t: NT) => {
+  for (const file of (await t.state()).openFiles as string[]) {
+    if (file !== t.file) await t.app.cmd({ op: "close", args: { file } });
+  }
   const original = path.join(t.app.docs, "tab-actions.canvas");
   copyDir(PLAYGROUND, original);
-  await t.app.cmd({ op: "open", args: { file: original } });
+  await t.app.openShown(original);
   await t.waitState((s) => s.file === original, "the action tab to open");
   const tab = (name: string) => t.mark({ id: "file-tab", label: name, exact: true });
   const point = (r: { x: number; y: number; w: number; h: number }) => ({ x: r.x + r.w * 0.4, y: r.y + r.h / 2 });
@@ -527,12 +530,12 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   await t.click(point(await tab("tab-actions")), { right: true });
   await t.waitState((s) => s.menu, "tab context menu");
   const items = (await t.state()).menu.items as string[];
-  t.eq(items, ["Rename", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab actions in order");
+  t.eq(items, ["Duplicate", "Rename", "Copy Link", "Reveal in Home", "Show in Finder", "Close", "Close Other Tabs"], "local tab actions in order");
   await t.cmd("qa.menu", { cancel: true });
   await t.cmd("qa.cloud", { url: "http://127.0.0.1:1" });
   await t.click(point(await tab("tab-actions")), { right: true });
   await t.waitState((s) => s.menu, "configured Cloud tab menu");
-  t.eq((await t.state()).menu.items, ["Rename", "Show in Finder", "Duplicate", "Move to Cloud", "Copy Link", "Close", "Close Other Tabs"], "Cloud adds its share action");
+  t.eq((await t.state()).menu.items, ["Duplicate", "Rename", "Copy Link", "Reveal in Home", "Show in Finder", "Move to Cloud", "Close", "Close Other Tabs"], "Cloud adds its share action");
   await t.cmd("qa.cloud", { url: prefs.cloudUrl, devEmail: prefs.cloudDevEmail, name: prefs.cloudName });
   t.eq((await t.state()).openFiles, order, "right click leaves the tab order alone");
   await t.pickMenu("Rename");
@@ -585,13 +588,13 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   const before = (await t.state()).openFiles as string[];
   const first = (await t.marks({ id: "file-tab" })).sort((a, b) => a.x - b.x)[0];
   await t.systemDrag(point(await tab("tab-away-renamed")), { x: first.x + 6, y: first.y + first.h / 2 }, { steps: 24 });
-  await sleep(500);
-  t.eq((await t.state()).openFiles, [away, ...before.filter((f) => f !== away)], "drag reorder still works after renaming");
+  const reordered = [away, ...before.filter((f) => f !== away)];
+  await t.waitState(s => JSON.stringify(s.openFiles) === JSON.stringify(reordered), "drag reorder still works after renaming");
   await t.click(point(await tab("tab-away-renamed")), { right: true });
   await t.pickMenu("Close Other Tabs");
   await t.waitState((s) => s.openFiles.length === 1 && s.file === away, "close other tabs");
   t.eq((await t.state()).openFiles, [away], "only the target file tab remains");
-  await t.app.cmd({ op: "open", args: { file: t.file } });
+  await t.app.openShown(t.file);
   await t.waitState((s) => s.file === t.file, "restore the scenario file");
   await t.app.cmd({ op: "close", args: { file: away } });
 });
@@ -682,4 +685,23 @@ sc('comments-list-navigation', 'Native comment pill shows list instead of proper
   await t.shot(path.join(process.cwd(), 'qa/out/native/comments-sidebar-navigation.png'));
   await click('.cm-sidebar-head button');
   await t.waitJs("document.querySelector('.cm-sidebar').hidden", 'list closes');
+});
+
+sc('home-card-menu', 'Home card copies its file link and duplicates the chosen file', { covers: [] }, async (t: NT) => {
+  const file = t.file, name = path.basename(file, '.canvas');
+  await t.click(center(await t.mark({id:'file-tab', label:name, exact:true})), {right:true});
+  await t.pickMenu('Reveal in Home');
+  await t.waitState(s => s.homeShown && s.homeSection === 'recents', 'revealed in Home');
+  const cardMenu = async () => t.click(center(await t.mark({id:'home-card', label:name, exact:true})), {right:true});
+  await cardMenu();
+  const items = (await t.cmd('qa.menu')).items.map((item: { title: string }) => item.title);
+  for (const title of ['Open', 'Duplicate', 'Rename', 'Copy Link', 'Show in Finder', 'Move to Cloud', 'Move to Trash']) {
+    t.ok(items.includes(title), title);
+  }
+  await t.pickMenu('Copy Link');
+  t.eq(new URL((await t.cmd('qa.pasteboard')).text).searchParams.get('file'), file, 'link names the card file');
+  await cardMenu();
+  await t.pickMenu('Duplicate');
+  const copy = path.join(t.app.docs, name + ' copy.canvas');
+  await t.waitState(s => s.file === copy && !s.homeShown, 'duplicate opened');
 });

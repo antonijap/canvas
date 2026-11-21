@@ -29,3 +29,18 @@ sc('context-actions', 'context Delete command removes a lone card and undo resto
   await t.undo();
   t.eq(t.widgets().widgets.length, count, 'undo restored card');
 });
+
+sc('board-here', 'New Board here uses the context click in world coordinates', { covers: [], skip: { visual: 'Checks board placement and undo on disk.' } }, async (t: T) => {
+  await t.showPage('layout');
+  const point = await t.ev(`(() => {
+    const h = window.canvasHost;
+    const x = h.cam.x - 123 * h.cam.z, y = h.cam.y - 234 * h.cam.z;
+    window.canvasCmd({cmd:'newBoardHere', x, y});
+    return {x:-123, y:-234};
+  })()`);
+  await t.waitFor("!!window.canvasHost.sel && window.canvasHost.boards.has(window.canvasHost.sel)", 'new board selected');
+  const id = await t.ev('window.canvasHost.sel');
+  t.eq([t.node(id)?.x, t.node(id)?.y], [point.x, point.y], 'board starts at the click');
+  await t.undo();
+  t.ok(!t.node(id), 'undo removes new board');
+});

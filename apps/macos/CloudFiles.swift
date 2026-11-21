@@ -14,6 +14,10 @@ struct CloudFilesView: View {
     let entry: CloudEntry
     @ObservedObject private var account = CloudAccount.shared
     @State private var files: [CloudFileItem] = []
+    @ObservedObject private var home = HomeStore.shared
+    @State private var key = ""
+    @State private var deleteItem: CloudFileItem?
+    @State private var refreshVersion = 0
     @State private var role = "viewer"
     @State private var warning: String?
     @State private var loaded = false
@@ -37,8 +41,10 @@ struct CloudFilesView: View {
     }
 
     private func refresh() async {
+        refreshVersion += 1
+        let version = refreshVersion
         let j = await Self.read(model, entry: entry, path: "api/cloud/files")
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, version == refreshVersion else { return }
         offline = j["files"] == nil
         if let rows = j["files"] as? [[String: Any]] {
             files = rows.compactMap { r in
@@ -46,10 +52,11 @@ struct CloudFilesView: View {
                 return CloudFileItem(id: id, name: name, updated: r["updated_at"] as? String)
             }
             role = j["role"] as? String ?? "viewer"
+            key = j["key"] as? String ?? ""
         }
         loaded = true
         let usage = role == "owner" && !offline ? await Self.read(model, entry: entry, path: "api/cloud/usage") : [:]
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled, version == refreshVersion else { return }
         warning = CloudFilesText.warning(offline: offline, usage: usage)
     }
 
@@ -81,20 +88,61 @@ struct CloudFilesView: View {
         alert.addButton(withTitle: "Cancel")
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let name = field.stringValue
-        let key = CloudFilePath.key(for: entry.url)
-        if let file = model.openFiles.first(where: { CloudFilePath($0).map { $0.key == key && $0.id == item.id } == true }) {
-            model.renameFile(file, to: name)
-            return
-        }
+        let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        perform("rename", item: item, with: ["name": name])
+    }
+
+    private func perform(_ action: String, item: CloudFileItem, with values: [String: Any] = [:]) {
+        guard !busy, !offline, action == "download" || canEdit else { return }
+        opening = true
         Task {
-            let (status, result) = await CloudAccount.post(model, "api/cloud/files/open", ["cloud": entry.url, "id": item.id])
-            if status == 200, let file = result["file"] as? String {
-                model.renameFile(file, to: name)
-            } else {
-                model.flash(CloudFilesText.problem(code: result["code"] as? String, fallback: "Could not rename the Cloud file"))
+            defer { opening = false }
+            var body = values
+            body["cloud"] = entry.url
+            body["id"] = item.id
+            let (status, j) = await CloudAccount.post(model, "api/cloud/files/" + action, body)
+            guard (200..<300).contains(status) else {
+                model.flash(CloudFilesText.problem(code: j["code"] as? String, fallback: "Could not complete the Cloud file action. Try again."))
+                return
             }
+            if action == "download" {
+                model.flash("Local copy saved", level: "success")
+                return
+            }
+            let cached = (model.openFiles + home.recents.map(\.path)).filter {
+                guard let location = CloudFilePath($0) else { return false }
+                return location.key == key && location.id == item.id
+            }
+            if action == "delete" {
+                for file in Set(cached) { model.close(file); home.remove(file) }
+            } else if action == "rename", let name = values["name"] as? String {
+                for file in Set(cached) { model.setCloudFileName(name, for: file) }
+            }
+            await refresh()
         }
+    }
+
+    @ViewBuilder private func fileMenu(_ item: CloudFileItem) -> some View {
+        Button("Open") { open(item) }.disabled(busy || offline)
+        Button("Duplicate") { perform("duplicate", item: item) }.disabled(busy || !canEdit)
+        Button("Rename") {
+            RunLoop.main.perform { MainActor.assumeIsolated { rename(item) } }
+        }.disabled(busy || !canEdit)
+        Button("Copy Link") { model.copyDocumentLink(CanvasLink.cloudURL(key: key, id: item.id)) }.disabled(key.isEmpty)
+        Button("Download a Local Copy") {
+            let name = TabRename.name(item.name) ?? "Download.canvas"
+            if let url = model.savePanel(title: "Download a Local Copy", name: name) {
+                perform("download", item: item, with: ["target": url.path])
+            }
+        }.disabled(busy || offline)
+        Divider()
+        Button("Delete", role: .destructive) { deleteItem = item }.disabled(busy || !canEdit)
+    }
+
+    private var revealedID: String? {
+        guard let path = home.revealPath, let location = CloudFilePath(path),
+              location.key == key, visible.contains(where: { $0.id == location.id }) else { return nil }
+        return location.id
     }
 
     private func move(_ url: URL) {
@@ -179,23 +227,24 @@ struct CloudFilesView: View {
             } else if files.isEmpty && !offline {
                 empty
             } else if !files.isEmpty {
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: HomeMetric.cardMin, maximum: HomeMetric.cardMax), spacing: HomeMetric.gap, alignment: .top)], alignment: .leading, spacing: 24) {
-                        ForEach(visible) { item in
-                            CloudFileCard(name: item.name, subtitle: CloudFilesText.edited(item.updated)) { open(item) }
-                                .disabled(busy).qaID("cloud-file", label: item.name)
-                                .contextMenu {
-                                    Button("Open") { open(item) }.disabled(busy || offline)
-                                    if canEdit {
-                                        Button("Rename") {
-                                            RunLoop.main.perform { MainActor.assumeIsolated { rename(item) } }
-                                        }.disabled(busy)
-                                    }
-                                }
-                        }
-                    }.padding(.bottom, HomeMetric.gutter)
-                    if visible.isEmpty { Text("No files match your search").font(Typography.body).foregroundStyle(Palette.mutedFg).qaText("No files match your search") }
-                }.scrollIndicators(.never)
+                ScrollViewReader { scroll in
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: HomeMetric.cardMin, maximum: HomeMetric.cardMax), spacing: HomeMetric.gap, alignment: .top)], alignment: .leading, spacing: 24) {
+                            ForEach(visible) { item in
+                                CloudFileCard(name: item.name, subtitle: CloudFilesText.edited(item.updated)) { open(item) }
+                                    .disabled(busy).qaID("cloud-file", label: item.name)
+                                    .contextMenu { fileMenu(item) }
+                                    .id(item.id)
+                            }
+                        }.padding(.bottom, HomeMetric.gutter)
+                        if visible.isEmpty { Text("No files match your search").font(Typography.body).foregroundStyle(Palette.mutedFg).qaText("No files match your search") }
+                    }.scrollIndicators(.never)
+                    .task(id: revealedID) {
+                        guard let id = revealedID else { return }
+                        scroll.scrollTo(id, anchor: .center)
+                        home.revealPath = nil
+                    }
+                }
             }
             if offline { Spacer(minLength: 0) }
         }
@@ -203,6 +252,12 @@ struct CloudFilesView: View {
         .background(targeted && canEdit ? Palette.hover : Color.clear)
         .contentShape(Rectangle())
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $targeted, perform: drop)
+        .alert("Delete Cloud File", isPresented: Binding(get: { deleteItem != nil }, set: { if !$0 { deleteItem = nil } }), presenting: deleteItem) { item in
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) { perform("delete", item: item) }
+        } message: { item in
+            Text("Delete \(item.name) from this Cloud for everyone?")
+        }
         .task(id: entry.url) {
             loaded = false; files = []; role = "viewer"; warning = nil; query = ""
             guard await account.waitListed(model, entry.url) else { loaded = true; offline = true; warning = "This Cloud is offline."; return }
@@ -222,7 +277,10 @@ private struct CloudFileCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button(action: open) {
+            Button {
+                guard NSApp.currentEvent?.type != .rightMouseDown, NSApp.currentEvent?.type != .rightMouseUp else { return }
+                open()
+            } label: {
                 HomeFilePlaceholder(name: name)
                     .aspectRatio(HomeMetric.thumbRatio, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: HomeMetric.radiusCard, style: .continuous))

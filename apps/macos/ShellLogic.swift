@@ -744,7 +744,7 @@ enum ContextMenuLayout {
     }
 
     static func fileTab(cloud: Bool) -> [[String]] {
-        [["Rename", "Show in Finder", "Duplicate"] + (cloud ? ["Move to Cloud"] : []) + ["Copy Link"],
+        [["Duplicate", "Rename", "Copy Link", "Reveal in Home", "Show in Finder"] + (cloud ? ["Move to Cloud"] : []),
          ["Close", "Close Other Tabs"]]
     }
 
@@ -759,15 +759,16 @@ enum ContextMenuLayout {
 
     static let backspace = "\u{8}"
 
-    /// On a layer: clipboard and delete, grouping, arrange, select all.
+    static let delete = Entry(title: "Delete", selector: "deleteSelection:", key: backspace, command: false)
+
+    /// On a layer: clipboard, grouping, arrange, select all.
     static let node: [[Entry]] = [
         [Entry(title: "Cut", selector: "cut:", key: "x"),
          Entry(title: "Copy", selector: "copy:", key: "c"),
          Entry(title: "Paste", selector: "paste:", key: "v"),
          Entry(title: "Paste here", selector: "pasteHere:", command: false),
          Entry(title: "Paste to replace", selector: "pasteReplace:", key: "r", shift: true),
-         Entry(title: "Duplicate", selector: "duplicate:", key: "d"),
-         Entry(title: "Delete", selector: "deleteSelection:", key: backspace, command: false)],
+         Entry(title: "Duplicate", selector: "duplicate:", key: "d")],
         [Entry(title: "Group selection", selector: "group:", key: "g"),
          Entry(title: "Frame selection", selector: "frameSelection:", key: "g", option: true),
          Entry(title: "Ungroup", selector: "ungroup:", key: "g", shift: true)],
@@ -1533,6 +1534,36 @@ enum PasteImage {
     }
 }
 
+/// A package in the Cloud cache uses the Cloud key and file ID as its path.
+struct CloudFilePath {
+    let key: String
+    let id: String
+
+    init?(_ path: String) {
+        var url = URL(fileURLWithPath: path)
+        if url.lastPathComponent == "document.json" { url.deleteLastPathComponent() }
+        let cloud = url.deletingLastPathComponent(), cache = cloud.deletingLastPathComponent()
+        let id = url.deletingPathExtension().lastPathComponent
+        guard url.pathExtension == "canvas", UUID(uuidString: id) != nil,
+              cache.lastPathComponent == "cloud-files", cache.deletingLastPathComponent().lastPathComponent == "Canvas",
+              cloud.lastPathComponent.range(of: "^[0-9a-f]{16}$", options: .regularExpression) != nil else { return nil }
+        self.key = cloud.lastPathComponent
+        self.id = id
+    }
+
+    static func key(for cloud: String) -> String {
+        SHA256.hash(data: Data(cloud.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func displayName(_ name: String?) -> String? {
+        guard let name else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.caseInsensitiveCompare(id) != .orderedSame,
+              trimmed.caseInsensitiveCompare(id + ".canvas") != .orderedSame else { return nil }
+        return name
+    }
+}
+
 /// canvas:// links (Cmd+L, Edit > Copy Link): canvas://open?file=<path>&page=<id>&node=<id>,<id>. The page builds
 /// them (src/page/link-logic.js, which documents the format); the shell opens them (AppDelegate in main.swift).
 /// Values are percent-encoded, ids split on "," before decoding (an id's own "," is %2C), "+" is a plus.
@@ -1540,6 +1571,13 @@ struct CanvasLink: Equatable {
     let file: String
     let page: String?
     let nodes: [String]
+
+    static func fileURL(_ file: String) -> String {
+        if let cloud = CloudFilePath(file) { return cloudURL(key: cloud.key, id: cloud.id) }
+        return "canvas://open?file=" + DocURL.encode(file)
+    }
+
+    static func cloudURL(key: String, id: String) -> String { "canvas://open?cloud=\(key)&cloudFile=\(id)" }
 
     static func parse(_ url: URL) -> CanvasLink? { parse(url.absoluteString) }
 

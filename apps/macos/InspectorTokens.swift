@@ -161,6 +161,7 @@ struct TokenNumberField: View {
     var enabled = true
     var minimum: Double?
     var maximum: Double?
+    var defaultValue: Double? = nil
     var onStep: ((Double) -> Void)? = nil
     var onRelative: ((String) -> Void)? = nil
     let onCommit: (Double) -> Void
@@ -174,7 +175,7 @@ struct TokenNumberField: View {
             TokenChip(model: model, name: name, kind: .number, symbol: symbol, enabled: enabled, onPick: onBind, onDetach: { onDetach(name) })
         } else {
             NumberField(prefix: "", symbol: symbol, value: value, placeholder: placeholder, suffix: suffix, enabled: enabled,
-                        minimum: minimum, maximum: maximum, onStep: onStep, onRelative: onRelative, onCommit: onCommit)
+                        minimum: minimum, maximum: maximum, onStep: onStep, onRelative: onRelative, defaultValue: defaultValue, onCommit: onCommit)
                 .modifier(BindOnHover(model: model, enabled: enabled, hovering: $hovering, picking: $picking, onBind: onBind))
         }
     }
@@ -543,6 +544,11 @@ struct TrackingField: View {
             }
             .help(helpText)
             .qaID("tracking-field")
+            .modifier(FieldValueMenu.number(value, enabled: enabled, defaultValue: 0) { v in
+                text = NumberField.format(v)
+                draft.show(text, for: target)
+                if auto || v != value { onManual(v) }
+            })
             .modifier(OptionalBind(model: model, enabled: enabled, hovering: $hovering, picking: $picking, onBind: onBind, inline: true))
         }
         .onAppear(perform: sync)

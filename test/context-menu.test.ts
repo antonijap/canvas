@@ -38,3 +38,12 @@ test("Paste here carries the click point; the canvas menu exists for empty canva
   const ctx = fs.readFileSync(new URL("../src/page/context.js", import.meta.url), "utf8");
   assert.match(ctx, /context: \{ x, y, target: null, canvas: true \}/);
 });
+
+test("Delete is the last layer action and board creation starts the empty canvas menu", () => {
+  const lib = fs.readFileSync(new URL("../apps/macos/Library.swift", import.meta.url), "utf8");
+  const layerMenu = lib.slice(lib.indexOf("func showContextMenu("), lib.indexOf("func showCanvasMenu("));
+  assert.match(layerMenu, /Copy Link to Layer[\s\S]*menu\.separator\(\)\s+menu\.edit\(ContextMenuLayout\.delete\)/);
+  const canvasMenu = lib.slice(lib.indexOf("func showCanvasMenu("), lib.indexOf("func exportTargets("));
+  assert.ok(canvasMenu.includes("New Board here"));
+  assert.ok(canvasMenu.indexOf("New Board here") < canvasMenu.indexOf("ContextMenuLayout.canvas"));
+});

@@ -247,14 +247,16 @@ extension CanvasModel {
         let menu = ContextMenuBuilder(model: self, at: point)
         if c.kind == "card" {
             menu.action("Duplicate", enabled: !cloudReadOnly, key: "d", mods: .command) { self.run("{cmd:'structure',op:'duplicate'}") }
-            menu.action("Delete", enabled: !cloudReadOnly, key: ContextMenuLayout.backspace) { self.run("{cmd:'structure',op:'delete'}") }
             let id = String(c.id.dropFirst("widget:".count))
             if let widget = widgets.first(where: { $0.id == id }), !["todo", "note", "shader", "video"].contains(widget.kind) {
                 menu.action("Refresh", enabled: !cloudReadOnly) { self.refreshWidget(id) }
             }
+            menu.separator()
+            menu.action("Delete", enabled: !cloudReadOnly, key: ContextMenuLayout.backspace) { self.run("{cmd:'structure',op:'delete'}") }
             menu.pop(in: webView)
             return
         }
+        menu.action("Reveal in Boards list") { self.revealInBoards(c.board) }
         if c.canCreateComponent {
             menu.action("Create Component", enabled: !cloudReadOnly, key: "k", mods: [.command, .option]) { self.run("{cmd:'shortcut',op:'component'}") }
         }
@@ -264,11 +266,6 @@ extension CanvasModel {
         menu.action("Rename", enabled: !cloudReadOnly && !c.id.contains("/"), key: "r", mods: .command) { self.renameSelection() }
         menu.action(c.locked ? "Unlock" : "Lock", enabled: !cloudReadOnly && !c.id.contains("/"), key: "l", mods: [.command, .shift]) { self.run("{cmd:'shortcut',op:'lock'}") }
         menu.action(c.hidden ? "Show" : "Hide", enabled: !cloudReadOnly && !c.id.contains("/"), key: "h", mods: [.command, .shift]) { self.run("{cmd:'shortcut',op:'hide'}") }
-        if boards.contains(where: { $0.id == c.id }) {
-            menu.submenu("Move to Page") { m in
-                for p in pages { m.action(p.name, enabled: !self.cloudReadOnly && p.id != self.activePage) { self.moveBoard(c.id, toPage: p.id) } }
-            }
-        }
         menu.separator()
         var head = false
         // Select layer: every layer under the pointer, topmost first; picking one selects it.
@@ -315,17 +312,26 @@ extension CanvasModel {
             // Copy/Paste as, after the clipboard items: the layer (or the selection it is in) as a picture,
             // vector or code on the clipboard, and its link.
             if k == 0 {
+                menu.action("Copy Link to Layer", key: "l", mods: .command) { self.copyLayerLink(c.id, page: self.activePage) }
+                menu.action("Copy ID") { self.copy(c.id, "ID") }
+                menu.action("Copy name") { self.copy(c.name, "name") }
                 menu.submenu("Copy as") { m in
                     for f in CopyAs.formats {
                         if f.id == "png" { m.action(f.title, key: "c", mods: [.command, .shift]) { self.copyAs("png", ids: targets) } }
                         else { m.action(f.title) { self.copyAs(f.id, ids: targets) } }
                         if f.id == "svg" { m.separator() }
                     }
-                    m.separator()
-                    m.action("Copy link", key: "l", mods: .command) { self.run("{cmd:'copyLink'}") }
                 }
             }
+            if k == 4 {
+                menu.action("Select Matching Layers", key: "a", mods: [.command, .option]) { self.run("{cmd:'shortcut',op:'selectMatching'}") }
+            }
             // Several layers or boards, the click inside them: Align, distribute and tidy up (ArrangeActions).
+            if k == 3, boards.contains(where: { $0.id == c.id }) {
+                menu.submenu("Move to Page") { m in
+                    for p in pages { m.action(p.name, enabled: !self.cloudReadOnly && p.id != self.activePage) { self.moveBoard(c.id, toPage: p.id) } }
+                }
+            }
             if k == 3, let sel = selection, ArrangeActions.shows(count: sel.ids.count), sel.ids.contains(c.id) {
                 menu.submenu("Align") { m in
                     for group in [ArrangeActions.align, ArrangeActions.spread] {
@@ -364,23 +370,25 @@ extension CanvasModel {
         }
         menu.action("Export with settings", key: "e", mods: [.command, .shift]) { self.exportWithSettings(targets) }
         menu.separator()
-        menu.action("Copy ID") { self.copy(c.id, "ID") }
-        menu.action("Copy name") { self.copy(c.name, "name") }
-        menu.separator()
         menu.action("Zoom to fit selection", key: "2", mods: .shift) { self.run("{cmd:'zoomSel'}") }
         if c.type == "frame" || c.type == "text", !c.id.contains("/") {
             // Resize to fit (Opt+Cmd+Shift+R on the canvas); src/page/live.js.
             menu.action("Resize to fit content", key: "r", mods: [.command, .option, .shift]) { self.run("{cmd:'fitContent'}") }
         }
-        menu.action("Reveal in Boards list") { self.revealInBoards(c.board) }
+        menu.separator()
+        menu.edit(ContextMenuLayout.delete)
         contextOnLayer = true
         menu.pop(in: webView)
         contextOnLayer = false
     }
 
-    /// Right-click on empty canvas: Paste here, Select all, Zoom to fit (the page).
+    /// Right-click on empty canvas.
     func showCanvasMenu(at point: CGPoint) {
         let menu = ContextMenuBuilder(model: self, at: point)
+        menu.action("New Board here", enabled: !cloudReadOnly) {
+            self.run("{cmd:'newBoardHere',x:\(point.x),y:\(point.y)}")
+        }
+        menu.separator()
         for group in ContextMenuLayout.canvas {
             for e in group { menu.edit(e) }
             menu.separator()

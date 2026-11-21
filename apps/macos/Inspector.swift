@@ -334,8 +334,8 @@ struct InspectorBody: View {
                 NumberField(prefix: "", symbol: "angle", value: mixed("rotation") ? nil : num(n["rotation"]).map(FieldMath.angle) ?? 0, placeholder: "Mixed", suffix: "°", enabled: structural,
                             onStep: { model.stepEach("rotation", by: $0) },
                             onRelative: { model.relativeEach("rotation", $0) },
-                            normalize: FieldMath.angle) { model.update(["rotation": $0]) }
-                    .help("Rotation")
+                            normalize: FieldMath.angle, defaultValue: 0) { model.update(["rotation": $0]) }
+                    .help("Rotation").qaID("rotation-value")
                 ToggleIcons(items: [("arrow.left.and.right.righttriangle.left.righttriangle.right", n["flipX"] as? Bool == true, "Flip horizontal"),
                                     ("arrow.up.and.down.righttriangle.up.righttriangle.down", n["flipY"] as? Bool == true, "Flip vertical")],
                             enabled: structural) { i, on in
@@ -402,7 +402,7 @@ struct InspectorBody: View {
     func numberToken(_ key: String, symbol: String, scale: Double = 1, suffix: String = "", fallback: Double? = nil, minimum: Double? = nil, empty: String = "") -> some View {
         TokenNumberField(model: model, symbol: symbol, raw: n[key], value: mixed(key) ? nil : num(n[key]).map { $0 * scale } ?? fallback,
                          placeholder: mixed(key) ? "Mixed" : empty, suffix: n[key] == nil && fallback == nil && !mixed(key) ? "" : suffix, enabled: editable,
-                         minimum: minimum.map { $0 * scale },
+                         minimum: minimum.map { $0 * scale }, defaultValue: fallback,
                          onStep: { d in model.stepEach(key, by: d / scale, fallback: fallback.map { $0 / scale } ?? 0, min: minimum) },
                          onRelative: { t in model.relativeEach(key, t, scale: scale, fallback: fallback.map { $0 / scale } ?? 0, min: minimum) },
                          onCommit: { v in model.update([key: minimum.map { max($0, v / scale) } ?? v / scale]) },
@@ -425,7 +425,7 @@ struct InspectorBody: View {
             HStack(spacing: 8) {
                 TokenNumberField(model: model, symbol: "drop.halffull", raw: n["opacity"], value: mixed("opacity") ? nil : (num(n["opacity"]) ?? 1) * 100,
                                  placeholder: "Mixed", suffix: "%", enabled: editable,
-                                 minimum: 0, maximum: 100,
+                                 minimum: 0, maximum: 100, defaultValue: 100,
                                  onStep: { model.stepEach("opacity", by: $0 / 100, fallback: 1, min: 0, max: 1) },
                                  onRelative: { model.relativeEach("opacity", $0, scale: 100, fallback: 1, min: 0, max: 1) },
                                  onCommit: { model.update(["opacity": max(0, min(100, $0)) / 100]) },
@@ -905,6 +905,8 @@ struct HexField: View {
     var enabled = true
     /// Up / Down while the field has focus (up?, Shift held?): the colour gets lighter or darker.
     var onStep: ((Bool, Bool) -> Void)? = nil
+    var defaultValue: String? = nil
+    var copyValue: String? = nil
     let onCommit: (String) -> Void
     @Environment(\.editTarget) private var target
     @State private var text = ""
@@ -920,6 +922,9 @@ struct HexField: View {
             .textFieldStyle(.plain).font(Typography.body).monospacedDigit().foregroundStyle(Palette.fg)
             .focused($focused).disabled(!enabled)
             .onSubmit(commit)
+            .qaID("hex-value")
+            .modifier(FieldValueMenu(value: copyValue ?? value, enabled: enabled, defaultValue: defaultValue,
+                                     format: { $0 }, parse: Self.hex) { apply($0) })
             .onKeyPress(.escape) { sync(); focused = false; return .handled }
             .onKeyPress(keys: [.upArrow, .downArrow]) { press in
                 guard let onStep, enabled else { return .ignored }
@@ -932,14 +937,21 @@ struct HexField: View {
             .onChange(of: focused) { _, f in if !f { commit() } }
     }
 
+    private static func hex(_ raw: String) -> String? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let hex = CanvasModel.fullHex(text.hasPrefix("#") ? text : "#" + text), parseColor(hex) != nil else { return nil }
+        return hex
+    }
+
     private func commit() {
-        guard draft.commits(text, target: target) else { sync(); return }
-        var t = text.trimmingCharacters(in: .whitespaces)
-        if !t.hasPrefix("#") { t = "#" + t }
-        guard let hex = CanvasModel.fullHex(t), parseColor(hex) != nil else { sync(); return }
+        guard draft.commits(text, target: target), let hex = Self.hex(text) else { sync(); return }
+        apply(hex)
+    }
+
+    private func apply(_ hex: String) {
         text = Self.shown(hex)
         draft.show(text, for: target)
-        if hex != value.uppercased() { onCommit(hex) }
+        if hex.uppercased() != (copyValue ?? value).uppercased() { onCommit(hex) }
     }
 }
 
@@ -989,6 +1001,10 @@ private struct ScaleField: View {
                 .onSubmit(commit)
             Text("%").font(Typography.micro).foregroundStyle(Palette.mutedFg)
         }
+        .modifier(FieldValueMenu.number(100, enabled: enabled, suffix: "%") { raw in
+            let v = NumericInput.clean(NumericInput.clamp(raw, 1, 10000))
+            if v != 100 { apply(v / 100) }
+        })
         .onChange(of: focused) { _, f in if !f { text = "100" } }
     }
 

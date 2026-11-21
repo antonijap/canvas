@@ -305,7 +305,9 @@ func openCanvasLink(_ url: URL) {
       let (status, j) = await CloudAccount.post(model, "api/cloud/files/open", ["cloud": cloud, "id": id])
       if status == 200, let file = j["file"] as? String {
         model.setCloudFileName(j["name"] as? String, for: file)
-        model.open(file)
+        let local = url.absoluteString + "&file=" + DocURL.encode(file)
+        if let link = CanvasLink.parse(local), link.page != nil || !link.nodes.isEmpty { model.openLink(link) }
+        else { model.open(file) }
       } else { model.flash(j["error"] as? String ?? "Could not open the Cloud file") }
     }
     showMainWindow()

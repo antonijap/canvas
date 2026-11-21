@@ -101,8 +101,8 @@ struct ShellLogicTests {
         for title in contextTitles {
             check(!title.contains("...") && !title.contains("…"), "no ellipsis in context menu title: \(title)")
         }
-        check(ContextMenuLayout.fileTab(cloud: false).flatMap { $0 } == ["Rename", "Show in Finder", "Duplicate", "Copy Link", "Close", "Close Other Tabs"], "local tab menu order")
-        check(ContextMenuLayout.fileTab(cloud: true) == [["Rename", "Show in Finder", "Duplicate", "Move to Cloud", "Copy Link"], ["Close", "Close Other Tabs"]], "cloud action and separator")
+        check(ContextMenuLayout.fileTab(cloud: false).flatMap { $0 } == ["Duplicate", "Rename", "Copy Link", "Reveal in Home", "Show in Finder", "Close", "Close Other Tabs"], "local tab menu order")
+        check(ContextMenuLayout.fileTab(cloud: true) == [["Duplicate", "Rename", "Copy Link", "Reveal in Home", "Show in Finder", "Move to Cloud"], ["Close", "Close Other Tabs"]], "cloud action and separator")
         for name in ["", " ", ".hidden", "../Other", "a/b", "a\0b", ".canvas"] {
             check(TabRename.name(name) == nil, "invalid package name")
         }
@@ -481,14 +481,14 @@ struct ShellLogicTests {
         check(ContextMenuLayout.canCreateComponent(type: nil, reusable: false, path: false, inInstance: false), "mixed selection can create components")
         check(!ContextMenuLayout.canCreateComponent(type: "text", reusable: false, path: true, inInstance: false), "path cannot create component")
         let titles = ContextMenuLayout.node.map { $0.map(\.title) }
-        check(titles == [["Cut", "Copy", "Paste", "Paste here", "Paste to replace", "Duplicate", "Delete"], ["Group selection", "Frame selection", "Ungroup"],
+        check(titles == [["Cut", "Copy", "Paste", "Paste here", "Paste to replace", "Duplicate"], ["Group selection", "Frame selection", "Ungroup"],
                          ["Add auto layout", "Remove auto layout"], ["Bring to front", "Bring forward", "Send backward", "Send to back"], ["Select all"]], "layer menu groups: \(titles)")
         check(ContextMenuLayout.canvas.flatMap { $0 }.map(\.title) == ["Paste here", "Select all"], "canvas menu")
         let frame = ContextMenuLayout.node[1][1]
         check(frame.key == "g" && frame.command && frame.option && !frame.shift, "Frame selection is Opt+Cmd+G")
         let ungroup = ContextMenuLayout.node[1][2]
         check(ungroup.key == "g" && ungroup.shift && !ungroup.option, "Ungroup is Shift+Cmd+G")
-        let del = ContextMenuLayout.node[0][6]
+        let del = ContextMenuLayout.delete
         check(del.key == ContextMenuLayout.backspace && !del.command, "Delete shows the bare Backspace key")
         let add = ContextMenuLayout.node[2][0], remove = ContextMenuLayout.node[2][1]
         check(add.key == "a" && add.shift && !add.command && !add.option, "Add auto layout is Shift+A")

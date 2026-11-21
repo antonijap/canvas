@@ -2,7 +2,6 @@
 // team server it is shared to), the cards' order, filter and search, the labels, and where a thumbnail is kept.
 // Tests/HomeLogicTests.swift runs all of it (built with SettingsLogic.swift, for the Cloud addresses). Home.swift draws it.
 
-import CryptoKit
 import Foundation
 
 /// Copy shared by the Cloud file page, its actions and the host's settings.

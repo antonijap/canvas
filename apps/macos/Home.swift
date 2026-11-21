@@ -39,6 +39,7 @@ final class HomeStore: ObservableObject {
     static let shared = HomeStore()
 
     @Published var query = ""
+    @Published var revealPath: String?
     @Published var section: HomeSection = .recents
     @Published private(set) var cards: [HomeCard] = []
     /// False until the first read of the files finished (so a view with files does not flash its empty line).
@@ -140,6 +141,35 @@ extension CanvasModel {
         flushTextEdit { _ in
             self.snapshotShown()
             self.homeShown = true
+        }
+    }
+
+    @MainActor func revealInHome(_ file: String) {
+        let store = HomeStore.shared
+        store.query = ""
+        if let location = CloudFilePath(file),
+           let cloud = prefs.clouds.first(where: { CloudFilePath.key(for: $0.url) == location.key }) {
+            store.section = .cloud(cloud.id)
+        } else {
+            store.section = .recents
+            if !store.recents.contains(where: { $0.path == file }) { store.touch(file) }
+        }
+        store.revealPath = file
+        showHome()
+    }
+
+    @MainActor func moveToTrash(_ file: String) {
+        flushTextEdit { ok in
+            guard ok else { return }
+            self.afterWrites {
+                do {
+                    try FileManager.default.trashItem(at: URL(fileURLWithPath: file), resultingItemURL: nil)
+                    self.close(file)
+                    HomeStore.shared.remove(file)
+                } catch {
+                    self.flash("Could not move the file to the Trash")
+                }
+            }
         }
     }
 
@@ -445,21 +475,30 @@ private struct HomeMain: View {
             .padding(.bottom, HomeMetric.gutter)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    top
-                    // A Cloud's page is the same cards as Recents, without the cloud before each time (all are there).
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: HomeMetric.cardMin, maximum: HomeMetric.cardMax), spacing: HomeMetric.gap, alignment: .top)],
-                              alignment: .leading, spacing: 24) {
-                        ForEach(visible) { c in HomeCardView(model: model, store: store, card: c, showWhere: !onServer) }
+            ScrollViewReader { scroll in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        top
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: HomeMetric.cardMin, maximum: HomeMetric.cardMax), spacing: HomeMetric.gap, alignment: .top)],
+                                  alignment: .leading, spacing: 24) {
+                            ForEach(visible) { c in
+                                HomeCardView(model: model, store: store, card: c, showWhere: !onServer)
+                                    .id(c.path)
+                            }
+                        }
                     }
+                    .padding(.horizontal, HomeMetric.gutter)
+                    .padding(.top, topInset)
+                    .padding(.bottom, HomeMetric.gutter)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .padding(.horizontal, HomeMetric.gutter)
-                .padding(.top, topInset)
-                .padding(.bottom, HomeMetric.gutter)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .scrollIndicators(.never)
+                .task(id: visible.first(where: { $0.path == store.revealPath })?.path) {
+                    guard let file = store.revealPath, visible.contains(where: { $0.path == file }) else { return }
+                    scroll.scrollTo(file, anchor: .center)
+                    store.revealPath = nil
+                }
             }
-            .scrollIndicators(.never)
         }
     }
 }
@@ -501,6 +540,10 @@ private struct HomeCardView: View {
     /// A shared file's cloud before its time (off on a Cloud's own page, where every file is that Cloud's).
     var showWhere = true
     @State private var hovering = false
+    @State private var renaming = false
+    @State private var draft = ""
+
+    private var local: Bool { CloudFilePath(card.path) == nil }
 
     var body: some View {
         let where_ = HomeLogic.whereLabel(server: card.server, clouds: model.prefs.clouds)
@@ -555,9 +598,25 @@ private struct HomeCardView: View {
         .onHover { h in withAnimation(Motion.fast) { hovering = h } }
         .contextMenu {
             Button("Open") { model.open(card.path) }.disabled(!card.exists)
-            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: card.path)]) }.disabled(!card.exists)
-            Divider()
+            if local {
+                Button("Duplicate") { model.duplicateFile(card.path) }.disabled(!card.exists)
+                Button("Rename") { draft = card.name; renaming = true }.disabled(!card.exists)
+            }
+            Button("Copy Link") { model.copyFileLink(card.path) }.disabled(!card.exists)
+            if local {
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: card.path)]) }.disabled(!card.exists)
+                Button("Move to Cloud") { CloudAccount.shared.moveOpenFile(model, file: card.path) }.disabled(!card.exists)
+            }
             Button("Remove from recents") { store.remove(card.path) }
+            if local {
+                Divider()
+                Button("Move to Trash", role: .destructive) { model.moveToTrash(card.path) }.disabled(!card.exists)
+            }
+        }
+        .alert("Rename File", isPresented: $renaming) {
+            TextField("Name", text: $draft)
+            Button("Cancel", role: .cancel) {}
+            Button("Rename") { model.renameFile(card.path, to: draft) }
         }
     }
 }

@@ -772,6 +772,12 @@ private struct PadNumberField: View {
            end: { scrub?.end(); scrub = nil }) }
         .simultaneousGesture(TapGesture().onEnded { if NSEvent.modifierFlags.contains(.command) { onCmdClick() } })
         .modifier(BindOnHover(model: model, enabled: enabled, hovering: $hovering, picking: $picking, onBind: onBind))
+        .modifier(FieldValueMenu.number(value, enabled: enabled, defaultValue: 0) { raw in
+            let v = NumericInput.clean(max(0, raw))
+            text = NumberField.format(v)
+            draft.show(text, for: target)
+            if v != value || highlighted { onCommit(v) }
+        })
         .onAppear(perform: sync)
         .onChange(of: value) { _, _ in if (!focused || !draft.edited(text)) && scrub == nil { sync() } }
         .onChange(of: target) { _, _ in if scrub == nil { sync() } }

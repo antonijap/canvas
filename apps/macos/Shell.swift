@@ -232,15 +232,8 @@ struct TopBar: View {
                     case "Show in Finder": NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: file)])
                     case "Duplicate": model.duplicateFile(file)
                     case "Move to Cloud": CloudAccount.shared.moveOpenFile(model, file: file)
-                    case "Copy Link":
-                        let link: String
-                        if let cloud = CloudFilePath(file) {
-                            link = "canvas://open?cloud=\(cloud.key)&cloudFile=\(cloud.id)"
-                        } else {
-                            link = "canvas://open?file=" + DocURL.encode(file)
-                        }
-                        canvasPasteboard.clearContents()
-                        canvasPasteboard.setString(link, forType: .string)
+                    case "Copy Link": model.copyFileLink(file)
+                    case "Reveal in Home": model.revealInHome(file)
                     case "Close": model.close(file)
                     case "Close Other Tabs": model.closeOtherTabs(file)
                     default: break
