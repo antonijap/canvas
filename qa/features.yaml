@@ -406,6 +406,11 @@ features:
     cases: [text, mouse]
 
   # ------------------------------------------------------------ structure
+  - id: board-create
+    name: New Board here creates a board at the context click
+    area: structure
+    driven: [page, native]
+    cases: [context-menu, undo]
   - id: group
     name: Cmd+G groups, Opt+Cmd+G frames the selection
     area: structure

@@ -62,12 +62,13 @@ describe("swarm flags", () => {
 });
 
 describe("swarm plan", () => {
-  test("the first agents cover every area once, personas take turns, harnesses alternate", () => {
+  test("the first agents cover distinct areas up to the agent limit, personas take turns, harnesses alternate", () => {
     const areas = [...new Set(cat.features.map((f) => f.area))];
-    const plan = buildPlan(parseSwarmArgs(["--agents", "20"]), cat.features);
-    assert.equal(plan.length, 20);
-    assert.deepEqual(new Set(plan.slice(0, areas.length).map((p) => p.area)), new Set(areas));
-    assert.equal(new Set(plan.map((p) => `${p.persona.id}/${p.area}`)).size, 20, "no pair twice");
+    const plan = buildPlan(parseSwarmArgs(["--agents", String(MAX_AGENTS)]), cat.features);
+    assert.equal(plan.length, MAX_AGENTS);
+    const firstAreas = areas.slice(0, MAX_AGENTS);
+    assert.deepEqual(new Set(plan.slice(0, firstAreas.length).map((p) => p.area)), new Set(firstAreas));
+    assert.equal(new Set(plan.map((p) => `${p.persona.id}/${p.area}`)).size, MAX_AGENTS, "no pair twice");
     assert.ok(new Set(plan.slice(0, 5).map((p) => p.persona.id)).size >= 4, "personas vary");
     assert.deepEqual(plan.slice(0, 4).map((p) => p.harness), ["claude", "codex", "claude", "codex"]);
     assert.ok(plan.every((p) => p.features.length && p.features.every((f) => f.area === p.area)));

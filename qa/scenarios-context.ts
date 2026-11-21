@@ -30,7 +30,7 @@ sc('context-actions', 'context Delete command removes a lone card and undo resto
   t.eq(t.widgets().widgets.length, count, 'undo restored card');
 });
 
-sc('board-here', 'New Board here uses the context click in world coordinates', { covers: [], skip: { visual: 'Checks board placement and undo on disk.' } }, async (t: T) => {
+sc('board-here', 'New Board here uses the context click in world coordinates', { covers: ['board-create:context-menu', 'board-create:undo'], skip: { visual: 'Checks board placement and undo on disk.' } }, async (t: T) => {
   await t.showPage('layout');
   const point = await t.ev(`(() => {
     const h = window.canvasHost;

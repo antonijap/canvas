@@ -227,7 +227,7 @@ sc('inspector-value-menu', 'Inspector menus copy, paste and reset a rotation and
   await t.waitDisk(() => JSON.stringify(t.node('r_free')?.fill).includes('#123456'), 'pasted color');
 });
 
-sc('empty-canvas-menu', 'Empty canvas menu creates a board at the click', { covers: [] }, async (t: NT) => {
+sc('empty-canvas-menu', 'Empty canvas menu creates a board at the click', { covers: ['board-create:context-menu'] }, async (t: NT) => {
   await t.showPage('layout');
   await t.look(-1800, -1200);
   const point = {x: 780, y: 430};
