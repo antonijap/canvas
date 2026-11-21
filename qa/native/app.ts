@@ -115,7 +115,20 @@ export class QaApp {
     this.server.stdout!.on("data", (d) => this.serverLog.push(String(d)));
     this.server.stderr!.on("data", (d) => this.serverLog.push(String(d)));
     await this.waitHealth();
+    await this.launch();
+  }
 
+  async relaunch() {
+    const pid = this.pid;
+    await this.cmd({ op: "qa.quit" });
+    for (let i = 0; i < 80; i++) {
+      try { process.kill(pid, 0); } catch { await this.launch(); return; }
+      await sleep(100);
+    }
+    throw new Error("QA app did not quit before relaunch");
+  }
+
+  private async launch() {
     // `open -g -n`: a new instance, launched in the background. Started any other way (a child of a frontmost
     // terminal or app), macOS brings it to the front and it takes the keyboard from whoever is typing.
     // -ApplePersistenceIgnoreState: no "reopen windows?" alert after the last run's kill (it blocks all input).
@@ -124,7 +137,10 @@ export class QaApp {
       "--args", "-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"], { stdio: "ignore" });
     const t0 = Date.now();
     for (;;) {
-      try { this.pid = (await this.cmd<{ pid: number }>({ op: "qa.ping", timeoutMs: 2000 })).pid; break; } catch {}
+      try {
+        const { pid } = await this.cmd<{ pid: number }>({ op: "qa.ping", timeoutMs: 2000 });
+        if (pid !== this.pid) { this.pid = pid; break; }
+      } catch {}
       if (Date.now() - t0 > 40_000) throw new Error(`QA app did not connect in 40 s: ${this.log().slice(-2000)}`);
       await sleep(250);
     }

@@ -399,7 +399,12 @@ private struct HomeMain: View {
         case .mac: base = HomeLogic.filter(store.cards, .mac)
         case .cloud: base = cloud.map { HomeLogic.onServer(store.cards, $0.url) } ?? []
         }
-        return HomeLogic.search(base, store.query)
+        let named = base.map { card in
+            var card = card
+            if CloudFilePath(card.path) != nil { card.cloudName = model.name(of: card.path) }
+            return card
+        }
+        return HomeLogic.search(named, store.query)
     }
 
     private var onServer: Bool { cloud != nil }

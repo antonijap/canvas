@@ -527,7 +527,7 @@ final class CloudAccount: ObservableObject {
             guard await waitListed(model, entry.url) else { model.flash("This Cloud is offline."); return }
             let (status, j) = await Self.post(model, "api/cloud/files/create", ["cloud": entry.url, "name": "Untitled"])
             if status == 201, let file = j["file"] as? String {
-                model.cloudFileNames[file] = "Untitled"
+                model.setCloudFileName(j["name"] as? String, for: file)
                 model.open(file)
             } else { model.flash(CloudFilesText.problem(code: j["code"] as? String, fallback: "Could not create the Cloud file. Try again.")) }
         }
@@ -563,7 +563,7 @@ final class CloudAccount: ObservableObject {
             }
             let (movedStatus, moved) = await CloudAccount.post(model, "api/cloud/files/move", ["cloud": chosen.url], query: [URLQueryItem(name: "file", value: file)])
             if movedStatus == 200, let destination = moved["file"] as? String {
-                model.cloudFileNames[destination] = moved["name"] as? String ?? "Untitled"
+                model.setCloudFileName(moved["name"] as? String, for: destination)
                 model.close(file)
                 HomeStore.shared.remove(file)
                 model.open(destination)
@@ -635,6 +635,16 @@ final class CloudAccount: ObservableObject {
         a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return nil }
         return CloudSharePicker.selected(menu, in: clouds)
+    }
+
+    nonisolated static func get(_ model: CanvasModel, _ path: String, query: [URLQueryItem]) async -> [String: Any] {
+        var c = URLComponents(url: model.base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        c?.queryItems = query
+        guard let url = c?.url else { return [:] }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return [:] }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
     }
 
     nonisolated static func post(_ model: CanvasModel, _ path: String, _ body: [String: Any], query: [URLQueryItem] = []) async -> (Int, [String: Any]) {

@@ -46,6 +46,36 @@ enum CloudFilesText {
     }
 }
 
+/// A package in the Cloud cache uses the Cloud key and file ID as its path.
+struct CloudFilePath {
+    let key: String
+    let id: String
+
+    init?(_ path: String) {
+        var url = URL(fileURLWithPath: path)
+        if url.lastPathComponent == "document.json" { url.deleteLastPathComponent() }
+        let cloud = url.deletingLastPathComponent(), cache = cloud.deletingLastPathComponent()
+        let id = url.deletingPathExtension().lastPathComponent
+        guard url.pathExtension == "canvas", UUID(uuidString: id) != nil,
+              cache.lastPathComponent == "cloud-files", cache.deletingLastPathComponent().lastPathComponent == "Canvas",
+              cloud.lastPathComponent.range(of: "^[0-9a-f]{16}$", options: .regularExpression) != nil else { return nil }
+        self.key = cloud.lastPathComponent
+        self.id = id
+    }
+
+    static func key(for cloud: String) -> String {
+        SHA256.hash(data: Data(cloud.utf8)).prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    func displayName(_ name: String?) -> String? {
+        guard let name else { return nil }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.caseInsensitiveCompare(id) != .orderedSame,
+              trimmed.caseInsensitiveCompare(id + ".canvas") != .orderedSame else { return nil }
+        return name
+    }
+}
+
 /// One file the person opened: its path and when (seconds since 1970).
 struct RecentEntry: Codable, Equatable {
     var path: String
@@ -157,7 +187,8 @@ struct HomeCard: Identifiable, Equatable {
     var openComments: Int
     var server: String?
     var id: String { path }
-    var name: String { HomeLogic.name(path) }
+    var cloudName: String? = nil
+    var name: String { HomeLogic.name(path, cloudName: cloudName) }
     var shared: Bool { server != nil }
 }
 
@@ -172,7 +203,12 @@ enum HomeLogic {
     }
 
     /// "Pricing page" for ".../Pricing page.canvas".
-    static func name(_ path: String) -> String { URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent }
+    static func name(_ path: String, cloudName: String? = nil, listedName: String? = nil) -> String {
+        if let cloud = CloudFilePath(path) {
+            return cloud.displayName(cloudName) ?? cloud.displayName(listedName) ?? "Cloud file"
+        }
+        return listedName ?? URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+    }
 
     /// Newest first. A file edited since it was last opened counts from its edit.
     static func ordered(_ cards: [HomeCard]) -> [HomeCard] {

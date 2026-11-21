@@ -210,6 +210,7 @@ struct TopBar: View {
 
     private func beginRename(_ file: String) {
         rename.begin(file)
+        if CloudFilePath(file) != nil { rename.draft = model.name(of: file) }
         traceTabRename("begin", file)
     }
 
@@ -232,8 +233,14 @@ struct TopBar: View {
                     case "Duplicate": model.duplicateFile(file)
                     case "Move to Cloud": CloudAccount.shared.moveOpenFile(model, file: file)
                     case "Copy Link":
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString("canvas://open?file=" + DocURL.encode(file), forType: .string)
+                        let link: String
+                        if let cloud = CloudFilePath(file) {
+                            link = "canvas://open?cloud=\(cloud.key)&cloudFile=\(cloud.id)"
+                        } else {
+                            link = "canvas://open?file=" + DocURL.encode(file)
+                        }
+                        canvasPasteboard.clearContents()
+                        canvasPasteboard.setString(link, forType: .string)
                     case "Close": model.close(file)
                     case "Close Other Tabs": model.closeOtherTabs(file)
                     default: break
@@ -315,7 +322,7 @@ struct TopBar: View {
                         .frame(width: stripWidth)
                         .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
                         Menu {
-                            ForEach(model.allFiles) { f in Button(f.name) { model.open(f.file) } }
+                            ForEach(model.allFiles) { f in Button(model.name(of: f.file)) { model.open(f.file) } }
                         } label: {
                             Image(systemName: "plus").symbolRenderingMode(.hierarchical)
                                 .symbolEffect(.bounce, value: model.openFiles.count)

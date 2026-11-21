@@ -7,6 +7,79 @@ import { startServer, ROOT, type Scratch } from '../lib.ts';
 import { PLAYGROUND } from '../playground.ts';
 import { expectedMove } from '../cloud-files-fixture.ts';
 const post = async (base: string, p: string, b: unknown) => { const r = await fetch(base + p, { method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, j: await r.json() as any }; };
+sc('cloud-files', 'Cloud tab name survives a background open and relaunch', { covers: ['cloud-files:open'] }, async (t: NT) => {
+    const host = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Owner' });
+    t.eq(host.status, 200, 'Cloud starts');
+    const cloud = host.j.url;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-native-tab-name-'));
+    let file: string | undefined;
+    let peer: Scratch | undefined;
+    try {
+        const made = await post(t.app.base, '/api/cloud/files/create', { cloud, name: 'Marketing site' });
+        t.eq(made.status, 201, 'Cloud file created');
+        file = made.j.file;
+        await t.cmd('open', { file, focus: false });
+        t.eq((await t.state()).file, t.file, 'quiet open keeps the local tab active');
+        await t.mark({ id: 'file-tab', label: 'Marketing site', exact: true });
+
+        await t.cmd('qa.cloud', { clouds: [{ url: cloud, name: 'Studio' }], commentName: 'Owner' });
+        await t.click(center(await t.mark({ id: 'home-tab' })));
+        await t.click(center(await t.mark({ id: 'home-row', label: 'Studio', exact: true })));
+        const card = await t.mark({ id: 'cloud-file', label: 'Marketing site', exact: true });
+        await t.click(center(card), { right: true });
+        await t.waitState(s => s.menu?.items.includes('Rename'), 'Cloud card Rename action');
+        await t.pickMenu('Rename');
+        await t.waitState(s => !!s.modal, 'file rename dialog');
+        await t.type('Campaign site', { window: 'modal' });
+        const rename = (await t.views('modal')).find(v => v.kind === 'button' && v.title === 'Rename');
+        t.ok(rename, 'rename button');
+        await t.click(center(rename!), { window: 'modal' });
+        const campaignTab = await t.mark({ id: 'file-tab', label: 'Campaign site', exact: true });
+        await t.click(center(campaignTab), { right: true });
+        await t.waitState(s => s.menu?.items.includes('Copy Link'), 'Cloud tab Copy Link action');
+        await t.pickMenu('Copy Link');
+        const copied = new URL((await t.cmd('qa.pasteboard')).text);
+        t.eq(copied.searchParams.get('cloudFile'), made.j.id, 'Copy Link points to the Cloud file');
+        t.eq(copied.searchParams.has('file'), false, 'Copy Link leaves out the cache path');
+        await t.app.openShown(t.file);
+        await t.waitState(s => s.file === t.file && !s.homeShown, 'the local tab is active before the remote rename');
+
+        peer = await startServer(dir, {
+            HOME: dir, CANVAS_STATE_DIR: path.join(dir, 'state'), CANVAS_CLOUD_SECRETS_FILE: path.join(dir, 'secrets.json'),
+            CANVAS_TUNNEL_BIN: path.join(ROOT, 'test/fixtures/fake-tunnel.sh'),
+            CANVAS_FAKE_TUNNEL_DIR: path.join(t.app.dir, 'tunnels'), CANVAS_FAKE_TUNNEL_NODE: process.execPath, CANVAS_FAKE_TUNNEL_ANY_PORT: '1',
+        });
+        const invite = await post(t.app.base, '/api/cloud/host/invite', { hostId: host.j.hostId, label: 'Editor', role: 'editor' });
+        t.eq((await post(peer.base, '/api/cloud/join', { link: invite.j.link, device: 'Test Mac' })).status, 200, 'editor joins');
+        const opened = await post(peer.base, '/api/cloud/files/open', { cloud, id: made.j.id });
+        t.eq(opened.status, 200, 'editor opens the file');
+        const renamed = await post(peer.base, '/api/canvas/rename', { file: opened.j.file, name: 'Launch site' });
+        t.eq(renamed.status, 200, 'editor renames the file');
+        await t.mark({ id: 'file-tab', label: 'Launch site', exact: true }, 10_000);
+        t.eq((await t.state()).file, t.file, 'remote rename keeps the tab in the background');
+        await t.app.openShown(file!);
+        await t.waitState(s => s.windows.some((w: any) => w.main && w.title === 'Launch site'), 'the window title follows the Cloud name');
+        await t.click(center(await t.mark({ id: 'home-tab' })));
+        await t.click(center(await t.mark({ id: 'home-row', label: 'Recents', exact: true })));
+        await t.mark({ id: 'home-card', label: 'Launch site', exact: true });
+        await t.app.openShown(t.file);
+
+        await post(t.app.base, '/api/cloud/host/stop', { hostId: host.j.hostId });
+        await t.app.relaunch();
+        await t.mark({ id: 'file-tab', label: 'Launch site', exact: true }, 10_000);
+        const tabs = await t.cmd('tabs');
+        t.eq(tabs.tabs.find((tab: any) => tab.file === file)?.name, 'Launch site', 'offline restore keeps the last known name');
+        await t.shot(path.join(ROOT, 'qa/out/native/cloud-tab-name-restored.png'));
+    } finally {
+        if (file) await t.cmd('close', { file }).catch(() => {});
+        await peer?.stop();
+        await t.cmd('qa.cloud', { clouds: [] }).catch(() => {});
+        await post(t.app.base, '/api/cloud/host/stop', { hostId: host.j.hostId });
+        await post(t.app.base, '/api/cloud/host/wipe', { hostId: host.j.hostId });
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 sc('cloud-files', 'Only actionable warnings appear on files; storage and people live in host settings', { covers: ['cloud-files:usage'] }, async (t: NT) => {
     await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
     const h = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Anna' });

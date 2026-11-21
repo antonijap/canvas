@@ -15,9 +15,25 @@ struct HomeLogicTests {
     }
 
     static func main() {
-        cloudMenu(); recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles()
+        fileNames(); cloudMenu(); recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func fileNames() {
+        let file = "/cache/Canvas/cloud-files/1234567890abcdef/12345678-abcd-4000-8000-0123456789ab.canvas"
+        check(HomeLogic.name(file) == "Cloud file", "an unknown Cloud name never shows the file id")
+        check(HomeLogic.name(file, cloudName: "Marketing site", listedName: "Older name") == "Marketing site", "Cloud metadata takes priority")
+        check(HomeLogic.name(file, listedName: "Marketing site") == "Marketing site", "a known Cloud list name is next")
+        let id = "12345678-abcd-4000-8000-0123456789ab"
+        check(HomeLogic.name(file, cloudName: " ", listedName: id) == "Cloud file", "blank and raw IDs are not display names")
+        check(HomeLogic.name(file + "/document.json", listedName: id + ".canvas") == "Cloud file", "the Cloud document JSON path also hides the ID")
+        check(HomeLogic.name("/docs/Local.canvas", listedName: "Local title") == "Local title", "local files use the listed name")
+        check(HomeLogic.name("/docs/\(id).canvas") == id, "a UUID is a valid local filename")
+        var recent = HomeCard(path: file, opened: 1, exists: true, openComments: 0)
+        recent.cloudName = "Marketing site"
+        check(HomeLogic.search([recent], "site mark") == [recent], "recents search uses the Cloud name")
+        check(HomeLogic.search([recent], id).isEmpty, "recents search hides the Cloud ID")
     }
 
     static func cloudMenu() {

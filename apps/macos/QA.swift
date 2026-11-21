@@ -220,6 +220,12 @@ enum QA {
     static func run(_ op: String, _ a: [String: Any]) async throws -> [String: Any] {
         switch op {
         case "qa.ping": return ["qa": true, "pid": Int(ProcessInfo.processInfo.processIdentifier)]
+        case "qa.quit":
+            // Let the bridge acknowledge before exiting. The synthetic event loop cannot wait for AppKit's quit dialog.
+            RunMarker.quit(.standard)
+            UserDefaults.standard.synchronize()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { exit(EXIT_SUCCESS) }
+            return ["ok": true]
         case "qa.window": return try windowOp(a)
         case "qa.mouse": return try await mouse(a)
         case "qa.drag": return try await drag(a)

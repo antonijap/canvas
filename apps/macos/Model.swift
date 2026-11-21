@@ -153,8 +153,18 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var widgetStatus: WidgetStatus?
     @Published var section: RailSection? = .boards
     @Published var allFiles: [FileEntry] = []
-    @Published var openFiles: [String] = UserDefaults.standard.stringArray(forKey: "canvas.openFiles") ?? []
-    @Published var cloudFileNames: [String: String] = [:]
+    @Published var openFiles: [String] = UserDefaults.standard.stringArray(forKey: "canvas.openFiles") ?? [] {
+        didSet {
+            UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
+            if Set(openFiles) != Set(oldValue) {
+                saveCloudFileNames()
+                if cloudNamesStarted { watchCloudFileNames(added: openFiles.filter { !oldValue.contains($0) }) }
+            }
+        }
+    }
+    @Published private(set) var cloudFileNames = UserDefaults.standard.dictionary(forKey: "canvas.cloudFileNames") as? [String: String] ?? [:]
+    private var cloudNamesStarted = false
+    private var cloudNameTasks: [String: Task<Void, Never>] = [:]
     @Published private(set) var isCloudFile = false
     @Published var cloudReadOnly = false
     @Published var currentFile: String?
@@ -284,7 +294,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             let cloud = m["cloudFile"] as? [String: Any]
             isCloudFile = cloud != nil
             cloudReadOnly = (cloud?["role"] as? String).map { $0 != "owner" && $0 != "editor" } ?? false
-            if let file = currentFile, let name = cloud?["name"] as? String { cloudFileNames[file] = name }
+            if let file = currentFile, cloudFileNames[file] == nil {
+                setCloudFileName(cloud?["name"] as? String, for: file)
+            }
         }
         if let z = m["zoom"] as? Double, let v = JSONNumber.int(z) { zoom = v }
         if m.keys.contains("selBoard") { selectedBoard = m["selBoard"] as? String }
@@ -394,7 +406,11 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             else if m["widgetStatus"] is NSNull { widgetStatus = nil }
         }
         guard let doc = m["doc"] as? [String: Any] else { return }
-        fileName = doc["name"] as? String ?? fileName
+        if let file = currentFile, CloudFilePath(file) != nil {
+            fileName = name(of: file)
+        } else {
+            fileName = doc["name"] as? String ?? fileName
+        }
         revision = doc["revision"] as? String ?? ""
         boards = (doc["boards"] as? [[String: Any]] ?? []).map {
             Board(id: $0["id"] as? String ?? "", name: $0["name"] as? String ?? ($0["id"] as? String ?? ""),
@@ -432,11 +448,11 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         isCloudFile = false
         cloudReadOnly = false
         currentFile = file
+        if CloudFilePath(file) != nil { fileName = name(of: file) }
         if widgetKinds.isEmpty { fetchKinds() }
         UserDefaults.standard.set(file, forKey: "canvas.lastFile")
         if !openFiles.contains(file) { openFiles.append(file) }
         if openFiles.count > 40 { openFiles.removeFirst(openFiles.count - 40) }
-        UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
         if quietRecents.remove(file) == nil { MainActor.assumeIsolated { HomeStore.shared.touch(file) } }
     }
 
@@ -446,7 +462,6 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         let moved = TabOrder.move(openFiles, from: i, to: index)
         guard moved != openFiles else { return }
         openFiles = moved
-        UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
     }
 
     /// Shift+Cmd+[ and ]: the previous or next tab in the strip's order, Home first.
@@ -456,7 +471,65 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func name(of file: String) -> String {
-        cloudFileNames[file] ?? allFiles.first { $0.file == file }?.name ?? URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+        HomeLogic.name(file, cloudName: cloudFileNames[file], listedName: allFiles.first { $0.file == file }?.name)
+    }
+
+    func setCloudFileName(_ candidate: String?, for file: String) {
+        guard let name = CloudFilePath(file)?.displayName(candidate), cloudFileNames[file] != name else { return }
+        cloudFileNames[file] = name
+        saveCloudFileNames()
+        if file == currentFile { fileName = name }
+    }
+
+    private func saveCloudFileNames() {
+        let keep = Set(openFiles + (Recents.load() ?? []).map(\.path))
+        let names = cloudFileNames.filter { keep.contains($0.key) }
+        UserDefaults.standard.set(names, forKey: "canvas.cloudFileNames")
+    }
+
+    func startCloudFileNames() {
+        cloudNamesStarted = true
+        watchCloudFileNames(added: openFiles)
+    }
+
+    private func watchCloudFileNames(added: [String]) {
+        for file in added where CloudFilePath(file) != nil && cloudFileNames[file] == nil {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let info = await CloudAccount.get(self, "api/cloud/files/info", query: [URLQueryItem(name: "file", value: file)])
+                guard self.openFiles.contains(file), self.cloudFileNames[file] == nil else { return }
+                self.setCloudFileName(info["name"] as? String, for: file)
+            }
+        }
+
+        // The file list has the current name, including renames by other members. Hidden tabs do not have page streams.
+        let keys = Set(openFiles.compactMap { CloudFilePath($0)?.key })
+        for key in cloudNameTasks.keys.filter({ !keys.contains($0) }) {
+            cloudNameTasks.removeValue(forKey: key)?.cancel()
+        }
+        for key in keys where cloudNameTasks[key] == nil {
+            cloudNameTasks[key] = Task { @MainActor [weak self] in
+                while !Task.isCancelled {
+                    guard let self else { return }
+                    await self.refreshCloudFileNames(key)
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                }
+            }
+        }
+    }
+
+    @MainActor private func refreshCloudFileNames(_ key: String) async {
+        let before = cloudFileNames
+        let response = await CloudAccount.get(self, "api/cloud/files", query: [URLQueryItem(name: "cloud", value: key)])
+        guard !Task.isCancelled, let rows = response["files"] as? [[String: Any]] else { return }
+        var names: [String: String] = [:]
+        for row in rows {
+            if let id = row["id"] as? String { names[id] = row["name"] as? String }
+        }
+        for file in openFiles where cloudFileNames[file] == before[file] {
+            guard let cloud = CloudFilePath(file), cloud.key == key else { continue }
+            setCloudFileName(names[cloud.id], for: file)
+        }
     }
 
     /// MCP quiet open adds a tab without changing the document, selection, Home or window focus.
@@ -464,7 +537,6 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func openQuietly(_ file: String) {
         guard !openFiles.contains(file), DocURL.page(base: base, file: file) != nil else { return }
         openFiles.append(file)
-        UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
     }
 
     func open(_ file: String) {
@@ -717,8 +789,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func openTab(_ file: String) {
         guard isMissing(file) else { open(file); return }
         let alert = NSAlert()
-        alert.messageText = "\u{201C}\(URL(fileURLWithPath: file).lastPathComponent)\u{201D} was not found"
-        alert.informativeText = "It was moved, renamed or deleted:\n\(file)"
+        alert.messageText = "\u{201C}\(name(of: file))\u{201D} was not found"
+        alert.informativeText = CloudFilePath(file) == nil
+            ? "It was moved, renamed or deleted:\n\(file)"
+            : "This Cloud file is unavailable on this Mac."
         alert.addButton(withTitle: "Locate\u{2026}")
         alert.addButton(withTitle: "Close Tab")
         alert.addButton(withTitle: "Cancel")
@@ -732,14 +806,13 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// Points a missing tab at the file's new place and opens it there.
     func locate(_ file: String) {
         let panel = NSOpenPanel()
-        panel.title = "Locate \(URL(fileURLWithPath: file).lastPathComponent)"
+        panel.title = "Locate \(name(of: file))"
         panel.allowedContentTypes = [Self.canvasType]
         panel.directoryURL = URL(fileURLWithPath: file).deletingLastPathComponent()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         openFiles = TabList.replacing(openFiles, file, with: url.path)
-        UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
         MainActor.assumeIsolated { HomeStore.shared.replace(file, with: url.path) }
         open(url.path)
     }
@@ -793,16 +866,26 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func renameFile(_ file: String, to raw: String) {
-        guard let name = TabRename.name(raw) else { flash("Choose a name without slashes or a leading dot"); return }
+        let name: String
+        if CloudFilePath(file) != nil {
+            name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name.utf16.count <= 200 else { flash("Choose a name up to 200 characters"); return }
+        } else {
+            guard let local = TabRename.name(raw) else { flash("Choose a name without slashes or a leading dot"); return }
+            name = local
+        }
         flushTextEdit { ok in
             guard ok else { return }
             self.afterWrites {
                 self.post("api/canvas/rename", ["file": file, "name": name]) { renamed, error in
                     guard let renamed else { self.flash(error ?? "Could not rename the file"); return }
+                    if CloudFilePath(file) != nil {
+                        self.setCloudFileName(name, for: file)
+                        return
+                    }
                     guard renamed != file else { return }
                     if self.openFiles.contains(file) {
                         self.openFiles = TabList.replacing(self.openFiles, file, with: renamed)
-                        UserDefaults.standard.set(self.openFiles, forKey: "canvas.openFiles")
                     }
                     self.allFiles = self.allFiles.map { $0.file == file ? FileEntry(name: URL(fileURLWithPath: renamed).deletingPathExtension().lastPathComponent, file: renamed) : $0 }
                     self.sectionByFile[renamed] = self.sectionByFile.removeValue(forKey: file)
@@ -862,7 +945,6 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         guard let i = openFiles.firstIndex(of: file) else { return }
         openFiles.remove(at: i)
         Task { _ = await CloudAccount.post(self, "api/cloud/files/close", ["file": file]) }
-        UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
         drop(file) // a hidden tab's page goes with it (the shown one goes once another is shown)
         guard file == currentFile else { return }
         // Closing a tab while Home is showing leaves Home showing.
@@ -875,6 +957,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         } else {
             snapshotShown()
             currentFile = nil
+            if CloudFilePath(file) != nil { fileName = "" }
             UserDefaults.standard.removeObject(forKey: "canvas.lastFile")
             clearDocumentState()
             clearSidebarState()
@@ -1272,7 +1355,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         let ready = "!!(window.canvasHost && window.canvasHost.file === \(JSONText.string(file)) && window.canvasHost.doc && window.canvasBridge && window.canvasHost.copyLink)"
         webView.evaluateJavaScript(ready) { r, _ in
             if (r as? Bool) == true { self.run(link.pageCommand); return }
-            guard Date() < deadline else { self.flash("Canvas could not show the link: \(URL(fileURLWithPath: file).lastPathComponent) did not open"); return }
+            guard Date() < deadline else { self.flash("Canvas could not show the link: \(self.name(of: file)) did not open"); return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { self.revealLink(link, file: file, token: token, deadline: deadline) }
         }
     }

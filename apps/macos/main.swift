@@ -304,7 +304,7 @@ func openCanvasLink(_ url: URL) {
     Task { @MainActor in
       let (status, j) = await CloudAccount.post(model, "api/cloud/files/open", ["cloud": cloud, "id": id])
       if status == 200, let file = j["file"] as? String {
-        model.cloudFileNames[file] = j["name"] as? String
+        model.setCloudFileName(j["name"] as? String, for: file)
         model.open(file)
       } else { model.flash(j["error"] as? String ?? "Could not open the Cloud file") }
     }
@@ -313,7 +313,7 @@ func openCanvasLink(_ url: URL) {
   }
   guard let link = CanvasLink.parse(url) else { model.flash("That Canvas link is not one Canvas can open"); return }
   guard FileManager.default.fileExists(atPath: link.file) else {
-    model.flash("Canvas cannot find \(URL(fileURLWithPath: link.file).lastPathComponent): it was moved, renamed or deleted")
+    model.flash("Canvas cannot find \(model.name(of: link.file)): it was moved, renamed or deleted")
     return
   }
   openedFromFinder = true // the remembered file must not open over it
@@ -1152,6 +1152,7 @@ DispatchQueue.global(qos: .userInitiated).async {
     MainActor.assumeIsolated { Updater.shared.launched() }
     // A Finder open that arrived before the server was up goes first; otherwise the remembered file.
     model.refreshAgentReady()
+    model.startCloudFileNames()
     let defaults = UserDefaults.standard, env = ProcessInfo.processInfo.environment
     let last = defaults.string(forKey: "canvas.lastFile")
     if FirstRun.marksWelcomed(lastFile: last, openFiles: model.openFiles, env: env) { defaults.set(true, forKey: FirstRun.key) }

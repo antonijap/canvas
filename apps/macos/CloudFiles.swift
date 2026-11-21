@@ -33,13 +33,7 @@ struct CloudFilesView: View {
         #if CANVAS_QA
         if path == "api/cloud/usage", let meter = QA.cloudUsage { return meter }
         #endif
-        var c = URLComponents(url: model.base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        c?.queryItems = [URLQueryItem(name: "cloud", value: entry.url)]
-        guard let url = c?.url else { return [:] }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 10
-        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return [:] }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        return await CloudAccount.get(model, path, query: [URLQueryItem(name: "cloud", value: entry.url)])
     }
 
     private func refresh() async {
@@ -70,9 +64,36 @@ struct CloudFilesView: View {
             let (status, j) = await CloudAccount.post(model, "api/cloud/files/open", ["cloud": entry.url, "id": item.id])
             opening = false
             if status == 200, let file = j["file"] as? String {
-                model.cloudFileNames[file] = item.name
+                model.setCloudFileName(j["name"] as? String, for: file)
                 model.open(file)
             } else { model.flash(CloudFilesText.problem(code: j["code"] as? String, fallback: "Could not open the Cloud file. Try again.")) }
+        }
+    }
+
+    private func rename(_ item: CloudFileItem) {
+        let alert = NSAlert()
+        alert.messageText = "Rename file"
+        let field = NSTextField(string: item.name)
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        field.setAccessibilityLabel("File name")
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue
+        let key = CloudFilePath.key(for: entry.url)
+        if let file = model.openFiles.first(where: { CloudFilePath($0).map { $0.key == key && $0.id == item.id } == true }) {
+            model.renameFile(file, to: name)
+            return
+        }
+        Task {
+            let (status, result) = await CloudAccount.post(model, "api/cloud/files/open", ["cloud": entry.url, "id": item.id])
+            if status == 200, let file = result["file"] as? String {
+                model.renameFile(file, to: name)
+            } else {
+                model.flash(CloudFilesText.problem(code: result["code"] as? String, fallback: "Could not rename the Cloud file"))
+            }
         }
     }
 
@@ -163,7 +184,14 @@ struct CloudFilesView: View {
                         ForEach(visible) { item in
                             CloudFileCard(name: item.name, subtitle: CloudFilesText.edited(item.updated)) { open(item) }
                                 .disabled(busy).qaID("cloud-file", label: item.name)
-                                .contextMenu { Button("Open") { open(item) }.disabled(busy || offline) }
+                                .contextMenu {
+                                    Button("Open") { open(item) }.disabled(busy || offline)
+                                    if canEdit {
+                                        Button("Rename") {
+                                            RunLoop.main.perform { MainActor.assumeIsolated { rename(item) } }
+                                        }.disabled(busy)
+                                    }
+                                }
                         }
                     }.padding(.bottom, HomeMetric.gutter)
                     if visible.isEmpty { Text("No files match your search").font(Typography.body).foregroundStyle(Palette.mutedFg).qaText("No files match your search") }
