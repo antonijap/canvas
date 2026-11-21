@@ -68,7 +68,8 @@ sc("blueprint", "blueprint board drag, reload and zoom", {
   await t.flush();
   t.eq(t.node(childId)!.width, child.width + 16, "layer resize snaps");
 
-  const note = await t.a.post("/api/widgets", { kind: "note", name: "Grid note", page, x: -7624, y: -7920, w: 240, h: 192 });
+  const pageWidth = 320;
+  const note = await t.a.post("/api/widgets", { kind: "note", name: "Grid note", page, x: -7624, y: -7920, w: pageWidth, h: 192, config: { pageWidth } });
   const cardId = note.widget.id;
   const cardRect = () => t.ev<{ x: number; y: number; w: number; h: number }>(`(() => {
     const r = document.querySelector('.wd[data-id="widget:${cardId}"]').getBoundingClientRect();
@@ -83,7 +84,8 @@ sc("blueprint", "blueprint board drag, reload and zoom", {
   card = await cardRect();
   await t.io.drag(card.x + card.w - 3, card.y + card.h / 2, card.x + card.w + 10, card.y + card.h / 2);
   await t.flush();
-  t.eq(savedCard().w, 256, "card resize snaps");
+  t.eq(savedCard().w, pageWidth + 16, "card resize snaps");
+  t.eq(savedCard().config.pageWidth, pageWidth + 16, "the snapped width is kept by the card");
   await t.clearSel();
   await t.ev(`if (window.canvasHost.nav.state.pixelGrid) window.canvasHost.nav.run({ op: "grid" }); true`);
   for (const theme of ["light", "dark"]) {
