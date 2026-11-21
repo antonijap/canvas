@@ -1,9 +1,10 @@
 // PostHog data on a card: an insight by short id, or a HogQL query, shown as one number or as a chart
 // (display.chart). Bearer personal API key (scopes query:read and insight:read) from the Keychain.
 
-import { bad, bool, extras, int, obj, oneOf, str } from "../check.ts";
+import { bad, bool, extras, int, isObject, obj, oneOf, str } from "../check.ts";
 import { deltaOf, formatValue, FORMAT_RE } from "../format.ts";
 import { parseRef } from "../keychain.ts";
+import { webOrigin } from "../trust.ts";
 import { WidgetError, type ChartData, type ChartType, type Config, type SecretRef, type SourceData, type WidgetKind } from "../types.ts";
 
 const KNOWN = ["host", "projectId", "source", "insight", "query", "secret", "display", "refreshSec"];
@@ -334,6 +335,7 @@ export function normalize(json: unknown, source: string, display: Record<string,
 
 export const posthog: WidgetKind = {
   id: "posthog",
+  picker: false,
   title: "PostHog",
   symbol: "chart.line.uptrend.xyaxis",
   defaultSize: { w: 220, h: 140 },
@@ -446,12 +448,23 @@ export const posthog: WidgetKind = {
     { key: "refreshSec", label: "Refresh (seconds)", type: "number" },
   ],
   source: {
+    approval: {
+      field: "host", verb: "load",
+      target(c) {
+        const query = c.source === "query";
+        const settings = query ? c.query : c.insight;
+        if (typeof c.host === "string" && c.projectId && isObject(settings) && settings[query ? "query" : "shortId"]) {
+          return webOrigin(baseOf(c.host));
+        }
+      },
+    },
     key: (c) => JSON.stringify([c.host, c.projectId, c.source, c.source === "insight" ? c.insight : c.query, c.secret, c.display]),
     minIntervalSec: 60,
     intervalSec: (c) => Number(c.refreshSec) || 300,
     secretUse(c) {
       const ref = c.secret as SecretRef | undefined;
-      return ref ? { ref, origin: new URL(baseOf(String(c.host))).origin } : undefined;
+      const origin = typeof c.host === "string" ? webOrigin(baseOf(c.host)) : undefined;
+      return ref && origin ? { ref, origin } : undefined;
     },
     async fetch(ctx): Promise<SourceData> {
       const c = ctx.widget.config;
@@ -461,14 +474,16 @@ export const posthog: WidgetKind = {
       const byInsight = c.source !== "query";
       if (!c.projectId || (byInsight ? !insight.shortId : !query.query)) throw new WidgetError(0, "not-configured", "Set the project and the insight or query");
       if (!ref) throw new WidgetError(0, "needs-secret", "Pick the Keychain item that holds your PostHog API key");
-      const base = baseOf(String(c.host));
+      const base = typeof c.host === "string" ? webOrigin(baseOf(c.host)) : undefined;
+      if (!base) throw new WidgetError(0, "bad-url", "Set a valid analytics host");
       const project = `${base}/api/projects/${encodeURIComponent(String(c.projectId))}`;
       const refresh = ctx.force ? "force_blocking" : "blocking";
       const res = byInsight
-        ? await ctx.request({ url: `${project}/insights/?short_id=${encodeURIComponent(String(insight.shortId))}&refresh=${refresh}`, secret: ref, maxBytes: 2_000_000 })
+        ? await ctx.request({ url: `${project}/insights/?short_id=${encodeURIComponent(String(insight.shortId))}&refresh=${refresh}`, secret: ref, maxBytes: 2_000_000, sameOrigin: true })
         : await ctx.request({
             url: `${project}/query/`,
             method: "POST",
+            sameOrigin: true,
             body: { query: { kind: "HogQLQuery", query: query.query }, name: "canvas-widget", refresh },
             secret: ref,
             maxBytes: 2_000_000,

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { diffImages, sideBySide } from "../fidelity/diff.ts";
 import { decodePng, encodePng } from "../fidelity/png.ts";
+import { kindOf } from "../src/widgets/registry.ts";
 import { validateNode, validateVariable, type DocNode } from "../src/doc/schema.ts";
 
 /** A scenario can opt out of a shared check, with the reason. */
@@ -14,8 +15,6 @@ export type OptOut = Partial<Record<CheckName, string>>;
 /** Budgets from docs/perf/latency.md (p95, ms). */
 export const BUDGET = { frame: 16.7, input: 16.7, write: 100 } as const;
 export type LatencyKind = keyof typeof BUDGET;
-
-export const WIDGET_KINDS = new Set(["todo", "note", "posthog", "shader", "video", "welcome"]);
 
 // ---------------------------------------------------------------- file
 
@@ -97,7 +96,7 @@ export function checkDocument(doc: Doc, side: any): string[] {
       if (!w || typeof w.id !== "string") { errs.push("a card has no id"); continue; }
       if (wids.has(w.id)) errs.push(`duplicate card ${w.id}`);
       wids.add(w.id);
-      if (!WIDGET_KINDS.has(w.kind)) errs.push(`card ${w.id} has unknown kind ${w.kind}`);
+      if (!kindOf(w.kind)) errs.push(`card ${w.id} has unknown kind ${w.kind}`);
       if (pages.length && w.page !== undefined && !pageIds.has(w.page)) errs.push(`card ${w.id} is on page ${w.page}, which does not exist`);
       for (const k of ["x", "y", "w", "h"]) if (!Number.isFinite(w[k])) errs.push(`card ${w.id}: ${k} is ${JSON.stringify(w[k])}`);
       if (w.w <= 0 || w.h <= 0) errs.push(`card ${w.id} has size ${w.w} x ${w.h}`);

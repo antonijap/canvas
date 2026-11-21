@@ -270,7 +270,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
 
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
         // Only the shown tab speaks for the window: a hidden one's selection, toasts or document are not on screen.
-        guard message.webView === webView else { return }
+        guard message.frameInfo.isMainFrame, message.webView === webView else { return }
         guard let text = message.body as? String, let data = text.data(using: .utf8),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         DispatchQueue.main.async { self.apply(m) }
@@ -327,6 +327,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             } else {
                 pb.setString(clip, forType: .string)
             }
+        }
+        if let raw = m["widgetExternalURL"] as? String, let url = URL(string: raw),
+           let scheme = url.scheme, ["http", "https"].contains(scheme), url.host != nil {
+            NSWorkspace.shared.open(url)
         }
         if m["snapHello"] != nil { pushSnap(); pushPrefs(); resendInsets() }
         if m["bottomOverlayReady"] != nil {

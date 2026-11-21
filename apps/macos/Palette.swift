@@ -26,6 +26,7 @@ struct PaletteItem: Identifiable {
     var secondary: (() -> Void)?
     /// Small text on the right (Recent asks: when).
     var trailing: String?
+    var widgetKind: WidgetKindInfo?
     let run: () -> Void
 }
 
@@ -353,9 +354,10 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
     }
 
     private func commandItems(_ model: CanvasModel) -> [PaletteItem] {
-        Self.commands(model).filter { $0.applies(model) }.map { c in
+        let kinds = Dictionary(uniqueKeysWithValues: model.widgetKinds.map { ("card:" + $0.id, $0) })
+        return Self.commands(model).filter { $0.applies(model) }.map { c in
             PaletteItem(id: "cmd:" + c.key, title: c.title, symbol: c.symbol, tint: c.tint,
-                        shortcut: c.shortcut, recentKey: "cmd:" + c.key) { c.run(model) }
+                        shortcut: c.shortcut, recentKey: "cmd:" + c.key, widgetKind: kinds[c.key]) { c.run(model) }
         }
     }
 
@@ -416,7 +418,13 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
             let byId = Dictionary(groups.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
             out = order.compactMap { byId[$0] }
         }
-        groups = out
+        groups = out.flatMap { group in
+            let cards = group.items.filter { $0.widgetKind != nil }
+            guard !cards.isEmpty else { return [group] }
+            let rows = group.items.filter { $0.widgetKind == nil }
+            let picker = PaletteGroup(id: "widgets:" + group.id, title: "Add widgets", items: cards)
+            return rows.isEmpty ? [picker] : [PaletteGroup(id: group.id, title: group.title, items: rows), picker]
+        }
         if cursor >= flat.count { cursor = max(0, flat.count - 1) }
     }
 
@@ -531,8 +539,8 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
         for t in AppTheme.allCases where t != model.theme {
             out.append(PaletteCommand(key: "theme:" + t.rawValue, title: "\(t.title) Theme", symbol: t.symbol, keywords: "appearance mode", applies: { _ in true }, run: { m in m.theme = t }))
         }
-        for k in model.widgetKinds {
-            out.append(PaletteCommand(key: "card:" + k.id, title: "Add \(k.title) Card", symbol: k.symbol, keywords: "widget new insert", applies: { $0.currentFile != nil }, run: { $0.addWidget(k.id) }))
+        for k in model.widgetKinds where k.inPicker {
+            out.append(PaletteCommand(key: "card:" + k.id, title: "Add \(k.title) Card", symbol: k.symbol, keywords: "widget new insert " + k.description, applies: { $0.currentFile != nil }, run: { $0.addWidget(k.id) }))
         }
         fromMenus(["File", "Canvas"])
         return out
@@ -582,7 +590,10 @@ private struct PalettePanel: View {
     /// The list's height: one-line rows and the gaps between them, up to a cap (then it scrolls). No group headers:
     /// the groups only set the order.
     private var listHeight: CGFloat {
-        min(CGFloat(palette.flat.count) * (Metric.row + 2) + 4, 420)
+        let height = palette.groups.reduce(CGFloat(4)) { total, group in
+            total + (group.id.hasPrefix("widgets:") ? CGFloat((group.items.count + 3) / 4) * 126 : CGFloat(group.items.count) * (Metric.row + 2))
+        }
+        return min(height, 420)
     }
 
     var body: some View {
@@ -613,9 +624,23 @@ private struct PalettePanel: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(palette.flat.enumerated()), id: \.element.id) { i, item in
-                        PaletteRow(item: item, active: i == palette.cursor) { palette.perform(item) }
-                            .id(item.id)
+                    ForEach(palette.groups) { group in
+                        if group.id.hasPrefix("widgets:") {
+                            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8, alignment: .top), count: 4), spacing: 8) {
+                                ForEach(group.items) { item in
+                                    if let kind = item.widgetKind {
+                                        WidgetPickerTile(kind: kind, active: item.id == palette.current?.id) { palette.perform(item) }
+                                            .id(item.id)
+                                    }
+                                }
+                            }
+                            .padding(4)
+                        } else {
+                            ForEach(group.items) { item in
+                                PaletteRow(item: item, active: item.id == palette.current?.id) { palette.perform(item) }
+                                    .id(item.id)
+                            }
+                        }
                     }
                 }
             }

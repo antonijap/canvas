@@ -14,6 +14,7 @@ process.env.CANVAS_SECURITY_BIN = stubSecurity(dir, { "posthog:key": "phx_test_K
 
 const w = await import("../src/widgets.ts");
 const { baseOf, normalize } = await import("../src/widgets/kinds/posthog.ts");
+const { approveSource } = await import("../src/widgets/trust.ts");
 
 const docFile = writeDoc(dir);
 let fake: Fake;
@@ -39,6 +40,7 @@ before(async () => {
     sendJson(res, { detail: "not found" }, 404);
   });
   process.env.CANVAS_POSTHOG_BASE = fake.url;
+  approveSource("posthog", fake.url);
 });
 after(async () => {
   await fake.close();
@@ -145,8 +147,11 @@ describe("posthog widget", () => {
     const wd = await make({ host: "https://ph.example.org", source: "insight", insight: { shortId: "trend1" } });
     const r = await read(wd.id);
     assert.equal(r.state, "needs-approval");
+    assert.equal(r.approvalTarget, "https://ph.example.org");
     assert.match(r.error!.message, /ph\.example\.org/);
     assert.equal(fake.hits.length, hits, "nothing was sent");
+    assert.deepEqual(await w.trustWidget(docFile, wd.id, undefined, false, r.approvalTarget), { ok: true, target: "https://ph.example.org" });
+    assert.deepEqual(JSON.parse(fs.readFileSync(process.env.CANVAS_TRUST_FILE!, "utf8")).approvals, {}, "allowing a source does not release a secret");
     assert.deepEqual(await w.trustWidget(docFile, wd.id), { ok: true, origin: "https://ph.example.org" });
     assert.deepEqual(JSON.parse(fs.readFileSync(process.env.CANVAS_TRUST_FILE!, "utf8")).approvals, { "posthog\0key": ["https://ph.example.org"] });
   });

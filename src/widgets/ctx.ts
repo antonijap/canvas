@@ -21,6 +21,7 @@ export async function request(o: RequestOptions): Promise<JsonResponse> {
     headers: { ...(o.headers ?? {}), ...(hasBody ? { "content-type": "application/json" } : {}) },
     body: hasBody ? JSON.stringify(o.body) : undefined,
     secret,
+    sameOrigin: o.sameOrigin,
     maxBytes: o.maxBytes ?? 1_000_000,
   });
   if (res.status === 401 || res.status === 403) {

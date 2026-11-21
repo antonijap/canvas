@@ -22,12 +22,13 @@ export function freePort(): Promise<number> {
   });
 }
 
-export type Scratch = { port: number; base: string; proc: ChildProcess; log: string[]; stop: () => Promise<void> };
+export type Scratch = { widgetsDir: string; port: number; base: string; proc: ChildProcess; log: string[]; stop: () => Promise<void> };
 
 /** `node src/server.ts` on a free port, reading and writing only under `dir`. */
 export async function startServer(dir: string, extraEnv: Record<string, string> = {}): Promise<Scratch> {
   const port = await freePort();
   const log: string[] = [];
+  const widgetsDir = path.join(dir, ".local-widgets");
   const proc = spawn(process.execPath, [path.join(ROOT, "src/server.ts")], {
     cwd: ROOT,
     env: {
@@ -36,6 +37,7 @@ export async function startServer(dir: string, extraEnv: Record<string, string> 
       CANVAS_CHECK_ACTIONS: "1",
       CANVAS_ROOTS: dir,
       CANVAS_WEB_FONTS: "0",
+      CANVAS_WIDGETS_DIR: widgetsDir,
       CANVAS_TRUST_FILE: path.join(dir, ".trust.json"),
       CANVAS_VIDEO_PROXIES: path.join(dir, ".video-proxies"),
       CANVAS_MCP_NO_SPAWN: "1",
@@ -65,7 +67,7 @@ export async function startServer(dir: string, extraEnv: Record<string, string> 
     await sleep(50);
   }
   return {
-    port, base, proc, log,
+    port, base, proc, log, widgetsDir,
     stop: async () => {
       if (proc.exitCode !== null) return;
       const gone = new Promise<void>((r) => proc.once("exit", () => r()));

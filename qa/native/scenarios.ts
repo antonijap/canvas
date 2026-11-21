@@ -10,6 +10,7 @@ import { PLAYGROUND } from "../playground.ts";
 import { execFileSync } from "node:child_process";
 import { ROOT, copyDir, gradientPng, sleep } from "../lib.ts";
 import { buildLink, parseLink } from "../../src/page/link-logic.js";
+import { fakeServer, sendJson } from "../../test/helpers.ts";
 import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";
 import "./scenarios-cloud.ts";
@@ -24,10 +25,92 @@ import { intoInspector } from "./scenarios-leftovers.ts";
 const CANVAS_SPOT: Pt = { x: 900, y: 640 };
 const SEL_BLUE = ["#3B82F6", "#0766EB"];
 
+const WIDGET_GREY = { light: "#626267", dark: "#bcbcc4" };
+
 /** A point on the canvas in world space: the card dropped there should be centred on it. */
 async function dropWorld(t: NT, p: Pt) { return t.world(p); }
 
 // ---------------------------------------------------------------- the sidebar's drags
+
+sc("widgets", "widget picker shows drawn previews in a two-column grid", { covers: ["card-add:card-note"] }, async (t: NT) => {
+  const folder = path.join(t.app.dir, "local-widgets", "hello");
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, "manifest.json"), JSON.stringify({
+    id: "hello", title: "Hello", description: "Example greeting", defaultSize: { w: 240, h: 160 }, settings: [],
+    previewHTML: "<strong>Preview greeting</strong>",
+  }));
+  fs.writeFileSync(path.join(folder, "renderer.js"), "export default (root) => { root.textContent = 'Hello'; };");
+  const was = (await t.app.cmd({ op: "theme.get" })).mode;
+  try {
+    await t.section("Widgets");
+    await t.mark({ label: "Mine", exact: true });
+    await t.mark({ id: "widget-preview-hello" });
+    for (const theme of ["light", "dark"]) {
+      await t.app.cmd({ op: "theme.set", args: { mode: theme } });
+      await t.waitState((s) => s.theme === theme, theme + " theme");
+      const page = await t.mark({ id: "widget-preview-note" });
+      const todo = await t.mark({ id: "widget-preview-todo" });
+      const title = await t.mark({ label: "Page", region: { x: page.x, y: page.y, w: page.w, h: 94 } });
+      t.near(page.y, todo.y, 1, "the first two previews share a row");
+      t.ok(page.x > todo.x + todo.w, "the second preview has its own column");
+      t.ok(page.h >= 40 && title.y >= page.y + page.h, "the preview is drawn above the title");
+      const git = await t.mark({ id: "widget-preview-git-status" });
+      const ci = await t.mark({ id: "widget-preview-ci" });
+      t.near(git.y, ci.y, 1, "the previews share a row");
+      const ciTitle = await t.mark({ label: "CI and PRs", region: { x: ci.x, y: ci.y + ci.h, w: ci.w, h: 44 } });
+      const gitTitle = await t.mark({ label: "Git status", region: { x: git.x, y: git.y + git.h, w: git.w, h: 44 } });
+      t.near(ciTitle.y, gitTitle.y, 1, "titles share a baseline");
+      const ciTile = await t.mark({ id: "widget-tile-ci" });
+      const gitTile = await t.mark({ id: "widget-tile-git-status" });
+      t.near(ciTile.h, gitTile.h, 1, "tiles have equal height");
+      await t.shot(path.join(ROOT, "qa", "out", "native", "widget-picker-" + theme + ".png"));
+    }
+    await t.click(center(await t.mark({ id: "widget-preview-hello" })));
+    const widget = await t.waitDisk(() => t.widgets().widgets.find((w: any) => w.kind === "hello"), "the local widget from the picker");
+    const selector = JSON.stringify('.wd[data-id="widget:' + widget.id + '"]');
+    await t.waitJs(`document.querySelector(${selector})?.querySelector("button[aria-label='Allow widget']")`, "the local approval button");
+    await t.js(`document.querySelector(${selector}).querySelector("button[aria-label='Allow widget']").click();`);
+    await t.waitJs(`document.querySelector(${selector})?.querySelector("iframe[data-rendered]")`, "the local renderer in WebKit");
+  } finally {
+    fs.rmSync(folder, { recursive: true, force: true });
+    await t.app.cmd({ op: "theme.set", args: { mode: was } }).catch(() => {});
+  }
+});
+
+sc("widgets", "widget picker in Quick actions previews and adds Metric", { covers: ["palette:keyboard"] }, async (t: NT) => {
+  await t.section("Layers");
+  await t.click(CANVAS_SPOT);
+  await t.key("k", ["cmd"]);
+  await t.waitState((s) => s.palette.open, "Quick actions opens");
+  await t.type("add metric");
+  const preview = await t.mark({ id: "widget-preview-metric" });
+  t.ok(preview.w >= 80 && preview.h >= 40, "the result has a drawn thumbnail");
+  await t.key("Return");
+  await t.waitDisk(() => t.widgets().widgets.some((w: any) => w.kind === "metric"), "Metric is added from Quick actions");
+});
+
+sc("widgets", "approve a shared metric from the inspector", { covers: ["widget-source-approval:inspector"] }, async (t: NT) => {
+  const host = await fakeServer((_req, res) => sendJson(res, 42));
+  try {
+    const file = path.join(t.file, "widgets.json");
+    const state = t.widgets();
+    const id = "shared-metric";
+    state.widgets.push({ id, kind: "metric", name: "Shared metric", x: 2300, y: 60,
+      w: 300, h: 176, locked: false, config: { url: host.url } });
+    fs.writeFileSync(file, JSON.stringify(state));
+    await t.look(2300, 60);
+    const card = `document.querySelector('.wd[data-id="widget:shared-metric"] .wd-live')`;
+    await t.waitJs(`${card}?.dataset.state === "needs-approval"`, "the card asks to load the metric");
+    await t.js(`window.canvasHost.setSelection(["widget:shared-metric"]);`);
+    const button = await t.mark({ id: "widget-allow-source" });
+    t.eq(host.hits.length, 0, "selecting the card made no request");
+    await t.click(center(button));
+    await t.waitJs(`${card}?.dataset.state === "ok"`, "the allowed metric loads");
+    t.ok(host.hits.length > 0, "the approved origin was contacted");
+  } finally {
+    await host.close();
+  }
+});
 
 sc("widgets", "drag a widget from the library onto the canvas", { covers: ["card-add:card-note"] }, async (t: NT) => {
   await t.section("Widgets");
@@ -978,7 +1061,7 @@ sc("clipboard", "copy cards and a board in one tab, paste them in another tab", 
 });
 
 for (const theme of ["light", "dark"] as const) {
-  sc("cards", `a selected card shows its blue outline, ${theme}`, { covers: [`card-select:card-todo`, `card-select:${theme}`] }, async (t: NT) => {
+  sc("cards", `a selected card shows its grey outline, ${theme}`, { covers: [`card-select:card-todo`, `card-select:${theme}`] }, async (t: NT) => {
     const was = (await t.app.cmd({ op: "theme.get" })).mode;
     try {
       await t.app.cmd({ op: "theme.set", args: { mode: theme } });
@@ -992,16 +1075,16 @@ for (const theme of ["light", "dark"] as const) {
       const r = { x: card.x + st.webFrame.x, y: card.y + st.webFrame.y, w: card.w, h: card.h };
       const ring = { x: r.x + 24, y: r.y - 2.5, w: r.w - 48, h: 2.5 }; // just above the top edge, away from the corners
       const inner = { x: r.x + 24, y: r.y + 4, w: r.w - 48, h: 3 };
-      const blue = async (region: typeof ring) => { const px = await t.cmd("qa.pixels", { region, colors: SEL_BLUE, tol: 40 }); return px.count / Math.max(1, px.total); };
+      const grey = async (region: typeof ring) => { const px = await t.cmd("qa.pixels", { region, colors: [WIDGET_GREY[theme]], tol: 24 }); return px.count / Math.max(1, px.total); };
       await t.js("window.canvasHost.clearSel();");
       await sleep(300);
-      t.ok((await blue(ring)) < 0.1, "no outline before the card is selected");
+      t.ok((await grey(ring)) < 0.1, "no outline before the card is selected");
       await t.js(`window.canvasHost.setSelection(["widget:" + ${JSON.stringify(w.id)}]);`);
       await t.waitJs(`window.canvasHost.selection()[0] === "widget:" + ${JSON.stringify(w.id)}`, "the card to be selected");
       await sleep(300);
-      const on = await blue(ring);
-      t.ok(on > 0.5, `the outline above the card is the selection blue (${Math.round(on * 100)}% of its pixels)`);
-      t.ok((await blue(inner)) < 0.1, "nothing blue inside the card's edge: the outline sits outside it");
+      const on = await grey(ring);
+      t.ok(on > 0.5, `the outline above the card is the selection grey (${Math.round(on * 100)}% of its pixels)`);
+      t.ok((await grey(inner)) < 0.1, "nothing grey inside the card's edge: the outline sits outside it");
       fs.mkdirSync(path.join(ROOT, "qa", "out", "native"), { recursive: true });
       await t.cmd("qa.shot", { path: path.join(ROOT, "qa", "out", "native", `card-selected-${theme}.png`), window: "main" });
     } finally {

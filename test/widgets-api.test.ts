@@ -3,6 +3,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { chromeCandidates } from "../src/doc/render/chrome-path.ts";
 import { after, before, describe, test } from "node:test";
 import { fakeServer, sendJson, sseClient, stubSecurity, tmpDir, writeDoc, type Fake } from "./helpers.ts";
 import { json } from "./fixtures/json-kind.ts";
@@ -12,6 +14,7 @@ registerKind(json); // a test-only kind with a URL, headers and auth (test/fixtu
 
 const dir = tmpDir("api");
 process.env.CANVAS_ROOTS = dir;
+process.env.CANVAS_WIDGETS_DIR = path.join(dir, "local-widgets");
 process.env.CANVAS_TRUST_FILE = path.join(dir, "trust.json");
 process.env.CANVAS_SECURITY_BIN = stubSecurity(dir, { "svc:present": "abc-secret" });
 
@@ -50,11 +53,57 @@ describe("widgets API", () => {
     assert.deepEqual(r.body.data, {});
     assert.ok(r.body.rev);
     const k = await jcall("GET", "/api/widgets/kinds");
-    assert.deepEqual(k.body.map((x: any) => x.id).filter((id: string) => id !== "json"), ["todo", "note", "posthog", "shader", "video"]);
+    assert.deepEqual(k.body.map((x: any) => x.id).filter((id: string) => id !== "json"), ["todo", "note", "posthog", "shader", "video", "git-status", "ci", "claude-usage", "metric", "page-preview", "disk-space"]);
     const todo = k.body[0];
-    assert.deepEqual(Object.keys(todo).sort(), ["actions", "defaultSize", "defaults", "fields", "id", "minSize", "symbol", "title"]);
+    assert.deepEqual(Object.keys(todo).sort(), ["actions", "defaultSize", "defaults", "description", "fields", "id", "live", "minSize", "symbol", "title"]);
     assert.deepEqual(todo.actions, ["addItem", "toggleItem", "updateItem", "removeItem", "moveItem"]);
     assert.ok(k.body[2].fields.some((f: any) => f.type === "secret"));
+  });
+
+  test("local kind approval pins the bundle and gates polling and rendering", async (t) => {
+    let requests = 0;
+    const host = await fakeServer((_req, res) => { requests++; sendJson(res, { result: [{ greeting: "hello", extra: "ignored" }] }); });
+    const folder = path.join(process.env.CANVAS_WIDGETS_DIR!, "hello");
+    fs.mkdirSync(folder, { recursive: true });
+    const manifest = { id: "hello", title: "Hello", description: "Example", defaultSize: { w: 250, h: 160 }, settings: [], previewHTML: "<b>Hello</b>" };
+    fs.writeFileSync(path.join(folder, "manifest.json"), JSON.stringify(manifest));
+    fs.writeFileSync(path.join(folder, "renderer.js"), "export default (root) => { root.textContent = 'Hello'; };");
+    fs.writeFileSync(path.join(folder, "fetch.json"), JSON.stringify({ url: host.url, path: "$.result", fields: ["greeting"] }));
+    t.after(async () => { fs.rmSync(folder, { recursive: true, force: true }); await host.close(); });
+
+    const listed = (await jcall("GET", "/api/widgets/kinds")).body.find((k: any) => k.id === "hello");
+    assert.equal(listed.local, true);
+    assert.equal(listed.previewHTML, undefined);
+    const details = async () => (await jcall("GET", "/api/widgets/kinds?view=picker")).body.find((k: any) => k.id === "hello");
+    const before = await details();
+    assert.equal(before.approved, false);
+    assert.equal(before.previewHTML, "<b>Hello</b>");
+    const doc = writeDoc(dir, "local-widget");
+    const made = await jcall("POST", "/api/widgets?file=" + encodeURIComponent(doc), { kind: "hello", config: { keep: true } }, { "x-canvas": "1", "x-canvas-source": "mcp" });
+    assert.equal(made.status, 201);
+    assert.equal(made.body.local, true);
+    const route = (op: string) => `/api/widgets/${made.body.widget.id}/${op}?file=${encodeURIComponent(doc)}`;
+    const renderer = (bundle: string) => "/api/widgets/local-renderer/hello?bundle=" + bundle;
+    assert.equal((await jcall("GET", renderer(before.bundle))).status, 403);
+    assert.equal((await jcall("POST", route("refresh"), {})).body.data.state, "needs-approval");
+    assert.equal(requests, 0);
+    assert.equal((await jcall("POST", route("trust"), { bundle: before.bundle }, { "x-canvas": "1", "x-canvas-source": "mcp" })).status, 403);
+    assert.equal((await jcall("POST", route("trust"), { bundle: before.bundle })).body.local, true);
+    assert.match((await jcall("GET", renderer(before.bundle))).body.renderer, /export default/);
+
+    fs.appendFileSync(path.join(folder, "renderer.js"), "\n// a different version");
+    const changed = await details();
+    assert.equal(changed.approved, false);
+    assert.equal((await jcall("GET", renderer(before.bundle))).status, 404);
+    assert.equal((await jcall("POST", route("trust"), { bundle: before.bundle })).status, 409);
+    assert.equal((await jcall("GET", renderer(changed.bundle))).status, 403);
+    assert.equal((await jcall("POST", route("trust"), { bundle: changed.bundle })).body.local, true);
+    assert.deepEqual((await jcall("POST", route("refresh"), {})).body.data.content.local, { hash: changed.bundle, data: [{ greeting: "hello" }] });
+    assert.equal(requests, 1);
+    fs.rmSync(folder, { recursive: true });
+    const stored = (await jcall("GET", "/api/widgets?file=" + encodeURIComponent(doc))).body;
+    assert.deepEqual(stored.widgets[0].config, { keep: true });
+    assert.deepEqual(stored.data, {});
   });
 
   test("anything that changes state needs the x-canvas header", async () => {
@@ -107,7 +156,7 @@ describe("widgets API", () => {
     const b = await jcall("POST", `/api/widgets${q()}`, { kind: "note", name: "Memo", config: { text: "hello", tone: "yellow" } });
     assert.equal(b.body.widget.y, 184, "stacks below the first");
     const list = await jcall("GET", `/api/widgets${q()}`);
-    assert.deepEqual(list.body.widgets.map((w: any) => w.name), ["Today", "Memo"]);
+    assert.deepEqual(list.body.widgets.map((w: any) => w.name), ["Today", "hello"]);
     assert.equal((await jcall("GET", `/api/widgets/${todoId}${q()}`)).body.widget.name, "Today");
 
     const patched = await jcall("PATCH", `/api/widgets/${todoId}${q()}`, { x: 20, y: 30, name: "Renamed", config: { hideDone: true } }, { "x-canvas": "1", "if-match": list.body.rev });
@@ -247,6 +296,69 @@ describe("widgets API", () => {
     es.close();
     assert.equal((await jcall("POST", `/api/widgets/visibility${q()}`, { clientId: "bad id!", ids: [] })).status, 400);
     assert.equal((await jcall("POST", `/api/widgets/visibility${q()}`, { clientId: "c", ids: "all" })).status, 400);
+  });
+
+  test("MCP cannot approve a source and a new origin needs its own approval", async (t) => {
+    const host = await fakeServer((_req, res) => sendJson(res, 8));
+    const other = await fakeServer((_req, res) => sendJson(res, 9));
+    t.after(() => Promise.all([host.close(), other.close()]));
+    const mcp = { "x-canvas": "1", "x-canvas-source": "mcp" };
+    const made = await jcall("POST", `/api/widgets${q()}`, { kind: "metric", config: { url: host.url } }, mcp);
+    assert.equal(made.status, 201);
+    const endpoint = "/api/widgets/" + made.body.widget.id;
+    const read = async () => (await jcall("POST", endpoint + "/refresh" + q(), {})).body.data;
+    const allow = (target: string, headers?: Record<string, string>) => jcall("POST", endpoint + "/trust" + q(), { target }, headers);
+    t.after(() => jcall("DELETE", endpoint + q()));
+    assert.equal((await read()).state, "needs-approval");
+    assert.equal((await allow(host.url, mcp)).status, 403);
+    assert.equal(host.hits.length, 0);
+    assert.equal((await allow(host.url)).status, 200);
+    assert.equal((await read()).value, 8);
+    const preview = (await jcall("POST", `/api/widgets${q()}`, { kind: "page-preview", config: { url: host.url } }, mcp)).body.widget;
+    t.after(() => jcall("DELETE", "/api/widgets/" + preview.id + q()));
+    const previewRead = await jcall("POST", "/api/widgets/" + preview.id + "/refresh" + q(), {});
+    assert.equal(previewRead.body.data.state, "needs-approval", "approval is scoped to the widget kind");
+    assert.equal(host.hits.length, 1);
+
+    await jcall("PATCH", endpoint + q(), { config: { url: other.url } }, mcp);
+    await jcall("PATCH", endpoint + q(), { config: { path: "$" }, name: "Renamed" });
+    assert.equal((await read()).approvalTarget, other.url);
+    assert.equal((await allow(host.url)).status, 409, "a stale prompt cannot approve a different origin");
+    assert.equal(other.hits.length, 0);
+    await jcall("PATCH", endpoint + q(), { config: { url: other.url } });
+    assert.equal((await read()).value, 9, "saving a user-entered URL approves it");
+  });
+
+  test("refreshes Git, Metric, Disk space and a localhost snapshot", async (t) => {
+    const host = await fakeServer((req, res) => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end("<title>Studio</title><main>Preview fixture</main>");
+    });
+    t.after(() => host.close());
+    const refresh = async (kind: string, config: Record<string, unknown> = {}) => {
+      const made = await jcall("POST", `/api/widgets${q()}`, { kind, config });
+      assert.equal(made.status, 201);
+      const read = await jcall("POST", `/api/widgets/${made.body.widget.id}/refresh${q()}`, {});
+      assert.equal(read.status, 200);
+      t.after(() => jcall("DELETE", `/api/widgets/${made.body.widget.id}${q()}`));
+      return read.body.data;
+    };
+    const repo = fs.mkdtempSync(path.join(dir, "sample-repo-"));
+    execFileSync("/usr/bin/git", ["init", "-q", "--initial-branch=main"], { cwd: repo });
+    fs.writeFileSync(path.join(repo, "draft.txt"), "Sample");
+    assert.deepEqual((await refresh("git-status", { repo })).content.git, {
+      branch: "main", changed: 1, ahead: null, behind: null, commits: [],
+    });
+    const reading = await refresh("metric", { url: upstream.url, path: "$.stats.users", sparkPath: "$.stats.days[*].n" });
+    assert.equal(reading.value, 42);
+    assert.deepEqual(reading.spark, [1, 2, 5]);
+    assert.equal((await refresh("metric")).state, "empty");
+    assert.ok((await refresh("disk-space")).content.disk.total > 0);
+    if (chromeCandidates().some((browser) => fs.existsSync(browser))) {
+      const preview = await refresh("page-preview", { url: host.url });
+      assert.equal(preview.state, "ok", JSON.stringify(preview.error));
+      assert.match(preview.content.preview, /^data:image\/png;base64,iVBOR/);
+    }
   });
 
   test("a todo or note has no live data to refresh", async () => {

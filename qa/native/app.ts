@@ -61,6 +61,7 @@ export class QaApp {
       CANVAS_QA: "1",
       CANVAS_STATE_DIR: path.join(this.dir, "state"),
       CANVAS_LOG_DIR: this.logs,
+      CANVAS_WIDGETS_DIR: path.join(this.dir, "local-widgets"),
       CANVAS_TRUST_FILE: path.join(this.dir, "widget-trust.json"),
       CANVAS_VIDEO_PROXIES: path.join(this.dir, "video-proxies"),
       CANVAS_AGENT_LOG: path.join(this.logs, "agent-runs.log"),

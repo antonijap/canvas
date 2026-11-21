@@ -5,7 +5,8 @@
 import { makeCtx } from "./ctx.ts";
 import { clearSecret, redact } from "./keychain.ts";
 import { kindOf } from "./registry.ts";
-import { WidgetError, type FetchCtx, type Reading, type SecretRef, type Widget, type WidgetKind } from "./types.ts";
+import { isSourceApproved } from "./trust.ts";
+import { SourceApproval, WidgetError, type FetchCtx, type Reading, type SecretRef, type Source, type Widget, type WidgetKind } from "./types.ts";
 
 export const LEASE_MS = 90_000;
 const FLUSH_MS = 250;
@@ -20,12 +21,14 @@ type Entry = {
   failures: number;
   inflight: boolean;
   configKey: string;
+  version?: string;
   /** Bumped whenever the widget's config changes: a fetch started under an older generation is thrown away. */
   gen: number;
   lastRefresh: number;
   reading?: Reading;
-  /** Last reading pushed to pages, without updatedAt, to skip pushes that say nothing new. */
+  /** Last reading pushed to pages, excluding its timestamp. */
   sent?: string;
+  samples?: number[];
 };
 
 type Lease = { ids: Set<string>; expires: number };
@@ -62,8 +65,44 @@ export class Poller {
     return e;
   }
 
-  private sourceOf(w: Widget): WidgetKind["source"] | undefined {
-    return kindOf(w.kind)?.source;
+  private sourceOf(w: Widget | undefined): WidgetKind["source"] | undefined {
+    return w && kindOf(w.kind)?.source;
+  }
+
+  private syncVersion(e: Entry, src: NonNullable<WidgetKind["source"]>): void {
+    if (e.version === src.version) return;
+    e.version = src.version;
+    e.gen++;
+    e.nextAt = 0;
+    e.failures = 0;
+    e.lastRefresh = 0;
+    if (e.reading) this.push(e, { state: "loading" });
+  }
+
+  private syncConfig(e: Entry, w: Widget, src: Source): void {
+    const key = JSON.stringify([w.kind, w.config]);
+    if (e.configKey === key) return;
+    e.configKey = key;
+    e.gen++;
+    e.nextAt = 0;
+    e.failures = 0;
+    e.lastRefresh = 0;
+    e.samples = undefined;
+    if (e.reading && src.approval) this.push(e, { state: "loading" });
+    else if (e.reading?.state === "ok") this.push(e, { ...e.reading, state: "stale" });
+  }
+
+  private needsApproval(w: Widget, e: Entry, src: Source): boolean {
+    const rule = src.approval;
+    if (!rule) return false;
+    const target = rule.target(w.config);
+    if (!target || isSourceApproved(w.kind, target)) return false;
+    this.push(e, this.approvalReading(new SourceApproval(target, rule.verb)));
+    return true;
+  }
+
+  private approvalReading(err: SourceApproval): Reading {
+    return { state: "needs-approval", approvalTarget: err.target, error: { code: err.code, message: err.message } };
   }
 
   private interestIds(file: string): Set<string> {
@@ -80,8 +119,17 @@ export class Poller {
       const ids = this.interestIds(file);
       if (!ids.size) continue;
       for (const w of this.opts.widgetsOf(file)) {
+        if (!ids.has(w.id)) continue;
         const src = this.sourceOf(w);
-        if (src && ids.has(w.id)) out.push({ w, e: this.entry(file, w.id), src });
+        if (src) {
+          const e = this.entry(file, w.id);
+          this.syncVersion(e, src);
+          this.syncConfig(e, w, src);
+          if (this.needsApproval(w, e, src)) continue;
+          // CI can also wait for approval of the remote resolved from a repository folder.
+          if (e.reading?.approvalTarget && !isSourceApproved(w.kind, e.reading.approvalTarget)) continue;
+          out.push({ w, e, src });
+        }
       }
     }
     return out;
@@ -109,7 +157,9 @@ export class Poller {
       if (!src || before.has(w.id) || !this.interestIds(file).has(w.id)) continue;
       // Newly in view: show what we have right away (stale if old), and refetch if it is due.
       const e = this.entry(file, w.id);
-      e.configKey = JSON.stringify(w.config);
+      this.syncVersion(e, src);
+      this.syncConfig(e, w, src);
+      if (this.needsApproval(w, e, src)) continue;
       const age = e.reading?.updatedAt ? now - e.reading.updatedAt : Infinity;
       if (e.reading?.state === "ok" && age > this.intervalMs(w, src)) this.push(e, { ...e.reading, state: "stale" });
       if (!e.reading) this.push(e, { state: "loading" });
@@ -151,27 +201,28 @@ export class Poller {
         this.entries.delete(k);
         continue;
       }
-      const key = JSON.stringify(w.config);
-      if (key !== e.configKey) {
-        e.configKey = key;
-        e.gen++;
-        e.nextAt = 0;
-        e.failures = 0;
-        if (e.reading && e.reading.state === "ok") this.push(e, { ...e.reading, state: "stale" });
-      }
+      this.syncConfig(e, w, src);
     }
     this.schedule();
   }
 
   /** After the user allows an origin or saves a secret: try the blocked widgets again now. */
-  retryBlocked(file: string): void {
-    for (const e of this.entries.values()) if (e.file === file && (e.reading?.state === "needs-secret" || e.reading?.state === "needs-approval")) e.nextAt = 0;
+  retryBlocked(file?: string): void {
+    for (const e of this.entries.values()) if ((!file || e.file === file) && (e.reading?.state === "needs-secret" || e.reading?.state === "needs-approval")) e.nextAt = 0;
     this.schedule();
   }
 
   readings(file: string): Record<string, Reading> {
     const out: Record<string, Reading> = {};
-    for (const e of this.entries.values()) if (e.file === file && e.reading) out[e.id] = e.reading;
+    let widgets: Map<string, Widget> | undefined;
+    for (const e of this.entries.values()) {
+      if (e.file !== file || !e.reading) continue;
+      if (e.version) {
+        widgets ??= new Map(this.opts.widgetsOf(file).map((w) => [w.id, w]));
+        if (this.sourceOf(widgets.get(e.id))?.version !== e.version) continue;
+      }
+      out[e.id] = e.reading;
+    }
     return out;
   }
 
@@ -181,20 +232,23 @@ export class Poller {
     const src = w && this.sourceOf(w);
     if (!w || !src) throw new WidgetError(422, "no-source", "This widget has no live data to refresh");
     const e = this.entry(file, id);
+    this.syncVersion(e, src);
+    this.syncConfig(e, w, src);
+    if (this.needsApproval(w, e, src)) return { reading: e.reading };
     const now = this.now();
     if (now - e.lastRefresh < REFRESH_MIN_MS) return { retryAfterSec: Math.ceil((REFRESH_MIN_MS - (now - e.lastRefresh)) / 1000) };
     e.lastRefresh = now;
-    e.configKey = JSON.stringify(w.config);
     await this.run(w, e, src, true);
     this.schedule();
     return { reading: e.reading };
   }
 
-  private push(e: Entry, r: Reading): void {
+  private push(e: Entry, r: Reading, manualRefresh = false): void {
     e.reading = r;
-    const { updatedAt: _u, ...rest } = r;
-    const sig = JSON.stringify(rest);
-    if (sig === e.sent) return;
+    const { updatedAt: _updatedAt, ...data } = r;
+    const sig = JSON.stringify(data);
+    // The native inspector uses the new timestamp to finish a manual refresh.
+    if (!manualRefresh && sig === e.sent) return;
     e.sent = sig;
     let batch = this.pending.get(e.file);
     if (!batch) this.pending.set(e.file, (batch = {}));
@@ -239,12 +293,19 @@ export class Poller {
     // The widget's source changed (or it was removed) while this fetch ran: its answer is about the old config.
     // reconcile() already marked the entry due, so the caller's schedule() fetches the new one.
     if (e.gen !== gen || this.entries.get(`${e.file}\0${e.id}`) !== e) return;
+    if (src.version && this.sourceOf(w)?.version !== src.version) return;
     const now = this.now();
     const ms = this.intervalMs(w, src);
     if (r.ok) {
       e.failures = 0;
       e.nextAt = now + ms;
-      this.push(e, { ...r.data, state: "ok", updatedAt: now });
+      const data = r.data;
+      if (w.kind === "metric" && typeof data.value === "number" && !data.spark?.length) {
+        e.samples = [...(e.samples ?? []), data.value].slice(-30);
+        this.push(e, { ...data, spark: e.samples, state: "ok", updatedAt: now }, force);
+      } else {
+        this.push(e, { ...data, state: data.empty ? "empty" : "ok", updatedAt: now }, force);
+      }
       return;
     }
     const err = r.err;
@@ -256,7 +317,7 @@ export class Poller {
     if (err.code === "needs-secret" || err.code === "needs-approval") {
       // Nothing to retry until the user acts; the page's Refresh (or a new lease) tries again.
       e.nextAt = now + ms;
-      this.push(e, { state: err.code, error: { code: err.code, message } });
+      this.push(e, err instanceof SourceApproval ? this.approvalReading(err) : { state: err.code, error: { code: err.code, message } });
       return;
     }
     e.failures++;

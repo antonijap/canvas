@@ -49,6 +49,7 @@ async function worker(o: Opts) {
   for (const sig of ["SIGINT", "SIGTERM", "disconnect"] as const) process.once(sig as any, async () => { await stop(); process.exit(130); });
   try {
     srv = await startServer(tmp);
+    process.env.CANVAS_WIDGETS_DIR = srv.widgetsDir;
     chrome = await launchChrome();
     process.send!({ type: "ready", chrome: chrome.version });
     for (;;) {

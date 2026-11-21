@@ -4,14 +4,16 @@
 //
 // ctx: { widget() -> current widget, act(name, args) -> Promise<{result}>, patch(config) -> Promise, trust() -> Promise }
 
-import { ageLabel, ageSec, deltaSign, fitRows, originOf, sparkPoints } from "./geometry.js";
+import { fitRows } from "./geometry.js";
+import { liveCard, widgetButton, widgetSkeleton } from "./widget-live.js";
+import { pageName, pageWidth, PAGE_PADDING } from "./widget-page.js";
 import { noteEditor } from "./note-editor.js";
 import { NOTE_MAX } from "./note-doc.js";
 import { chartCard } from "./charts.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 export const ROW_H = 32;
-export const TODO_CHROME = 106; // 1 border + 16 pad + 24 title + 16 gap + 32 add row + 16 pad + 1 border
+export const TODO_CHROME = 104; // Padding, title, gap and add row.
 /** How long a checked to-do stays in place before it moves down to the done ones (Things waits about as long). */
 const SETTLE_MS = 900;
 const reducedMotion = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -349,10 +351,32 @@ function note(ctx0) {
   const root = h("div", "nt");
   const kept = keepUnsaved(ctx0, root);
   const ctx = kept.ctx;
-  // The card grows to fit its text, like a Notion page: by however much the text runs past it. The height goes in the
-  // same write as the text, so one Undo takes back both (QA round 2 #8).
-  const growth = () => { const el = ed.el; const extra = el.scrollHeight - el.clientHeight; const h = extra > 1 && ctx.grownHeight ? ctx.grownHeight(extra) : null; return h ? { h } : undefined; };
-  const save = debounce((t) => { ctx.patch({ text: t }, growth()).catch(() => {}); }, 300);
+  function measure(manual) {
+    const el = ed.el;
+    const { width, bottom, whiteSpace, paddingInline } = el.style;
+    el.style.bottom = "auto";
+    let intrinsic = 0;
+    if (!Number.isFinite(manual)) {
+      el.style.width = "max-content";
+      el.style.whiteSpace = "pre";
+      el.style.paddingInline = PAGE_PADDING + "px";
+      intrinsic = el.offsetWidth - PAGE_PADDING * 2;
+    }
+    const w = pageWidth(intrinsic, manual);
+    el.style.width = w + "px";
+    el.style.whiteSpace = whiteSpace;
+    el.style.paddingInline = "";
+    const size = { w, h: Math.max(80, el.offsetHeight) };
+    Object.assign(el.style, { width, bottom, whiteSpace, paddingInline });
+    return size;
+  }
+  const save = debounce((t) => {
+    const w = ctx.widget();
+    const size = measure(w.config.pageWidth);
+    const name = pageName(t);
+    ctx.fit(size, name);
+    ctx.patch({ text: t }, w.locked ? undefined : size).catch(() => {});
+  }, 300);
   const ed = noteEditor({ save, flush: () => save.flush() });
   root.append(ed.el);
   const textOf = (w) => (w.config && typeof w.config.text === "string" ? w.config.text : "");
@@ -361,68 +385,16 @@ function note(ctx0) {
   root.addEventListener("pointerdown", (e) => { press = { x: e.clientX, y: e.clientY }; }, true);
   return {
     el: root,
-    update(w) { ed.show(kept.view(textOf(w))); }, // ignored while editing: what is being typed stays
+    update(w) {
+      const text = kept.view(textOf(w));
+      if (!ed.editing()) {
+        ed.show(text);
+        ctx.fit(measure(w.config.pageWidth), pageName(text));
+      }
+    },
+    measure,
     dblclick() { ed.begin(press && press.x, press && press.y, true); }, // the word under the pointer is selected
   };
-}
-
-// ---------- stat (app, posthog) ----------
-function stat(ctx) {
-  // PostHog cards draw every display.chart type, the plain number included, in one frame (src/page/charts.js).
-  if (ctx.widget && ctx.widget() && ctx.widget().kind === "posthog") return chartCard(ctx);
-  const root = h("div", "st");
-  const label = h("div", "st-label");
-  const main = h("div", "st-main");
-  const num = h("div", "st-num");
-  const chip = h("span", "st-delta");
-  main.append(num, chip);
-  const svg = document.createElementNS(SVG, "svg");
-  svg.setAttribute("class", "st-spark");
-  svg.setAttribute("viewBox", "0 0 100 30");
-  svg.setAttribute("preserveAspectRatio", "none");
-  svg.setAttribute("aria-hidden", "true");
-  const line = document.createElementNS(SVG, "polyline");
-  line.setAttribute("vector-effect", "non-scaling-stroke");
-  svg.append(line);
-  const msg = h("div", "st-msg");
-  const msgText = h("span");
-  msg.append(msgText);
-  const btn = nodrag(h("button", "st-btn", "Allow"));
-  btn.type = "button";
-  btn.onclick = () => {
-    btn.disabled = true;
-    ctx.trust().catch(() => {}).finally(() => { btn.disabled = false; });
-  };
-  root.append(label, main, svg, msg, btn);
-
-  function update(w, r) {
-    const c = w.config || {};
-    const state = r ? r.state : "loading";
-    root.dataset.state = state;
-    const cfgLabel = w.kind === "posthog" ? c.display && c.display.label : c.label;
-    setText(label, cfgLabel || (r && r.label) || w.name || "");
-    setText(num, r && r.display ? r.display : "–");
-    const d = r && r.delta;
-    chip.hidden = !d;
-    if (d) {
-      setText(chip, d.display);
-      const s = deltaSign(d);
-      chip.className = "st-delta" + (s > 0 ? " up" : s < 0 ? " down" : "");
-    }
-    const pts = r && Array.isArray(r.spark) ? sparkPoints(r.spark) : "";
-    svg.hidden = !pts;
-    if (pts) line.setAttribute("points", pts);
-    let m = "";
-    btn.hidden = state !== "needs-approval";
-    if (state === "error") m = (r.error && r.error.message) || "Could not load.";
-    else if (state === "needs-secret") m = "Add the API key in the inspector.";
-    else if (state === "needs-approval") m = "Send your key to " + (originOf(w.kind, c) || "this server") + "?";
-    else if (state === "stale") { const a = ageLabel(ageSec(r.updatedAt)); m = a ? "Stale, updated " + a + " ago" : "Stale"; }
-    msg.hidden = !m;
-    setText(msgText, m);
-    msg.title = m;
-  }
-  return { el: root, update };
 }
 
 // ---------- shader ----------
@@ -439,7 +411,9 @@ function shaderCard(ctx) {
   const img = h("img", "sh-poster");
   img.alt = "";
   img.hidden = true;
-  box.append(title, list, btn);
+  const skeleton = widgetSkeleton();
+  const retry = widgetButton("Retry", () => S()?.retry(ctx.widget().id));
+  box.append(title, list, skeleton, btn, retry);
   root.append(img, box);
   btn.onclick = () => { btn.disabled = true; ctx.patch({ quarantined: false }).catch(() => {}).finally(() => { btn.disabled = false; }); };
   const S = () => window.canvasShaders;
@@ -458,15 +432,17 @@ function shaderCard(ctx) {
     root.dataset.state = st;
     root.classList.toggle("live", !!(r && r.frame));
     let t = "";
-    if (st === "error") t = "Shader error";
-    else if (st === "quarantined") t = "Stopped after a GPU reset";
-    else if (st === "loading" && !(r && r.frame)) t = "Compiling…";
+    if (st === "error") t = "! Shader error";
+    else if (st === "quarantined") t = "! Stopped after a GPU reset";
+    else if (st === "loading" && !(r && r.frame)) t = "◷ Compiling";
     else if (st === "no-gpu" && !(r && r.poster)) t = "Shaders need WebGPU";
     setText(title, t);
+    skeleton.hidden = st !== "loading";
+    retry.hidden = st !== "error";
     box.hidden = !t;
     btn.hidden = st !== "quarantined";
     list.textContent = "";
-    const errs = (r && r.errors) || [];
+    const errs = r?.errors || (st === "error" && r?.error?.message ? [r.error] : []);
     for (const e of errs.slice(0, 6)) list.append(h("li", "", (e.line ? "Line " + e.line + (e.col ? ":" + e.col : "") + "  " : "") + e.message));
     if (errs.length > 6) list.append(h("li", "", "+" + (errs.length - 6) + " more"));
     list.hidden = !errs.length;
@@ -508,7 +484,9 @@ function videoCard(ctx) {
   const msg = h("div", "sh-msg vd-msg");
   const title = h("div", "sh-title");
   const sub = h("div", "vd-sub");
-  msg.append(title, sub);
+  const skeleton = widgetSkeleton();
+  const retry = widgetButton("Retry", () => V()?.retry(id()));
+  msg.append(title, sub, skeleton, retry);
   const bar = nodrag(h("div", "vd-ctl"));
   const playBtn = h("button", "vd-btn");
   playBtn.type = "button";
@@ -554,12 +532,14 @@ function videoCard(ctx) {
     root.dataset.state = st;
     root.classList.toggle("live", !!(r && r.frame));
     let t = "", s = "";
-    if (st === "empty") { t = "No video file"; s = "Choose one in the inspector."; }
-    else if (st === "error") { t = "Cannot play this video"; s = (r.error && r.error.message) || ""; }
-    else if (st === "loading" && !(r && r.frame)) t = "Loading…";
+    if (st === "empty") { t = "○ No video file"; s = "Choose one in the inspector."; }
+    else if (st === "error") { t = "! Cannot play this video"; s = (r.error && r.error.message) || ""; }
+    else if (st === "loading" && !(r && r.frame)) t = "◷ Loading";
     else if (st === "no-gpu" && !(r && r.poster)) t = "Videos need WebGPU";
     setText(title, t);
     setText(sub, s);
+    skeleton.hidden = st !== "loading";
+    retry.hidden = st !== "error";
     sub.hidden = !s;
     msg.hidden = !t;
     bar.hidden = st === "empty" || st === "error";
@@ -753,5 +733,5 @@ function unsupported(ctx) {
   return { el: root, update(w) { setText(root.lastChild, String(w.kind)); } };
 }
 
-export const KINDS = { todo, note, posthog: stat, shader: shaderCard, video: videoCard, welcome: welcomeCard };
+export const KINDS = { todo, note, posthog: chartCard, "git-status": liveCard, ci: liveCard, "claude-usage": liveCard, metric: liveCard, "page-preview": liveCard, "disk-space": liveCard, shader: shaderCard, video: videoCard, welcome: welcomeCard };
 export const rendererFor = (kind) => (Object.hasOwn(KINDS, kind) ? KINDS[kind] : unsupported);

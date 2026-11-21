@@ -4,7 +4,10 @@
 // toggle and lazy mounting; the camera transform on #world moves everything.
 
 import { CARD_RADIUS, LEASE_MARGIN, MOUNT_MARGIN, NudgeQueue, camToReveal, idsInView, lodCrossing, moveRect, placeCentered, rectsIntersect, resizeRect, resizeZone, sameSet, viewToWorld, visibleWorldRect, ZONE_CURSOR } from "./geometry.js";
-import { rendererFor } from "./widget-kinds.js";
+import { pageName } from "./widget-page.js";
+import { updateWidgetAges } from "./widget-live.js";
+import { localCard } from "./widget-local.js";
+import { KINDS, rendererFor } from "./widget-kinds.js";
 
 const host = window.canvasHost;
 if (host && host.file) start(host);
@@ -24,7 +27,9 @@ function start(host) {
   let list = [];               // widgets in z-order, as the server sent them
   const entries = new Map();   // id -> { id, w, el, lod, body, impl, geom, key }
   const readings = new Map();  // id -> Reading
+  const colorScheme = matchMedia("(prefers-color-scheme: dark)");
   const kinds = new Map();     // kind id -> { defaultSize, minSize, title }
+  let latestKinds = 0;
   let selId = null;            // bare id of the selected widget
   let clientId = null;
   let low = false;             // level-of-detail state
@@ -34,7 +39,8 @@ function start(host) {
 
   // ---------- network ----------
   async function call(method, path, body, headers) {
-    const r = await fetch(host.api(path), { method, headers: { "x-canvas": "1", "content-type": "application/json", ...(headers || {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const [route, query] = path.split("?");
+    const r = await fetch(host.api(route) + (query ? "&" + query : ""), { method, headers: { "x-canvas": "1", "content-type": "application/json", ...(headers || {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw Object.assign(new Error(j.error || r.statusText), { status: r.status, code: j.code });
     return j;
@@ -64,7 +70,10 @@ function start(host) {
 
   // ---------- entries ----------
   // A card linked to a node (a video placed with "Embed video here") shows over that node (src/page/videos.js).
-  const shownRect = (w) => (host.widgetDisplayRect && host.widgetDisplayRect(w)) || w;
+  const shownRect = (w) => {
+    const fit = w.kind === "note" && entries.get(w.id)?.fit;
+    return host.widgetDisplayRect?.(w) || (fit ? { ...w, w: fit.w, h: fit.h } : w);
+  };
   const setGeom = (e, w0) => {
     const w = shownRect(w0);
     const g = w.x + "," + w.y + "," + w.w + "," + w.h;
@@ -79,8 +88,9 @@ function start(host) {
     e.el.dataset.kind = w.kind;
     e.el.dataset.tone = (w.config && w.config.tone) || "";
     e.el.classList.toggle("locked", !!w.locked);
-    e.el.setAttribute("aria-label", w.name || w.kind);
-    if (e.lod.textContent !== (w.name || w.kind)) e.lod.textContent = w.name || w.kind;
+    const name = w.kind === "note" ? pageName(w.config?.text || "") : w.name || w.kind;
+    e.el.setAttribute("aria-label", name);
+    if (e.lod.textContent !== name) e.lod.textContent = name;
   };
 
   // Each write the page makes to a card gets a number: an answer that comes back after a newer write to the same card
@@ -96,13 +106,28 @@ function start(host) {
       widget: () => e.w,
       act: (name, args) => { const land = stampWrite(e.id); return call("POST", "/api/widgets/" + e.id + "/actions/" + name, args).then((r) => { land(r.widget); return r; }, fail("Could not save")); },
       // extra: geometry that goes in the same write (a note's growth), so it is one undo step with the change.
-      patch: (config, extra) => { const land = stampWrite(e.id); return call("PATCH", "/api/widgets/" + e.id, { config, ...(extra || {}) }).then((r) => { land(r.widget); return r; }, fail("Could not save")); },
-      /** The height a card whose content outgrew it by `by` world px grows to (up to GROW_MAX), or null: never shorter. */
-      grownHeight: (by) => {
-        const h = Math.min(GROW_MAX, Math.ceil(e.w.h + by));
-        return by > 0 && !e.w.locked && h > e.w.h ? h : null;
+      patch: (config, extra) => { const land = stampWrite(e.id); return track(call("PATCH", "/api/widgets/" + e.id, { config, ...(extra || {}) }).then((r) => { land(r.widget); return r; }, fail("Could not save"))); },
+      fit: (size, name) => {
+        if (act?.entry === e || !size) return;
+        e.fit = size;
+        setGeom(e, e.w);
+        e.lod.textContent = name;
+        e.el.setAttribute("aria-label", name);
+        if (e.id === selId) host.syncSel();
       },
-      trust: () => call("POST", "/api/widgets/" + e.id + "/trust", {}).catch(fail("Could not allow")),
+      refresh: () => call("POST", "/api/widgets/" + e.id + "/refresh", {}).then(
+        (r) => { if (r.data) host.widgetReading(e.id, r.data); }, fail("Could not refresh")),
+      trust: (bundle, target) => call("POST", "/api/widgets/" + e.id + "/trust", { bundle, target }).then(() => bundle && loadKinds()).catch(fail("Could not allow")),
+      renderer: (kind) => call("GET", "/api/widgets/local-renderer/" + encodeURIComponent(kind.id) + "?bundle=" + kind.bundle),
+      native: host.native,
+      theme: () => colorScheme.matches ? "dark" : "light",
+      openLink: (value) => {
+        if (typeof value !== "string") return;
+        try {
+          const url = new URL(value);
+          if (url.protocol === "https:" || url.protocol === "http:") host.post({ widgetExternalURL: url.href });
+        } catch {}
+      },
       /** Text on the clipboard (the app's pasteboard in Canvas.app), and a "Copied" toast. */
       copy: (text) => {
         if (host.native) { host.post({ clipboard: text, toast: "Copied", toastIcon: "success" }); return; }
@@ -112,26 +137,36 @@ function start(host) {
     };
   }
 
-  const RETIRED = new Set(["app"]);
-  const GROW_MAX = 1600; // world px: the tallest a card grows by itself (a person can still drag it taller)
+  setInterval(() => { if (!document.hidden) updateWidgetAges(); }, 5000);
+
+  function unmount(e) {
+    e.impl?.dispose?.();
+    e.impl = null;
+    e.mounted = false;
+    e.body.replaceChildren();
+  }
   function mount(e) {
     e.mounted = true;
-    // A kind Canvas no longer has (the "app" value card) keeps its data in the file and shows as an unsupported
-    // card that can still be moved and deleted, instead of a stat card that waits for readings forever.
-    e.impl = rendererFor(RETIRED.has(e.w.kind) ? "" : e.w.kind)(ctxFor(e));
+    const kind = kinds.get(e.w.kind);
+    const ctx = ctxFor(e);
+    e.impl = kind?.local ? localCard(ctx, kind) : rendererFor(e.w.kind)(ctx);
     e.body.append(e.impl.el);
     e.key = keyOf(e.w);
     e.impl.update(e.w, readings.get(e.id));
   }
-  const keyOf = (w) => JSON.stringify([w.name, w.h, w.config]);
+  const keyOf = (w) => JSON.stringify([w.name, w.w, w.h, w.config]);
 
   function createEntry(w) {
     const el = h("div", "wd");
     el.dataset.id = PREFIX + w.id;
     const lod = h("div", "wd-lod");
     const body = h("div", "wd-body");
-    el.append(lod, body);
-    const e = { id: w.id, w, el, lod, body, impl: null, mounted: false, geom: "", key: "" };
+    const handles = h("div", "wd-handles");
+    for (const corner of ["tl", "tr", "bl", "br"]) handles.append(h("i", "wd-" + corner));
+    const badge = h("div", "wd-size");
+    badge.hidden = true;
+    el.append(lod, body, handles, badge);
+    const e = { id: w.id, w, el, lod, body, badge, impl: null, mounted: false, geom: "", key: "" };
     setGeom(e, w);
     skin(e, w);
     el.addEventListener("pointerdown", (ev) => onWidgetDown(ev, e));
@@ -143,7 +178,7 @@ function start(host) {
   function updateEntry(e, w) {
     const prev = e.w;
     e.w = w;
-    if (prev.kind !== w.kind) { e.mounted = false; e.impl = null; e.body.textContent = ""; }
+    if (prev.kind !== w.kind) unmount(e);
     if (!(act && act.entry === e)) setGeom(e, w);
     skin(e, w);
     if (e.mounted) {
@@ -155,6 +190,7 @@ function start(host) {
   // keep: the card only left the page shown; its reading stays, since the server sends a reading again only when it changes.
   function removeEntry(e, keep) {
     if (act && act.entry === e) endAct(true);
+    unmount(e);
     e.el.remove();
     entries.delete(e.id);
     if (!keep) readings.delete(e.id);
@@ -165,6 +201,8 @@ function start(host) {
   // Widgets on another page are not drawn (absent page = the first page).
   const onPage = (w) => !host.widgetOnPage || host.widgetOnPage(w);
   const shown = () => list.filter(onPage);
+  const shellWidgets = (widgets = shown()) => widgets.map((w) =>
+    w.kind === "note" ? { ...w, ...shownRect(w), name: pageName(w.config?.text || "") } : w);
   host.widgetPageOf = (id) => { const w = list.find((x) => x.id === id); if (!w) return null; return host.pages && host.pages.some((p) => p.id === w.page) ? w.page : host.pages ? host.pages[0].id : null; };
   function render() {
     const here = shown();
@@ -199,7 +237,7 @@ function start(host) {
   host.widgetReading = (id, r) => {
     readings.set(id, r);
     const e = entries.get(id);
-    if (e && e.mounted && !(act && act.entry === e)) e.impl.update(e.w, r);
+    if (e && e.mounted && !(act && act.entry === e)) { setGeom(e, e.w); e.impl.update(e.w, r); }
     if (selId === id) { renderProps(); postStatus(); }
   };
   host.widgetsShown = () => shown();
@@ -221,8 +259,9 @@ function start(host) {
   function postStatus() {
     if (!selId) return;
     const e = entries.get(selId), r = readings.get(selId);
-    const live = e && (e.w.kind === "posthog" || e.w.kind === "shader" || e.w.kind === "video");
-    const s = { id: selId, state: r ? r.state : live ? "loading" : "ok", error: (r && r.error) || null, display: r && r.display !== undefined ? r.display : null, updatedAt: (r && r.updatedAt) || null };
+    const live = e && (kinds.get(e.w.kind)?.live || e.w.kind === "shader" || e.w.kind === "video");
+    const s = { id: selId, state: r ? r.state : live ? "loading" : "ok", error: r?.error, approvalTarget: r?.approvalTarget,
+      display: r?.display, updatedAt: r?.updatedAt };
     const key = JSON.stringify(s);
     if (key === lastStatus) return;
     lastStatus = key;
@@ -232,7 +271,7 @@ function start(host) {
     const e = selId && entries.get(selId);
     if (!e) return;
     propsBody.textContent = "";
-    const r = readings.get(selId), w = e.w;
+    const r = readings.get(selId), w = { ...e.w, ...shownRect(e.w) };
     propsBody.append(h("h2", "", w.name || w.kind), h("div", "tid", w.kind + ", " + w.id + (w.locked ? ", locked" : "")));
     const sec = (title, rows) => { const d = h("div"); d.append(h("h4", "", title)); for (const [k, v] of rows) { if (v === undefined || v === null || v === "") continue; const row = h("div", "kv"); row.append(h("span", "k", k), h("span", "v", String(v))); d.append(row); } propsBody.append(d); };
     sec("Position & size", [["x", w.x], ["y", w.y], ["width", w.w], ["height", w.h]]);
@@ -320,7 +359,14 @@ function start(host) {
     act.moved = true;
     if (act.type === "move") act.dup = ev.altKey; // Option: drag a copy, the card stays
     const z = host.cam.z;
-    act.rect = act.type === "move" ? moveRect(act.r0, dxp / z, dyp / z) : resizeRect(act.r0, act.handle, dxp / z, dyp / z, minOf(act.entry.w.kind), ev.shiftKey, ev.altKey);
+    act.rect = act.type === "move" ? moveRect(act.r0, dxp / z, dyp / z) : resizeRect(act.r0, act.handle, dxp / z, dyp / z, minOf(act.entry.w.kind), (act.entry.w.kind === "video" && !!act.entry.w.config?.src) || ev.shiftKey, ev.altKey);
+    if (act.type === "resize" && act.entry.w.kind === "note" && act.entry.impl?.measure) {
+      const size = act.entry.impl.measure(act.rect.w);
+      const dy = act.rect.h - size.h;
+      if (ev.altKey) act.rect.y += Math.round(dy / 2);
+      else if (act.handle.includes("t")) act.rect.y += dy;
+      act.rect.h = size.h;
+    }
     // A moved card snaps to boards and other cards like a board does (the page's snapping, src/page/snap.js).
     if (act.type === "move" && host.snapRect) {
       act.rect = host.snapRect(act.snap || (act.snap = host.snapBegin(PREFIX + act.entry.id)), act.rect, ev);
@@ -340,8 +386,11 @@ function start(host) {
     if (act.type === "move" && act.dup) { entry.el.style.transform = ""; ghostCards([entry.id], rect.x - r0.x, rect.y - r0.y); }
     else if (act.type === "move") { clearGhosts(); entry.el.style.transform = "translate(" + (rect.x - r0.x) + "px," + (rect.y - r0.y) + "px)"; }
     else {
+      entry.badge.hidden = false;
+      entry.badge.textContent = rect.w + " × " + rect.h;
+      entry.el.classList.add("resizing");
       setGeom(entry, rect);
-      if (entry.mounted) entry.impl.update({ ...entry.w, ...rect }, readings.get(entry.id));
+      if (entry.mounted && entry.w.kind !== "note") entry.impl.update({ ...entry.w, ...rect }, readings.get(entry.id));
     }
     host.emit("widgetMove", { id: entry.id, rect: { ...entry.w, ...rect } });
     host.syncSel();
@@ -363,6 +412,8 @@ function start(host) {
     cancelAnimationFrame(a.frame);
     clearGhosts();
     a.entry.el.style.transform = "";
+    a.entry.badge.hidden = true;
+    a.entry.el.classList.remove("resizing");
     if (revert || !a.rect) {
       a.entry.geom = "";
       setGeom(a.entry, a.entry.w);
@@ -396,9 +447,9 @@ function start(host) {
     }
     // A linked card that is dragged lets go of its node and keeps the rect it was dropped at.
     const linked = !!(e.w.config && e.w.config.link);
-    const patch = a.type === "move" && !linked ? { x: r.x, y: r.y } : { x: r.x, y: r.y, w: r.w, h: r.h, ...(linked ? { config: { link: null } } : {}) };
+    const patch = a.type === "move" && !linked ? { x: r.x, y: r.y } : { x: r.x, y: r.y, w: r.w, h: r.h, ...(linked ? { config: { link: null } } : e.w.kind === "note" ? { config: { pageWidth: r.w } } : {}) };
     const was = e.w;
-    e.w = { ...e.w, ...patch, ...(patch.config ? { config: { ...e.w.config, link: null } } : {}) };
+    e.w = { ...e.w, ...patch, ...(patch.config ? { config: { ...e.w.config, ...patch.config } } : {}) };
     e.geom = "";
     setGeom(e, e.w);
     e.key = keyOf(e.w);
@@ -454,7 +505,7 @@ function start(host) {
   /** Copies of cards moved by (dx, dy), one POST each. mergeKey ("group:...") joins them to the layers' duplicate: one undo step. Resolves to the copies' ids. */
   function duplicateCards(ids, dx, dy, mergeKey) {
     const pixel = !host.snap || host.snap().pixel;
-    const headers = mergeKey ? { "x-canvas-merge": mergeKey } : undefined;
+    const headers = { "x-canvas-copy": "1", ...(mergeKey ? { "x-canvas-merge": mergeKey } : {}) };
     return track(Promise.all(ids.map((id) => {
       const e = entries.get(bare(id));
       if (!e) return null;
@@ -467,7 +518,7 @@ function start(host) {
       // A shader card's source is a file named by its id: the server copies it (a plain POST would give the copy the template).
       const made = e.w.kind === "shader" ? call("POST", "/api/shaders", { copyFrom: e.id, name: e.w.name, x, y, w: r.w, h: r.h, ...(e.w.page ? { page: e.w.page } : {}) }, headers) : call("POST", "/api/widgets", body, headers);
       return made.then((j) => { merge(j.widget); return PREFIX + j.widget.id; }, (err) => { toast("Could not duplicate: " + err.message); return null; });
-    }))).then((made) => { host.post({ widgets: shown() }); return made.filter(Boolean); });
+    }))).then((made) => { host.post({ widgets: shellWidgets() }); return made.filter(Boolean); });
   }
 
   // ---------- delete + undo ----------
@@ -480,10 +531,10 @@ function start(host) {
     try { res = await call("DELETE", "/api/widgets/" + e.id); } catch (err) { toast("Could not delete: " + err.message); return; }
     list = list.filter((w) => w.id !== e.id);
     render();
-    host.post({ widgets: shown() });
+    host.post({ widgets: shellWidgets() });
     toast("Widget deleted", async () => {
       try {
-        const r = await call("POST", "/api/widgets", { ...snapshot, index: res.index });
+        const r = await call("POST", "/api/widgets", { ...snapshot, index: res.index }, { "x-canvas-copy": "1" });
         merge(r.widget);
         host.selectId(PREFIX + snapshot.id);
       } catch (err) { toast("Could not undo: " + err.message); }
@@ -528,14 +579,14 @@ function start(host) {
   function reveal(id) {
     const e = entries.get(bare(id));
     if (!e) return;
-    host.setCam(camToReveal(e.w, view.clientWidth, view.clientHeight, host.insets, { maxZ: 1 }));
+    host.setCam(camToReveal(shownRect(e.w), view.clientWidth, view.clientHeight, host.insets, { maxZ: 1 }));
     host.selectId(PREFIX + e.id);
   }
-  host.on("page", () => { render(); host.post({ widgets: shown() }); scheduleVis(); });
-  host.on("resync", () => host.post({ widgets: shown() }));
+  host.on("page", () => { render(); host.post({ widgets: shellWidgets() }); scheduleVis(); });
+  host.on("resync", () => host.post({ widgets: shellWidgets() }));
   // The widget list can arrive before the page list decides which page shows (nothing matched yet): draw
   // again once boards are placed, when what this page shows differs from the cards on screen.
-  host.on("visible", () => { const here = shown(); if (here.length !== entries.size || here.some((w) => !entries.has(w.id))) { render(); host.post({ widgets: here }); } });
+  host.on("visible", () => { const here = shown(); if (here.length !== entries.size || here.some((w) => !entries.has(w.id))) { render(); host.post({ widgets: shellWidgets(here) }); } });
   // ---------- nudge (arrow keys, sent by the page) ----------
   // The card moves now; the write follows, one at a time, the latest spot each time. The server folds a burst
   // into one undo step (x-canvas-merge: nudge).
@@ -627,12 +678,12 @@ function start(host) {
     clearGhost: () => clearGhosts(),
     duplicate: (ids, dx, dy, mergeKey) => duplicateCards(ids, dx, dy, mergeKey),
     /** Cards a paste just made (src/page/structure.js): shown now, before their widgets event arrives. */
-    adopt(ws) { for (const w of ws) merge(w); host.post({ widgets: shown() }); },
+    adopt(ws) { for (const w of ws) merge(w); host.post({ widgets: shellWidgets() }); },
     /** Delete cards (a multi-selection that holds some): one write each; mergeKey ("group:...") joins them to the layers' delete, one undo step. */
     remove(ids, mergeKey) {
       const headers = mergeKey ? { "x-canvas-merge": mergeKey } : undefined;
       return track(Promise.all(ids.map((id) => call("DELETE", "/api/widgets/" + bare(id), undefined, headers).then(() => { list = list.filter((w) => w.id !== bare(id)); }, (err) => toast("Could not delete: " + err.message))))
-        .then(() => { render(); host.post({ widgets: shown() }); }));
+        .then(() => { render(); host.post({ widgets: shellWidgets() }); }));
     },
   };
 
@@ -696,10 +747,11 @@ function start(host) {
       postVis(true);
     } else if (name === "widgets") {
       list = Array.isArray(d.widgets) ? d.widgets.slice() : [];
+      if (list.some((w) => !Object.hasOwn(KINDS, w.kind) && !kinds.has(w.kind))) void loadKinds();
       // A nudge still being written: the card stays where the arrow keys put it.
       list = list.map((w) => { const at = nudges.held(w.id); return at ? { ...w, x: at.x, y: at.y } : w; });
       render();
-      host.post({ widgets: shown() });
+      host.post({ widgets: shellWidgets() });
       if (d.warning && d.warning !== lastWarning) toast(d.warning, null, 8000);
       lastWarning = d.warning || "";
     } else if (name === "wdata") {
@@ -716,5 +768,30 @@ function start(host) {
   for (const [n, data] of early) onEvent(n, data);
   for (const n of ["hello", "widgets", "wdata"]) host.es.addEventListener(n, (e) => onEvent(n, e.data));
 
-  fetch("/api/widgets/kinds").then((r) => r.json()).then((ks) => { for (const k of ks) kinds.set(k.id, k); }).catch(() => {});
+  async function loadKinds() {
+    const seq = ++latestKinds;
+    try {
+      const next = await call("GET", "/api/widgets/kinds?view=picker");
+      if (seq !== latestKinds) return;
+      const old = new Map(kinds);
+      kinds.clear();
+      for (const k of next) kinds.set(k.id, k);
+      for (const e of entries.values()) {
+        const before = old.get(e.w.kind);
+        const after = kinds.get(e.w.kind);
+        if (before?.bundle !== after?.bundle) readings.delete(e.id);
+        if (before?.bundle !== after?.bundle || before?.approved !== after?.approved) unmount(e);
+      }
+      mountVisible();
+    } catch {}
+  }
+  setInterval(() => {
+    if (!document.hidden && list.some((w) => !Object.hasOwn(KINDS, w.kind))) void loadKinds();
+  }, 5000);
+  colorScheme.addEventListener("change", () => {
+    for (const e of entries.values()) {
+      if (e.mounted && kinds.get(e.w.kind)?.local) e.impl.update(e.w, readings.get(e.id));
+    }
+  });
+  void loadKinds();
 }

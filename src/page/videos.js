@@ -77,6 +77,8 @@ function start(host) {
       const r = host.worldRectOf(link);
       if (r && r.w > 0 && r.h > 0) return { x: r.x, y: r.y, w: r.w, h: r.h };
     }
+    const c = w?.kind === "video" && cards.get(w.id);
+    if (c?.aspect && c.src === w.config?.src) return { x: w.x, y: w.y, w: w.w, h: Math.max(1, Math.round(w.w / c.aspect)) };
     return null;
   }
   host.widgetDisplayRect = displayRect;
@@ -96,6 +98,13 @@ function start(host) {
   host.on("render", relink);
   host.on("visible", relink);
 
+  function setAspect(c, width, height) {
+    if (width > 0 && height > 0 && c.aspect !== width / height) {
+      c.aspect = width / height;
+      host.widgetsRelayout?.();
+      sync();
+    }
+  }
   function rectOf(c) { return c.dragRect || displayRect(c.w) || c.w; }
   /** Corner radius: a linked card takes its node's (the placeholder's rounded corners), else the card's. */
   function radiusOf(c, r) {
@@ -153,7 +162,7 @@ function start(host) {
     el.loop = c.w.config.loop !== false;
     el.preload = "metadata";
     el.disablePictureInPicture = true;
-    el.addEventListener("loadedmetadata", () => { c.duration = el.duration; host.requestFrame(); });
+    el.addEventListener("loadedmetadata", () => { c.duration = el.duration; if (c.el === el) setAspect(c, el.videoWidth, el.videoHeight); host.requestFrame(); });
     el.addEventListener("loadeddata", () => host.requestFrame());
     el.addEventListener("seeked", () => { if (eng) eng.wantVideoFrame(c.id); host.requestFrame(); });
     el.addEventListener("ended", () => { if (c.forced) { c.forced = false; if (eng) eng.setVideoForced(c.id, false); } setReading(c, reading(c)); });
@@ -258,13 +267,15 @@ function start(host) {
       const blob = await r.blob();
       if (c.posterKey !== key || cards.get(c.id) !== c) return;
       c.posterUrl = url;
+      const bm = await createImageBitmap(blob);
+      if (c.posterKey !== key || cards.get(c.id) !== c) { bm.close(); return; }
+      if (!c.aspect) setAspect(c, bm.width, bm.height);
       if (eng) {
-        const bm = await createImageBitmap(blob);
         // A frame of the video itself (it played, or a seek) is newer than the poster.
         const s = stat(c.id);
         if (eng && cards.get(c.id) === c && !(s && (s.shows === "live" || s.shows === "frame"))) { eng.setShaderPoster(c.id, bm); host.requestFrame(); }
-        bm.close();
       }
+      bm.close();
       setReading(c, reading(c));
     } catch (e) {
       if (c.posterKey === key) c.posterKey = "";
@@ -286,7 +297,7 @@ function start(host) {
       const src = cfg.src || "";
       if (src !== c.src || (cfg.hash || "") !== c.hash) {
         dropEl(c);
-        c.src = src; c.hash = cfg.hash || ""; c.error = ""; c.posterKey = ""; c.posterUrl = "";
+        c.src = src; c.aspect = 0; c.hash = cfg.hash || ""; c.error = ""; c.posterKey = ""; c.posterUrl = "";
         if (src && !c.hash) fetch(q("/api/videos/" + encodeURIComponent(c.id) + "/hash"), { method: "POST", headers: { "x-canvas": "1" } }).then((r) => r.arrayBuffer()).catch(() => {});
       }
       const pms = Math.round((cfg.posterTime ?? 1) * 1000);
@@ -410,6 +421,16 @@ function start(host) {
       if (!c) return;
       c.unmuted = !muted;
       if (!muted && !c.forced) { api.toggle(id); return; }
+      sync();
+    },
+    retry(id) {
+      const c = cards.get(id);
+      if (!c?.src) return;
+      c.error = "";
+      c.posterKey = "";
+      dropEl(c);
+      c.el = makeEl(c);
+      setReading(c, { state: "loading", frame: false });
       sync();
     },
     stats: () => (eng ? eng.shaderStats() : null),

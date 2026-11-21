@@ -41,6 +41,7 @@ fn shade(p: vec2<f32>) -> vec4<f32> {
 export const shader: WidgetKind = {
   id: "shader",
   title: "Shader",
+  description: "A live shader canvas",
   symbol: "camera.filters",
   defaultSize: { w: 480, h: 270 },
   minSize: { w: 96, h: 64 },

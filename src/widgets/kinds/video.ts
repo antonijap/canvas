@@ -21,6 +21,7 @@ function seconds(v: unknown, field: string, def: number): number {
 export const video: WidgetKind = {
   id: "video",
   title: "Video",
+  description: "Play a local video",
   symbol: "play.rectangle",
   defaultSize: { w: 480, h: 270 },
   minSize: { w: 64, h: 40 },

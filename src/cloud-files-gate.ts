@@ -8,6 +8,9 @@ export function readOnlyRoute(method: string, pathname: string): boolean {
         return false;
     if (pathname.startsWith('/api/comments/') || pathname.startsWith('/api/cloud/') || SAFE.has(pathname))
         return false;
+    // These widget requests only change local polling or trust. Viewers can use them on shared files.
+    if (method === 'POST' && (pathname === '/api/widgets/visibility' || /^\/api\/widgets\/[^/]+\/(?:refresh|trust)$/.test(pathname)))
+        return false;
     // Fail closed for new edit routes too; a route need not be remembered in this table to be protected.
     return pathname.startsWith('/api/');
 }

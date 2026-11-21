@@ -594,6 +594,11 @@ features:
     area: cards
     driven: [page, mcp]
     cases: [card-todo, keyboard, mouse, agent]
+  - id: widget-source-approval
+    name: A shared live widget waits for approval before loading its origin
+    area: cards
+    driven: [page, native]
+    cases: [shared-preview, inspector]
   - id: note
     name: Rich notes (markdown typing, Cmd+B, paste keeps formatting)
     area: cards

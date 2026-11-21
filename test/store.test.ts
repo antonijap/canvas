@@ -47,7 +47,7 @@ describe("widget store", () => {
     await w.addWidget(docFile, { kind: "note", id: "w_aaaaaaaa", x: 5, y: 6, name: "N", config: { text: "hi" } });
     const raw = fs.readFileSync(sidecarPath(docFile), "utf8");
     assert.ok(raw.endsWith("}\n"));
-    assert.match(raw, /^\{\n  "version": 1,\n  "widgets": \[\n    \{\n      "id": "w_aaaaaaaa",\n      "kind": "note",\n      "name": "N",\n      "x": 5,\n      "y": 6,\n      "w": 320,\n      "h": 240,\n      "locked": false,\n      "config": \{\n        "text": "hi",\n        "tone": "plain"\n/);
+    assert.match(raw, /^\{\n  "version": 1,\n  "widgets": \[\n    \{\n      "id": "w_aaaaaaaa",\n      "kind": "note",\n      "name": "hi",\n      "x": 5,\n      "y": 6,\n      "w": 480,\n      "h": 80,\n      "locked": false,\n      "config": \{\n        "text": "hi",\n        "tone": "plain"\n/);
     // A no-op patch leaves the bytes alone.
     await w.updateWidget(docFile, "w_aaaaaaaa", { x: 5 });
     assert.equal(fs.readFileSync(sidecarPath(docFile), "utf8"), raw);

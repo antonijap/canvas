@@ -38,6 +38,7 @@ const text = (v: unknown) => {
 export const todo: WidgetKind = {
   id: "todo",
   title: "To-do",
+  description: "Tasks with checkboxes",
   symbol: "checklist",
   defaultSize: { w: 280, h: 160 },
   minSize: { w: 200, h: 120 },

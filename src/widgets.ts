@@ -11,15 +11,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { boardsOf } from "./boards.ts";
 import { loadDoc, resolveDocPath, type CanvasDoc } from "./engine.ts";
+import { pageName } from "./page/widget-page.js";
 import { pathExists } from "./docpath.ts";
 import { redact } from "./widgets/ctx.ts";
 import { clearSecret, hasSecret, parseRef } from "./widgets/keychain.ts";
+import { readLocalWidget } from "./widgets/local.ts";
 import { Poller } from "./widgets/poller.ts";
 import { ID_RE, kindList, kindOf, mergeConfig } from "./widgets/registry.ts";
 import { cleanPages } from "./pages.ts";
 import { GROUP_MERGE_MS, isGroupMerge } from "./move.ts";
 import { storeFor, type Store, type StoreState, type WriteOpts } from "./widgets/store.ts";
-import { approve } from "./widgets/trust.ts";
+import { approve, approveLocalWidget, approveSource, isLocalWidgetApproved, isSourceApproved } from "./widgets/trust.ts";
 import { WidgetError, type Config, type Reading, type Widget } from "./widgets/types.ts";
 import { countUsage } from "./usage-counts.ts";
 
@@ -102,8 +104,14 @@ export function getWidget(file: string, id: string) {
   return { rev: s.rev, widget, data: poller.readings(p)[id] };
 }
 
-export function kinds() {
-  return kindList().filter((k) => !k.hidden).map((k) => ({ id: k.id, title: k.title, symbol: k.symbol, defaultSize: k.defaultSize, minSize: k.minSize, fields: k.fields, defaults: k.defaults(), actions: Object.keys(k.actions ?? {}) }));
+export function kinds(picker = false) {
+  return kindList().filter((k) => !k.hidden).map((k) => ({
+    id: k.id, title: k.title, description: k.description, picker: k.picker, live: !!k.source, symbol: k.symbol,
+    defaultSize: k.defaultSize, minSize: k.minSize, fields: k.fields, defaults: k.defaults(),
+    actions: Object.keys(k.actions ?? {}),
+    ...(k.local ? { local: true } : {}),
+    ...(picker && k.local ? { bundle: k.local.hash, previewHTML: k.local.previewHTML, approved: isLocalWidgetApproved(k.id, k.local.hash) } : {}),
+  }));
 }
 
 /** Right of every board, 80 px away, stacking down past what is already there. */
@@ -139,16 +147,17 @@ export async function addWidget(file: string, input: WidgetInput, opts: Opts = {
   const { state, result } = await store(p).mutate<Widget>((list) => {
     const size = { w: input.w ?? k.defaultSize.w, h: input.h ?? k.defaultSize.h };
     const at = input.x !== undefined && input.y !== undefined ? { x: input.x, y: input.y } : autoPlace(p, list, size);
+    const config = k.validate(mergeConfig(k.defaults(), input.config ?? {}));
     const widget: Widget = {
       id: input.id ?? newId(),
       kind: k.id,
-      name: input.name ?? k.title,
+      name: k.id === "note" ? pageName(String(config.text ?? "")) : input.name ?? k.title,
       x: input.x ?? at.x,
       y: input.y ?? at.y,
       w: size.w,
       h: size.h,
       locked: input.locked === true,
-      config: k.validate(mergeConfig(k.defaults(), input.config ?? {})),
+      config,
       ...(typeof input.page === "string" && input.page ? { page: input.page } : {}),
     };
     if (list.some((w) => w.id === widget.id)) throw new WidgetError(409, "id-exists", `A widget "${widget.id}" already exists`);
@@ -156,8 +165,8 @@ export async function addWidget(file: string, input: WidgetInput, opts: Opts = {
     list.splice(index, 0, widget);
     return { widgets: list, result: widget };
   }, opts);
-  countUsage(`widget.add.${k.id}`);
-  return { rev: state.rev, widget: state.widgets.find((w) => w.id === result!.id)! };
+  countUsage(k.local ? "widget.add.local" : `widget.add.${k.id}`);
+  return { rev: state.rev, widget: state.widgets.find((w) => w.id === result!.id)!, ...(k.local ? { local: true } : {}) };
 }
 
 /**
@@ -175,7 +184,7 @@ export async function addWidgets(file: string, inputs: WidgetInput[], opts: Opts
       const at = input.x !== undefined && input.y !== undefined ? { x: input.x, y: input.y } : autoPlace(p, list, size);
       // A kind Canvas no longer has keeps its config as it is (shown as an unsupported card, like on load).
       const config = k ? k.validate(mergeConfig(k.defaults(), input.config ?? {})) : { ...(input.config ?? {}) };
-      list.push({ id, kind: k ? k.id : String(input.kind), name: input.name ?? k?.title ?? String(input.kind), x: at.x, y: at.y, w: size.w, h: size.h, locked: input.locked === true, config, ...(typeof input.page === "string" && input.page ? { page: input.page } : {}) });
+      list.push({ id, kind: k ? k.id : String(input.kind), name: k?.id === "note" ? pageName(String(config.text ?? "")) : input.name ?? k?.title ?? String(input.kind), x: at.x, y: at.y, w: size.w, h: size.h, locked: input.locked === true, config, ...(typeof input.page === "string" && input.page ? { page: input.page } : {}) });
       ids.push(id);
     }
     return { widgets: list, result: ids };
@@ -211,6 +220,10 @@ export async function updateWidget(file: string, id: string, patch: WidgetPatch,
     if (patch.config !== undefined) {
       if (typeof patch.config !== "object" || patch.config === null || Array.isArray(patch.config)) throw new WidgetError(422, "invalid-widget", "config must be an object");
       w.config = mergeConfig(w.config, patch.config);
+      if (w.kind === "note" && Object.hasOwn(patch.config, "text")) w.name = pageName(String(w.config.text ?? ""));
+    }
+    if (w.kind === "note" && patch.w !== undefined && !Object.hasOwn(patch.config ?? {}, "text") && !Object.hasOwn(patch.config ?? {}, "pageWidth")) {
+      w.config.pageWidth = Math.max(280, Number(patch.w));
     }
     return { widgets: list };
   }, opts);
@@ -262,12 +275,39 @@ export function setVisibility(file: string, clientId: unknown, ids: unknown) {
   return { ok: true, leaseSec: 90 };
 }
 
-/** Allow this widget to send its secret to the origin its config points at. */
-export async function trustWidget(file: string, id: string) {
+function approveSavedSource(w: Widget, editedConfig?: Config) {
+  const rule = kindOf(w.kind)?.source?.approval;
+  if (!rule || (editedConfig && !Object.hasOwn(editedConfig, rule.field))) return;
+  const target = rule.target(w.config);
+  if (!target) return;
+  approveSource(w.kind, target);
+  poller.retryBlocked();
+}
+
+/** Approve the source, local bundle or secret named by the card. */
+export async function trustWidget(file: string, id: string, bundle?: unknown, fromMcp = false, target?: unknown) {
+  if (fromMcp) throw new WidgetError(403, "forbidden", "Approve widgets from the canvas.");
   const p = docFileFor(file);
   const w = store(p).snapshot().widgets.find((x) => x.id === id);
   if (!w) throw new WidgetError(404, "no-widget", `No widget "${id}"`);
-  const use = kindOf(w.kind)?.source?.secretUse?.(w.config);
+  const kind = kindOf(w.kind);
+  if (kind?.local) {
+    if (bundle !== kind.local.hash) throw new WidgetError(409, "widget-changed", "This local widget changed. Review it again.");
+    approveLocalWidget(w.kind, kind.local.hash);
+    poller.retryBlocked();
+    return { ok: true, local: true };
+  }
+  const primary = kind?.source?.approval?.target(w.config);
+  if (target !== undefined) {
+    const pending = poller.readings(p)[id]?.approvalTarget;
+    const matches = typeof target === "string" && (target === primary || (primary && isSourceApproved(w.kind, primary) && target === pending));
+    if (!matches) throw new WidgetError(409, "widget-changed", "This widget changed. Review its source again.");
+    approveSource(w.kind, target);
+    poller.retryBlocked();
+    return { ok: true, target };
+  }
+  if (primary && !isSourceApproved(w.kind, primary)) throw new WidgetError(409, "needs-approval", "Allow the source on the canvas first.");
+  const use = kind?.source?.secretUse?.(w.config);
   if (!use) throw new WidgetError(422, "no-secret", "This widget does not send a secret");
   approve(use.ref, use.origin);
   poller.retryBlocked(p);
@@ -408,11 +448,17 @@ export async function handleWidgetRoute(req: http.IncomingMessage, res: http.Ser
         const o = isGroupMerge(groupKey) ? opts("Duplicate", groupKey) : opts("Add Widget");
         if (isGroupMerge(groupKey) && o.record) o.record.mergeMs = GROUP_MERGE_MS;
         const added = await addWidget(file as string, body as WidgetInput, o);
+        if (!agent && req.headers["x-canvas-copy"] !== "1") approveSavedSource(added.widget);
         edited(added.widget.id);
         return out(201, added);
       }
     } else if (a === "kinds" && !b && m === "GET") {
-      return out(200, kinds());
+      return out(200, kinds(url.searchParams.get("view") === "picker"));
+    } else if (a === "local-renderer" && b && !c && m === "GET") {
+      const local = kindOf(b)?.local && readLocalWidget(b);
+      if (!local || url.searchParams.get("bundle") !== local.hash) return out(404, { code: "widget-changed", error: "Local widget unavailable" });
+      if (!isLocalWidgetApproved(b, local.hash)) return out(403, { code: "needs-approval", error: "Approve this local widget on the canvas." });
+      return out(200, { renderer: local.renderer });
     } else if (a === "secret-status" && !b && m === "GET") {
       return out(200, await secretStatus(url.searchParams.get("service"), url.searchParams.get("account")));
     } else if (a === "secret-changed" && !b && m === "POST") {
@@ -434,6 +480,7 @@ export async function handleWidgetRoute(req: http.IncomingMessage, res: http.Ser
         if (nudge && o.record) o.record.mergeMs = 1000;
         if (group && o.record) o.record.mergeMs = GROUP_MERGE_MS;
         const updated = await updateWidget(file as string, a, patch, o);
+        if (!agent && patch.config) approveSavedSource(updated.widget, patch.config);
         edited(a);
         return out(200, updated);
       }
@@ -452,8 +499,8 @@ export async function handleWidgetRoute(req: http.IncomingMessage, res: http.Ser
     } else if (b === "refresh" && !c && m === "POST") {
       return out(200, await refreshWidget(file as string, a));
     } else if (b === "trust" && !c && m === "POST") {
-      await readBody(req);
-      return out(200, await trustWidget(file as string, a));
+      const body = await readBody(req);
+      return out(200, await trustWidget(file as string, a, body.bundle, !!agent, body.target));
     }
     reply(res, 404, { error: "not found", code: "not-found" });
   } catch (e) {

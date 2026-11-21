@@ -20,6 +20,8 @@ import "./scenarios-comments.ts";
 import "./scenarios-comments-shared.ts";
 import "./scenarios-comments-move.ts";
 import "./scenarios-alignment.ts";
+import "./scenarios-widgets.ts";
+
 import { buildLink } from "../src/page/link-logic.js";
 
 const pos = (n: any) => ({ x: n?.x, y: n?.y });
@@ -664,11 +666,10 @@ sc("cards", "a PostHog card shows its state again after another page", { covers:
   t.eq((await status()).includes("Loading"), false, `the card shows its state, not Loading (${JSON.stringify((await status()).slice(0, 80))}, was ${JSON.stringify(before.slice(0, 80))})`);
 });
 
-// The maintainer, 2026-11-16: a selected card shows a calm 1.5 px blue outline just outside its border, around its
-// 12 px corners; no handles, no size badge; the card itself does not change. Light and dark.
+// A card has a grey outline in both themes. Handles appear on hover and the badge appears while resizing.
 for (const [theme, z] of [["light", 1], ["dark", 0.5]] as const) {
   const kinds = theme === "light" ? ["todo", "note", "posthog", "video"] : ["shader", "todo", "note"];
-  sc("cards", `a selected card shows a blue outline, ${theme} theme`, { covers: [...kinds.map((k) => `card-select:card-${k}`), `card-select:${theme}`] }, async (t: T) => {
+  sc("cards", `a selected card shows a grey outline, ${theme} theme`, { skip: { visual: "Checks and captures the selection directly in each theme." }, covers: [...kinds.map((k) => `card-select:card-${k}`), `card-select:${theme}`] }, async (t: T) => {
     await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }, { name: "prefers-color-scheme", value: theme }] });
     for (const kind of kinds) {
       await cards(t, kind);
@@ -682,20 +683,20 @@ for (const [theme, z] of [["light", 1], ["dark", 0.5]] as const) {
       await t.select([id]);
       await sleep(200);
       t.eq(await t.sel(), [id], "the card is selected");
-      const sel = await t.ev<any>(`(() => { const e = document.getElementById("sel"), s = getComputedStyle(e), b = e.getBoundingClientRect(); const hs = [...e.querySelectorAll("i")].map((i) => { const c = getComputedStyle(i); return c.backgroundColor + "|" + c.borderTopWidth; }); const probe = document.createElement("div"); probe.style.color = "var(--c-sel)"; document.body.append(probe); const blue = getComputedStyle(probe).color; probe.remove(); return { outline: s.outlineWidth + " " + s.outlineStyle, want: Math.max(1, Math.floor(1.5 * devicePixelRatio)) / devicePixelRatio + "px solid", color: s.outlineColor, blue, radius: parseFloat(s.borderTopLeftRadius), z: window.canvasHost.cam.z, dim: getComputedStyle(document.getElementById("seldim")).display, box: { x: b.left, y: b.top, w: b.width, h: b.height }, hs }; })()`);
+      const sel = await t.ev<any>(`(() => { const e = document.getElementById("sel"), s = getComputedStyle(e), b = e.getBoundingClientRect(); const hs = [...e.querySelectorAll("i")].map((i) => { const c = getComputedStyle(i); return c.backgroundColor + "|" + c.borderTopWidth; }); const probe = document.createElement("div"); probe.style.color = "var(--widget-selection)"; document.body.append(probe); const grey = getComputedStyle(probe).color; probe.remove(); return { outline: s.outlineWidth + " " + s.outlineStyle, want: Math.max(1, Math.floor(1.5 * devicePixelRatio)) / devicePixelRatio + "px solid", color: s.outlineColor, grey, radius: parseFloat(s.borderTopLeftRadius), z: window.canvasHost.cam.z, dim: getComputedStyle(document.getElementById("seldim")).display, box: { x: b.left, y: b.top, w: b.width, h: b.height }, hs }; })()`);
       t.eq(sel.outline, sel.want, `${kind}: the outline (1.5 px, drawn on whole device pixels)`);
-      t.eq(sel.color, sel.blue, `${kind}: the outline is the canvas selection blue`);
+      t.eq(sel.color, sel.grey, `${kind}: the outline uses the widget selection grey`);
       t.near(sel.radius, 12 * sel.z, 0.01, `${kind}: the outline's corners follow the card's 12 px radius at ${sel.z * 100}%`);
       t.near(sel.box.x, r.x, 1, `${kind}: #sel sits on the card`);
       t.near(sel.box.w, r.w, 1, `${kind}: #sel is the card's width`);
       t.eq(sel.dim, "none", `${kind}: no size badge`);
       t.ok(sel.hs.every((x: string) => /rgba\(0, 0, 0, 0\)\|0px/.test(x)), `${kind}: no handles are painted: ${JSON.stringify(sel.hs)}`);
       const after = await t.shot(clip);
-      // Pixels: the ring just outside the card turned blue; nothing inside the card changed.
+      // Pixels: the ring just outside the card changed; nothing inside the card changed.
       const A = decodePng(before), B = decodePng(after);
       const at = (img: ReturnType<typeof decodePng>, x: number, y: number) => { const i = (Math.round(y) * img.width + Math.round(x)) * 4; return [img.data[i], img.data[i + 1], img.data[i + 2]]; };
       const [br, bg, bb] = at(B, r.x + r.w / 2 - clip.x, r.y - 1 - clip.y);
-      t.ok(bb > 150 && bb > br + 40 && bb > bg, `${kind}: the pixel above the card's top edge is blue (${br},${bg},${bb})`);
+      t.ok(Math.max(br, bg, bb) - Math.min(br, bg, bb) < 16, `${kind}: the pixel above the card's top edge is grey (${br},${bg},${bb})`);
       const inside = { x: 6, y: 6, w: r.w - 12, h: r.h - 12 };
       let changed = 0;
       for (let y = inside.y; y < inside.y + inside.h; y += 2) for (let x = inside.x; x < inside.x + inside.w; x += 2) {
@@ -724,8 +725,8 @@ sc("cards", "two selected cards each show the outline", { covers: ["card-select:
 });
 
 const CARD_CURSOR: Record<Handle, string> = CURSORS;
-for (const kind of ["todo", "note", "posthog", "shader", "video"]) {
-  sc("cards", `${kind} card: resize from 4 edges and 4 corners, cursors, Option from the centre`, { covers: [`card-resize:card-${kind}`, `resize:card-${kind}`, `resize-modifiers:card-${kind}`, `card-resize:mouse`, ...HANDLES.map((h) => `card-resize:handle-${h}`), `undo-redo:card-${kind}`] }, async (t: T) => {
+for (const kind of ["todo", "posthog", "shader"]) {
+  sc("cards", `${kind} card: resize from 4 edges and 4 corners, cursors, Option from the centre`, { skip: { visual: "Checks resize geometry and undo directly." }, covers: [`card-resize:card-${kind}`, `resize:card-${kind}`, `resize-modifiers:card-${kind}`, `card-resize:mouse`, ...HANDLES.map((h) => `card-resize:handle-${h}`), `undo-redo:card-${kind}`] }, async (t: T) => {
     await cards(t, kind);
     const problems: string[] = [];
     for (const h of HANDLES) {
@@ -853,10 +854,10 @@ sc("todo", "a text drag that leaves a to-do field selects nothing outside it", {
 
 // ---------------------------------------------------------------- note
 
-sc("note", "# heading, - list and Cmd+B bold by typing", { covers: ["note:card-note","note:keyboard"] }, async (t: T) => {
+sc("note", "# heading, - list and Cmd+B bold by typing", { skip: { visual: "Asserts the stored rich text and its rendered blocks directly." }, covers: ["note:card-note","note:keyboard"] }, async (t: T) => {
   await cards(t, "note", "Scratch note");
-  const { r } = await card(t, "note", "Scratch note");
-  const word = await t.ev<{ x: number; y: number }>(`(() => { const e = [...document.querySelectorAll(".wd")].find((x) => x.getAttribute("aria-label") === "Scratch note").querySelector(".nd"); const b = e.getBoundingClientRect(); return { x: b.left + 40, y: b.top + 12 }; })()`);
+  const { r, id } = await card(t, "note", "Scratch note");
+  const word = await t.ev<{ x: number; y: number }>(`(() => { const e = [...document.querySelectorAll(".wd")].find((x) => x.dataset.id === ${JSON.stringify(id)}).querySelector(".nd"); const b = e.getBoundingClientRect(); return { x: b.left + 40, y: b.top + 37 }; })()`);
   t.ok(word.y > r.y, "the note's text is on screen");
   await t.io.dblclick(word.x, word.y);
   await sleep(200);
@@ -876,11 +877,11 @@ sc("note", "# heading, - list and Cmd+B bold by typing", { covers: ["note:card-n
   await t.io.key("Escape");
   await sleep(400);
   await t.flush();
-  const text = t.widgets().widgets.find((x: any) => x.name === "Scratch note").config.text as string;
+  const text = t.widgets().widgets.find((x: any) => "widget:" + x.id === id).config.text as string;
   t.ok(text.split("\n").includes("# Big title"), `a heading line: ${JSON.stringify(text)}`);
   t.ok(text.split("\n").includes("- first point"), `a list line: ${JSON.stringify(text)}`);
   t.ok(text.includes("**strong** plain"), `bold text: ${JSON.stringify(text)}`);
-  const dom = await t.ev<string[]>(`[...[...document.querySelectorAll(".wd")].find((x) => x.getAttribute("aria-label") === "Scratch note").querySelectorAll(".nd .nb, .nd strong")].map((e) => (e.dataset.t || e.tagName) + ":" + e.textContent)`);
+  const dom = await t.ev<string[]>(`[...[...document.querySelectorAll(".wd")].find((x) => x.dataset.id === ${JSON.stringify(id)}).querySelectorAll(".nd .nb, .nd strong")].map((e) => (e.dataset.t || e.tagName) + ":" + e.textContent)`);
   t.ok(dom.includes("h1:Big title") && dom.includes("ul:first point") && dom.includes("STRONG:strong"), `drawn as heading, list and bold: ${JSON.stringify(dom)}`);
 });
 

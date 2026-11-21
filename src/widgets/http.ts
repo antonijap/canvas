@@ -20,6 +20,7 @@ export type SafeFetchOptions = {
   totalMs?: number;
   idleMs?: number;
   maxRedirects?: number;
+  sameOrigin?: boolean;
 };
 export type SafeResponse = { status: number; headers: Record<string, string>; body: Buffer; url: string };
 
@@ -105,7 +106,7 @@ async function acquire(host: string): Promise<() => void> {
   };
 }
 
-const lookup: net.LookupFunction = (hostname, options, cb) => {
+export const checkedLookup: net.LookupFunction = (hostname, options, cb) => {
   dns.lookup(hostname, { ...options, all: true }, (err, addrs) => {
     if (err) return (cb as (e: Error | null) => void)(err);
     const ok = addrs.filter((a) => !blockedReason(a.address));
@@ -130,9 +131,9 @@ function hop(u: URL, h: Hop, o: { maxBytes: number; idleMs: number; signal: Abor
     const mod = u.protocol === "https:" ? https : http;
     const headers: Record<string, string> = { accept: "application/json", "accept-encoding": "identity", "user-agent": "Canvas-widgets/1", ...h.headers };
     if (h.body !== undefined) headers["content-length"] = String(Buffer.byteLength(h.body));
-    const req = mod.request(u, { method: h.method, headers, lookup, agent: false, signal: o.signal }, (res) => {
+    const req = mod.request(u, { method: h.method, headers, lookup: checkedLookup, agent: false, signal: o.signal }, (res) => {
       const len = Number(res.headers["content-length"]);
-      if (Number.isFinite(len) && len > o.maxBytes) {
+      if (h.method !== "HEAD" && Number.isFinite(len) && len > o.maxBytes) {
         res.destroy();
         return reject(new WidgetError(0, "too-large", `The response is larger than ${Math.round(o.maxBytes / 1024)} KB`));
       }
@@ -209,12 +210,13 @@ export async function safeFetch(o: SafeFetchOptions): Promise<SafeResponse> {
         throw new WidgetError(0, "bad-url", "The server redirected to an invalid URL");
       }
       if (next.origin !== origin) {
+        if (o.sameOrigin) throw new WidgetError(0, "redirect-origin", "The source redirected to a different origin");
         // Credentials and custom headers stay with the origin they were meant for.
         secret = undefined;
         headers = {};
       }
       check(next, !!secret);
-      if (res.status !== 307 && res.status !== 308) {
+      if (method !== "HEAD" && res.status !== 307 && res.status !== 308) {
         method = "GET";
         body = undefined;
       }

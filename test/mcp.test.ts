@@ -15,6 +15,7 @@ import { buildLink } from "../src/page/link-logic.js";
 
 const dir = tmpDir("mcp");
 process.env.CANVAS_ROOTS = dir;
+process.env.CANVAS_WIDGETS_DIR = path.join(dir, "local-widgets");
 const FIXTURE = {
   version: "2.21",
   children: [
@@ -656,6 +657,24 @@ describe("widgets", () => {
     assert.match((await call("remove_widget", { file, id: "missing" })).text, /^not_found: /);
     assert.equal((await call("remove_widget", { file, id: w.id })).isError, false);
     assert.equal((await call("list_widgets", { file })).json.widgets.length, 0);
+  });
+
+  test("lists and adds a kind installed on this Mac", async (t) => {
+    const folder = path.join(process.env.CANVAS_WIDGETS_DIR!, "hello");
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, "manifest.json"), JSON.stringify({
+      id: "hello", title: "Hello", description: "Example", defaultSize: { w: 250, h: 160 }, settings: [],
+    }));
+    fs.writeFileSync(path.join(folder, "renderer.js"), "export default () => {};");
+    t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+    const kinds = await call("list_widget_kinds");
+    assert.equal(kinds.json.find((k: any) => k.id === "hello")?.local, true);
+    const add = await call("add_widget", { file, kind: "hello", config: { greeting: "Hello" } });
+    assert.equal(add.isError, false, add.text);
+    assert.equal(add.json.local, true);
+    assert.equal(add.json.widget.w, 250);
+    assert.deepEqual(add.json.widget.config, { greeting: "Hello" });
+    assert.equal((await call("remove_widget", { file, id: add.json.widget.id })).isError, false);
   });
 
   test("reveal_widget fits and selects through the page", async () => {

@@ -62,6 +62,11 @@ test('read-only gate covers all mutation families and permits reads and comments
     }
     assert.ok(MUTATING_ROUTES.length > 10);
     assert.equal(readOnlyRoute('POST', '/api/comments/ops'), false);
+    for (const route of ['/api/widgets/visibility', '/api/widgets/shared/trust', '/api/widgets/shared/refresh']) {
+        assert.equal(readOnlyRoute('POST', route), false, route);
+        assert.equal(readOnlyRoute('DELETE', route), true, route);
+    }
+    assert.equal(readOnlyRoute('POST', '/api/widgets/shared/actions/change'), true);
 });
 test('Mac file routes persist snapshots, reject viewers and unregistered rooms before lookup', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-files-host-'));

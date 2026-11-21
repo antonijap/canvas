@@ -1197,7 +1197,7 @@ func openWelcome() {
 // reopens it on the next launch.
 class Hook: NSObject, WKScriptMessageHandler {
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-    if message.name == "canvasFile", message.webView === model.webView, let file = message.body as? String, !file.isEmpty {
+    if message.name == "canvasFile", message.frameInfo.isMainFrame, message.webView === model.webView, let file = message.body as? String, !file.isEmpty {
       UserDefaults.standard.set(file, forKey: "canvas.lastFile")
     }
   }

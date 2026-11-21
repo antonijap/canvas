@@ -1,3 +1,5 @@
+import type { ciData, diskData, gitData, usageData } from "./source-data.ts";
+
 // Shared widget types. No runtime imports, so every other widget module can use them without cycles.
 
 export type Config = Record<string, unknown>;
@@ -18,7 +20,7 @@ export type Widget = {
 
 export type SecretRef = { service: string; account: string };
 
-export type ReadingState = "loading" | "ok" | "stale" | "error" | "needs-secret" | "needs-approval";
+export type ReadingState = "loading" | "ok" | "empty" | "stale" | "error" | "needs-secret" | "needs-approval";
 
 /** `value` is the change against the previous sample, `pct` that change as a ratio (0.12 = +12%), `display` is ready to print. */
 export type Delta = { value: number; pct?: number; display: string };
@@ -44,6 +46,16 @@ export type ChartData = {
 /** What a live widget shows right now. Never stored in the sidecar; pushed over SSE as `wdata`. */
 export type Reading = {
   state: ReadingState;
+  approvalTarget?: string;
+  empty?: string;
+  content?: {
+    git?: ReturnType<typeof gitData>;
+    ci?: ReturnType<typeof ciData>;
+    usage?: ReturnType<typeof usageData>;
+    preview?: string;
+    local?: { hash: string; data: unknown };
+    disk?: ReturnType<typeof diskData>;
+  };
   display?: string;
   value?: number | string;
   spark?: number[];
@@ -68,6 +80,14 @@ export class WidgetError extends Error {
   }
 }
 
+export class SourceApproval extends WidgetError {
+  readonly target: string;
+  constructor(target: string, verb: "load" | "read") {
+    super(0, "needs-approval", `Allow this widget to ${verb} ${target}`);
+    this.target = target;
+  }
+}
+
 export type Field = {
   /** Dotted keys ("auth.type") address nested config; PATCH merges nested objects, so send just that branch. */
   key: string;
@@ -79,6 +99,7 @@ export type Field = {
 
 export type RequestOptions = {
   url: string;
+  sameOrigin?: boolean;
   method?: "GET" | "POST";
   headers?: Record<string, string>;
   body?: unknown;
@@ -102,6 +123,13 @@ export type FetchCtx = {
 export type SourceData = Omit<Reading, "state" | "updatedAt" | "error">;
 
 export type Source = {
+  approval?: {
+    field: string;
+    verb: "load" | "read";
+    target(c: Config): string | undefined;
+  };
+  /** On-disk bundle version for local sources. */
+  version?: string;
   /** Two widgets with the same key share one fetch per round. Cover everything that changes the result. */
   key(c: Config): string;
   minIntervalSec: number;
@@ -116,6 +144,8 @@ export type ActionResult = { config: Config; result?: unknown };
 export type WidgetKind = {
   id: string;
   title: string;
+  description?: string;
+  picker?: boolean;
   /** SF Symbol name for the native shell. */
   symbol: string;
   /** Not offered in the Widgets panel or to agents' list_widget_kinds (the Welcome card): only Canvas makes one. */
@@ -126,6 +156,7 @@ export type WidgetKind = {
   /** Fill gaps from defaults, reject bad values with a 422, keep unknown keys. Returns the config to store. */
   validate(c: Config): Config;
   fields: Field[];
+  local?: { hash: string; previewHTML?: string };
   source?: Source;
   actions?: Record<string, (c: Config, args: Record<string, unknown>) => ActionResult>;
 };

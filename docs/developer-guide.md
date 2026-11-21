@@ -663,7 +663,7 @@ pnpm qa:release --only scrub,docs # some checks: scrub licence security agent fu
 | `CANVAS_ENGINE_PKG` | `engine/pkg` | Where the WASM build is |
 | `CANVAS_WEB_FONTS` | on | `0` stops Google Fonts downloads |
 | `CANVAS_VIDEO_PROXIES` | `~/Library/Caches/Canvas/video-proxies` | Video proxy cache |
-| `CANVAS_TRUST_FILE` | `~/Library/Application Support/Canvas/widget-trust.json` | Approved origins per widget secret |
+| `CANVAS_TRUST_FILE` | `~/Library/Application Support/Canvas/widget-trust.json` | Local widget source, secret and bundle approvals |
 | `CANVAS_STATE_DIR` | `~/Library/Application Support/Canvas` | Where the gzipped backup of each write goes (`backups/`, the 10 newest per document) |
 | `CANVAS_CHROME` | found automatically | The Chromium-family browser headless renders and exports use |
 | `CANVAS_NO_WARM` | unset | Set: do not start the headless renderer early (tests and short scripts) |
@@ -755,3 +755,36 @@ codex -c 'mcp_servers.canvas.env.CANVAS_MCP_BACKGROUND="1"'
 ```
 
 Normal mode `open_file` defaults to `focus:false`: it adds the tab without switching the person's view. A hidden tab may have no live page. Live tools then return `no_page` with a background-mode hint. Only `focus:true` or the person switches to that tab.
+
+## Live widget approvals
+
+Live widgets ask before loading an address or reading a repository. Canvas stores approval on this Mac by widget kind and URL origin, folder path or repository name. Saving a source you enter in the app approves that target. A source from a shared file or added through MCP needs **Allow** if that target has no local approval. Moving or renaming a card leaves its approval alone. Changing to a target you haven't approved brings back the prompt.
+
+LAN and loopback addresses are reachable after approval, including local dev servers. Page previews use a fresh Chromium profile and limit web requests to the approved origin, so assets hosted elsewhere may be missing. CI cards configured with a folder also ask before using the repository resolved from its remote. Analytics cards may separately ask to send a saved API key.
+
+## Personal widgets
+
+Put each kind in `~/Library/Application Support/Canvas/widgets/<id>/`. Set `CANVAS_WIDGETS_DIR` to use a different folder. The Widgets panel lists these kinds under Mine. The canvas asks you to allow each bundle before it runs. Editing any of its three files requires approval again. A canvas opened without the bundle keeps the widget's settings and shows an unsupported card.
+
+A bundle has a `manifest.json` and a self-contained `renderer.js`. For example, in a folder named `hello`:
+
+```json
+{
+  "id": "hello",
+  "title": "Hello",
+  "description": "A greeting",
+  "defaultSize": { "w": 250, "h": 160 },
+  "settings": [{ "key": "greeting", "label": "Greeting", "type": "text", "default": "Hello" }],
+  "previewHTML": "<strong>Hello</strong>"
+}
+```
+
+`settings` may be empty. Fields accept `text`, `textarea`, `number`, `select`, `bool` or `url`, with optional `default` and `help`. A select needs `options` with `value` and `label` strings. `previewHTML` is optional and renders with scripts and network access disabled.
+
+```js
+export default function render(root, { config }) {
+  root.textContent = config.greeting;
+}
+```
+
+Canvas calls the renderer in an isolated frame with `{ name, config, data, state, theme }`. Use DOM text APIs for fetched strings. For a polling kind, add `fetch.json` with an HTTP(S) URL and an optional JSON path and response byte limit, for example `{ "url": "https://example.org/greeting.json", "path": "$.greeting" }`. Canvas fetches that URL on the server and passes the selected JSON as `data`. Set `fields` to keep only those keys from an object or from each object in an array. The request uses the standard widget timeouts, concurrency and network rules. Set `pollIntervalSec` in the manifest to 15–3600 seconds (default 60). MCP lists and adds personal kinds with `local: true`.

@@ -61,7 +61,7 @@ export function noteEditor(opts) {
     root.replaceChildren(...doc.map((b, k) => blockEl(b, nums[k])));
     decorate();
   }
-  /** Placeholder and overflow state; cheap, runs after every change. */
+  /** Placeholder state; cheap, runs after every change. */
   function decorate() {
     const kids = root.children;
     const onlyEmpty = kids.length === 1 && kids[0].dataset.t === "p" && !kids[0].textContent;
@@ -74,7 +74,6 @@ export function noteEditor(opts) {
       const hint = t !== "hr" && !el.textContent && (k === at || (!editing && onlyEmpty)) ? (editing ? BLOCK_HINT[t] || "" : EMPTY_HINT) : "";
       if ((el.dataset.ph || "") !== hint) { if (hint) el.dataset.ph = hint; else delete el.dataset.ph; }
     }
-    root.classList.toggle("over", !editing && root.scrollHeight > root.clientHeight + 1);
   }
   function renumber() {
     const doc = readDoc();
@@ -231,6 +230,14 @@ export function noteEditor(opts) {
     if (!editing || e.isComposing || e.keyCode === 229) return;
     const mod = e.metaKey || e.ctrlKey;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (mod && key === "a") {
+      e.preventDefault();
+      e.stopPropagation();
+      const doc = readDoc();
+      const last = doc.length - 1;
+      setSel({ b: 0, o: 0 }, { b: last, o: D.blockLen(doc[last]) });
+      return;
+    }
     if (mod && key === "z") { e.preventDefault(); e.stopPropagation(); step(e.shiftKey ? "redo" : "undo"); return; }
     if (mod && key === "y") { e.preventDefault(); e.stopPropagation(); step("redo"); return; }
     if (mod && e.shiftKey && key === "v") { plainNext = Date.now(); return; } // the paste event follows (native menu or browser)

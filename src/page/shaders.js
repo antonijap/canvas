@@ -313,6 +313,13 @@ function start(host) {
   // ---------- hover, live moves ----------
   window.canvasShaders = {
     hover(id, x, y, pressed) { if (eng) { eng.setShaderHover(id || "", x, y, !!pressed); host.requestFrame(); } },
+    retry(id) {
+      const c = cards.get(id);
+      if (!c) return;
+      c.loadError = null;
+      c.tries = 0;
+      return load(c);
+    },
     stats: () => (eng ? eng.shaderStats() : null),
     get risk() { return [...risk.keys()]; },
     cards: () => [...cards.values()].map((c) => ({ id: c.id, rev: c.rev, srcRev: c.srcRev, seq: c.seq, done: c.done, quarantined: c.quarantined, errors: c.errors.length })),

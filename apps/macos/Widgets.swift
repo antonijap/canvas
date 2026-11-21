@@ -4,6 +4,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 // MARK: Types
 
@@ -55,6 +56,11 @@ struct WidgetKindInfo: Identifiable {
     let id: String
     let title: String
     let symbol: String
+    let description: String
+    let isLocal: Bool
+    let previewHTML: String?
+    let inPicker: Bool
+    let live: Bool
     let minSize: CGSize
     let fields: [WidgetFieldInfo]
     let defaults: [String: Any]
@@ -69,6 +75,11 @@ struct WidgetKindInfo: Identifiable {
         self.id = id
         title = m["title"] as? String ?? id
         symbol = m["symbol"] as? String ?? "square"
+        description = m["description"] as? String ?? ""
+        isLocal = m["local"] as? Bool ?? false
+        previewHTML = m["previewHTML"] as? String
+        inPicker = m["picker"] as? Bool ?? true
+        live = m["live"] as? Bool ?? false
         minSize = size(m["minSize"])
         fields = (m["fields"] as? [[String: Any]] ?? []).compactMap(WidgetFieldInfo.init)
         defaults = m["defaults"] as? [String: Any] ?? [:]
@@ -79,6 +90,7 @@ struct WidgetStatus {
     let id: String
     let state: String
     let error: String?
+    let approvalTarget: String?
     let display: String?
     let updatedAt: Date?
 
@@ -89,6 +101,7 @@ struct WidgetStatus {
         if let e = m["error"] as? String { error = e }
         else if let e = m["error"] as? [String: Any] { error = e["message"] as? String ?? e["code"] as? String }
         else { error = nil }
+        approvalTarget = m["approvalTarget"] as? String
         display = m["display"] as? String
         updatedAt = (m["updatedAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
     }
@@ -157,7 +170,7 @@ extension CanvasModel {
     }
 
     func fetchKinds() {
-        guard let url = widgetURL("api/widgets/kinds", file: false) else { return }
+        guard let url = widgetURL("api/widgets/kinds", query: [URLQueryItem(name: "view", value: "picker")], file: false) else { return }
         URLSession.shared.dataTask(with: url) { data, _, _ in
             guard let data, let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
             let kinds = list.compactMap(WidgetKindInfo.init)
@@ -331,13 +344,13 @@ extension CanvasModel {
         }
     }
 
-    func trustWidget(_ id: String) {
-        widgetCall("POST", "api/widgets/\(id)/trust", body: [:]) { [weak self] r in
+    func trustWidget(_ id: String, target: String?) {
+        widgetCall("POST", "api/widgets/\(id)/trust", body: target.map { ["target": $0] } ?? [:]) { [weak self] r in
             guard let self else { return }
             switch r {
             case .success(let j):
-                self.flash("Allowed \(j["origin"] as? String ?? "origin")")
-                self.refreshWidget(id, quiet: true)
+                self.flash("Allowed \(j["target"] as? String ?? j["origin"] as? String ?? "source")")
+                if target == nil { self.refreshWidget(id, quiet: true) }
             case .failure(let e): self.flash(e.message)
             }
         }
@@ -400,19 +413,165 @@ extension UTType {
     static let canvasWidgetDrag = UTType(exportedAs: "cc.getcanvas.canvas.widget-drag")
 }
 
-/// The drag image: the row's icon and title on a card-like chip, centred under the pointer where the card lands.
-struct WidgetDragPreview: View {
-    let title: String
-    let symbol: String
+struct WidgetPickerTile: View {
+    let kind: WidgetKindInfo
+    var active = false
+    let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: symbol).railGlyph().foregroundStyle(Palette.mutedFg)
-            Text(title).font(Typography.body).foregroundStyle(Palette.fg)
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 3) {
+                Group {
+                    if let html = kind.previewHTML {
+                        LocalWidgetPreview(html: html).allowsHitTesting(false)
+                    } else {
+                        WidgetThumbnail(kind: kind.id)
+                    }
+                }
+                    .frame(height: 40)
+                    .qaID("widget-preview-" + kind.id)
+                    .accessibilityHidden(true)
+                Text(kind.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.fg)
+                    .lineLimit(1).qaText(kind.title)
+                Text(kind.description).font(.system(size: 12)).foregroundStyle(Palette.mutedFg)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: 90, alignment: .topLeading)
+            .padding(6)
+            .background(active ? Palette.active : hovering ? Palette.hover : Palette.field, in: RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 12).frame(height: Metric.row)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).fill(Palette.popover))
-        .overlay(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).stroke(Palette.stroke, lineWidth: 1))
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(kind.description)
+        .qaID("widget-tile-" + kind.id)
+        .accessibilityLabel(kind.title)
+        .accessibilityHint(kind.description)
+        .accessibilityAddTraits(active ? .isSelected : [])
+    }
+}
+
+struct WidgetThumbnail: View {
+    let kind: String
+
+    var body: some View {
+        Canvas { ctx, size in
+            let scale = min(size.width / 100, size.height / 50)
+            let dx = (size.width - 100 * scale) / 2, dy = (size.height - 50 * scale) / 2
+            func box(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ color: Color, radius: Double = 2) {
+                let r = CGRect(x: dx + x * scale, y: dy + y * scale, width: w * scale, height: h * scale)
+                ctx.fill(Path(roundedRect: r, cornerRadius: radius * scale), with: .color(color))
+            }
+            func stroke(_ points: [CGPoint], _ color: Color) {
+                var path = Path()
+                guard let first = points.first else { return }
+                path.move(to: CGPoint(x: dx + first.x * scale, y: dy + first.y * scale))
+                for point in points.dropFirst() { path.addLine(to: CGPoint(x: dx + point.x * scale, y: dy + point.y * scale)) }
+                ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2 * scale, lineCap: .round, lineJoin: .round))
+            }
+            let ink = Palette.fg, faint = Palette.mutedFg.opacity(0.36)
+            let accent = Color.blue.opacity(0.8)
+            box(0, 0, 100, 50, Palette.popover, radius: 6)
+            switch kind {
+            case "note":
+                box(14, 10, 48, 6, ink)
+                for (row, width) in [68.0, 62, 43].enumerated() { box(14, 23 + Double(row) * 7, width, 3, faint) }
+            case "todo":
+                for row in 0..<3 {
+                    let y = 10 + Double(row) * 12
+                    box(13, y, 7, 7, row == 0 ? accent : faint)
+                    box(26, y + 2, 50 - Double(row) * 5, 3, row == 0 ? faint : ink.opacity(0.7))
+                }
+            case "shader":
+                box(0, 0, 100, 50, Color(red: 0.13, green: 0.13, blue: 0.29), radius: 6)
+                for i in 0..<7 {
+                    let y = Double(i) * 4
+                    stroke([CGPoint(x: 6, y: 16 + y), CGPoint(x: 34, y: 36 - y / 2), CGPoint(x: 66, y: 12 + y / 2), CGPoint(x: 94, y: 33 - y / 4)], i.isMultiple(of: 2) ? .cyan : .purple)
+                }
+            case "video":
+                box(0, 0, 100, 50, Color(red: 0.14, green: 0.23, blue: 0.3), radius: 6)
+                stroke([CGPoint(x: 9, y: 40), CGPoint(x: 36, y: 15), CGPoint(x: 57, y: 36), CGPoint(x: 72, y: 23), CGPoint(x: 90, y: 40)], Color.cyan.opacity(0.38))
+                var play = Path()
+                play.move(to: CGPoint(x: dx + 45 * scale, y: dy + 18 * scale))
+                play.addLine(to: CGPoint(x: dx + 58 * scale, y: dy + 25 * scale))
+                play.addLine(to: CGPoint(x: dx + 45 * scale, y: dy + 32 * scale))
+                play.closeSubpath()
+                ctx.fill(play, with: .color(.white))
+            case "git-status":
+                box(14, 8, 34, 6, ink)
+                stroke([CGPoint(x: 17, y: 21), CGPoint(x: 17, y: 43)], accent)
+                for row in 0..<3 {
+                    let y = 22 + Double(row) * 9
+                    box(14, y, 6, 6, accent, radius: 3)
+                    box(28, y + 1, 46 - Double(row) * 6, 3, faint)
+                }
+            case "ci":
+                for row in 0..<3 {
+                    let y = 10 + Double(row) * 12
+                    box(12, y, 7, 7, row == 1 ? .orange : .green, radius: 4)
+                    box(25, y + 2, 36 + Double(row) * 6, 3, faint)
+                }
+            case "claude-usage":
+                for (i, height) in [12.0, 24, 16, 30, 18, 35, 21].enumerated() {
+                    box(12 + Double(i) * 11, 43 - height, 7, height, accent)
+                }
+            case "metric":
+                box(12, 9, 21, 10, ink)
+                stroke([CGPoint(x: 13, y: 40), CGPoint(x: 30, y: 33), CGPoint(x: 48, y: 37), CGPoint(x: 67, y: 28), CGPoint(x: 87, y: 24)], accent)
+            case "page-preview":
+                box(9, 7, 82, 5, faint)
+                box(9, 17, 82, 23, accent.opacity(0.25), radius: 4)
+                box(16, 23, 28, 4, ink)
+                box(16, 31, 37, 3, faint)
+            case "disk-space":
+                box(12, 13, 42, 9, ink)
+                box(12, 32, 76, 7, faint, radius: 3)
+                box(12, 32, 30, 7, accent, radius: 3)
+            default:
+                box(13, 10, 30, 5, ink)
+                box(13, 23, 72, 16, faint, radius: 3)
+            }
+        }
+        .background(Palette.popover, in: RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .shadow(color: .black.opacity(0.10), radius: 3, y: 1)
+    }
+}
+
+private struct LocalWidgetPreview: NSViewRepresentable {
+    let html: String
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var html: String?
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            decisionHandler(action.targetFrame?.isMainFrame == true && action.request.url?.absoluteString == "about:blank" ? .allow : .cancel)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.defaultWebpagePreferences.allowsContentJavaScript = false
+        config.websiteDataStore = .nonPersistent()
+        let view = WKWebView(frame: .zero, configuration: config)
+        view.navigationDelegate = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ view: WKWebView, context: Context) {
+        guard context.coordinator.html != html else { return }
+        context.coordinator.html = html
+        view.loadHTMLString("""
+            <!doctype html><meta charset="utf-8">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+            <meta name="color-scheme" content="light dark">
+            <style>body{margin:0;padding:4px 8px;font:12px system-ui;overflow:hidden}</style>
+            \(html)
+            """, baseURL: nil)
     }
 }
 
@@ -421,12 +580,26 @@ struct WidgetDragPreview: View {
 struct WidgetsPanel: View {
     @ObservedObject var model: CanvasModel
 
+    private func grid(_ kinds: [WidgetKindInfo]) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), alignment: .top)], alignment: .leading, spacing: 8) {
+            ForEach(kinds) { kind in
+                WidgetPickerTile(kind: kind) { model.addWidget(kind.id) }
+                    .onDrag { model.beginWidgetDrag(WidgetDrag(kind: kind.id)) } preview: {
+                        WidgetThumbnail(kind: kind.id).frame(width: 110, height: 68)
+                    }
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
+    }
+
     var body: some View {
-        SectionHeader(title: "Add")
-        ForEach(model.widgetKinds) { k in
-            // Click: the card goes in the middle of the view. Drag: it goes where it is dropped.
-            ListRow(title: k.title, symbol: k.symbol, bounces: true, railGlyph: true) { model.addWidget(k.id) }
-                .onDrag { model.beginWidgetDrag(WidgetDrag(kind: k.id)) } preview: { WidgetDragPreview(title: k.title, symbol: k.symbol) }
+        SectionHeader(title: "Add").onAppear { model.fetchKinds() }
+        grid(model.widgetKinds.filter { $0.inPicker && !$0.isLocal })
+        let local = model.widgetKinds.filter { $0.inPicker && $0.isLocal }
+        if !local.isEmpty {
+            SectionHeader(title: "Mine")
+            grid(local)
         }
         if model.widgetKinds.isEmpty {
             Text("Open a canvas to add widgets.").font(Typography.micro).foregroundStyle(Palette.mutedFg)
@@ -464,7 +637,7 @@ struct WidgetInspector: View {
                 if let kind {
                     ForEach(groups(kind), id: \.title) { g in
                         InspectorSection(title: g.title) {
-                            if g.first { nameField(w) }
+                            if g.first && w.kind != "note" { nameField(w) }
                             ForEach(g.fields.filter { visible($0, w) }) { f in
                                 WidgetFieldRow(model: model, widget: w, field: f, kind: kind)
                             }
@@ -492,6 +665,8 @@ struct WidgetInspector: View {
 
     private func position(_ w: WidgetInfo, _ kind: WidgetKindInfo?) -> some View {
         let minW = Double(kind?.minSize.width ?? 0), minH = Double(kind?.minSize.height ?? 0)
+        let hasVideo = w.kind == "video" && (configValue(w.config, "src") as? String)?.isEmpty == false
+        let fitsHeight = w.kind == "note" || hasVideo
         return InspectorSection(title: "Position") {
             HStack(spacing: 8) {
                 NumberField(prefix: "X", value: w.x, enabled: !w.locked) { model.updateWidget(w.id, ["x": $0]) }
@@ -499,7 +674,7 @@ struct WidgetInspector: View {
             }
             HStack(spacing: 8) {
                 NumberField(prefix: "W", value: w.w, enabled: !w.locked) { model.updateWidget(w.id, ["w": max($0, minW)]) }
-                NumberField(prefix: "H", value: w.h, enabled: !w.locked) { model.updateWidget(w.id, ["h": max($0, minH)]) }
+                NumberField(prefix: "H", value: w.h, enabled: !w.locked && !fitsHeight) { model.updateWidget(w.id, ["h": max($0, minH)]) }
             }
             CheckField(title: "Lock position and size", isOn: w.locked) { model.updateWidget(w.id, ["locked": $0]) }
         }
@@ -626,7 +801,7 @@ struct WidgetStatusSection: View {
     let kind: WidgetKindInfo?
 
     private var status: WidgetStatus? { model.widgetStatus?.id == widget.id ? model.widgetStatus : nil }
-    private var isLive: Bool { widget.kind != "todo" && widget.kind != "note" && widget.kind != "shader" && widget.kind != "video" }
+    private var isLive: Bool { kind?.live ?? false }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // The poller has no "refreshing" state: a manual refresh spins until a newer reading arrives (10 s cap).
     @State private var refreshPressed: Date?
@@ -664,8 +839,10 @@ struct WidgetStatusSection: View {
                         .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if s.state == "needs-approval", let origin = approvalOrigin {
-                    PillButton(title: "Allow \(origin)", style: .primary) { model.trustWidget(widget.id) }
+                if s.state == "needs-approval", let target = s.approvalTarget ?? approvalOrigin {
+                    PillButton(title: "Allow", style: .primary) { model.trustWidget(widget.id, target: s.approvalTarget) }
+                        .accessibilityLabel("Allow \(target)")
+                        .qaID("widget-allow-source")
                 }
             } else {
                 Text("No data yet.").font(Typography.micro).foregroundStyle(Palette.mutedFg)

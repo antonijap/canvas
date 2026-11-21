@@ -3,15 +3,12 @@
    No letter-spacing on the system font: WebKit already applies Apple's tracking chart to SF by size (measured in a
    WKWebView against SF Pro Text: +0.06px a character at 11px, -0.08 at 13px, -0.23 at 15px, -0.43 at 17px), so any
    letter-spacing here would track it twice. */
+:root{--wd-pad:16px;--wd-small:12px;--wd-text:14px;--wd-title:17px;--wd-large:28px;--widget-selection:#626267}
+@media (prefers-color-scheme:dark){:root{--widget-selection:#bcbcc4}}
 #wlayer{position:absolute;left:0;top:0;width:0;height:0;z-index:2}
-/* A selected card shows a 1.5 px outline in the canvas selection blue, hugging its 12 px corners just outside its own
-   border (maintainer, 2026-11-16: with nothing painted it was unclear a card was selected, so unclear it could be
-   copied). Calmer than a layer's selection: no handles, no size badge, the card's shadow as it is. #sel sits on the
-   card's rect in screen px; server.ts putBox sets its radius to the card's at the current zoom. In a multi-selection
-   each card gets the same outline (.mbox.wbox). Every card's edges and corners resize it (widgets.js resizeZone,
-   6 screen px), shown by the resize cursor; the selected card's corner zones below also reach 6 px outside it. */
-#sel.wsel{border-color:transparent;outline:1.5px solid var(--ov);outline-offset:0}
-.mbox.wbox{border-color:transparent;outline:1.5px solid var(--ov);outline-offset:0}
+/* Widget selection and resize affordances. */
+#sel.wsel{border-color:transparent;outline:1.5px solid var(--widget-selection);outline-offset:0}
+.mbox.wbox{border-color:transparent;outline:1.5px solid var(--widget-selection);outline-offset:0}
 #sel.wsel #seldim{display:none}
 #sel.wsel i{pointer-events:auto;background:none;border:0}
 #sel.wsel i::before{content:"";position:absolute;inset:-6px}
@@ -19,13 +16,13 @@
 #sel.wsel i:nth-child(2),#sel.wsel i:nth-child(3){cursor:nesw-resize}
 #sel.wsel.lock i{pointer-events:none}
 
-.wd{position:absolute;box-sizing:border-box;contain:layout style paint;container-type:size;background:var(--c-popover);border:1px solid var(--c-stroke);border-radius:12px;box-shadow:0 1px 2px #0000000f,0 8px 24px #00000014;color:var(--c-fg);font:13px/20px var(--c-font-sans);user-select:none;-webkit-user-select:none;cursor:default;-webkit-font-smoothing:antialiased}
+.wd{position:absolute;box-sizing:border-box;contain:layout style paint;container-type:size;background:var(--c-popover);border:0;border-radius:12px;box-shadow:0 1px 2px #0000000f,0 8px 24px #00000014;color:var(--c-fg);font:var(--wd-text)/20px var(--c-font-sans);user-select:none;-webkit-user-select:none;cursor:default;-webkit-font-smoothing:antialiased}
 @media (prefers-color-scheme: dark){.wd{box-shadow:0 1px 2px #00000066,0 8px 24px #00000059}}
 .wd [hidden]{display:none!important}
 .wd-body{position:absolute;inset:0}
 .wd-lod{display:none;position:absolute;inset:0;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font-size:64px;font-weight:600;line-height:1.1;color:var(--c-muted-fg);text-align:center;overflow:hidden}
 #wlayer.lod .wd-lod{display:flex}
-#wlayer.lod .wd-body{display:none}
+#wlayer.lod .wd-body{visibility:hidden}
 .wd[data-tone=yellow]{background:color-mix(in srgb,var(--c-warn) 12%,var(--c-popover))}
 .wd[data-tone=green]{background:color-mix(in srgb,var(--c-ok) 11%,var(--c-popover))}
 .wd[data-tone=blue]{background:color-mix(in srgb,var(--c-sel) 10%,var(--c-popover))}
@@ -35,8 +32,8 @@
    32px; one control column (16px) on the card's 16px edge holds the progress ring, the checkboxes and the add glyph,
    and every text starts 8px after it. Hover and focus tint a row out to 8px past both columns. */
 .wd-head{flex:none;display:flex;align-items:center;gap:8px;height:24px;margin-bottom:16px;min-width:0}
-.wd-title{flex:1;min-width:0;font-size:17px;line-height:24px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.td{display:flex;flex-direction:column;height:100%;padding:16px;box-sizing:border-box;font-size:14px;line-height:20px}
+.wd-title{flex:1;min-width:0;font-size:var(--wd-title);line-height:24px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.td{display:flex;flex-direction:column;height:100%;padding:var(--wd-pad);box-sizing:border-box;font-size:var(--wd-text);line-height:20px}
 .td-ring{flex:none;display:block;width:16px;height:16px;color:var(--c-sel);overflow:visible}
 .td-ring-o{fill:none;stroke:currentColor;stroke-width:1.5}
 .td-ring-p{fill:none;stroke:currentColor;stroke-width:5;transition:stroke-dasharray .4s cubic-bezier(.2,.8,.2,1)}
@@ -53,7 +50,7 @@
 .td-plus path{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round}
 .td-add:has(input:focus) .td-plus{color:var(--c-sel)}
 .td.empty .td-rows{display:none}
-.td-more{height:32px;line-height:32px;padding-left:24px;font-size:12px;color:var(--c-muted-fg);white-space:nowrap}
+.td-more{height:32px;line-height:32px;padding-left:24px;font-size:var(--wd-small);color:var(--c-muted-fg);white-space:nowrap}
 /* Checkbox: Things' rounded square, 14px in the 16px column. Checking it pops the box (scale .78 to 1 on a slight
    overshoot) and draws the check on; the row then waits and slides down to the done items. */
 .cb{flex:none;width:14px;height:14px;box-sizing:border-box;margin:0 1px}
@@ -70,20 +67,15 @@
 @keyframes cb-draw{from{stroke-dashoffset:11}to{stroke-dashoffset:0}}
 @media (prefers-reduced-motion: reduce){.wd .cb.pop,.wd .cb.pop path{animation:none}.td-row,.td-ring-p{transition:none}}
 
-/* note: rich text read like a Notion page. Type: body 16/24, H1 28/34 bold, H2 22/28 and H3 18/24 semibold, code
-   14/22 SF Mono. Blocks have 3px above and below and sit 2px apart (8px between paragraphs, 4px between list items);
-   headings get more room above (24, 20, 12) than below. Text runs at most 600px wide (about 75 characters at 16px)
-   and centres in a wider card. Each list level is a 24px gutter whose 16px marker column starts at the level's edge,
-   so bullets, numbers and checkboxes line up with each other and with the paragraph edge, and a nested marker sits
-   under its parent's text. View and edit are the same element, so double-clicking never moves a line. */
-.nt{position:absolute;inset:0;overflow:hidden}
-.nt-err{position:absolute;left:8px;right:8px;top:8px;z-index:1;padding:6px 10px;border-radius:6px;font-size:12px;line-height:16px;color:#fff;background:var(--c-danger-fill);pointer-events:none}
+/* Page text and its editing surface share the same column. */
+.nt{position:absolute;inset:0;--page-body:#252525;--page-muted:#525252;--page-link:#0058b7;--c-muted-fg:var(--page-muted)}
+@media (prefers-color-scheme:dark){.nt{--page-body:#f1f1f1;--page-muted:#c0c0c0;--page-link:#8fc0ff}}
+.nt-err{position:absolute;left:8px;right:8px;top:8px;z-index:1;padding:6px 10px;border-radius:6px;font-size:var(--wd-small);line-height:16px;color:#fff;background:var(--c-danger-fill);pointer-events:none}
 .nt-err[hidden]{display:none}
-.nd{position:absolute;inset:0;overflow:hidden;padding:20px max(24px,calc((100% - 600px) / 2)) 24px;box-sizing:border-box;font-size:16px;line-height:24px;color:var(--c-fg);white-space:pre-wrap;overflow-wrap:break-word;outline:none;caret-color:var(--c-sel);font-variant-ligatures:common-ligatures}
+.nd{position:absolute;inset:0;padding:24px calc(var(--wd-pad) * 2);max-width:calc(600px + var(--wd-pad) * 4);margin-inline:auto;box-sizing:border-box;font-size:16px;line-height:26px;color:var(--page-body);white-space:pre-wrap;overflow-wrap:break-word;outline:none;caret-color:var(--c-sel);font-variant-ligatures:common-ligatures}
 .nd.editing{overflow-y:auto;overscroll-behavior:contain;cursor:text}
 /* Text selects only inside the note while it is the editing host (contenteditable); never in the card around it. */
 .nd[contenteditable=true]{user-select:text;-webkit-user-select:text}
-.nd.over{-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 40px),transparent calc(100% - 4px));mask-image:linear-gradient(to bottom,#000 calc(100% - 40px),transparent calc(100% - 4px))}
 .nd ::selection{background:color-mix(in srgb,var(--c-sel) 26%,transparent)}
 .nb{--pad:0px;position:relative;margin-top:2px;padding:3px 0 3px var(--pad)}
 .nb:first-child{margin-top:0}
@@ -107,11 +99,11 @@
 .nb[data-t=quote]+.nb[data-t=quote]::before{top:-3px;border-radius:0 0 1.5px 1.5px}
 .nb[data-t=hr]{height:17px;padding:0;margin:6px 0;user-select:none;-webkit-user-select:none;cursor:default}
 .nb[data-t=hr]::after{content:"";position:absolute;left:0;right:0;top:8px;border-top:1px solid color-mix(in srgb,var(--c-fg) 14%,transparent)}
-.nb[data-ph]::after{content:attr(data-ph);position:absolute;left:var(--pad);top:3px;color:var(--c-muted-fg);opacity:.7;white-space:nowrap;pointer-events:none;user-select:none;-webkit-user-select:none}
+.nb[data-ph]::after{content:attr(data-ph);position:absolute;left:var(--pad);top:3px;color:var(--c-muted-fg);white-space:nowrap;pointer-events:none;user-select:none;-webkit-user-select:none}
 .nb[data-t=ul][data-ph]::after,.nb[data-t=ol][data-ph]::after,.nb[data-t=todo][data-ph]::after{top:1px}
 .nd strong,.nd b{font-weight:600}
 .nd code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:.875em;padding:.1em .3em;border-radius:4px;background:color-mix(in srgb,var(--c-fg) 8%,transparent)}
-.nd a{color:inherit;text-decoration:underline;text-decoration-color:color-mix(in srgb,currentColor 38%,transparent);text-decoration-thickness:1px;text-underline-offset:2px}
+.nd a{color:var(--page-link);text-decoration:underline solid;text-decoration-thickness:1px;text-underline-offset:2px}
 .nd.editing a{cursor:text}
 /* A line that is all code (a pasted code fence) reads as a code block; consecutive ones join into one box. */
 .nb[data-code]{font:14px/22px ui-monospace,"SF Mono",Menlo,monospace;margin-top:0;padding:0 12px;background:color-mix(in srgb,var(--c-fg) 6%,transparent)}
@@ -120,49 +112,35 @@
 .nb[data-code]:not(:has(+.nb[data-code])){margin-bottom:8px;padding-bottom:8px;border-bottom-left-radius:6px;border-bottom-right-radius:6px}
 .nb[data-code]:first-child{margin-top:0}
 
-/* stat (app, posthog) */
-.st{display:flex;flex-direction:column;height:100%;padding:16px;box-sizing:border-box}
-.st-label{flex:none;font-size:12px;line-height:16px;font-weight:500;color:var(--c-muted-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.st-main{flex:none;display:flex;align-items:baseline;gap:8px;min-width:0;margin-top:4px}
-.st-num{min-width:0;font-size:28px;line-height:32px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.st-delta{flex:none;font-size:11px;line-height:16px;font-weight:500;padding:0 6px;border-radius:999px;background:var(--c-muted);color:var(--c-muted-fg);font-variant-numeric:tabular-nums}
-.st-delta.up{color:var(--c-ok);background:color-mix(in srgb,var(--c-ok) 14%,transparent)}
-.st-delta.down{color:var(--c-danger);background:color-mix(in srgb,var(--c-danger) 14%,transparent)}
-.st-spark{display:block;flex:none;height:32px;width:100%;margin-top:auto;color:var(--c-sel);overflow:visible}
-.st-main{margin-bottom:12px}
+.st-num{font-size:var(--wd-large);line-height:34px;font-weight:600;font-variant-numeric:tabular-nums}
+.st-spark{display:block;flex:none;height:32px;width:100%;color:var(--c-sel);overflow:visible}
 .st-spark polyline{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
-.st-msg{flex:none;display:flex;align-items:center;gap:8px;font-size:12px;line-height:16px;color:var(--c-muted-fg);min-width:0}
-.st-msg::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--c-muted-fg);opacity:.6}
-.st-msg span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.st[data-state=error] .st-msg::before{background:var(--c-danger);opacity:1}
-.st[data-state=stale] .st-msg::before,.st[data-state=needs-secret] .st-msg::before,.st[data-state=needs-approval] .st-msg::before{background:var(--c-warn);opacity:1}
-.st[data-state=stale] .st-num,.st[data-state=error] .st-num,.st[data-state=loading] .st-num,.st[data-state=needs-secret] .st-num,.st[data-state=needs-approval] .st-num{color:var(--c-muted-fg)}
-.wd .st-btn{flex:none;align-self:flex-start;margin-top:8px;height:24px;padding:0 12px;border-radius:999px;font-size:12px;line-height:24px;font-weight:500;background:var(--c-primary);color:var(--c-primary-fg)}
+.wd .st-btn{flex:none;align-self:flex-start;margin-top:8px;height:24px;padding:0 12px;border-radius:999px;font-size:var(--wd-small);line-height:24px;font-weight:500;background:var(--c-primary);color:var(--c-primary-fg)}
 .wd .st-btn:hover{background:var(--c-primary);opacity:.85}
 .wd .st-btn:disabled{opacity:.5;cursor:default}
 
-.un{padding:16px;color:var(--c-muted-fg)}
+.un{padding:var(--wd-pad);color:var(--c-muted-fg)}
 .un-title{font-weight:600}
-.un-kind{font-size:12px;line-height:16px}
+.un-kind{font-size:var(--wd-small);line-height:16px}
 
 /* shader: the engine draws the picture under a transparent card */
 .wd[data-kind=shader]{background:var(--c-popover);border-color:transparent;overflow:hidden}
 .wd[data-kind=shader]:has(.sh.live){background:transparent}
 .sh{position:absolute;inset:0;cursor:crosshair}
 .sh-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:11px}
-.sh-msg{position:absolute;left:12px;right:12px;bottom:12px;max-height:calc(100% - 24px);overflow:hidden;padding:8px 12px;border-radius:8px;background:color-mix(in srgb,var(--c-popover) 92%,transparent);box-shadow:0 1px 2px #0000001a;font-size:12px;line-height:16px}
-.sh-title{font-weight:600}
+.sh-msg{position:absolute;inset:0;overflow:auto;padding:var(--wd-pad);background:var(--c-popover);font-size:var(--wd-text);line-height:20px}.sh-msg:has(.wd-action){user-select:text;-webkit-user-select:text}
+.sh-title{font-size:var(--wd-title);font-weight:600;line-height:24px}
 .sh[data-state=error] .sh-title,.sh[data-state=quarantined] .sh-title{color:var(--c-danger,#d92d20)}
-.sh-errors{margin:4px 0 0;padding:0;list-style:none;font:11px/16px var(--c-font-mono);letter-spacing:0;white-space:pre-wrap;word-break:break-word}
+.sh-errors{margin:4px 0 0;padding:0;list-style:none;font:var(--wd-text)/20px var(--c-font-sans);letter-spacing:0;white-space:pre-wrap;word-break:break-word}
 .sh .st-btn{margin-top:8px}
 
 /* video: the engine draws the frames under a transparent card; controls show when it is selected */
 .wd[data-kind=video]{background:var(--c-popover);border-color:transparent;overflow:hidden}
 .wd[data-kind=video]:has(.vd.live){background:transparent}
 .vd{position:absolute;inset:0}
-.vd-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:11px}
+.vd-poster{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:11px}
 .vd-sub{margin-top:2px;color:var(--c-muted-fg)}
-.vd-ctl{position:absolute;left:8px;right:8px;bottom:8px;height:32px;display:none;align-items:center;gap:8px;padding:0 8px;border-radius:10px;background:color-mix(in srgb,#000 55%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);color:#fff;font-size:11px;line-height:16px;font-variant-numeric:tabular-nums}
+.vd-ctl{position:absolute;left:8px;right:8px;bottom:8px;height:32px;display:none;align-items:center;gap:8px;padding:0 8px;border-radius:10px;background:color-mix(in srgb,#000 55%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);color:#fff;font-size:var(--wd-small);line-height:16px;font-variant-numeric:tabular-nums}
 .wd.vfocus .vd-ctl:not([hidden]){display:flex}
 .vd-btn{flex:none;width:24px;height:24px;display:grid;place-items:center;border-radius:6px;color:inherit;background:transparent}
 .vd-btn:hover{background:#ffffff26}
@@ -176,7 +154,7 @@
    is grey, never the accent. One-line labels sit at line-height 100%; an error or the temporary-worktree note in the
    footer takes two lines of 14px in the same 40px, so the card never needs to grow. */
 .wc{position:relative;display:flex;flex-direction:column;height:100%;box-sizing:border-box;overflow:hidden}
-.wc-title{flex:none;padding:16px 16px 8px;font-size:15px;line-height:100%;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wc-title{flex:none;padding:var(--wd-pad) var(--wd-pad) 8px;font-size:15px;line-height:100%;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wc-row{flex:none;display:flex;align-items:center;gap:6px;height:48px;padding:0 6px 0 16px}
 .wc-name{font-weight:500;line-height:100%;white-space:nowrap}
 .wc-sp{flex:1;min-width:0}
@@ -184,12 +162,12 @@
 .wc-btn{flex:none;display:inline-flex;align-items:center;height:28px;padding:0 12px;border:0;border-radius:8px;background:color-mix(in srgb,var(--c-fg) 7%,transparent);color:var(--c-fg);font:500 12px/100% var(--c-font-sans);white-space:nowrap;cursor:pointer}
 .wc-btn:hover{background:color-mix(in srgb,var(--c-fg) 12%,transparent)}
 .wc-btn:disabled{cursor:default;background:color-mix(in srgb,var(--c-fg) 5%,transparent);color:var(--c-muted-fg)}
-.wc-on{flex:none;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 6px;font-size:12px;line-height:100%;font-weight:500;color:var(--c-fg);white-space:nowrap}
+.wc-on{flex:none;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 6px;font-size:var(--wd-small);line-height:100%;font-weight:500;color:var(--c-fg);white-space:nowrap}
 .wc-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--c-ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--c-ok) 22%,transparent)}
 .wc-more{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:2.5px;width:28px;height:28px;padding:0;border:0;border-radius:14px;background:transparent;color:var(--c-muted-fg);cursor:pointer}
 .wc-more:hover,.wc-more[aria-expanded=true]{background:color-mix(in srgb,var(--c-fg) 7%,transparent);color:var(--c-fg)}
 .wc-more i{width:2.5px;height:2.5px;border-radius:50%;background:currentColor}
-.wc-hint{flex:none;padding:12px 16px 16px;font-size:12px;line-height:100%;color:var(--c-muted-fg)}
+.wc-hint{flex:none;padding:12px var(--wd-pad) var(--wd-pad);font-size:var(--wd-small);line-height:100%;color:var(--c-muted-fg)}
 .wc-hint.err,.wc-hint.long{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;padding:6px 16px;line-height:14px;word-break:break-word;user-select:text;-webkit-user-select:text;cursor:text}
 .wc-hint.err{color:var(--c-danger)}
 .wc-menu{position:absolute;z-index:1;min-width:150px;padding:4px;border-radius:10px;background:var(--c-popover);box-shadow:0 0 0 .5px #0000001f,0 1px 3px #00000014,0 8px 24px -6px #0000002e}
@@ -197,3 +175,48 @@
 .wc-menu button{display:flex;align-items:center;width:100%;height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--c-fg);font:500 12px/100% var(--c-font-sans);text-align:left;white-space:nowrap;cursor:pointer}
 .wc-menu button:hover{background:var(--c-hover)}
 .wc-menu button:disabled{color:var(--c-muted-fg);cursor:default;background:transparent}
+
+/* Shared card controls and readings. */
+.wd-handles{position:absolute;inset:0;pointer-events:none;display:none;color:var(--widget-selection)}
+.wd:hover:not(.locked) .wd-handles,.wd.resizing .wd-handles{display:block}
+.wd-handles i{position:absolute;width:8px;height:8px;border-radius:2px;background:currentColor;box-shadow:0 0 0 1px var(--c-popover)}
+.wd-tl{left:4px;top:4px}.wd-tr{right:4px;top:4px}.wd-bl{left:4px;bottom:4px}.wd-br{right:4px;bottom:4px}
+.wd-size{position:absolute;bottom:5px;left:50%;transform:translateX(-50%);pointer-events:none;color:var(--c-fg);background:var(--c-popover);box-shadow:0 2px 8px #0003;border-radius:6px;padding:2px 8px;font-size:var(--wd-small);font-variant-numeric:tabular-nums;white-space:nowrap}
+.wd-live{position:absolute;inset:0;padding:var(--wd-pad);display:flex;flex-direction:column;gap:6px}
+.wd-live .wd-head{margin:0 0 4px}
+.wd-live-main{flex:0 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;display:grid;gap:8px;scrollbar-width:thin}
+.wd-live-main:empty{display:none}
+.wd-live-status{display:flex;align-items:flex-start;gap:8px;color:var(--c-muted-fg);font-size:var(--wd-small);line-height:18px}
+.wd-live-status button{order:2;flex:none}
+.wd-live[data-state="needs-approval"] .wd-live-status span:not(.wd-state-icon){min-width:0;overflow-wrap:anywhere}
+.wd-muted,.wd-age,.wd-live small,.wd-live code{font-size:var(--wd-small);color:var(--c-muted-fg)}
+.wd-age{display:block;min-width:0;line-height:16px;font-variant-numeric:tabular-nums;margin-top:auto}
+.wd-state-icon{display:inline-grid;place-items:center;flex:0 0 16px;width:16px;height:16px;font-weight:700}
+.wd .wd-action{border:0;border-radius:6px;padding:2px 8px;min-height:20px;background:var(--c-hover);color:var(--c-fg);font:600 var(--wd-small)/16px var(--c-font-sans);cursor:pointer}
+.wd .wd-action:hover,.wd .wd-action:focus-visible{background:var(--c-field)}
+.wd .wd-action:disabled{opacity:.5;cursor:wait}
+.wd .wd-action[aria-label="Refresh"]{font-size:18px;width:24px;height:24px;padding:0}
+.wd-skeleton{display:grid;gap:8px;margin:6px 0 4px}
+.wd-skeleton i{display:block;width:75%;height:8px;border-radius:4px;background:var(--c-field);animation:wd-pulse 1.5s ease-in-out infinite alternate}
+.wd-skeleton i:first-child{width:42%;height:15px}
+.wd-skeleton i:last-child{width:60%}
+@keyframes wd-pulse{to{opacity:.5}}
+@media (prefers-reduced-motion:reduce){.wd-skeleton i{animation:none}}
+.sh-msg .wd-action{margin-top:8px}
+.wd-summary{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}
+.wd-summary span{font-size:var(--wd-small);color:var(--c-muted-fg)}
+.wd-rows{list-style:none;margin:0;padding:0;display:grid;gap:5px}
+.wd-rows li{display:flex;gap:8px;min-width:0;align-items:baseline;overflow-wrap:anywhere}
+.wd-runs small{display:block;white-space:normal}
+.wd-models li{justify-content:space-between}
+.wd-live a{color:inherit;text-decoration:underline;text-underline-offset:2px}
+.wd-live a:hover{color:var(--c-sel)}
+.wd-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.wd-days div{display:grid;text-align:center;justify-items:center;align-items:end;gap:3px;font-size:var(--wd-small);color:var(--c-muted-fg);font-variant-numeric:tabular-nums}
+.wd-days i{display:block;width:60%;height:54px;border-radius:4px;background:linear-gradient(to top,var(--c-sel) var(--fill),var(--c-field) var(--fill))}
+.wd-meter{height:9px;border-radius:5px;position:relative;background:linear-gradient(to right,var(--c-sel) var(--fill),var(--c-field) var(--fill))}
+.wd-marker{position:absolute;left:70%;width:2px;height:100%;background:var(--c-fg)}
+.wd-preview{display:block;width:100%;height:100%;min-height:0;object-fit:contain;border-radius:6px}
+
+.wd-local-frame{border:0;flex:1 1 0;width:100%;min-height:0}
+.wd-local [hidden]{display:none}

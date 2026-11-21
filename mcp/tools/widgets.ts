@@ -25,14 +25,14 @@ export function register(server: McpServer) {
     return api("GET", await wpath(a.file));
   }, { readOnlyHint: true });
 
-  tool(server, "list_widget_kinds", "The widget kinds (todo, note, posthog, shader, video) with their config fields, defaults, default size and actions.", {}, async () => {
+  tool(server, "list_widget_kinds", "Widget kinds with their config fields, defaults, default size and actions. Personal kinds are marked local.", {}, async () => {
     await ensureServer();
     return api("GET", "/api/widgets/kinds");
   }, { readOnlyHint: true });
 
-  tool(server, "add_widget", `Add a widget. Without x/y it goes to the right of the boards; nearNodeId puts it just right of that node. config is merged over the kind's defaults (see list_widget_kinds). A note's config.text is rich text written as ${NOTE_MARKDOWN_HELP}`, {
+  tool(server, "add_widget", `Add a widget. Omit x/y to place it to the right of the boards or pass nearNodeId to place it by a node. Config overrides the defaults from list_widget_kinds. For a Page widget (kind note), write config.text as ${NOTE_MARKDOWN_HELP}`, {
     file: S.file,
-    kind: z.string().describe("todo, note, posthog (a saved insight or a HogQL query), shader, video"),
+    kind: z.string().describe("Widget kind ID from list_widget_kinds, such as note or metric"),
     name: z.string().max(100).optional(),
     ...geometry,
     config: z.record(z.string(), z.any()).optional(),

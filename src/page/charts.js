@@ -9,19 +9,20 @@
 // Colour: categorical slots from the dataviz reference palette (validated for the card surfaces, light and
 // dark, in charts.css). A single-series chart wears one accent (display.color); "Other" is neutral.
 
-import { ageLabel, ageSec, originOf } from "./geometry.js";
+import { originOf } from "./geometry.js";
+import { widgetAge, widgetButton, widgetSkeleton } from "./widget-live.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 
 // ---------- frame ----------
-export const PAD = 20;
+export const PAD = 16;
 const TITLE_H = 16;
 const HL_GAP = 4;
 const HL_H = 34;
 const PLOT_GAP = 16;
 const LEGEND_H = 16;
 const LEGEND_GAP = 14;
-const AXIS_FS = 11;
+const AXIS_FS = 12;
 const XAXIS_H = 20;
 const TICK_GAP = 8;
 
@@ -257,7 +258,9 @@ export function chartCard(ctx) {
   const root = h("div", "ch");
   root.dataset.state = "loading";
   const title = h("div", "ch-title");
-  const meta = h("div", "ch-meta");
+  const age = widgetAge();
+  const refresh = widgetButton("Refresh", ctx.refresh, "↻");
+  refresh.classList.add("ch-refresh");
   const hl = h("div", "ch-hl");
   const hlVal = h("span", "ch-val");
   const hlCap = h("span", "ch-cap");
@@ -274,16 +277,18 @@ export function chartCard(ctx) {
   btn.setAttribute("data-nodrag", "");
   btn.onclick = () => {
     btn.disabled = true;
-    Promise.resolve(ctx.trust && ctx.trust()).catch(() => {}).finally(() => { btn.disabled = false; });
+    Promise.resolve(ctx.trust && ctx.trust(undefined, last?.r?.approvalTarget)).catch(() => {}).finally(() => { btn.disabled = false; });
   };
-  msg.append(msgTitle, msgText, btn);
+  const retry = widgetButton("Retry", ctx.refresh);
+  const skeleton = widgetSkeleton();
+  msg.append(msgTitle, msgText, skeleton, btn, retry);
   const tip = h("div", "ch-tip");
   const tipVal = h("div", "ch-tip-val");
   const tipRows = h("div", "ch-tip-rows");
   const tipLabel = h("div", "ch-tip-label");
   tip.append(tipVal, tipRows, tipLabel);
   tip.hidden = true;
-  root.append(title, meta, hl, plot, legend, msg, tip);
+  root.append(title, refresh, hl, plot, legend, msg, age.el, tip);
 
   let key = "";
   let hover = null; // { move(x, y), leave() } for the drawn chart
@@ -339,21 +344,17 @@ export function chartCard(ctx) {
     const c = (w && w.config) || {};
     const display = c.display || {};
     const state = r ? r.state : "loading";
-    const W = Math.max(0, Math.round((w.w || 0) - 2));
-    const H = Math.max(0, Math.round((w.h || 0) - 2));
+    const W = Math.max(0, Math.round(w.w || 0));
+    const H = Math.max(0, Math.round(w.h || 0));
     const chart = r && r.chart && (display.chart || "number") === r.chart.type ? r.chart : null;
     const type = display.chart || "number";
     root.dataset.state = state;
     root.dataset.type = type;
     root.style.setProperty("--ch-accent", `var(--ch-${COLORS.includes(display.color) ? display.color : "blue"})`);
-    setText(title, display.label || (r && r.label) || w.name || "PostHog");
-    // Meta: only when something needs saying (stale data).
-    let m = "";
-    if (state === "stale") { const a = ageLabel(ageSec(r.updatedAt)); m = a ? "Updated " + a + " ago" : "Not current"; }
-    setText(meta, m);
-    meta.hidden = !m;
+    setText(title, display.label || (r && r.label) || w.name || "Analytics");
+    age.update(r);
 
-    const k = JSON.stringify([W, H, state === "stale" ? "ok" : state, type, display, chart, type === "number" && r ? [r.display, r.spark, r.delta] : 0, r && r.error && r.error.message]);
+    const k = JSON.stringify([W, H, state, type, display, chart, type === "number" && r ? [r.display, r.spark, r.delta] : 0, r && r.error && r.error.message]);
     if (k === key) return;
     key = k;
     size = { W, H };
@@ -362,15 +363,20 @@ export function chartCard(ctx) {
 
     // Messages: loading, errors, the key and the trust prompt.
     let mt = "", mx = "";
+    retry.hidden = state !== "error" || r.error?.code === "no-data";
+    skeleton.hidden = state !== "loading";
     btn.hidden = state !== "needs-approval";
     const hasData = type === "number" ? !!(r && r.display) : !!chart;
     if (state === "error" && !(r.error && r.error.code === "no-data")) { mt = "Couldn’t load"; mx = (r.error && r.error.message) || ""; }
     else if (state === "error") { mt = "No data yet"; mx = "The query returned no rows."; }
-    else if (state === "needs-secret") { mt = "Needs an API key"; mx = "Add your PostHog personal API key in the inspector."; }
-    else if (state === "needs-approval") { mt = "Allow PostHog?"; mx = "Send your key to " + (originOf("posthog", c) || "this server") + "."; }
+    else if (state === "needs-secret") { mt = "Needs an API key"; mx = "Add the API key in the inspector."; }
+    else if (state === "needs-approval") {
+      if (r.approvalTarget) mt = r.error.message;
+      else { mt = "Allow this data source?"; mx = "Send your key to " + (originOf("posthog", c) || "this server") + "."; }
+    }
     else if (!hasData) { mt = "Loading"; mx = ""; }
     msg.hidden = !mt;
-    setText(msgTitle, mt);
+    setText(msgTitle, mt ? (state === "error" && retry.hidden ? "○ " : state === "loading" ? "◷ " : "! ") + mt : "");
     setText(msgText, mx);
     msgText.hidden = !mx;
     root.classList.toggle("ch-empty", !!mt);
@@ -402,7 +408,7 @@ export function chartCard(ctx) {
     legend.hidden = !multi;
     // Small multiples have no card headline: each tile has its own, on the headline row of its neighbours.
     const top = type === "sparklines" ? PAD + TITLE_H + HL_GAP + 15 : PAD + TITLE_H + (head ? HL_GAP + HL_H : 0) + PLOT_GAP;
-    const bottom = H - PAD - (multi ? LEGEND_H + LEGEND_GAP : 0);
+    const bottom = H - PAD - 20 - (multi ? LEGEND_H + LEGEND_GAP : 0);
     const box = { x: PAD, y: top, w: Math.max(0, W - PAD * 2), h: Math.max(0, bottom - top) };
     plot.style.cssText = `left:${box.x}px;top:${box.y}px;width:${box.w}px;height:${box.h}px`;
     msg.style.top = (PAD + TITLE_H) + "px";
@@ -418,7 +424,7 @@ export function chartCard(ctx) {
   }
 
   function drawLegend(chart, type) {
-    legend.style.cssText = `left:${PAD}px;bottom:${PAD}px;right:${PAD}px`;
+    legend.style.cssText = `left:${PAD}px;bottom:${PAD + 20}px;right:${PAD}px`;
     chart.series.forEach((se, i) => {
       const item = h("span", "ch-leg");
       const key = h("i", "ch-key" + (type === "line" ? " line" : ""));
