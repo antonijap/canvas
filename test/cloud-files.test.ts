@@ -4,12 +4,13 @@ import { createHash } from "node:crypto";
 import { applyAction, isReject } from "../cloud/core/files/apply.ts";
 import { DocTree, type DocLike } from "../src/cloud-files-tree.ts";
 import { makeAction } from "../src/cloud-files-ops.ts";
-import type { FileOp } from "../cloud/protocol-files.ts";
+import type { FileOp, Json } from "../cloud/protocol-files.ts";
 import { asOneAction, onAction, docEditAction, envelopeFileOps } from "../src/cloud-files-ops.ts";
 import { actionSha, blobTypeOf, checkBlobPath } from "../cloud/protocol-files.ts";
 import { docFileOps } from "../src/cloud-files-ops.ts";
 import { deliverOps } from "../src/cloud-files-ops.ts";
 import { actionBytes } from "../cloud/protocol-files.ts";
+import { stateFromFiles } from "../cloud/core/files/state.ts";
 
 const seed = () => new DocTree({ children: [
   { id: "board", type: "frame", children: [] },
@@ -17,6 +18,23 @@ const seed = () => new DocTree({ children: [
   { id: "instance", type: "ref", ref: "component" },
 ] });
 const send = (tree: DocTree, ops: FileOp[]) => applyAction(tree, makeAction(ops));
+
+test("Cloud page operations and initial state ignore local backgrounds", () => {
+  const envelope = (pages: Json) => ({ widgets: [], extra: { pages } });
+  const page = { id: "first", name: "First", boards: ["board"] };
+  const plain = envelope([page]);
+  const colored = envelope([{ ...page, background: "#123ABC" }]);
+  const empty = { widgets: [], extra: {} };
+  assert.equal(JSON.stringify(envelopeFileOps(empty, colored)), JSON.stringify(envelopeFileOps(empty, plain)));
+  assert.deepEqual(envelopeFileOps(plain, colored), []);
+  assert.deepEqual(envelopeFileOps(colored, plain), []);
+  const renamed = { ...page, name: "Renamed", boards: [] };
+  assert.equal(
+    JSON.stringify(envelopeFileOps(colored, envelope([{ ...renamed, background: "#456DEF" }]))),
+    JSON.stringify(envelopeFileOps(plain, envelope([renamed]))),
+  );
+  assert.deepEqual(stateFromFiles({}, colored.extra), stateFromFiles({}, plain.extra));
+});
 
 test("sidecar preserves explicit null separately from absence", () => {
   const before = { widgets: [], extra: {} };

@@ -6,6 +6,7 @@ import { checkBlobPath, blobTypeOf, type BlobPath, type FileOp, type Json } from
 import { readCommentsFile } from './comments-file.ts';
 import { opsForShare } from './cloud-sync.ts';
 import { openInPackage } from '../cloud/core/files/confine.ts';
+import { stripPageBackgrounds } from '../cloud/core/files/state.ts';
 import { trashPackage } from './cloud-files-trash.ts';
 import { readMoveAsset } from './cloud-files-assets.ts';
 export interface MoveBlob {
@@ -42,6 +43,7 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     const widgetsPath = path.join(pkg, 'widgets.json');
     const widgetsBefore = fs.existsSync(widgetsPath) ? fs.readFileSync(widgetsPath, 'utf8') : '{"widgets":[]}';
     const doc = JSON.parse(original), env = JSON.parse(widgetsBefore);
+    if (Object.hasOwn(env, 'pages')) env.pages = stripPageBackgrounds(env.pages);
     const blobs: MoveBlob[] = [];
     const rewrites=new Map<string,string>();
     for (const dir of ['media', 'shaders']) {

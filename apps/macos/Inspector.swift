@@ -9,7 +9,7 @@ struct Inspector: View {
     @ObservedObject var fonts: FontCatalog
 
     var body: some View {
-        if model.selection != nil || model.selectedWidgetId != nil {
+        if model.currentFile != nil {
             HStack {
                 Spacer(minLength: 0)
                 GlassIsland(padding: 0, dense: true) {
@@ -20,6 +20,10 @@ struct Inspector: View {
                         } else if let s = model.selection {
                             InspectorBody(model: model, fonts: fonts, s: s)
                                 .environment(\.editTarget, ([model.currentFile ?? "", s.id] + s.ids).joined(separator: "\u{1F}"))
+                        } else if let page = model.pages.first(where: { $0.id == model.activePage }) {
+                            PageInspector(model: model, page: page)
+                                .environment(\.editTarget, (model.currentFile ?? "") + "\u{1F}page:" + page.id)
+                                .id((model.currentFile ?? "") + page.id)
                         }
                     }
                     .scrollIndicators(.never)
@@ -30,6 +34,38 @@ struct Inspector: View {
             .padding(.bottom, Metric.pill + Metric.islandGap)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
             .transition(.move(edge: .trailing).combined(with: .opacity))
+        }
+    }
+}
+
+private struct PageInspector: View {
+    @ObservedObject var model: CanvasModel
+    let page: PageInfo
+    @Environment(\.colorScheme) private var scheme
+
+    private var color: String { page.background ?? (scheme == .dark ? "#18181B" : "#F6F6F6") }
+    private let cloudHint = "Page colours stay on local files for now"
+    private func write(_ color: String) { model.setPageBackground(color, page: page.id) }
+
+    var body: some View {
+        InspectorSection(title: "Page") {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Background").font(Typography.label).foregroundStyle(Palette.mutedFg).qaText("Background")
+                HStack(spacing: 4) {
+                    ColorAlphaField(model: model, value: color, enabled: !model.isCloudFile,
+                                    swatch: AnyView(ColorSwatchButton(value: color, enabled: !model.isCloudFile,
+                                                                     onChange: { _ in }, onCommit: write)),
+                                    showsOpacity: false, allowsTokens: false, write: write)
+                    MiniButton(symbol: "arrow.uturn.backward", help: "Reset background to default") {
+                        model.setPageBackground(nil, page: page.id)
+                    }
+                    .disabled(page.background == nil || model.isCloudFile)
+                    .qaID("page-background-reset")
+                }
+                if model.isCloudFile {
+                    Text(cloudHint).font(Typography.label).foregroundStyle(Palette.mutedFg).qaText(cloudHint)
+                }
+            }
         }
     }
 }

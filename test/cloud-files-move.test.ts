@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { PLAYGROUND } from '../qa/playground.ts';
 import { ROOT, startServer } from '../qa/lib.ts';
 import { expectedMove } from '../qa/cloud-files-fixture.ts';
@@ -12,6 +14,8 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-roundtrip-')));
     const server = await startServer(dir, {
         HOME: dir,
+        CANVAS_HEADLESS: '1',
+        CANVAS_CLOUD_HOST_PORT: '0',
         CANVAS_STATE_DIR: path.join(dir, 'state'),
         CANVAS_CLOUD_SECRETS_FILE: path.join(dir, 'secrets.json'),
         CANVAS_TUNNEL_BIN: path.join(ROOT, 'test/fixtures/fake-tunnel.sh'),
@@ -67,7 +71,9 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                         { id: 'Shader', kind: 'shader', name: 'Shader', x: 120, y: 0, w: 100, h: 100, locked: false, config: { rev: '123456789abc' } },
                         { id: 'Note', kind: 'note', name: 'Note', x: 0, y: 120, w: 100, h: 100, locked: false, config: { text: 'Example' } },
                     ], pages: [
-                        { id: 'first', name: 'First', boards: fixture === 'children first' ? [] : ['Board'] },
+                        fixture === 'children first'
+                            ? { id: 'first', name: 'First', boards: [], background: '#123ABC' }
+                            : { id: 'first', name: 'First', boards: ['Board'] },
                         { id: 'second', name: 'Second', boards: fixture === 'children first' ? [] : ['Empty'] },
                         { id: 'third', name: 'Third', boards: [] },
                     ] }));
@@ -80,6 +86,7 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     images.push({ rel, bytes });
                 }
                 const envelope = JSON.parse(fs.readFileSync(path.join(source, 'widgets.json'), 'utf8'));
+                if (fixture === 'children first') delete envelope.pages[0].background;
                 const assets = ['media', 'shaders'].flatMap(folder => fs.readdirSync(path.join(source, folder))
                     .filter(name => fs.statSync(path.join(source, folder, name)).isFile() && !name.includes('.poster-'))
                     .map(name => ({ rel: folder + '/' + name, bytes: fs.readFileSync(path.join(source, folder, name)) })));
@@ -94,6 +101,24 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     for (const asset of [...assets, ...images]) assert.deepEqual(fs.readFileSync(path.join(file, asset.rel)), asset.bytes, asset.rel);
                 };
                 check(moved.file);
+                if (fixture === 'children first') {
+                    const health = await (await fetch(server.base + '/health')).json() as { version: string };
+                    const client = new Client({ name: 'page-background-test', version: '1' });
+                    try {
+                        await client.connect(new StdioClientTransport({
+                            command: process.execPath, args: [path.join(ROOT, 'mcp/server.ts')], stderr: 'pipe',
+                            env: { CANVAS_PORT: String(server.port), CANVAS_MCP_BACKGROUND: '1', CANVAS_MCP_NO_SPAWN: '1', CANVAS_MCP_WANT_VERSION: health.version },
+                        }));
+                        for (const color of ['#456DEF', null]) {
+                            const result = await client.callTool({ name: 'set_page_background', arguments: { file: moved.file, page: 'first', color } });
+                            assert.equal(result.isError, true);
+                            assert.match(JSON.stringify(result.content), /Page colours stay on local files for now/);
+                        }
+                        check(moved.file);
+                    } finally {
+                        await client.close();
+                    }
+                }
                 await call('/api/cloud/files/close', { file: moved.file });
                 // Discard the cache so reopening must download the room's persisted snapshot and assets.
                 fs.rmSync(moved.file, { recursive: true });

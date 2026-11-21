@@ -1373,7 +1373,7 @@ window.canvasHost = host;
 const isW = (id) => typeof id === "string" && id.startsWith("widget:");
 const pageMetas = () => (doc ? doc.boards.filter((b) => pageBoards.has(b.id)) : []);
 const docMsg = () => doc && ({ name: doc.name, revision: doc.revision, boards: pageMetas().map((b) => ({ id: b.id, name: b.name, width: b.width, height: b.height })), components: doc.components, styles: doc.styles, variables: doc.variables, tokens: doc.tokens });
-const pagesMsg = () => ({ active: activePage, implicit: pageImplicit, list: pageList.map((p) => ({ id: p.id, name: p.name, count: p.boards.length })) });
+const pagesMsg = () => ({ active: activePage, implicit: pageImplicit, list: pageList.map((p) => ({ id: p.id, name: p.name, count: p.boards.length, background: p.background ?? null })) });
 
 // ---------- camera loop ----------
 // Wheel, pointer and commands only change cam and ask for a frame. One rAF applies it: transform, labels,
@@ -2048,6 +2048,8 @@ function setDoc(d) {
     if (cam) { endTween(true); cam = null; restoredCam = false; zeroFit = false; if (sel) deselect(); }
     activePage = pg.id;
   }
+  view.style.backgroundColor = pg.background || "";
+  if (ev) ev.syncBg();
   pageBoards = new Set(pg.boards);
   const seen = new Set();
   let idx = 0, reordered = false;
@@ -3658,7 +3660,7 @@ es.addEventListener("doc", (e) => { docGen++; onDoc(JSON.parse(e.data)); });
 let cloudReadOnly = false;
 es.addEventListener("cloudfile", (e) => {
   const info = JSON.parse(e.data); window.canvasCloudFile = info; cloudReadOnly = !!info && info.role !== "owner" && info.role !== "editor";
-  if (native) post({ cloudFile: info || { role: "editor" } });
+  if (native) post({ file, cloudFile: info });
   document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });
 });
 es.addEventListener("cloudremoved", () => {
@@ -3742,7 +3744,7 @@ window.canvasCmd = (c) => {
 // The app shows this tab again: everything its chrome shows from this page, said once more.
 function resync() {
   if (!native) return;
-  if (doc) post({ file, doc: docMsg(), pages: pagesMsg(), history: { undo: history.undo, redo: history.redo, repeat: history.repeat ? history.repeat.label : null }, selBoard: selBoard ? selBoard.meta.id : null });
+  if (doc) post({ file, cloudFile: window.canvasCloudFile ?? null, doc: docMsg(), pages: pagesMsg(), history: { undo: history.undo, redo: history.redo, repeat: history.repeat ? history.repeat.label : null }, selBoard: selBoard ? selBoard.meta.id : null });
   postedPct = -1; postZoom();
   if (multi) showMulti(multi); else if (sel) select(sel.id, true); else post({ selection: null });
   post({ snapHello: true });

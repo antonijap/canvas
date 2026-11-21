@@ -43,7 +43,7 @@ test("background refuses every window-only tool before its handler", async () =>
 });
 
 test("background disk tools require file after expanding links", async () => {
-  for (const name of ["add_nodes", "set_node_props", "delete_nodes", "place_nodes", "list_widgets", "list_pages", "list_comments", "render_node", "inspect_node", "lookup_nodes", "get_document_summary", "check_variation", "finish_work", "create_shader", "update_shader", "video_frame"]) {
+  for (const name of ["add_nodes", "set_node_props", "delete_nodes", "place_nodes", "list_widgets", "list_pages", "set_page_background", "list_comments", "render_node", "inspect_node", "lookup_nodes", "get_document_summary", "check_variation", "finish_work", "create_shader", "update_shader", "video_frame"]) {
     const { out, ran } = await invoke(name, { file: z.string().optional() }, {});
     assert.equal(ran, false, name);
     assert.match(out.content[0].text, /background mode needs file/, name);

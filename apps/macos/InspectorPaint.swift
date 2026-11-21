@@ -408,6 +408,8 @@ struct ColorAlphaField: View {
     var enabled = true
     /// A paint row's swatch (PaintSwatchButton: the type tabs and the picker) instead of the plain colour swatch.
     var swatch: AnyView? = nil
+    var showsOpacity = true
+    var allowsTokens = true
     let write: (String) -> Void
 
     @State private var hovering = false
@@ -429,7 +431,7 @@ struct ColorAlphaField: View {
                 }
                 .layoutPriority(1)
                 // The colour token button shows on hover, like every number field's, so the hex keeps its room.
-                if enabled && (hovering || picking) && !model.tokenItems(.color).isEmpty {
+                if allowsTokens && enabled && (hovering || picking) && !model.tokenItems(.color).isEmpty {
                     TokenBindButton(model: model, kind: .color, open: $picking, inField: true) { write("$" + $0) }
                         .padding(.trailing, -4)
                 }
@@ -437,10 +439,12 @@ struct ColorAlphaField: View {
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
             // "100" and the % fit at the panel's width (no glyph: the % is the scrub handle).
-            NumberField(prefix: "", value: alpha, suffix: "%", enabled: enabled && alpha != nil, minimum: 0, maximum: 100) { p in
-                if let h = PaintLogic.withAlpha(value, percent: p) { write(h) }
+            if showsOpacity {
+                NumberField(prefix: "", value: alpha, suffix: "%", enabled: enabled && alpha != nil, minimum: 0, maximum: 100) { p in
+                    if let h = PaintLogic.withAlpha(value, percent: p) { write(h) }
+                }
+                .frame(width: FieldWidth.percent).help("Opacity")
             }
-            .frame(width: FieldWidth.percent).help("Opacity")
         }
     }
 }

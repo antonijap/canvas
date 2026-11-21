@@ -80,7 +80,7 @@ struct RootView: View {
     @ObservedObject var model: CanvasModel
     @State private var windowWidth: CGFloat = 0
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden && !model.homeShown }
-    private var inspectorShown: Bool { model.hasInspectable && model.inspectorOpen && !model.commentsSidebarOpen && !model.uiHidden && !model.homeShown }
+    private var inspectorShown: Bool { model.inspectorOpen && !model.commentsSidebarOpen && !model.uiHidden && !model.homeShown }
 
     private var rightSidebarShown: Bool { inspectorShown || (model.commentsSidebarOpen && !model.uiHidden && !model.homeShown) }
 
@@ -340,10 +340,8 @@ struct TopBar: View {
                 HStack(spacing: 0) {
                     ResourceReadout(meter: ResourceMeter.shared, model: model)
                     IconButton(symbol: "magnifyingglass", help: "Quick actions  \u{2318}K") { PaletteController.shared.toggle() }
-                    // Nothing to inspect on an empty page.
-                    if !model.pageEmpty {
-                        IconButton(symbol: "sidebar.right", active: model.inspectorOpen, help: model.inspectorOpen ? "Hide properties" : "Show properties") { model.inspectorOpen.toggle() }
-                    }
+                    IconButton(symbol: "sidebar.right", active: model.inspectorOpen, help: model.inspectorOpen ? "Hide properties" : "Show properties") { model.inspectorOpen.toggle() }
+                        .qaID("properties-toggle")
                 }
             }
                 }
