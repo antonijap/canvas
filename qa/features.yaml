@@ -496,8 +496,8 @@ features:
   - id: create-component
     name: Opt+Cmd+K creates a component, Opt+Cmd+B detaches an instance
     area: components
-    driven: [page]
-    cases: [frame, group, instance, keyboard]
+    driven: [page, native]
+    cases: [frame, group, instance, keyboard, menu, inspector]
   - id: component-navigation
     name: Go to main component, select all instances
     area: components

@@ -155,6 +155,10 @@ struct InspectorBody: View {
             Image(systemName: headerSymbol).glyph(12).foregroundStyle(s.isComponent ? Palette.component : Palette.mutedFg)
             Text(layerTitle).font(Typography.title).foregroundStyle(Palette.fg).lineLimit(1)
             Spacer(minLength: 0)
+            if ContextMenuLayout.canCreateComponent(type: str(n["type"]), reusable: n["reusable"] as? Bool == true, path: s.isPath, inInstance: s.inInstance), !s.id.hasPrefix("widget:") {
+                IconButton(symbol: "diamond", help: "Create Component") { model.run("{cmd:'shortcut',op:'component'}") }
+                    .qaID("create-component", label: "Create Component").disabled(model.cloudReadOnly)
+            }
             Menu { nodeMenu } label: {
                 Image(systemName: "ellipsis").glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg)
                     .frame(width: 24, height: 24).contentShape(Circle())

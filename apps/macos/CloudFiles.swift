@@ -163,6 +163,7 @@ struct CloudFilesView: View {
                         ForEach(visible) { item in
                             CloudFileCard(name: item.name, subtitle: CloudFilesText.edited(item.updated)) { open(item) }
                                 .disabled(busy).qaID("cloud-file", label: item.name)
+                                .contextMenu { Button("Open") { open(item) }.disabled(busy || offline) }
                         }
                     }.padding(.bottom, HomeMetric.gutter)
                     if visible.isEmpty { Text("No files match your search").font(Typography.body).foregroundStyle(Palette.mutedFg).qaText("No files match your search") }
@@ -199,7 +200,7 @@ private struct CloudFileCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: HomeMetric.radiusCard, style: .continuous))
                     .cardShadow(hovering)
                     .contentShape(RoundedRectangle(cornerRadius: HomeMetric.radiusCard, style: .continuous))
-            }.buttonStyle(.plain).accessibilityLabel(name)
+            }.buttonStyle(.plain).accessibilityLabel(name).help("Open \(name)")
             VStack(alignment: .leading, spacing: 7) {
                 Text(name).font(Typography.body).fontWeight(.semibold).foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.middle).frame(height: 13).qaText(name)
                 Text(subtitle).font(Typography.label).fontWeight(.regular).foregroundStyle(Palette.mutedFg).lineLimit(1).frame(height: 12).qaText(subtitle)

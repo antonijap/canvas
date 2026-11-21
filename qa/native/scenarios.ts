@@ -1489,3 +1489,4 @@ sc("inspector", "letter spacing: the token button on hover sits beside the numbe
   await inspectorShot(t, "letter-spacing-token-button");
 });
 import "./scenarios-mcp-background.ts";
+import './scenarios-context.ts';

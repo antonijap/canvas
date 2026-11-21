@@ -468,6 +468,12 @@ struct ShellLogicTests {
 
     // Sweep S2: the core items on a layer, the short menu on empty canvas.
     static func contextMenu() {
+        check(ContextMenuLayout.canCreateComponent(type: "rectangle", reusable: false, path: false, inInstance: false), "ordinary node creates component")
+        check(!ContextMenuLayout.canCreateComponent(type: "ref", reusable: false, path: false, inInstance: false), "instance cannot create component")
+        check(!ContextMenuLayout.canCreateComponent(type: "frame", reusable: true, path: false, inInstance: false), "component cannot create component")
+        check(!ContextMenuLayout.canCreateComponent(type: "text", reusable: false, path: true, inInstance: true), "instance descendants cannot create component")
+        check(ContextMenuLayout.canCreateComponent(type: nil, reusable: false, path: false, inInstance: false), "mixed selection can create components")
+        check(!ContextMenuLayout.canCreateComponent(type: "text", reusable: false, path: true, inInstance: false), "path cannot create component")
         let titles = ContextMenuLayout.node.map { $0.map(\.title) }
         check(titles == [["Cut", "Copy", "Paste", "Paste here", "Paste to replace", "Duplicate", "Delete"], ["Group selection", "Frame selection", "Ungroup"],
                          ["Add auto layout", "Remove auto layout"], ["Bring to front", "Bring forward", "Send backward", "Send to back"], ["Select all"]], "layer menu groups: \(titles)")

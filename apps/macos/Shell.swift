@@ -493,6 +493,11 @@ struct SidePanel: View {
                                     symbol: "diamond.fill", tint: Palette.component, active: c.id == model.selection?.id) { model.reveal(c.id, board: c.board) }
                             // Drag onto the canvas: an instance where it lands; with Option onto an instance, a swap.
                             .onDrag { model.beginComponentDrag(c) } preview: { ComponentDragPreview(name: c.name) }
+                            .contextMenu {
+                                Button("Go to Main Component") { model.reveal(c.id, board: c.board) }
+                                Button("Select All Instances") { model.highlightInstances(of: ContextInfo.Family(id: c.id, name: c.name, instances: c.instances)) }
+                                    .disabled(c.instances == 0)
+                            }
                         }
                     case .styles:
                         TextSegments(items: [("Text", StylesTab.text), ("Variables", .variables), ("Fonts", .fonts)], selection: stylesTab) { stylesTab = $0 }

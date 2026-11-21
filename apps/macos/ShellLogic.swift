@@ -739,6 +739,10 @@ struct TabRename {
 /// target (StructureActions in main.swift), so the two menus run the same code; test/context-menu.test.ts
 /// checks every selector exists there and that the Edit menu shows the same keys.
 enum ContextMenuLayout {
+    static func canCreateComponent(type: String?, reusable: Bool, path: Bool, inInstance: Bool) -> Bool {
+        type != "ref" && !reusable && !path && !inInstance
+    }
+
     static func fileTab(cloud: Bool) -> [[String]] {
         [["Rename...", "Show in Finder", "Duplicate"] + (cloud ? ["Move to Cloud..."] : []) + ["Copy Link"],
          ["Close", "Close Other Tabs"]]

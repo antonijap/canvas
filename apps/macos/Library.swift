@@ -79,10 +79,16 @@ struct ContextInfo {
     let media: Bool
     /// A video path a caption near the node names, to start the file picker there.
     let videoHint: String?
+    let canCreateComponent: Bool
+    let locked: Bool
+    let hidden: Bool
 
     init?(_ d: [String: Any]) {
         guard let id = d["id"] as? String else { return nil }
         self.id = id
+        canCreateComponent = d["canCreateComponent"] as? Bool ?? false
+        locked = d["locked"] as? Bool ?? false
+        hidden = d["hidden"] as? Bool ?? false
         name = d["name"] as? String ?? id
         type = d["type"] as? String ?? ""
         kind = d["kind"] as? String ?? "node"
@@ -239,6 +245,31 @@ extension CanvasModel {
     /// their shortcuts, then the ones only this menu has. The edit items go to the Edit menu's target (one path).
     func showContextMenu(at point: CGPoint, for c: ContextInfo, under: [UnderLayer] = []) {
         let menu = ContextMenuBuilder(model: self, at: point)
+        if c.kind == "card" {
+            menu.action("Duplicate", enabled: !cloudReadOnly, key: "d", mods: .command) { self.run("{cmd:'structure',op:'duplicate'}") }
+            menu.action("Delete", enabled: !cloudReadOnly, key: ContextMenuLayout.backspace) { self.run("{cmd:'structure',op:'delete'}") }
+            let id = String(c.id.dropFirst("widget:".count))
+            if let widget = widgets.first(where: { $0.id == id }), !["todo", "note", "shader", "video"].contains(widget.kind) {
+                menu.action("Refresh", enabled: !cloudReadOnly) { self.refreshWidget(id) }
+            }
+            menu.pop(in: webView)
+            return
+        }
+        if c.canCreateComponent {
+            menu.action("Create Component", enabled: !cloudReadOnly, key: "k", mods: [.command, .option]) { self.run("{cmd:'shortcut',op:'component'}") }
+        }
+        if c.kind == "instance" {
+            menu.action("Detach Instance", enabled: !cloudReadOnly, key: "b", mods: [.command, .option]) { self.run("{cmd:'shortcut',op:'detach'}") }
+        }
+        menu.action("Rename", enabled: !cloudReadOnly && !c.id.contains("/"), key: "r", mods: .command) { self.renameSelection() }
+        menu.action(c.locked ? "Unlock" : "Lock", enabled: !cloudReadOnly && !c.id.contains("/"), key: "l", mods: [.command, .shift]) { self.run("{cmd:'shortcut',op:'lock'}") }
+        menu.action(c.hidden ? "Show" : "Hide", enabled: !cloudReadOnly && !c.id.contains("/"), key: "h", mods: [.command, .shift]) { self.run("{cmd:'shortcut',op:'hide'}") }
+        if boards.contains(where: { $0.id == c.id }) {
+            menu.submenu("Move to Page") { m in
+                for p in pages { m.action(p.name, enabled: !self.cloudReadOnly && p.id != self.activePage) { self.moveBoard(c.id, toPage: p.id) } }
+            }
+        }
+        menu.separator()
         var head = false
         // Select layer: every layer under the pointer, topmost first; picking one selects it.
         if under.count > 1 {

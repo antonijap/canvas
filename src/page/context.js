@@ -33,10 +33,16 @@ function start(host) {
     if (!host.native) return; // a plain browser keeps its own menu
     e.preventDefault();
     const x = e.clientX, y = e.clientY;
-    const leaf = host.pick ? host.pick(x, y) : null;
+    const card = e.target && e.target.closest ? e.target.closest(".wd[data-id]") : null;
+    const leaf = card ? card.dataset.id : host.pick ? host.pick(x, y) : null;
     // Empty canvas: a short menu (Paste here, Select all, Zoom to fit). The selection stays as it is.
     if (!leaf) { host.post({ context: { x, y, target: null, canvas: true } }); return; }
-    if (leaf.startsWith("widget:")) { host.post({ context: null }); return; }
+    if (leaf.startsWith("widget:")) {
+      const selected = host.selection ? host.selection() : [];
+      if (!selected.includes(leaf)) host.selectId(leaf);
+      host.post({ context: { x, y, target: { id: leaf, kind: "card" } } });
+      return;
+    }
     // A right-click on a selected layer (or inside one) keeps the selection: the menu acts on all of it.
     // Elsewhere it selects what a click there would (the click rule).
     const selected = host.selection ? host.selection() : host.sel ? [host.sel] : [];
@@ -48,6 +54,12 @@ function start(host) {
     let target = null;
     try { target = await getJson("/api/context", "&id=" + encodeURIComponent(id)); } catch {}
     if (!target) return;
+    const ids = host.selection ? host.selection() : [id];
+    const nodes = await Promise.all(ids.filter(i => !i.startsWith("widget:") && !i.includes("/")).map(i =>
+      getJson("/api/node", "&id=" + encodeURIComponent(i) + "&depth=0").then(j => j.node).catch(() => null)));
+    target.canCreateComponent = nodes.some(n => n && n.type !== "ref" && n.reusable !== true);
+    target.locked = nodes.length > 0 && nodes.every(n => n && n.locked);
+    target.hidden = nodes.length > 0 && nodes.every(n => n && n.enabled === false);
     host.post({ context: { x, y, target, under } });
   });
 

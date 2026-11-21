@@ -542,6 +542,16 @@ struct LayerRowView: View, Equatable {
         }
         .onDrop(of: [.text], delegate: LayerDrop(store: store, row: row))
         .contextMenu {
+            if row.kind != "component" && row.kind != "instance" && !LayersLogic.insideInstance(row.id) {
+                Button("Create Component") { rowCommand("{cmd:'shortcut',op:'component'}") }
+                    .keyboardShortcut("k", modifiers: [.command, .option]).disabled(model.cloudReadOnly)
+            }
+            Button("Duplicate") { rowCommand("{cmd:'structure',op:'duplicate'}") }
+                .keyboardShortcut("d", modifiers: .command).disabled(model.cloudReadOnly || LayersLogic.insideInstance(row.id))
+            Button("Group") { rowCommand("{cmd:'structure',op:'group'}") }
+                .keyboardShortcut("g", modifiers: .command).disabled(model.cloudReadOnly || LayersLogic.insideInstance(row.id))
+            Button("Reveal on Canvas") { model.reveal(row.id, board: row.board) }
+            Divider()
             Button("Rename") { startRename() }.disabled(model.cloudReadOnly || LayersLogic.insideInstance(row.id))
             if row.isBoard { MoveToPageMenu(model: model, board: row.id).disabled(model.cloudReadOnly) }
             else { Button(row.hidden ? "Show" : "Hide") { store.setHidden(row, !row.hidden) }.disabled(model.cloudReadOnly) }
@@ -558,6 +568,12 @@ struct LayerRowView: View, Equatable {
         .accessibilityAction(named: "Rename") { startRename() }
         .accessibilityAction(named: row.hidden ? "Show" : "Hide") { if !row.isBoard { store.setHidden(row, !row.hidden) } }
         .accessibilityAction(named: row.locked ? "Unlock" : "Lock") { if !row.lockedAbove { store.setLocked([row.id], !row.locked) } }
+    }
+
+    private func rowCommand(_ command: String) {
+        let ids = store.selectedIds.contains(row.id) ? store.selectedIds : [row.id]
+        model.run("{cmd:'layers',op:'select',ids:[\(ids.map(jsString).joined(separator: ","))]}")
+        model.run(command)
     }
 
     private var fill: Color {

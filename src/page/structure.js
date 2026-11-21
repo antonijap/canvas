@@ -336,7 +336,7 @@ export function attach(host) {
     if ((op === "duplicate" || op === "delete") && host.smart && host.smart.intercept(op)) return; // marked layers of a smart selection (/page/smart.js)
     const list = ids();
     if (!list.length && op !== "paste" && op !== "selectAll") return;
-    if (lone() && !CARD_OPS.has(op)) return; // widgets have their own keys (/page/widgets.js)
+    if (lone() && op !== "delete" && !CARD_OPS.has(op)) return; // widgets have their own keys (/page/widgets.js)
     // Cards in a multi-selection: Delete removes them too; the structure ops act on the layers and boards.
     const cards = list.filter(isW);
     if (cards.length && op !== "delete" && op !== "parent" && !CARD_OPS.has(op) && !plain(list).length) return;
