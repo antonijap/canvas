@@ -451,6 +451,14 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         cloudFileNames[file] ?? allFiles.first { $0.file == file }?.name ?? URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
     }
 
+    /// MCP quiet open adds a tab without changing the document, selection, Home or window focus.
+    /// Hidden tabs have no connected bridge; live tools can report no_page until the person shows one.
+    func openQuietly(_ file: String) {
+        guard !openFiles.contains(file), DocURL.page(base: base, file: file) != nil else { return }
+        openFiles.append(file)
+        UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
+    }
+
     func open(_ file: String) {
         // Obsidian's JSON Canvas files share the extension; Canvas documents are folders.
         var isDir: ObjCBool = false

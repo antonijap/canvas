@@ -696,7 +696,7 @@ export function startServer(port = PORT()): Promise<http.Server> {
         },
       })) return;
       // app names Canvas: the Mac app stops a server on its port only when it is positively Canvas (ServerCode.health).
-      if (url.pathname === "/health") return json(res, { ok: true, app: "canvas", version: ver, root: codeRootId() });
+      if (url.pathname === "/health") return json(res, { ok: true, app: "canvas", version: ver, root: codeRootId(), ...(process.env.CANVAS_HEADLESS === "1" ? { headless: true } : {}) });
       if (url.pathname === "/quit" && req.method === "POST") {
         // A foreign page can submit a form here (no preflight for a simple POST): it carries neither the header nor our Origin.
         if (req.headers["x-canvas"] !== "1" || !originOk(req)) return json(res, { error: "forbidden" }, 403);

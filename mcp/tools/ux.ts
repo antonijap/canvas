@@ -2,7 +2,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { api, cmd, ensureServer, status } from "../client.ts";
+import { api, background, cmd, ensureServer, status } from "../client.ts";
 import * as S from "../schemas.ts";
 import { tool } from "../tool.ts";
 
@@ -26,7 +26,7 @@ export function register(server: McpServer) {
     file: S.file,
   }, async (a) => {
     await ensureServer();
-    const { ok: _ok, boot: _boot, ...rest } = await api<any>("POST", "/api/bridge/finish", { summary: a.summary, ids: a.ids, sound: a.sound, client: a.client, file: a.file });
-    return rest;
+    const { ok: _ok, boot: _boot, ...rest } = await api<any>("POST", "/api/bridge/finish", { summary: a.summary, ids: a.ids, sound: background() ? false : a.sound, client: a.client, file: a.file });
+    return background() ? { ...rest, note: "background_mode: finished the undo step; toast and sound skipped. Use render_node to look; ask the person to open the file." } : rest;
   });
 }

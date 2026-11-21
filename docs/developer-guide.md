@@ -729,3 +729,29 @@ docs/                engine spike and performance write-ups
 vendor/paper-shaders Apache-2.0 sources, unmodified
 test/                node:test suites
 ```
+
+## Background MCP for a second agent
+
+Set `CANVAS_MCP_BACKGROUND=1` for any agent working while the person uses Canvas. It starts or shares a headless server on port 5199. `CANVAS_PORT` can choose another port; 5189 is reserved for the app and falls back to 5199. Every document tool needs `file` or a Canvas link. Look with `render_node`. Window tools return `background_mode`; ask the person to open the file when they want to see it. This switch is environment-only and lasts for the MCP process.
+
+For Claude, save this as `background-mcp.json`, then run `claude --mcp-config background-mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "canvas": {
+      "command": "node",
+      "args": ["/path/to/canvas/mcp/server.ts"],
+      "env": { "CANVAS_MCP_BACKGROUND": "1" }
+    }
+  }
+}
+```
+
+For Codex, with Canvas already registered:
+
+```sh
+codex -c 'mcp_servers.canvas.env.CANVAS_MCP_BACKGROUND="1"'
+```
+
+Normal mode `open_file` defaults to `focus:false`: it adds the tab without switching the person's view. A hidden tab may have no live page. Live tools then return `no_page` with a background-mode hint. Only `focus:true` or the person switches to that tab.

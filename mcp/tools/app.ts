@@ -3,7 +3,7 @@
 import { execFile } from "node:child_process";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { api, BASE, cmd, ensureServer, health, OTHER_COPY_NOTE, PORT, staleness, status, ToolError, wantVersion, type Status } from "../client.ts";
+import { api, background, BASE, cmd, ensureServer, health, OTHER_COPY_NOTE, PORT, staleness, status, ToolError, wantVersion, type Status } from "../client.ts";
 import { APP_PATH, appInstalled, launchCanvas } from "../launch.ts";
 import * as S from "../schemas.ts";
 import { tool } from "../tool.ts";
@@ -27,7 +27,12 @@ export function tabsFrom(r: any): { tabs: { file: string; name: string; current:
 }
 
 export function register(server: McpServer) {
-  tool(server, "canvas_status", "Is Canvas running? Server, app and open pages in one answer: versions, whether the running server is older than this MCP's code (a server another copy of Canvas runs, such as the installed app, is never stale), which pages and tabs exist, which page is active. Does not start anything.", {}, async () => {
+  tool(server, "canvas_status", "Is Canvas running? Server, app and open pages in one answer: versions, whether the running server is older than this MCP's code (a server another copy of Canvas runs, such as the installed app, is never stale), which pages and tabs exist, which page is active. Normal mode does not start anything. Background mode starts its private headless server if needed.", {}, async () => {
+    if (background()) {
+      await ensureServer();
+      const h = await health();
+      return { mode: "background", port: PORT(), server: { running: Boolean(h), port: PORT() }, app: { untouched: true }, hint: "Use render_node to look; ask the person to open the file." };
+    }
     const h = await health();
     const app = { path: APP_PATH(), installed: appInstalled() };
     if (!h) return { server: { running: false, port: PORT() }, app: { ...app, running: false }, hint: "Nothing answers. launch_canvas starts it; disk-only tools (get_document_summary, lookup_nodes, render_node, widgets) also start a server on their own." };
@@ -87,6 +92,8 @@ export function register(server: McpServer) {
       // The app's own page, not a browser tab that happens to show the same file.
       page = s.pages.find((p) => p.file === want && p.host === "native");
       if (page) break;
+      if (a.focus !== true && !a.board) return { opened: want, client: null, live: false, hint: "The tab is open without switching your view. Live tools need a connected page; use CANVAS_MCP_BACKGROUND=1 with file for disk tools." };
+      if (a.focus !== true) throw new ToolError("no_page", "The file is open in a background tab without a live page", "Use CANVAS_MCP_BACKGROUND=1 with file for disk tools; ask the person to open the file to use live tools.");
       if (Date.now() > end) throw new ToolError("timeout", `The app opened the tab but no page showing ${want} connected in time`, "Call canvas_status to see what is open.");
       await new Promise((r) => setTimeout(r, 150));
     }

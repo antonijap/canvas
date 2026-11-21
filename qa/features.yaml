@@ -790,3 +790,9 @@ features:
     area: chrome
     driven: [page]
     cases: [one, many, $themes]
+
+  - id: mcp-background
+    name: Background MCP edits on disk and quiet opening leaves the active tab alone
+    area: mcp
+    driven: [mcp, native]
+    cases: [disk, quiet-open]

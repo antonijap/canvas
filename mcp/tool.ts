@@ -1,7 +1,7 @@
 // Tool registration with one error format: "code: message. Hint: ...".
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { api, resolveFile, ToolError } from "./client.ts";
+import { api, background, backgroundError, ensureServer, resolveFile, ToolError } from "./client.ts";
 import { expandLink, linkShape, missingAfterLink } from "./link.ts";
 
 export type Content = ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[];
@@ -22,11 +22,23 @@ export function errorText(e: unknown): string {
   return `failed: ${(e as Error)?.message ?? String(e)}`;
 }
 
+const WINDOW_TOOLS = new Set([
+  "open_file", "launch_canvas", "close_tab", "screenshot_view", "fit_view", "pan_view", "set_zoom",
+  "select_nodes", "clear_selection", "highlight_nodes", "clear_highlights", "wait_for_selection",
+  "get_selection", "reveal_widget", "notify_user", "get_viewport", "set_active_page", "list_tabs",
+  "get_current_file", "get_theme", "set_theme",
+]);
+
 export function tool<S extends Record<string, any>>(server: McpServer, name: string, description: string, shape: S, handler: (args: any, extra: Extra) => Promise<unknown> | unknown, annotations: { readOnlyHint?: boolean; destructiveHint?: boolean; idempotentHint?: boolean } = {}) {
   // A canvas:// link (Cmd+L in Canvas) fills the file and the node arguments (mcp/link.ts).
   server.registerTool(name, { description, inputSchema: linkShape(name, shape), annotations }, (async (args: any, extra: Extra) => {
     try {
       const a = expandLink(name, shape, args ?? {});
+      if (background()) {
+        if (WINDOW_TOOLS.has(name)) throw backgroundError(name);
+        if ('file' in shape && !a.file) await resolveFile();
+        await ensureServer();
+      }
       const miss = missingAfterLink(name, shape, a);
       if (miss) throw new ToolError("invalid", `${miss} is required`, `Pass ${miss}, or a link that names it.`);
       if (typeof a.file === 'string' && a.file.startsWith('cloud:')) {

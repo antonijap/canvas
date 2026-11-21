@@ -4,7 +4,8 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { api, cmd, ensureServer, resolveFile, ToolError } from "../client.ts";
+import { api, background, cmd, ensureServer, resolveFile, ToolError } from "../client.ts";
+import { mediaFrame } from "../media.ts";
 import * as S from "../schemas.ts";
 import { Raw, tool } from "../tool.ts";
 import { pageOfNode } from "./pageof.ts";
@@ -59,7 +60,8 @@ export function register(server: McpServer) {
     const made = await api<any>("POST", `/api/videos?file=${enc(file)}`, { path: a.path, copy: a.copy, name: a.name, autoplay: a.autoplay, loop: a.loop, muted: a.muted, posterTime: a.posterTime, page, ...place });
     const id = made.widget.id;
     try {
-      const r: any = (await cmd({ op: "video_frame", args: { id, t: a.posterTime ?? 1 }, file, timeoutMs: 20_000 })).result;
+      const r: any = background() ? await mediaFrame(file, "videoFrame", { id, t: a.posterTime ?? 1 })
+        : (await cmd({ op: "video_frame", args: { id, t: a.posterTime ?? 1 }, file, timeoutMs: 20_000 })).result;
       if (r?.ok && r.image) {
         const { image, ...meta } = r;
         return new Raw([{ type: "image", data: image, mimeType: "image/png" }, { type: "text", text: JSON.stringify({ id, widget: made.widget, frame: meta }) }]);
@@ -78,7 +80,8 @@ export function register(server: McpServer) {
   }, async (a) => {
     await ensureServer();
     const file = await resolveFile(a.file);
-    const r: any = (await cmd({ op: "video_frame", args: { id: a.id, t: a.t ?? 1, maxSide: a.maxSide ?? 768 }, file, timeoutMs: 20_000 })).result;
+    const r: any = background() ? await mediaFrame(file, "videoFrame", { id: a.id, t: a.t ?? 1, maxSide: a.maxSide ?? 768 })
+      : (await cmd({ op: "video_frame", args: { id: a.id, t: a.t ?? 1, maxSide: a.maxSide ?? 768 }, file, timeoutMs: 20_000 })).result;
     if (!r?.ok || !r.image) return { ok: false, ...(r ?? {}) };
     const { image, ...meta } = r;
     return new Raw([{ type: "image", data: image, mimeType: "image/png" }, { type: "text", text: JSON.stringify(meta) }]);

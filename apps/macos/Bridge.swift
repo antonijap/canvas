@@ -156,11 +156,15 @@ final class BridgeClient {
     case "open":
       guard let file = args["file"] as? String, !file.isEmpty else { throw BridgeError(code: "invalid", message: "open needs a file") }
       let wasOpen = model.openFiles.contains(file)
-      model.open(file)
-      if args["focus"] as? Bool == true { activate() }
-      for _ in 0..<30 {
-        if model.currentFile == file { break }
-        try? await Task.sleep(nanoseconds: 100_000_000)
+      if args["focus"] as? Bool == true {
+        model.open(file)
+        activate()
+        for _ in 0..<30 {
+          if model.currentFile == file { break }
+          try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+      } else {
+        model.openQuietly(file)
       }
       return ["file": file, "opened": !wasOpen, "current": model.currentFile as Any? ?? NSNull()]
     case "close":
