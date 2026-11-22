@@ -315,11 +315,11 @@ describe("image decoder worker (stress: 8k shrink blocked the main thread 80 ms;
     assert.deepEqual(r.resized, [[30, 64, "blob"]]);
     assert.deepEqual([r.posted[0].nw, r.posted[0].nh], [1170, 2532]);
   });
-  test("a disk preview is used only after its source ETag is revalidated", async () => {
+  for (const savedCap of [64, 128]) test(`a cached ${savedCap}px preview is used only after ETag validation`, async () => {
     const origin = "http://localhost";
     const url = new URL("/asset?p=phone.png", origin);
     const key = new URL(url);
-    key.searchParams.set("preview", "64");
+    key.searchParams.set("preview", String(savedCap));
     const cache = {
       keys: async () => [{ url: key.href }],
       match: async () => new Response("preview", { headers: { etag: '"old"', width: "1170", height: "2532" } }),

@@ -385,9 +385,9 @@ export class NT {
 }
 
 /** covers: catalog pairs "feature:case" (qa/features.yaml), counted by pnpm qa:coverage like the page scenarios'. */
-export type NativeScenario = { name: string; area: string; covers: string[]; run: (t: NT) => Promise<void>; kind: "native" };
+export type NativeScenario = { name: string; area: string; covers: string[]; startEmpty?: boolean; run: (t: NT) => Promise<void>; kind: "native" };
 export const scenarios: NativeScenario[] = [];
-export const sc = (area: string, name: string, opts: { covers: string[] }, run: (t: NT) => Promise<void>) => { scenarios.push({ area, name, run, ...opts, kind: "native" }); };
+export const sc = (area: string, name: string, opts: { covers: string[]; startEmpty?: boolean }, run: (t: NT) => Promise<void>) => { scenarios.push({ area, name, run, ...opts, kind: "native" }); };
 /** The scenario's id in results and coverage: "native-" + the page runner's slug, so the two never collide. */
 export const nativeSlug = (s: { area: string; name: string }) => `native-${s.area}-${s.name}`.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
 

@@ -34,6 +34,7 @@ const MACOS = path.join(ROOT, "apps", "macos");
 function qaBuild(): string {
   const files = [...fs.readdirSync(MACOS).filter((f) => /\.(swift|plist|sh)$/.test(f)).map((f) => path.join(MACOS, f)),
     ...fs.readdirSync(path.join(MACOS, "DesignSystem")).filter((f) => f.endsWith(".swift")).map((f) => path.join(MACOS, "DesignSystem", f))].sort();
+  files.push(path.join(MACOS, "tools", "image-previews.swift"));
   const h = createHash("sha256");
   for (const f of files) h.update(f).update(fs.readFileSync(f));
   const key = h.digest("hex").slice(0, 16);
@@ -62,19 +63,21 @@ type Result = { slug: string; name: string; area: string; status: "PASS" | "FAIL
 
 async function runOne(app: QaApp, s: NativeScenario, k: number): Promise<Result> {
   const file = path.join(app.docs, `${String(k).padStart(2, "0")}-${nativeFileStem(s)}.canvas`);
-  copyDir(PLAYGROUND, file);
+  if (!s.startEmpty) copyDir(PLAYGROUND, file);
   const t = new NT(app, file);
   const t0 = Date.now();
   let status: Result["status"] = "PASS", msg = "";
   try {
     await t.cmd("qa.cloud", { commentName: "Anna" });
-    await app.openShown(file);
-    await t.waitState((st) => st.file === file && st.pages.length > 0, "the file to open", 15_000);
-    await t.settle();
-    const st = await t.state();
-    if (st.modal) throw new Fail(`a modal window is open: ${JSON.stringify(st.modal)}`);
-    // A QA instance must never take focus from the person using the Mac.
-    if (st.window.active) t.note("the QA app was the active app at the start");
+    if (!s.startEmpty) {
+      await app.openShown(file);
+      await t.waitState((st) => st.file === file && st.pages.length > 0, "the file to open", 15_000);
+      await t.settle();
+      const st = await t.state();
+      if (st.modal) throw new Fail(`a modal window is open: ${JSON.stringify(st.modal)}`);
+      // A QA instance must never take focus from the person using the Mac.
+      if (st.window.active) t.note("the QA app was the active app at the start");
+    }
     await withTimeout(s.run(t), 120_000, s.name);
   } catch (e) {
     if (e instanceof Skip) { status = "SKIP"; msg = e.message; }

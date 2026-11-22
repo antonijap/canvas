@@ -125,6 +125,8 @@ func startServer() {
   var env = ProcessInfo.processInfo.environment
   if env["CANVAS_TUNNEL_BIN"] == nil, let helper = Bundle.main.resourceURL?.appendingPathComponent("canvas-tunnel").path,
      FileManager.default.isExecutableFile(atPath: helper) { env["CANVAS_TUNNEL_BIN"] = helper }
+  if env["CANVAS_IMAGE_PREVIEWS_BIN"] == nil, let helper = Bundle.main.resourceURL?.appendingPathComponent("canvas-image-previews").path,
+     FileManager.default.isExecutableFile(atPath: helper) { env["CANVAS_IMAGE_PREVIEWS_BIN"] = helper }
   p.environment = env
   p.standardOutput = FileHandle.nullDevice
   if !FileManager.default.fileExists(atPath: serverLog.path) { FileManager.default.createFile(atPath: serverLog.path, contents: nil) }

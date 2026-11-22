@@ -336,7 +336,14 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         guard message.frameInfo.isMainFrame, message.webView === webView else { return }
         guard let text = message.body as? String, let data = text.data(using: .utf8),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
-        DispatchQueue.main.async { self.apply(m) }
+        let query = message.frameInfo.request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: true)?.queryItems }
+        let native = query?.contains { $0.name == "shell" && $0.value == "native" } == true
+        let key = query?.first { $0.name == "file" }?.value ?? ""
+        let token = loadToken
+        DispatchQueue.main.async {
+            guard token == self.loadToken, !native || key == self.activeKey else { return }
+            self.apply(m)
+        }
     }
 
     func apply(_ m: [String: Any]) {
@@ -673,8 +680,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         var wv = live[key]
         var fresh = wv == nil || staleViews.contains(ObjectIdentifier(wv!))
         if wv == nil {
-            // The first page of the app (nothing loaded yet) takes the web view that is already in the window.
-            if old.url == nil, oldKey == nil || live[oldKey!] === old {
+            // An empty view or the last tab closing can navigate in place. Opening another live tab
+            // still keeps its own view. Reusing the empty view avoids a second content process on reopen.
+            let emptyOrClosed = oldKey.map { $0.isEmpty || (key.isEmpty && !openFiles.contains($0)) } ?? true
+            if emptyOrClosed {
                 if let k = oldKey { live[k] = nil; liveOrder.removeAll { $0 == k } }
                 wv = old
             } else {

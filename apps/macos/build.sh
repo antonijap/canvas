@@ -30,6 +30,10 @@ cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # host's version into the binary and the app will not open on anything older.
 MINOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' Info.plist)"
 swiftc "${SWIFT_OPT:--O}" -target "$(uname -m)-apple-macos$MINOS" ${QA_FLAGS[@]+"${QA_FLAGS[@]}"} main.swift Model.swift Shell.swift Fonts.swift Inspector.swift Widgets.swift Keychain.swift Bridge.swift Pages.swift Library.swift InspectorTokens.swift ShellLogic.swift Updater.swift PaperShaders.swift ResourceMeterLogic.swift ResourceMeter.swift LayoutLogic.swift InspectorLayout.swift PaintLogic.swift InspectorPaint.swift PaintEditor.swift InspectorExport.swift InspectorGuides.swift LayersLogic.swift Layers.swift PaletteLogic.swift Palette.swift Spark.swift SettingsLogic.swift Settings.swift CloudPicker.swift CloudSettings.swift HomeLogic.swift Home.swift CloudFiles.swift ${QA_SRC[@]+"${QA_SRC[@]}"} DesignSystem/*.swift -o "$APP/Contents/MacOS/Canvas"
+# Tiny JPEG previews are decoded outside the WebKit process.
+PREVIEW_OUT="$APP/Contents/Resources/canvas-image-previews"
+swiftc -O -target "$(uname -m)-apple-macos$MINOS" tools/image-previews.swift -o "$PREVIEW_OUT"
+codesign --force --sign - "$PREVIEW_OUT"
 # The tunnel helper a hosted Cloud is reached through (cloud/tunnel, the tailcat library at a pinned version). Built
 # from source when Go is installed; without it the build goes on and Settings > Cloud > Host on this Mac is off.
 # CANVAS_REQUIRE_TUNNEL=1 (scripts/release-app.sh) makes a missing helper an error: a release always has it.
@@ -60,6 +64,7 @@ fi
 # A stable signing identity keeps macOS privacy grants (Desktop/Documents access) across rebuilds;
 # an ad-hoc signature changes every build and macOS asks again. CANVAS_SIGN_IDENTITY overrides.
 ID="${CANVAS_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' | head -1)}"
+codesign --force --sign "${ID:--}" "$PREVIEW_OUT" 2>/dev/null || codesign --force --sign - "$PREVIEW_OUT"
 if [ -f "$HELPER_OUT" ]; then codesign --force --sign "${ID:--}" "$HELPER_OUT" 2>/dev/null || codesign --force --sign - "$HELPER_OUT" 2>/dev/null || true; fi
 codesign --force --sign "${ID:--}" "$APP" 2>/dev/null || codesign --force --sign - "$APP" 2>/dev/null || true
 echo "built $(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"

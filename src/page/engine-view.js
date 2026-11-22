@@ -7,6 +7,8 @@
 // engine, and falls back to the DOM only when that keeps happening: engineRestartDelay below).
 // The pure helpers at the bottom are imported by node tests too.
 
+import { createImageOverview, imageOverviewBoard, localJpegPath } from "./image-overview.js";
+
 /** What an image is decoded at while boards show it large, but not larger than this on screen. */
 export const MAX_IMAGE_SIDE = 2048;
 /**
@@ -36,7 +38,7 @@ export const SMALL_IMAGE_SIDE = 512;
  *         orderOf(id) -> its index in the document (paint order), onLayout() (boards were laid out again),
  *         rebase(id, scene, fetchedAt) -> true when it put live edits on a server scene (src/page/live.js) }
  */
-export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, rebase = () => false }) {
+export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, nativePreviews = false, showOverview = () => true, rebase = () => false }) {
   if (!navigator.gpu) throw new Error("no WebGPU");
   const canvas = document.createElement("canvas");
   canvas.id = "engine";
@@ -202,29 +204,163 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       if (!m.boards.size) continue;
       const { px, distance } = imageUse(m, view, scale);
       if (px !== 0) m.usedAt = now;
-      const want = px < 0 ? MAX_IMAGE_SIDE : px > 0 ? imageCapFor(px) : SMALL_IMAGE_SIDE;
+      const want = px < 0 ? MAX_IMAGE_SIDE : m.overview && px <= PREVIEW_SIDE ? PREVIEW_SIDE :
+        px > 0 ? imageCapFor(px) : SMALL_IMAGE_SIDE;
       items.push({ url, cap: m.cap, bytes: m.bytes, nw: m.nw, nh: m.nh, aspect: m.aspect || 1, want,
-        shown: px !== 0, busy: !mayDecode(m), at: m.usedAt, distance });
+        shown: px !== 0, busy: (m.overview && !m.cap && want === PREVIEW_SIDE) || !mayDecode(m), at: m.usedAt, distance });
     }
     items.sort((a, b) => Number(b.shown) - Number(a.shown) || a.distance - b.distance);
     return planImageDecodes(items, IMAGE_BUDGET);
   }
   const mayDecode = (m) => !m.busy && performance.now() >= m.retryAt;
   let decoding = 0, planQueued = false, previewHits = 0;
+  const imageTiming = { plans: 0, planMs: 0, decoded: 0, fetchMs: 0, decodeMs: 0, cacheWrites: 0, cacheWriteMs: 0, nativePreviews: 0, nativeMs: 0, attachMs: 0 };
   function requestImagePlan() {
     if (dead || planQueued || decoding >= DECODE_SLOTS) return;
     planQueued = true;
-    queueMicrotask(() => {
+    const plan = () => {
       planQueued = false;
       if (dead) return;
-      for (const { url, cap } of imagePlan()) {
+      const started = performance.now(), jobs = imagePlan();
+      imageTiming.plans++;
+      imageTiming.planMs += performance.now() - started;
+      for (const { url, cap } of jobs) {
         if (decoding >= DECODE_SLOTS) break;
         const m = images.get(url);
         if (m.cap && cap > m.cap && !isIdle()) continue;
         decoding++;
         void decode(url, cap).finally(() => { decoding--; requestImagePlan(); });
       }
-    });
+    };
+    // An overview can have thousands of pending URLs. Coalesce completions and board arrivals.
+    if (images.size > 512) setTimeout(plan, 16);
+    else queueMicrotask(plan);
+  }
+
+  let simpleOverview = null, overviewDone = false, overviewBoards = 0;
+  function endOverview() {
+    if (overviewDone) return;
+    overviewDone = true;
+    const rows = [];
+    for (const [url, m] of images) {
+      if (m.previewPixels) rows.push([url, ...m.previewPixels]);
+      m.previewPixels = m.previewTile = null;
+    }
+    registerPreviews(rows);
+    simpleOverview?.destroy();
+    simpleOverview = null;
+    if (presenting && !canvas.isConnected) view.prepend(canvas);
+  }
+  function registerPreviews(rows) {
+    if (!rows.length) return;
+    if (engine.registerPreviews) engine.registerPreviews(rows);
+    else for (const [url, pixels, w, h] of rows) engine.registerImage(url, pixels, w, h, true);
+  }
+  function overviewFrame(cam) {
+    if (!bulkOverview || overviewDone || !loaded.size) return false;
+    if (!cam || (cam.z > 0.035) || !showOverview()) { endOverview(); return false; }
+    const boards = [], dpr = window.devicePixelRatio || 1;
+    for (const id of paint) {
+      const rec = loaded.get(id);
+      if (!rec?.rect) continue;
+      const b = rec.overview;
+      if (!b || b.rects.some((r) => Math.max(r.w, r.h) * cam.z * dpr > PREVIEW_SIDE)) { endOverview(); return false; }
+      if (rec.x * cam.z + cam.x >= cssW || rec.y * cam.z + cam.y >= cssH ||
+          (rec.x + b.w) * cam.z + cam.x <= 0 || (rec.y + b.h) * cam.z + cam.y <= 0) continue;
+      boards.push({ order: orderOf(id), x: rec.x, y: rec.y, overview: b });
+    }
+    simpleOverview ||= createImageOverview();
+    if (!simpleOverview.canvas.isConnected) {
+      canvas.remove();
+      presenting = false;
+      view.prepend(simpleOverview.canvas);
+    }
+    boards.sort((a, b) => a.order - b.order);
+    simpleOverview.draw(cam, cssW, cssH, bg, boards, (url) => images.get(url)?.previewTile);
+    overviewBoards = boards.length;
+    return true;
+  }
+
+  let bulkOverview = false, previewUnavailable = false, previewTimer = 0, previewActive = 0;
+  const previewQueue = new Map(), previewAbort = new AbortController();
+  function queuePreview(url, m) {
+    if (!bulkOverview || previewUnavailable || m.cap || m.busy || m.overview || m.previewFailed) return;
+    const file = localJpegPath(url);
+    if (!file) return;
+    m.overview = true;
+    previewQueue.set(url, { m, file });
+    if (!previewTimer && previewActive < PREVIEW_CONCURRENCY) previewTimer = setTimeout(pumpPreviews, 12);
+  }
+  function pumpPreviews() {
+    previewTimer = 0;
+    if (dead || previewActive >= PREVIEW_CONCURRENCY || !previewQueue.size) return;
+    const jobs = [];
+    for (const [url, job] of previewQueue) {
+      previewQueue.delete(url);
+      if (images.get(url) === job.m && job.m.boards.size && !job.m.cap && !job.m.busy) jobs.push({ url, ...job });
+      if (jobs.length === PREVIEW_BATCH) break;
+    }
+    if (jobs.length) {
+      previewActive++;
+      void renderPreviews(jobs).finally(() => { previewActive--; pumpPreviews(); requestImagePlan(); });
+    }
+    if (previewQueue.size) pumpPreviews();
+  }
+  async function renderPreviews(jobs) {
+    const start = performance.now();
+    let records;
+    try {
+      if (!previewUnavailable) {
+        const res = await fetch("/api/image-previews", { method: "POST", signal: previewAbort.signal,
+          headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify(jobs.map((j) => j.file)) });
+        if (res.status === 404) previewUnavailable = true;
+        if (res.ok) records = previewRecords(await res.arrayBuffer(), jobs.length);
+      }
+    } catch { /* Keep using the regular decoder if the native tool failed. */ }
+    if (dead) return;
+    const attached = performance.now();
+    imageTiming.nativeMs += attached - start;
+    const rows = [], thumbnails = [];
+    for (const [i, { url, m }] of jobs.entries()) {
+      if (images.get(url) !== m || !m.boards.size) continue;
+      const preview = records?.[i];
+      if (!preview) {
+        endOverview();
+        m.overview = false; m.previewFailed = true;
+        continue;
+      }
+      if (m.cap || m.busy) continue;
+      const { pixels, w, h, nw, nh } = preview;
+      if (!overviewDone) {
+        thumbnails.push({ url, m, pixels, w, h });
+        m.previewPixels = [pixels, w, h];
+      } else rows.push([url, pixels, w, h]);
+      m.cap = PREVIEW_SIDE;
+      m.nw = nw; m.nh = nh;
+      m.etag = preview.etag;
+      m.bytes = pixels.byteLength;
+      m.fails = 0; m.retryAt = 0; m.gone = false;
+      imageTiming.nativePreviews++;
+      if (preview.cached) previewHits++;
+    }
+    registerPreviews(rows);
+    if (!overviewDone && thumbnails.length) {
+      simpleOverview ||= createImageOverview();
+      for (const { m } of thumbnails) m.busy = true;
+      try {
+        const tiles = await simpleOverview.add(thumbnails);
+        if (tiles) for (const [i, { m }] of thumbnails.entries()) m.previewTile = tiles[i];
+      } catch {
+        if (!dead) endOverview();
+      } finally {
+        for (const { url, m } of thumbnails) {
+          m.busy = false;
+          if (!dead && !m.boards.size) releaseImage(url, m);
+        }
+      }
+    }
+    if (!dead) onChange();
+    imageTiming.attachMs += performance.now() - attached;
   }
   // A URL that answered 4xx is said once per page: a page switch makes a new record, which asks again (the file
   // may exist by then), and repeated warnings drowned the console in the soak.
@@ -316,7 +452,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       if (m.bm?.width === m.nw && m.bm?.height === m.nh) full++;
     }
     return { decodedBytes: bytes, budget: IMAGE_BUDGET, images: images.size, big, full,
-      active: decoding, slots: DECODE_SLOTS, workers: decoder ? DECODE_WORKERS : 0, previewHits };
+      active: decoding, slots: DECODE_SLOTS, workers: decoder ? DECODE_WORKERS : 0, previewHits, timing: { ...imageTiming } };
   }
   /** An image no loaded board references any more: unregister it (frees its GPU levels) and only then close the bitmap. */
   function releaseImage(url, m) {
@@ -369,6 +505,13 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
         const worker = { postMessage: (m) => ws[rr++ % ws.length].postMessage(m), terminate: () => { for (const w of ws) w.terminate(); } };
         const d = { worker, jobs: new Map(), seq: 0 };
         const onmessage = (e) => {
+          imageTiming.cacheWrites += e.data.cacheWrites || 0;
+          imageTiming.cacheWriteMs += e.data.cacheWriteMs || 0;
+          if (e.data.decodeMs != null) {
+            imageTiming.decoded++;
+            imageTiming.fetchMs += e.data.fetchMs;
+            imageTiming.decodeMs += e.data.decodeMs;
+          }
           const j = d.jobs.get(e.data.id);
           if (!j) { if (e.data.bm) e.data.bm.close(); return; }
           d.jobs.delete(e.data.id);
@@ -399,6 +542,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   async function loadBoards(metas, onEach) {
     const firstLoad = opening;
     opening = false;
+    if (nativePreviews && metas.length >= 400 && getCam()?.z <= 0.04) bulkOverview = true;
     const jobs = metas.map((meta) => {
       const rec = loaded.get(meta.id) || unpark(meta.id) || { seq: 0, content: null, x: NaN, y: NaN, ids: new Set() };
       loaded.set(meta.id, rec);
@@ -535,11 +679,17 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       const uses = [];
       rec.ids = indexScene(scene.root, meta.id, nodeIndex, uses);
       rec.content = content;
+      rec.overview = bulkOverview && !overviewDone ? imageOverviewBoard(scene.root) : null;
+      if (!rec.overview && bulkOverview && !overviewDone) endOverview();
       const previousImages = rec.images || [];
       detachImages(meta.id, previousImages);
       measureImages(meta.id, uses, at);
       rec.images = scene.images || [];
-      for (const url of rec.images) imageOf(url).boards.add(meta.id);
+      for (const url of rec.images) {
+        const m = imageOf(url);
+        m.boards.add(meta.id);
+        queuePreview(url, m);
+      }
       for (const url of previousImages) { const m = images.get(url); if (m) releaseImage(url, m); }
     }
     rec.x = at.x; rec.y = at.y; rec.rect = root;
@@ -651,6 +801,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     // a live edit was a millisecond on a 1,300-node board).
     const { text, content } = sceneTextAndKey(scene);
     if (content === rec.content) return engine.nodeRectIn(id, id);
+    if (simpleOverview) endOverview();
     const at = posOf(id) || { x: rec.x, y: rec.y };
     const root = engine.setBoard(id, at.x, at.y, text).root;
     rec.rect = root;
@@ -673,6 +824,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     let ok = false;
     try { ok = engine.moveNode(board, id, x, y); } catch { ok = false; }
     if (!ok) return false;
+    if (simpleOverview) endOverview();
     rec.content = -1;
     onChange();
     return true;
@@ -689,6 +841,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     let ok = false;
     try { ok = engine.updateNode(board, id, JSON.stringify(node)); } catch { ok = false; }
     if (!ok) return false;
+    if (simpleOverview) endOverview();
     rec.content = -1;
     // The subtree's layers keep their ids (the engine checks): their index entries follow the new props.
     const parent = nodeIndex.get(id) ? nodeIndex.get(id).parent : null;
@@ -700,20 +853,24 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
 
   // ---- snapshot help: a 2D copy of the current frame over the GPU canvas
   let frozen = null;
+  const drawnCanvas = () => simpleOverview?.canvas.isConnected ? simpleOverview.canvas : canvas;
   function freeze() {
-    if (!presenting) return { frozen: false };
+    const surface = drawnCanvas();
+    if (!surface.isConnected) return { frozen: false };
     thaw();
     const c2 = document.createElement("canvas");
-    c2.width = canvas.width; c2.height = canvas.height;
-    c2.style.cssText = canvas.style.cssText;
+    c2.width = surface.width; c2.height = surface.height;
+    c2.style.cssText = surface.style.cssText;
     // Draw a fresh frame and copy it in the same task, while the drawing buffer is surely current.
-    engine.setBackground(bg);
-    // Shader cards show their frame at t = 2 s: a snapshot is the same picture every time.
-    if (engine.setShaderSnapshot) engine.setShaderSnapshot(true);
-    // This frame runs outside the page's rAF loop: when it leaves tiles to draw, the loop must pick them up.
-    if (engine.frame()) onChange();
-    c2.getContext("2d").drawImage(canvas, 0, 0);
-    canvas.after(c2);
+    if (surface === canvas) {
+      engine.setBackground(bg);
+      // Shader cards show their frame at t = 2 s: a snapshot is the same picture every time.
+      if (engine.setShaderSnapshot) engine.setShaderSnapshot(true);
+      // This frame runs outside the page's rAF loop: when it leaves tiles to draw, the loop must pick them up.
+      if (engine.frame()) onChange();
+    }
+    c2.getContext("2d").drawImage(surface, 0, 0);
+    surface.after(c2);
     frozen = c2;
     // A thaw that never comes (the shell or server went away) must not leave a still picture over the canvas.
     clearTimeout(thawT);
@@ -727,14 +884,18 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
    * `crops`: [{ sx, sy, sw, sh, w, h }] in canvas pixels; returns one 2D canvas of w x h each.
    */
   function capture(crops) {
-    engine.setBackground(bg);
-    if (engine.redraw()) onChange();
+    const surface = drawnCanvas();
+    if (surface === canvas) {
+      engine.setBackground(bg);
+      if (engine.redraw()) onChange();
+    }
+    const scale = surface === canvas ? 1 : 1 / (window.devicePixelRatio || 1);
     return crops.map((c) => {
       const out = document.createElement("canvas");
       out.width = c.w; out.height = c.h;
       const g = out.getContext("2d");
       g.imageSmoothingQuality = "high";
-      g.drawImage(canvas, c.sx, c.sy, c.sw, c.sh, 0, 0, c.w, c.h);
+      g.drawImage(surface, c.sx * scale, c.sy * scale, c.sw * scale, c.sh * scale, 0, 0, c.w, c.h);
       return out;
     });
   }
@@ -745,9 +906,10 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   }
 
   return {
-    engine, canvas,
+    engine, get canvas() { return drawnCanvas(); },
     setCam: (c) => engine.setCamera(c.x, c.y, c.z),
     frame(show = true) {
+      if (show && overviewFrame(getCam())) return false;
       if (!presenting) {
         if (!show) return false;
         if (!gpuReady) return true;
@@ -770,7 +932,11 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     isLoaded: (id) => loaded.has(id),
     loadBoards, removeBoard, park, pruneParked, moveBoard, parkedCount: () => parked.size, isParked: (id) => parked.has(id), freeze, thaw, capture, syncBg, refineImages, imageStats, imagesPending, warmFonts, reorder,
     sceneText, fetchScene, install, moveNode, updateNode,
-    stats: () => engine.stats(),
+    compactOverview: () => !!simpleOverview?.canvas.isConnected,
+    stats() {
+      const s = engine.stats();
+      return simpleOverview?.canvas.isConnected ? { ...s, visibleBoards: overviewBoards, tilesMissing: 0 } : s;
+    },
     /** { missing, blank, exact } of the last frame, without stats()'s walk over every board. */
     snapshotAssets(id) {
       const assets = new Map();
@@ -785,12 +951,14 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       return [...assets].sort();
     },
     pictureState() {
+      if (simpleOverview?.canvas.isConnected) return { missing: 0, blank: 0, exact: true, boardPixels: overviewBoards > 0 };
       const [missing, blank, exact, pixels] = engine.pictureState();
       const boardPixels = pixels === undefined ? blank === 0 && engine.boardsInView().length > 0 : pixels === 1;
       return { missing, blank, exact: exact === 1, boardPixels };
     },
     loseDevice: () => device && device.destroy(),
     destroy() {
+      if (dead) return;
       dead = true;
       ro.disconnect();
       scheme.removeEventListener("change", syncBg);
@@ -800,10 +968,19 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       try { engine.free(); } catch {}
       // The engine is gone, so the bitmaps it held can be closed now.
       for (const m of images.values()) if (m.bm) { try { m.bm.close(); } catch {} m.bm = null; }
+      simpleOverview?.destroy();
+      previewAbort.abort();
+      clearTimeout(previewTimer);
+      previewQueue.clear();
       images.clear();
       scenes.clear();
+      loaded.clear();
+      parked.clear();
+      nodeIndex.clear();
+      paint.length = 0;
       if (decoder) { const d = decoder; d.worker.terminate(); for (const j of d.jobs.values()) j.rej(new Error("engine gone")); d.jobs.clear(); }
       decoder = false;
+      device?.destroy();
     },
   };
 }
@@ -894,9 +1071,35 @@ export const DECODE_CONCURRENCY = 2;
 export const DECODE_WORKERS = 3;
 const DECODE_SLOTS = DECODE_CONCURRENCY * DECODE_WORKERS;
 
+const PREVIEW_SIDE = 32;
+const PREVIEW_BATCH = 1024;
+const PREVIEW_CONCURRENCY = 3;
+function previewRecords(buffer, count) {
+  const view = new DataView(buffer), strings = new TextDecoder();
+  const records = [];
+  let at = 0;
+  for (let i = 0; i < count; i++) {
+    const bytes = view.getUint16(at, true);
+    const tagBytes = view.getUint8(at + 2);
+    const cached = view.getUint8(at + 3) === 1;
+    at += 4;
+    const etag = strings.decode(new Uint8Array(buffer, at, tagBytes));
+    at += tagBytes;
+    if (!bytes) { records.push(null); continue; }
+    const nw = view.getUint32(at, true), nh = view.getUint32(at + 4, true);
+    const w = view.getUint32(at + 8, true), h = view.getUint32(at + 12, true);
+    if (!w || !h || w > PREVIEW_SIDE || h > PREVIEW_SIDE || bytes !== 16 + w * h * 4) throw new Error("invalid JPEG preview");
+    records.push({ etag, cached, nw, nh, w, h, pixels: new Uint8Array(buffer, at + 16, bytes - 16) });
+    at += bytes;
+  }
+  if (at !== buffer.byteLength) throw new Error("invalid JPEG preview packet");
+  return records;
+}
+
+
 // A preview is derived from one local asset at one size. Keep it on disk in the browser
 // cache and ask /asset to revalidate its source ETag before reusing it.
-function openThumbnailCache() {
+function openThumbnailCache(onWrite) {
   if (typeof caches === "undefined" || typeof OffscreenCanvas === "undefined") return null;
   const limit = 2048;
   let ready, writes = 0;
@@ -919,14 +1122,24 @@ function openThumbnailCache() {
     if (!store) return null;
     const { cache, existing, prune } = store;
     return {
-      read: () => existing.has(key.href) ? cache.match(key.href).catch(() => null) : null,
+      async read() {
+        const match = (href) => existing.has(href) ? cache.match(href).catch(() => null) : null;
+        const exact = await match(key.href);
+        if (exact || cap === 128) return exact;
+        // Layout can settle at a smaller scale on reopen. A sharper validated preview can draw it.
+        const larger = new URL(key);
+        larger.searchParams.set("preview", "128");
+        return match(larger.href);
+      },
       write(bm, nw, nh, etag, opaque) {
         if (!etag || Math.max(bm.width, bm.height) > cap || (nw === bm.width && nh === bm.height)) return;
         const canvas = new OffscreenCanvas(bm.width, bm.height);
         canvas.getContext("2d").drawImage(bm, 0, 0);
+        const started = performance.now();
         void canvas.convertToBlob().then(async (blob) => {
           await cache.put(key.href, new Response(blob, { headers: { etag, width: String(nw), height: String(nh), opaque: opaque ? "1" : "0" } }));
           existing.add(key.href);
+          onWrite(performance.now() - started);
           if (++writes % 128 === 0) await prune();
         }).catch(() => {});
       },
@@ -968,7 +1181,8 @@ export const DECODER_SRC = `"use strict";
 const MAX_IMAGE_SIDE = ${MAX_IMAGE_SIDE}, FULL_IMAGE_PX = ${FULL_IMAGE_PX};
 ${bitmapFromBlob.toString()}
 ${openThumbnailCache.toString()}
-const thumbnailCache = openThumbnailCache();
+let cacheWrites = 0, cacheWriteMs = 0;
+const thumbnailCache = openThumbnailCache((ms) => { cacheWrites++; cacheWriteMs += ms; });
 const q = []; let busy = 0;
 const pump = () => { while (busy < __MAX__ && q.length) { busy++; run(q.shift()).finally(() => { busy--; pump(); }); } };
 async function run({ id, url, cap, px }) {
@@ -977,6 +1191,7 @@ async function run({ id, url, cap, px }) {
     const thumb = await thumbnailCache?.(url, cap);
     const cached = await thumb?.read();
     const etag = cached?.headers.get("etag");
+    const started = performance.now();
     let r = await fetch(url, etag ? { cache: "no-store", headers: { "if-none-match": etag } } : undefined);
     if (r.status === 304 && cached) {
       bm = await cached.blob().then((blob) => createImageBitmap(blob)).catch(() => null);
@@ -989,13 +1204,16 @@ async function run({ id, url, cap, px }) {
     }
     if (!r.ok) { postMessage({ id, status: r.status, error: String(r.status) }); return; }
     const blob = await r.blob();
+    const decodeStarted = performance.now();
     const decoded = await bitmapFromBlob(blob, cap, px);
     bm = decoded.bm;
     const { nw, nh } = decoded;
     const opaque = opaqueOf(bm, blob.type);
     const sourceTag = r.headers.get("etag");
     try { thumb?.write(bm, nw, nh, sourceTag, opaque); } catch { /* optional cache */ }
-    postMessage({ id, bm, nw, nh, opaque, etag: sourceTag }, [bm]);
+    postMessage({ id, bm, nw, nh, opaque, etag: sourceTag, fetchMs: decodeStarted - started,
+      decodeMs: performance.now() - decodeStarted, cacheWrites, cacheWriteMs }, [bm]);
+    cacheWrites = 0; cacheWriteMs = 0;
   } catch (e) {
     if (bm) bm.close(); // the full-size decode, when shrinking it failed
     postMessage({ id, error: String((e && e.message) || e) });

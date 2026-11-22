@@ -83,8 +83,9 @@ PLIST
 TS=(--timestamp)
 [ "$ID" = "-" ] && TS=()
 codesign --force --options runtime "${TS[@]}" --entitlements "$ENT" --sign "$ID" "$APP/Contents/Resources/node/bin/node"
-# The tunnel helper is signed inside the app, with the hardened runtime, like Node.
+# Helpers are signed inside the app with the hardened runtime.
 codesign --force --options runtime "${TS[@]}" --sign "$ID" "$APP/Contents/Resources/canvas-tunnel"
+codesign --force --options runtime "${TS[@]}" --sign "$ID" "$APP/Contents/Resources/canvas-image-previews"
 codesign --force --options runtime "${TS[@]}" --sign "$ID" "$APP"
 codesign --verify --deep --strict "$APP" || fail "the built app's signature does not verify"
 

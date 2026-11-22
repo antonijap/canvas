@@ -219,6 +219,20 @@ enum QA {
 
     static func run(_ op: String, _ a: [String: Any]) async throws -> [String: Any] {
         switch op {
+        case "qa.memory":
+            let wc = (a["file"] as? String).flatMap(model.webContentPid).map { pid_t($0) }
+            let sample = ResourceSampler(port: port).sample(webContent: wc)
+            var pageBytes: UInt64 = 0
+            if let wc {
+                var usage = rusage_info_v4()
+                let ok = withUnsafeMutablePointer(to: &usage) { ptr in
+                    ptr.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(wc, RUSAGE_INFO_V4, $0) }
+                }
+                if ok == 0 { pageBytes = usage.ri_phys_footprint }
+            }
+            return ["bytes": sample.totalMemory, "pageBytes": pageBytes,
+                    "roles": Dictionary(uniqueKeysWithValues: sample.rows.map { ($0.role.rawValue, $0.memory) }),
+                    "pages": sample.rows.first { $0.role == .page }?.pids.count ?? 0]
         case "qa.gpuwarm": return model.gpuWarm ?? [:]
         case "qa.ping": return ["qa": true, "pid": Int(ProcessInfo.processInfo.processIdentifier)]
         case "qa.quit":

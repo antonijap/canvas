@@ -76,25 +76,32 @@ async function main() {
     return false;
   });
   const collected = new Map(active.map((id) => [id, [] as number[]]));
-  for (let round = 1; round <= SAMPLE_COUNT && collected.size; round++) {
-    console.log(`Measurement pass ${round}/${SAMPLE_COUNT} (one warm-up and one sample per metric)`);
-    const runner = measurements();
-    try {
-      for (const [id, samples] of collected) {
-        const gating = id !== "native-launch";
-        try {
-          console.log(`Measuring ${id}`);
-          await runner.measure(id);
-          samples.push(await runner.measure(id));
-        } catch (err) {
-          collected.delete(id);
-          if (gating) failed = true;
-          console.log(`${gating ? "FAIL" : "SKIP"} ${id}: ${(err as Error).message.split("\n")[0]}`);
+  // Reuse generated inputs across passes. Every sample still opens its own copy in a fresh app.
+  const imageSeedDir = active.some((id) => id === "open-images-2000" || id === "open-images-10k")
+    ? fs.mkdtempSync(path.join(os.tmpdir(), "canvas-perf-images-")) : undefined;
+  try {
+    for (let round = 1; round <= SAMPLE_COUNT && collected.size; round++) {
+      console.log(`Measurement pass ${round}/${SAMPLE_COUNT} (one warm-up and one sample per metric)`);
+      const runner = measurements(imageSeedDir);
+      try {
+        for (const [id, samples] of collected) {
+          const gating = id !== "native-launch";
+          try {
+            console.log(`Measuring ${id}`);
+            await runner.measure(id);
+            samples.push(await runner.measure(id));
+          } catch (err) {
+            collected.delete(id);
+            if (gating) failed = true;
+            console.log(`${gating ? "FAIL" : "SKIP"} ${id}: ${(err as Error).message.split("\n")[0]}`);
+          }
         }
+      } finally {
+        await runner.close();
       }
-    } finally {
-      await runner.close();
     }
+  } finally {
+    if (imageSeedDir) fs.rmSync(imageSeedDir, { recursive: true, force: true });
   }
 
   for (const [id, samples] of collected) {

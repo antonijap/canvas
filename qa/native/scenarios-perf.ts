@@ -1,5 +1,5 @@
 import { openFixture } from "../../bench/fixtures/open.ts";
-import { IMAGE_BOARDS, IMAGE_FILES } from "../../bench/fixtures/images.ts";
+import { IMAGE_BOARDS, IMAGE_FILES, OVERVIEW_BOARDS, OVERVIEW_FILES } from "../../bench/fixtures/images.ts";
 import { stats } from "../../bench/lib.ts";
 import { gpuWarm, measureOpen, openImages } from "../../bench/native-open.ts";
 import { recordFrameGaps } from "../frames.ts";
@@ -74,6 +74,39 @@ sc("open-images-2000", "draws two thousand screenshots at fit and sharpens on zo
     await view.settle();
     const full = await view.js<number>("return window.canvasHost.engineView.imageStats().full;");
     t.ok(full > 0, "zoom loads original-resolution pixels");
+  } finally {
+    await t.cmd("close", { file });
+  }
+});
+
+sc("open-images-10k", "draws ten thousand distinct JPEGs at fit and sharpens on zoom", { covers: ["render:image", "render:open-cache"], startEmpty: true }, async (t: NT) => {
+  await gpuWarm(t.app, true);
+  const file = openFixture(t.app.docs, "images-10k");
+  await sleep(20);
+  try {
+    const { first, second } = await openImages(t.app, file, 12_000, true);
+    t.note(JSON.stringify({ first, second }));
+    t.ok(first.look != null && first.look < 3000, "the overview appears within three seconds");
+    t.ok(first.imgs != null && first.load != null && first.load < 10_000, "all images draw within ten seconds");
+    t.ok(second.imgs != null && second.load != null && second.load < 2000, "the same file redraws within two seconds");
+    t.ok([first.peakPageBytes, second.peakPageBytes].every((bytes) => bytes && bytes < 1e9), "the document renderer peaks below one GB");
+    t.ok((second.status?.images?.decodedBytes ?? Infinity) < 24 * 1024 * 1024, "the overview holds less than 24 MiB of JPEG pixels");
+    const view = new NT(t.app, file);
+    t.eq(second.status?.visibleBoards, OVERVIEW_BOARDS, "every board is in view");
+    t.eq(second.status?.images?.images, OVERVIEW_FILES, "every distinct JPEG is registered");
+    t.eq(second.status?.images?.previewHits, OVERVIEW_FILES, "reopen reuses every validated JPEG preview");
+    const colors = await view.js<number[][]>(`const { cam, engineView } = window.canvasHost, dpr = devicePixelRatio;
+      const crops = [2, 974, 1997].map((i) => ({
+        sx: Math.round((cam.x + (i % 50 * 1480 + 155) * cam.z) * dpr),
+        sy: Math.round((cam.y + (Math.floor(i / 50) * 700 + 325) * cam.z) * dpr),
+        sw: 1, sh: 1, w: 1, h: 1,
+      }));
+      return engineView.capture(crops).map((c) => [...c.getContext("2d").getImageData(0, 0, 1, 1).data]);`);
+    t.ok(colors.every((rgba) => rgba[3] === 255 && rgba.slice(0, 3).every((v) => v > 80 && v < 245)),
+      "JPEG pixels are visible across the overview");
+    await view.look(24 * 1480 + 715, 19 * 700 + 325, 3);
+    await view.waitJs("window.canvasHost.engineView.imageStats().full > 0", "the original-resolution images to draw");
+    await view.settle();
   } finally {
     await t.cmd("close", { file });
   }

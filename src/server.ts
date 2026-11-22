@@ -40,6 +40,7 @@ import { scrubSecrets } from "./cloud-secrets.ts";
 import { handlePagesRoute, readPagePattern, resolvePages } from "./pages.ts";
 import { handleShaderRoute, settleShaderSources } from "./shaders.ts";
 import { handleImageRoute } from "./images.ts";
+import { assetTag, jpegPreviews, packPreviews, PREVIEW_BATCH } from "./image-previews.ts";
 import { handleVideoRoute } from "./videos.ts";
 import { loadBox } from "./boardbox.ts";
 import { fitCam, keepLabels, overlayNode, pickPage, retryDelay, unionRect, wheelAction, zoomAt } from "./pagelogic.ts";
@@ -617,7 +618,7 @@ try {
           void prime(file).catch(() => {});
         }
         const engine = fs.existsSync(path.join(enginePkgDir(), "canvas_engine.js")) ? "ok" : "missing";
-        return send(res, 200, "text/html; charset=utf-8", PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}">`));
+        return send(res, 200, "text/html; charset=utf-8", PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}" data-image-previews="${process.env.CANVAS_IMAGE_PREVIEWS_BIN ? "1" : "0"}">`));
       }
       let bodyFile: string | undefined;
       if (readOnlyRoute(req.method ?? "GET", url.pathname) && String(req.headers["content-type"] ?? "").startsWith("application/json")) {
@@ -737,13 +738,27 @@ try {
         quitSafely(0);
         return;
       }
+      if (url.pathname === "/api/image-previews" && req.method === "POST") {
+        const helper = process.env.CANVAS_IMAGE_PREVIEWS_BIN;
+        if (!helper) return json(res, { error: "native previews unavailable" }, 404);
+        if (req.headers["x-canvas"] !== "1") return json(res, { error: "forbidden" }, 403);
+        const raw = await readBodyText(req, 512_000);
+        if (raw === null) return json(res, { error: "too large" }, 413);
+        let paths: unknown;
+        try { paths = JSON.parse(raw); } catch { return json(res, { error: "invalid preview batch" }, 400); }
+        if (!Array.isArray(paths) || paths.length > PREVIEW_BATCH || !paths.every((p) => typeof p === "string")) {
+          return json(res, { error: "invalid preview batch" }, 400);
+        }
+        try { return send(res, 200, "application/octet-stream", packPreviews(await jpegPreviews(helper, paths))); }
+        catch { return json(res, { error: "preview batch unavailable" }, 503); }
+      }
       if (url.pathname === "/asset") {
         const p = path.resolve(url.searchParams.get("p") ?? "");
         const type = ASSET_TYPES[path.extname(p).toLowerCase()];
         const st = type ? await fs.promises.stat(p).catch(() => null) : null;
         if (!type || !st?.isFile()) return send(res, 404, "text/plain", "not found");
         // Revalidate on reuse so replacing a file under the same name changes both the image and its saved picture.
-        const etag = `"${st.ino}-${st.size}-${st.mtimeMs}-${st.ctimeMs}"`;
+        const etag = assetTag(st);
         if (req.headers["if-none-match"] === etag) {
           res.writeHead(304, { etag, "cache-control": "max-age=60", "cross-origin-resource-policy": "same-origin" });
           res.end();
@@ -1536,7 +1551,10 @@ function camWork() {
   placeOverlays();
   host.emit("cam");
 }
-addEventListener("pagehide", () => { if (cam) saveCam(); });
+addEventListener("pagehide", (e) => {
+  if (cam) saveCam();
+  if ((native || !e.persisted) && ev) ev.destroy();
+});
 // One pass over the boards from cached sizes: screen-space title labels and render culling.
 // States: 0 drawn, 1 outside the viewport plus margin (content-visibility), 2 flat placeholder (far zoom out).
 let flatOn = false;
@@ -1666,8 +1684,8 @@ function syncPh(b) {
   // A held picture must match the board key; on Blueprint pages the live grid must show through.
   if (b.snap && b.snap.el && (blueprint || b.snap.key !== b.meta.key)) { URL.revokeObjectURL(b.snap.url); b.snap = null; }
   const shown = boards.get(b.meta.id) === b && (mode === "engine" || mode === "pending");
-  const drawing = engineBusy || camRaf || (ev && ev.imagesPending() > 0);
-  const want = shown && (!b.loadedKey || (b.snap && b.snap.el && snapHold && drawing && performance.now() < b.snap.until));
+  const want = shown && (!b.loadedKey || (b.snap?.el && snapHold && performance.now() < b.snap.until &&
+    (engineBusy || camRaf || (ev && ev.imagesPending() > 0))));
   if (!want) {
     if (b.ph) { b.ph.remove(); b.ph = null; }
     // A shown snapshot goes with it; a lookup still in flight checks for itself whether it is still wanted.
@@ -2264,7 +2282,8 @@ async function startEngine() {
   try {
     engineMod = await import("/page/engine-view.js");
     const v = await engineMod.createEngineView({
-      view, api, sceneEnv: SCENE_ENV, waitForGpu: native, onChange: () => requestFlush(false), onLost: (why) => engineLost(why), getCam: () => cam, isIdle: () => !gesturing && !drag,
+      view, api, sceneEnv: SCENE_ENV, nativePreviews: document.documentElement.dataset.imagePreviews === "1",
+      showOverview: () => snapHold && !blueprint, waitForGpu: native, onChange: () => requestFlush(false), onLost: (why) => engineLost(why), getCam: () => cam, isIdle: () => !gesturing && !drag,
       posOf: (id) => { const b = boards.get(id); return b ? { x: b.meta.x, y: b.meta.y } : null; },
       orderOf: (id) => { const b = boards.get(id); return b ? b.idx : 1e9; },
       onLayout: () => { syncSel(); host.emit("render", null); },
@@ -2383,19 +2402,20 @@ function snapshotsCmd(op) {
 /** Boards near the view that the engine has not laid out yet: their snapshots, if any. */
 function showSnaps() {
   if (blueprint || !snaps || !cam || mode === "dom") return;
-  const L = -VW * PREFETCH, T = -VH * PREFETCH, R = VW * (1 + PREFETCH), B = VH * (1 + PREFETCH);
+  const L = -VW * PREFETCH, T = -VH * PREFETCH, R = VW * (1 + PREFETCH), B = VH * (1 + PREFETCH), bg = bgNow();
   for (const b of boards.values()) {
-    if (!snapUseful(b)) continue;
+    if (b.gone || b.snap) continue;
     const sx = b.meta.x * cam.z + cam.x, sy = b.meta.y * cam.z + cam.y;
-    if (sx < R && sx + (b.w || 400) * cam.z > L && sy < B && sy + (b.h || 400) * cam.z > T) wantSnap(b);
+    if (sx < R && sx + (b.w || 400) * cam.z > L && sy < B && sy + (b.h || 400) * cam.z > T) wantSnap(b, bg);
   }
 }
 /** A board not laid out yet, or laid out at its key with images still decoding (before the person did anything). */
 const snapUseful = (b) => !b.gone && !b.snap && (!b.loadedKey || (snapHold && b.loadedKey === b.meta.key && !!ev && ev.imagesPending() > 0));
-function wantSnap(b) {
-  if (blueprint || !snaps || !snapUseful(b) || mode === "dom") return;
-  const key = b.meta.key, bg = bgNow();
-  if (!snaps.meta(b.meta.id, key, bg)) return;
+function wantSnap(b, bg) {
+  if (blueprint || !snaps || b.gone || b.snap || mode === "dom") return;
+  bg ??= bgNow();
+  const key = b.meta.key;
+  if (!snaps.meta(b.meta.id, key, bg) || !snapUseful(b)) return;
   const tok = (b.snap = { key, el: null, url: null, until: performance.now() + SNAP_HOLD_MS });
   snaps.get(b.meta.id, key, bg).then((s) => {
     if (!s) { if (b.snap === tok) b.snap = null; return; }
@@ -2417,7 +2437,8 @@ function scheduleSnap() { if (snaps && !snapT) snapT = setTimeout(takeSnaps, 700
 function takeSnaps() {
   snapT = 0;
   if (blueprint || !snaps || !picLib || mode !== "engine" || !ev || !cam || document.hidden || gesturing || tween || drag || mv || engineBusy || camRaf) return;
-  if (!window.__canvas.settled() || ev.imagesPending() > 0 || (host.textEdit && host.textEdit.active)) return;
+  // The compact overview already has a validated on-disk preview for each image.
+  if (ev.compactOverview() || !window.__canvas.settled() || ev.imagesPending() > 0 || (host.textEdit && host.textEdit.active)) return;
   const bg = bgNow(), dpr = window.devicePixelRatio || 1;
   const cards = host.widgetsShown ? host.widgetsShown().map((w) => host.widgetRect(w.id)).filter(Boolean) : [];
   const list = [];
@@ -3796,7 +3817,8 @@ function setTabShown(on) {
   host.emit("tab", on);
 }
 readViewBox();
-if (mode === "pending") void startEngine();
+// Home has no document to draw. The shell already warms the GPU in a small separate view.
+if (mode === "pending" && (file || !native)) void startEngine();
 else announceRenderer();
 window.canvasCmd = (c) => {
   // Fit and zoom commands carry the shell's current insets: a fit never uses a stale or missing free area.

@@ -117,7 +117,11 @@ export class QaApp {
   }
 
   private async startServer() {
-    this.server = spawn(process.execPath, [path.join(ROOT, "src/server.ts")], { cwd: ROOT, env: { ...this.env(), HOME: this.home }, stdio: ["ignore", "pipe", "pipe"] });
+    const previewHelper = path.join(this.app, "Contents/Resources/canvas-image-previews");
+    this.server = spawn(process.execPath, [path.join(ROOT, "src/server.ts")], { cwd: ROOT, env: {
+      ...this.env(), HOME: this.home,
+      ...(fs.existsSync(previewHelper) ? { CANVAS_IMAGE_PREVIEWS_BIN: previewHelper } : {}),
+    }, stdio: ["ignore", "pipe", "pipe"] });
     this.server.stdout!.on("data", (d) => this.serverLog.push(String(d)));
     this.server.stderr!.on("data", (d) => this.serverLog.push(String(d)));
     await this.waitHealth();

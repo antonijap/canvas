@@ -20,7 +20,7 @@ use crate::shaders::{self as sh, Cand, SrcError};
 use crate::text::TextSystem;
 use vello::wgpu;
 
-type Mips = MipCache<(wgpu::Texture, ImageData)>;
+type Mips = MipCache<(Option<wgpu::Texture>, ImageData)>;
 
 /// What one board draws its images with: every registered image it uses, with the levels and tiles it holds.
 fn store_for(sources: &HashMap<String, (u32, u32, JsValue)>, mips: &Mips, urls: &[String], levels: &HashMap<String, u32>, tiles: &HashMap<String, (u32, Cells)>, picks: &HashMap<String, Vec<u32>>) -> ImageStore {
@@ -391,6 +391,48 @@ impl Engine {
     /// itself the first time the image is large enough on screen to be drawn from tiles.
     #[wasm_bindgen(js_name = registerImage)]
     pub fn register_image(&mut self, url: &str, data: JsValue, width: u32, height: u32, opaque: Option<bool>) -> Result<(), JsValue> {
+        let replaced = self.store_image_source(url, data, width, height, opaque)?;
+        for b in &mut self.boards {
+            if replaced {
+                b.image_levels.remove(url);
+                b.image_tiles.remove(url);
+                b.image_picks.remove(url);
+            }
+            if b.images.iter().any(|u| u == url) {
+                b.stale_paint = true;
+                b.generation += 1;
+            }
+        }
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Register an overview batch with one pass over the boards. Rows are [URL, RGBA bytes, width, height].
+    /// Only new sources are registered here. Larger decodes replace them through registerImage.
+    #[wasm_bindgen(js_name = registerPreviews)]
+    pub fn register_previews(&mut self, rows: js_sys::Array) {
+        let mut added = HashSet::with_capacity(rows.length() as usize);
+        for row in rows.iter() {
+            let row = js_sys::Array::from(&row);
+            let Some(url) = row.get(0).as_string() else { continue };
+            if self.sources.contains_key(&url) { continue; }
+            let w = row.get(2).as_f64().unwrap_or(0.0) as u32;
+            let h = row.get(3).as_f64().unwrap_or(0.0) as u32;
+            if w.max(h) <= crate::images::MIN_LEVEL && self.store_image_source(&url, row.get(1), w, h, Some(true)).is_ok() {
+                added.insert(url);
+            }
+        }
+        if added.is_empty() { return; }
+        for b in &mut self.boards {
+            if b.images.iter().any(|u| added.contains(u)) {
+                b.stale_paint = true;
+                b.generation += 1;
+            }
+        }
+        self.dirty = true;
+    }
+
+    fn store_image_source(&mut self, url: &str, data: JsValue, width: u32, height: u32, opaque: Option<bool>) -> Result<bool, JsValue> {
         let (src, w, h) = if let Some(bm) = data.dyn_ref::<web_sys::ImageBitmap>() {
             (data.clone(), bm.width(), bm.height())
         } else {
@@ -409,26 +451,14 @@ impl Engine {
         if let Some(o) = opaque {
             self.opaque.insert(url.to_string(), o);
         }
-        // A new picture for the same URL: every board gives up the old levels first.
-        if self.sources.insert(url.to_string(), (w, h, src)).is_some() {
-            for b in &mut self.boards {
-                b.image_levels.remove(url);
-                b.image_tiles.remove(url);
-                b.image_picks.remove(url);
-            }
+        let replaced = self.sources.insert(url.to_string(), (w, h, src)).is_some();
+        if replaced {
             for (tex, img) in self.mips.remove_url(url) {
                 self.gpu.forget_image(&img);
-                tex.destroy();
+                if let Some(tex) = tex { tex.destroy(); }
             }
         }
-        for b in &mut self.boards {
-            if b.images.iter().any(|u| u == url) {
-                b.stale_paint = true;
-                b.generation += 1;
-            }
-        }
-        self.dirty = true;
-        Ok(())
+        Ok(replaced)
     }
 
     /// Forget a registered image: every board gives up its levels, the GPU textures are freed, and the
@@ -453,7 +483,7 @@ impl Engine {
         }
         for (tex, img) in self.mips.remove_url(url) {
             self.gpu.forget_image(&img);
-            tex.destroy();
+            if let Some(tex) = tex { tex.destroy(); }
         }
         self.dirty = true;
         true
@@ -677,7 +707,21 @@ impl Engine {
             let t_dec = now();
             let (w, h, src) = self.sources.get(&url).expect("checked above");
             let (lw, lh) = level_dims(*w, *h, lvl);
-            match self.gpu.upload_image(src, *w, *h, None, lw, lh) {
+            // The overview supplies RGBA previews already at their only mip size. Vello can
+            // upload those bytes into its atlas directly, without a canvas and texture per image.
+            let native_pixels = (*w, *h) == (lw, lh) && lw.max(lh) <= crate::images::MIN_LEVEL;
+            let pixels = native_pixels.then(|| src.dyn_ref::<web_sys::ImageData>()).flatten();
+            let image = match pixels {
+                Some(pixels) => Ok((None, ImageData {
+                    data: peniko::Blob::new(std::sync::Arc::new(pixels.data().0)),
+                    format: peniko::ImageFormat::Rgba8,
+                    alpha_type: peniko::ImageAlphaType::Alpha,
+                    width: lw,
+                    height: lh,
+                })),
+                None => self.gpu.upload_image(src, *w, *h, None, lw, lh).map(|(tex, img)| (Some(tex), img)),
+            };
+            match image {
                 Ok((tex, img)) => {
                     self.mips.insert(&url, u64::from(lvl), (tex, img), lw, lh, frame);
                     self.mips.acquire(&url, u64::from(lvl), frame);
@@ -712,7 +756,7 @@ impl Engine {
                     let crop = [f64::from(x) * kx, f64::from(y) * ky, f64::from(tw) * kx, f64::from(th) * ky];
                     match self.gpu.upload_image(src, *w, *h, Some(crop), tw, th) {
                         Ok((tex, img)) => {
-                            self.mips.insert(&url, key, (tex, img), tw, th, frame);
+                            self.mips.insert(&url, key, (Some(tex), img), tw, th, frame);
                             self.mips.acquire(&url, key, frame);
                             self.tile_decode.1 += now() - t_dec;
                         }
@@ -755,7 +799,7 @@ impl Engine {
                 let (lw, lh) = level_dims(*w, *h, lvl);
                 match self.gpu.upload_image(src, *w, *h, None, lw, lh) {
                     Ok((tex, img)) => {
-                        self.mips.insert(url, u64::from(lvl), (tex, img), lw, lh, frame);
+                        self.mips.insert(url, u64::from(lvl), (Some(tex), img), lw, lh, frame);
                         self.mips.acquire(url, u64::from(lvl), frame);
                         self.tile_decode.1 += now() - t_dec;
                     }
@@ -813,7 +857,7 @@ impl Engine {
         // Detached from vello first (it copies from these), then destroyed (see gpu.rs GpuTile).
         for (tex, img) in self.mips.evict() {
             self.gpu.forget_image(&img);
-            tex.destroy();
+            if let Some(tex) = tex { tex.destroy(); }
         }
     }
 

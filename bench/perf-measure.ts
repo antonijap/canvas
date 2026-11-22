@@ -11,7 +11,7 @@ import { fixture, scratchCopy } from "./fixtures/gen.ts";
 import { openFixture } from "./fixtures/open.ts";
 import { Tab, wheelFrames } from "./latency.ts";
 import { stats } from "./lib.ts";
-import { measureOpen, NATIVE_APP, openSeven } from "./native-open.ts";
+import { gpuWarm, measureOpen, NATIVE_APP, openSeven } from "./native-open.ts";
 import { INSTRUMENT } from "./page.ts";
 import { startHost } from "./server.ts";
 import { NATIVE_METRICS, type Metric } from "./perf-budgets.ts";
@@ -21,10 +21,9 @@ export const hasNativeBuild = () => process.platform === "darwin" && fs.existsSy
 // QaApp uses the shard in its bundle identifier. Keep it unique across gate passes.
 let nativeShard = 0;
 
-export function measurements() {
+export function measurements(imageSeedDir?: string) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "canvas-perf-gate-")));
   let chrome: Chrome | undefined;
-  let imageFixture: string | undefined;
   const browser = async () => chrome ??= await launchChrome([
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1", "--disable-component-update", "--disable-sync",
   ]);
@@ -145,10 +144,14 @@ export function measurements() {
   async function native(id: Metric) {
     const app = new QaApp(root, ++nativeShard);
     try {
-      const images = id === "open-images-2000" ? path.join(app.docs, "images.canvas") : null;
-      if (images) {
-        imageFixture ??= openFixture(root, "images");
-        fs.cpSync(imageFixture, images, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
+      const kind = id === "open-images-10k" ? "images-10k" : id === "open-images-2000" ? "images" : null;
+      const images = kind && path.join(app.docs, kind + ".canvas");
+      const staged = kind === "images-10k" ? path.join(app.dir, "staged.canvas") : images;
+      if (kind && staged) {
+        const seedDir = imageSeedDir ?? root;
+        const seed = path.join(seedDir, kind + ".canvas");
+        const fixture = fs.existsSync(path.join(seed, "document.json")) ? seed : openFixture(seedDir, kind);
+        fs.cpSync(fixture, staged, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
       }
       let started = 0;
       await app.start(NATIVE_APP, () => { started = performance.now(); });
@@ -158,6 +161,10 @@ export function measurements() {
         return performance.now() - started;
       }
       if (images) {
+        if (staged && staged !== images) {
+          await gpuWarm(app, true);
+          fs.renameSync(staged, images);
+        }
         const first = await measureOpen(app, images);
         if (first.look == null) throw new Error("the image overview never reached look");
         return first.look;
