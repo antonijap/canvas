@@ -6,10 +6,13 @@ import path from 'node:path';
 import {writeBoardCheckpoint,evictClosedPackages} from '../src/cloud-files-cache.ts';
 import {FileStateStore} from '../src/cloud-files-store.ts';
 import {stateFromFiles} from '../cloud/core/files/state.ts';
-import {cloudKey, fileEvents, fileSession, openCloudFile} from '../src/cloud-files.ts';
-import {setToken} from '../src/cloud.ts';
+import {cloudFiles, cloudKey, fileEvents, fileSession, openCloudFile} from '../src/cloud-files.ts';
+import {closeTunnel, setToken} from '../src/cloud.ts';
 import {cloudFileHooks} from '../src/cloud-files-runtime.ts';
-import {resetCloudConfig, setCloudConfig} from '../src/cloud-config.ts';
+import {hostedUrl, resetCloudConfig, setCloudConfig} from '../src/cloud-config.ts';
+import {writeJoined} from '../src/cloud-secrets.ts';
+import {genkey, serve} from '../src/cloud-tunnel.ts';
+import {CloudHost, newSecret} from '../cloud/adapters/mac/host.ts';
 
 test('a configured Cloud opens its local replica when the host is unreachable', async (t) => {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-offline-open-')));
@@ -104,7 +107,7 @@ test('cache eviction keeps permanently rejected comment drafts',()=>{
  }finally{try{s.close();}catch{}fs.rmSync(dir,{recursive:true,force:true});}
 });
 
-for (const scenario of ['missing file', 'old host', 'role downgrade', 'removed member'] as const) {
+for (const scenario of ['missing file', 'old host', 'role downgrade', 'forbidden'] as const) {
   test(`cached open revalidates Cloud access: ${scenario}`, async (t) => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-cache-check-')));
     const cloud = 'http://127.0.0.1:9192', id = crypto.randomUUID();
@@ -120,7 +123,7 @@ for (const scenario of ['missing file', 'old host', 'role downgrade', 'removed m
       const { pathname } = new URL(input);
       if (pathname === '/v1/me') return Response.json({ role });
       if (pathname === '/v1/files') {
-        if (scenario === 'removed member') return Response.json({}, { status: 403 });
+        if (scenario === 'forbidden') return Response.json({}, { status: 403 });
         return Response.json({ files: missing ? [] : [{ id, name: 'Restored' }], role: scenario === 'old host' ? undefined : role });
       }
       if (missing || scenario === 'old host') return Response.json({}, { status: 404 });
@@ -135,17 +138,17 @@ for (const scenario of ['missing file', 'old host', 'role downgrade', 'removed m
         cloud, file: id, name: 'Cached', role: 'editor', author: { id: 'anna', name: 'Anna' },
         state: stateFromFiles({ children: [{ id: 'Board', type: 'frame' }] }),
       });
-      if (missing || scenario === 'removed member') store.propose([{ k: 'set', id: 'Board', props: { name: { v: 'Draft' } } }]);
+      if (missing || scenario === 'forbidden') store.propose([{ k: 'set', id: 'Board', props: { name: { v: 'Draft' } } }]);
       store.materialize();
       store.close();
-      if (missing || scenario === 'removed member') {
+      if (missing || scenario === 'forbidden') {
         await assert.rejects(() => openCloudFile(cloud, id), {
           status: missing ? 404 : 403,
         });
         assert.equal(removed, 1);
         const recovered = path.join(dir, 'Documents', 'Canvas Recovered');
         assert.match(fs.readFileSync(path.join(recovered, fs.readdirSync(recovered)[0], 'unsent-actions.json'), 'utf8'), /Draft/);
-        if (scenario === 'removed member') {
+        if (scenario === 'forbidden') {
           assert.equal(socket.mock.calls.length, 0);
           assert.equal(fs.existsSync(pkg), false);
           await assert.rejects(() => openCloudFile(cloud, id), /membership was removed/);
@@ -176,6 +179,92 @@ for (const scenario of ['missing file', 'old host', 'role downgrade', 'removed m
       else process.env.HOME = oldHome;
       resetCloudConfig();
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const signingOut of [false, true]) {
+  test(signingOut ? 'sign-out during hosted connect keeps the cache' : 'a Mac host 401 clears cached files and recovers drafts once', async (t) => {
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-hosted-cache-')));
+    const bin = path.resolve(import.meta.dirname, 'fixtures/fake-tunnel.sh');
+    const env = {
+      CANVAS_TUNNEL_BIN: bin, CANVAS_FAKE_TUNNEL_DIR: home,
+      CANVAS_FAKE_TUNNEL_NODE: process.execPath, CANVAS_FAKE_TUNNEL_ANY_PORT: '1',
+      CANVAS_CLOUD_SECRETS_FILE: path.join(home, 'secrets.json'),
+    };
+    const oldEnv = new Map(Object.keys(env).map(name => [name, process.env[name]]));
+    Object.assign(process.env, env);
+    t.mock.method(os, 'homedir', () => home);
+    const host = new CloudHost({ dir: path.join(home, 'host'), port: 0 });
+    let tunnel: Awaited<ReturnType<typeof serve>> | undefined;
+    try {
+      const port = await host.start();
+      host.ownerDevice('Anna');
+      const { code } = host.invite('Ben');
+      const token = newSecret('ccd');
+      const joined = await fetch(`http://127.0.0.1:${port}/v1/join`, {
+        method: 'POST', headers: { authorization: `Bearer ${code}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ token, device: 'Test Mac' }),
+      });
+      assert.equal(joined.status, 200);
+      const { me } = await joined.json() as { me: { id: string } };
+      const hostKey = await genkey(bin, 'server');
+      tunnel = await serve(bin, hostKey.key, null, port);
+      const cloud = hostedUrl(host.hostId()), id = crypto.randomUUID();
+      assert.ok(await writeJoined(host.hostId(), { token, addr: tunnel.addr, key: (await genkey(bin, 'client')).key, memberKey: hostKey.public }));
+      setCloudConfig({ clouds: [{ url: cloud }] });
+      const cache = path.join(home, 'Library', 'Application Support', 'Canvas', 'cloud-files', cloudKey(cloud));
+      const boards = path.join(home, 'Library', 'Caches', 'Canvas', 'cloud', cloudKey(cloud));
+      const pkg = path.join(cache, id + '.canvas');
+      for (const file of [id, crypto.randomUUID()]) {
+        const store = new FileStateStore(path.join(cache, file + '.canvas'), {
+          cloud, file, name: 'Design', role: 'editor', author: { id: me.id, name: 'Ben' },
+          state: stateFromFiles({ children: [{ id: 'Board', type: 'frame' }] }),
+        });
+        if (file === id) store.propose([{ k: 'set', id: 'Board', props: { name: { v: 'Draft' } } }]);
+        store.materialize();
+        store.close();
+      }
+      assert.ok(host.remove(me.id));
+      const fetchHost = globalThis.fetch;
+      let refusal: { status: number; code: string } | undefined;
+      const requests = t.mock.method(globalThis, 'fetch', async (input: string, init: RequestInit) => {
+        const answer = await fetchHost(input, init);
+        refusal = { status: answer.status, code: (await answer.clone().json() as { code: string }).code };
+        if (signingOut) setToken(cloud, null);
+        return answer;
+      });
+      if (signingOut) {
+        assert.equal((await openCloudFile(cloud, id)).file, pkg);
+        assert.deepEqual(refusal, { status: 401, code: 'unauthenticated' });
+        assert.ok(fs.existsSync(pkg));
+        assert.ok(fs.existsSync(boards));
+        assert.equal(fileSession(pkg)?.store.replica.pending.length, 1);
+        assert.ok(!fs.existsSync(path.join(home, 'Documents', 'Canvas Recovered')));
+      } else {
+        const opened = openCloudFile(cloud, id);
+        await assert.rejects(opened, { status: 403, code: 'removed' });
+        assert.deepEqual(refusal, { status: 401, code: 'unauthenticated' });
+        assert.ok(!fs.existsSync(cache));
+        assert.ok(!fs.existsSync(boards));
+        await assert.rejects(() => cloudFiles(cloud), { status: 403, code: 'removed' });
+        const recovered = path.join(home, 'Documents', 'Canvas Recovered');
+        const copies = fs.readdirSync(recovered);
+        assert.equal(copies.length, 1);
+        assert.match(fs.readFileSync(path.join(recovered, copies[0], 'unsent-actions.json'), 'utf8'), /Draft/);
+      }
+      assert.equal(requests.mock.calls.length, 1);
+    } finally {
+      setCloudConfig({ clouds: [] });
+      resetCloudConfig();
+      closeTunnel(host.hostId());
+      tunnel?.helper.stop();
+      await host.stop();
+      for (const [name, value] of oldEnv) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 }
@@ -225,10 +314,29 @@ for (const scenario of ['sign-out during file listing', 'socket closes during im
       } else {
         await new Promise<void>(resolve => setImmediate(resolve));
         assert.equal(sockets.length, 1);
+        t.mock.timers.enable({ apis: ['setTimeout'] });
         sockets[0].dispatchEvent(new Event('close'));
-        await new Promise<void>(resolve => setTimeout(resolve, 600));
+        t.mock.timers.tick(500);
+        await new Promise<void>(resolve => setImmediate(resolve));
         assert.equal(session.stopped, false);
         assert.equal(sockets.length, 2);
+        sockets[1].dispatchEvent(new Event('close'));
+        t.mock.timers.tick(500);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(sockets.length, 2, 'the second retry waits longer');
+        t.mock.timers.tick(500);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(sockets.length, 3);
+        sockets[2].dispatchEvent(new MessageEvent('message', { data: JSON.stringify({
+          type: 'welcome', protocol: 2, role: 'editor', me: { id: 'editor', name: 'Editor' },
+          epoch: 1, seq: 0, known: [], limits: { opsPerMessage: 1000, actionBytes: 100_000 },
+        }) }));
+        await session.chain;
+        assert.equal(session.status, 'connected');
+        sockets[2].dispatchEvent(new Event('close'));
+        t.mock.timers.tick(500);
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(sockets.length, 4, 'a welcome resets the retry delay');
       }
     } finally {
       setToken(cloud, null);

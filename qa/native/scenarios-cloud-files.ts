@@ -202,7 +202,7 @@ sc('cloud-files', 'Home New File, live remote edit, offline catch-up, view mode,
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
-sc('cloud-files', 'Viewer opens from Home with disabled editing, then removal closes the file', { covers: ['home:clouds', 'settings:cloud', 'cloud-files:viewer', 'cloud-files:removed'] }, async (t: NT) => {
+sc('cloud-files', 'Viewer opens from Home with disabled editing, then offline membership removal closes the file', { covers: ['home:clouds', 'settings:cloud', 'cloud-files:viewer', 'cloud-files:removed'] }, async (t: NT) => {
     await t.cmd('qa.cloud', { clouds: [], commentName: 'Anna' });
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-native-viewer-'));
     let host: Scratch | undefined;
@@ -245,8 +245,17 @@ sc('cloud-files', 'Viewer opens from Home with disabled editing, then removal cl
         t.ok(!textEditing,'viewer cannot enter text editing');
         t.ok(!/read only|Could not (?:change the pages|move)/i.test((await t.state()).toast ?? ''),'viewer drag and Add page controls stay inactive');
         await t.shot(path.join(ROOT, 'qa/out/native/cloud-files-viewer.png'));
+        t.eq((await post(t.app.base, '/api/cloud/files/disconnect', { file })).status, 200, 'viewer goes offline');
         const st = await (await fetch(host.base + '/api/cloud/host?hostId=' + started.j.hostId)).json() as any;
-        await post(host.base, '/api/cloud/host/remove', { hostId: started.j.hostId, personId: st.people.find((p: any) => p.label === 'Anna').id });
+        t.eq((await post(host.base, '/api/cloud/host/remove', { hostId: started.j.hostId, personId: st.people.find((p: any) => p.label === 'Anna').id })).status, 200, 'owner removes viewer');
+        t.ok(fs.existsSync(file), 'offline viewer still has the cache');
+        // Let the stale device reach the adapter through the fake tunnel so its HTTP refusal arrives.
+        const secrets = JSON.parse(fs.readFileSync(path.join(t.app.dir, 'cloud-secrets.json'), 'utf8'));
+        const { addr } = JSON.parse(secrets[`hosted:${started.j.hostId}`]);
+        const tunnel = path.join(t.app.dir, 'tunnels', `${addr}.json`);
+        const route = JSON.parse(fs.readFileSync(tunnel, 'utf8'));
+        fs.writeFileSync(tunnel, JSON.stringify({ ...route, allow: null }));
+        t.eq((await post(t.app.base, '/api/cloud/files/reconnect', { file })).status, 200, 'viewer reconnects');
         await t.waitState(s => s.file !== file, 'removed file closes', 8000);
         t.ok(!fs.existsSync(file), 'removed cache deleted');
     }

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type http from 'node:http';
 import { target } from './cloud.ts';
-import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump } from './cloud-config.ts';
+import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump, hostedId } from './cloud-config.ts';
 import { FileStateStore } from './cloud-files-store.ts';
 import { DocTree } from './cloud-files-tree.ts';
 import { documentOf, envelopeOf } from '../cloud/core/files/state.ts';
@@ -71,6 +71,7 @@ interface Session {
     importing?: boolean;
     status: string;
     timer?: NodeJS.Timeout;
+    retryDelay?: number;
     chain: Promise<unknown>;
     stopped: boolean;
     offline: boolean;
@@ -174,7 +175,10 @@ async function request(cloud: string, p: string, method = 'GET', body?: unknown)
     if(revoked.has(cloud))fail(403,'removed','Cloud membership was removed');
     const g = generation(cloud), t = await target(cloud);
     checkGeneration(cloud, g);
-    if ('fail' in t) fail(503, t.fail, 'The Cloud is unavailable');
+    if ('fail' in t) {
+        if (t.fail === 'removed') removeCaches(cloud);
+        fail(503, t.fail, 'The Cloud is unavailable');
+    }
     const r = await fetch((t as any).base + p, { method, headers: { ...(t as any).headers, ...(body === undefined ? {} : { 'content-type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json' }) }, body: body === undefined ? undefined : body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body), signal: AbortSignal.timeout(30000), redirect: 'error' });
     checkGeneration(cloud, g);
     if (r.status === 403) {
@@ -184,7 +188,8 @@ async function request(cloud: string, p: string, method = 'GET', body?: unknown)
     if (!r.ok) {
         const j = await cloudJson(r).catch(() => ({})) as any;
         checkGeneration(cloud, g);
-        if (r.status === 401 && j.code === 'removed') removeCaches(cloud);
+        // A Mac host refuses a removed device's bearer with 401 unauthenticated.
+        if (r.status === 401 && (hostedId(cloud) || j.code === 'removed')) removeCaches(cloud);
         throw new CloudHttpError(r.status, j.code ?? 'cloud', j.message ?? 'The Cloud refused the request');
     }
     return r;
@@ -334,8 +339,10 @@ export async function receive(s: Session, m: any) {
         fileEvents.presence?.(path.join(s.store.pkg,'document.json'),[{session:'agent:'+a.by.id,by:a.by,role:'editor',cursor:{x,y},sel:[id],editing:{id}}]);
     }
     if(m.type==='applied'&&Number(s.store.db.prepare('SELECT COUNT(*) AS n FROM confirmed').get()!.n)>=2000)checkpointSession(s);
-    if (m.type === 'welcome')
+    if (m.type === 'welcome') {
         s.status = 'connected';
+        s.retryDelay = undefined;
+    }
     await cacheBlobs(s);
     render(s);
     if (result === 'hello' || result === 'gap')
@@ -364,8 +371,15 @@ async function send(s: Session) {
         s.ws.send(JSON.stringify({ type: 'actions', epoch: s.store.replica.epoch, actions: [a] }));
     }
 }
-function reconnect(s: Session) { if (s.stopped || s.offline)
-    return; s.status = 'offline'; s.timer = setTimeout(() => void connect(s), 500); s.timer.unref(); }
+function reconnect(s: Session) {
+    if (s.stopped || s.offline) return;
+    s.status = 'offline';
+    clearTimeout(s.timer);
+    const delay = s.retryDelay ?? 500;
+    s.retryDelay = Math.min(delay * 2, 30_000);
+    s.timer = setTimeout(() => void connect(s), delay);
+    s.timer.unref();
+}
 function closeSession(file: string, s: Session, missing = false) {
     const replica = s.store.replica;
     if (replica.pending.length || replica.refused.length || s.commentsPending.length || s.commentsRejected?.length) {
@@ -424,8 +438,10 @@ async function connect(s: Session): Promise<'missing' | void> {
         }
         const t = await target(cloud);
         checkGeneration(cloud, g);
-        if ('fail' in t)
+        if ('fail' in t) {
+            if (t.fail === 'removed') removeCaches(cloud);
             throw new Error(t.fail);
+        }
         if (s.stopped || s.offline)
             return;
         const ws = new WebSocket(t.base.replace(/^http/, 'ws') + `/v1/files/${s.store.meta.file}/socket`, { headers: t.headers } as unknown as string[]);
