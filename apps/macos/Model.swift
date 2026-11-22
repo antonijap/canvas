@@ -486,6 +486,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             fileName = doc["name"] as? String ?? fileName
         }
         revision = doc["revision"] as? String ?? ""
+        openingSidebar = nil
         boards = (doc["boards"] as? [[String: Any]] ?? []).map {
             Board(id: $0["id"] as? String ?? "", name: $0["name"] as? String ?? ($0["id"] as? String ?? ""),
                   width: ($0["width"] as? NSNumber)?.doubleValue, height: ($0["height"] as? NSNumber)?.doubleValue)
@@ -691,6 +692,8 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     private func openingCameraKey(_ file: String) -> String { "canvas.openingCamera." + Thumbnails.key(file) }
 
     private var openingPictureFile: String?
+    @Published private(set) var openingSidebar: OpeningPicture.Sidebar?
+
     func showOpeningPicture(_ file: String) {
         guard !file.isEmpty, prefs.openView == .restore, let saved = OpeningPicture.read(file),
               saved.labels == prefs.boardLabels, saved.appearance == openingAppearance,
@@ -699,6 +702,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
               let image = NSImage(data: saved.png),
               tabHost.showPicture(image, size: NSSize(width: saved.width, height: saved.height), scale: saved.scale) else { return }
         openingPictureFile = file
+        openingSidebar = saved.sidebar
         #if CANVAS_QA
         openingTimings["saved"] = Date().timeIntervalSince1970 * 1000
         openingTimings["view"] = ["page": saved.view.page, "x": saved.view.x, "y": saved.view.y, "z": saved.view.z]
@@ -709,6 +713,8 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     var openingTimings: [String: Any] = [:]
     var openingWindow: Double = 0
     var openingAction: Double = 0
+    var holdOpeningLoad = false
+    var heldOpeningLoad: (() -> Void)?
     #endif
 
     private func switchTo(_ key: String, url: URL) {
@@ -724,10 +730,14 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             saveOpeningPicture(of: old, file: k)
         }
         let alreadyShowingPicture = oldKey == nil && openingPictureFile == key
-        if !alreadyShowingPicture { tabHost.clearPicture() }
+        if !alreadyShowingPicture {
+            tabHost.clearPicture()
+            openingPictureFile = nil
+            openingSidebar = nil
+        }
         // The inspector must never write the old document's selection into the new one (same node ids).
         clearDocumentState()
-        // The panels show nothing (not the old tab's pages and layers) until the new tab's page reports its state.
+        // Drop the previous tab's live lists before showing the next tab.
         clearSidebarState()
         var wv = live[key]
         var fresh = wv == nil || staleViews.contains(ObjectIdentifier(wv!))
@@ -762,7 +772,18 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             #if CANVAS_QA
             if !alreadyShowingPicture { openingTimings = [:] }
             #endif
+            #if CANVAS_QA
+            if holdOpeningLoad && !key.isEmpty {
+                heldOpeningLoad = { [weak self, weak next] in
+                    guard let self, let next, self.activeKey == key, self.webView === next else { return }
+                    next.load(URLRequest(url: url))
+                }
+            } else {
+                next.load(URLRequest(url: url))
+            }
+            #else
             next.load(URLRequest(url: url))
+            #endif
             if !alreadyShowingPicture { showOpeningPicture(key) }
         } else {
             if !key.isEmpty { noteOpened(key) }

@@ -138,6 +138,18 @@ sc("open-picture", "Home captures actual canvas pixels and rejects an old theme 
     const key = createHash("sha256").update(file).digest("hex").slice(0, 32);
     const picture = path.join(t.app.dir, "state", "opening-pictures", key + ".plist");
     const view = new NT(t.app, file);
+    const emptyText = { id: "text", label: "No boards on this page", exact: true };
+    const sidebarIsBlank = async () => {
+      t.eq((await t.marks({ id: "page-row" })).length, 0, "Pages waits for live data");
+      t.eq((await t.marks({ id: "layer-row" })).length, 0, "Layers waits for live data");
+      t.eq((await t.marks(emptyText)).length, 0, "Layers hides the empty state while loading");
+    };
+    fs.writeFileSync(path.join(file, "widgets.json"), JSON.stringify({
+      version: 1, widgets: [], pages: [
+        { id: "artwork", name: "Artwork", boards: Array.from({ length: 7 }, (_, i) => `board-${i}`) },
+        { id: "empty", name: "Empty page", boards: [] },
+      ],
+    }));
     try {
       await t.cmd("qa.theme", { theme: "light" });
       t.ok((await measureOpen(t.app, file)).picture != null, "the sample draws");
@@ -157,6 +169,28 @@ sc("open-picture", "Home captures actual canvas pixels and rejects an old theme 
 
       await t.cmd("close", { file });
       await t.waitState(s => s.homeShown && !s.openFiles.includes(file), "the sample tab to close");
+      card = await recentCard(view, file);
+      await t.cmd("qa.opening", { holdLoad: true });
+      await t.click(card);
+      await t.waitFor(async () => (await openingState(t.app)).saved != null, "the saved opening picture to show");
+      t.eq((await t.marks(emptyText)).length, 0, "Layers never claims the opening file is empty");
+      t.eq((await t.marks({ id: "page-row" })).map(m => m.label), ["artwork", "empty"], "Pages shows saved rows during the opening picture");
+      t.ok((await t.marks({ id: "text", label: "Artwork", exact: true })).length > 0, "Pages shows the saved name");
+      const previewBoards = await t.marks({ id: "layer-row" });
+      t.eq(previewBoards[0]?.label, "board-0", "Layers shows the first saved board during the opening picture");
+      const emptyPage = await t.mark({ id: "page-row", label: "empty" });
+      await t.shot(path.join(process.cwd(), "qa", "out", "native", "open-picture-sidebar.png"));
+      await t.click(center(emptyPage));
+      await t.cmd("qa.opening", { holdLoad: false });
+      await t.waitFor(async () => (await openingState(t.app)).live != null, "the reopened view to draw");
+      t.eq((await t.state()).activePage, "artwork", "clicking a saved page row did nothing");
+      await t.waitState(s => s.revision && s.layers[0]?.id === "board-0", "the live layers to load");
+      await view.showPage("empty");
+      await t.mark(emptyText);
+      await view.showPage("artwork");
+
+      await t.cmd("close", { file });
+      await t.waitState(s => s.homeShown && !s.openFiles.includes(file), "the sample tab to close");
       await t.cmd("qa.theme", { theme: "dark" });
       await t.click(card);
       await t.waitFor(async () => (await openingState(t.app)).live != null, "the dark view to draw");
@@ -167,10 +201,16 @@ sc("open-picture", "Home captures actual canvas pixels and rejects an old theme 
       await t.cmd("qa.theme", { theme: "light" });
       card = await recentCard(view, file);
       fs.copyFileSync(path.join(file, "media", "img-1.png"), path.join(file, "media", "img-0.png"));
+      await t.cmd("qa.opening", { holdLoad: true });
       await t.click(card);
+      await t.waitFor(async () => !((await t.state()).homeShown) && (await openingState(t.app)).switched != null,
+        "the edited file to leave Home while its load is held");
+      await sidebarIsBlank();
+      await t.cmd("qa.opening", { holdLoad: false });
       await t.waitFor(async () => (await openingState(t.app)).live != null, "the edited design to draw");
       t.eq((await openingState(t.app)).saved, undefined, "a changed image invalidates the saved view");
     } finally {
+      await t.cmd("qa.opening", { holdLoad: false });
       await t.cmd("close", { file }).catch(() => {});
       await t.cmd("qa.theme", { theme: "system" });
       fs.rmSync(file, { recursive: true, force: true });

@@ -234,6 +234,13 @@ enum QA {
                     "roles": Dictionary(uniqueKeysWithValues: sample.rows.map { ($0.role.rawValue, $0.memory) }),
                     "pages": sample.rows.first { $0.role == .page }?.pids.count ?? 0]
         case "qa.opening":
+            if let hold = a["holdLoad"] as? Bool {
+                model.holdOpeningLoad = hold
+                if !hold {
+                    model.heldOpeningLoad?()
+                    model.heldOpeningLoad = nil
+                }
+            }
             return model.openingTimings.merging(["window": model.openingWindow, "action": model.openingAction]) { _, new in new }
         case "qa.savepicture":
             await withCheckedContinuation { continuation in

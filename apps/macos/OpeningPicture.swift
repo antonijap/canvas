@@ -13,7 +13,19 @@ struct OpeningPicture: Codable {
     let height: CGFloat
     let scale: CGFloat
     let view: ViewState
+    let sidebar: Sidebar?
     let png: Data
+
+    struct Sidebar: Codable {
+        struct Row: Codable, Identifiable {
+            let id: String
+            let name: String
+        }
+
+        let activePage: String
+        let pages: [Row]
+        let boards: [Row]
+    }
 
     struct ViewState: Codable, Equatable {
         let revision: String
@@ -107,6 +119,13 @@ extension CanvasModel {
         let scale = web.window?.backingScaleFactor ?? 1
         let appearance = openingAppearance
         let labels = prefs.boardLabels
+        // The shell still represents this tab here. A switch can clear it before WebKit answers.
+        let sidebarRevision = revision
+        let sidebar = web === webView && currentFile == file ? activePage.map { page in
+            OpeningPicture.Sidebar(activePage: page,
+                                   pages: pages.map { .init(id: $0.id, name: $0.name) },
+                                   boards: boards.map { .init(id: $0.id, name: $0.name) })
+        } : nil
         web.evaluateJavaScript("window.canvasHost?.openingSnapshot?.() ?? null") { result, _ in
             guard let raw = result as? [String: Any],
                   let data = try? JSONSerialization.data(withJSONObject: raw),
@@ -127,7 +146,8 @@ extension CanvasModel {
                           let image, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
                           size == web.bounds.size, appearance == self.openingAppearance, labels == self.prefs.boardLabels
                     else { self.openingCaptureStatus("frame changed during capture"); done?(); return }
-                    self.persistOpeningPicture(file, signature: signature, view: state, size: size,
+                    let matchingSidebar = sidebarRevision == state.revision && sidebar?.activePage == state.page ? sidebar : nil
+                    self.persistOpeningPicture(file, signature: signature, view: state, sidebar: matchingSidebar, size: size,
                                                scale: scale, appearance: appearance, labels: labels, image: cg, then: done)
                 }
             }
@@ -135,6 +155,7 @@ extension CanvasModel {
     }
 
     private func persistOpeningPicture(_ file: String, signature: String, view: OpeningPicture.ViewState,
+                                       sidebar: OpeningPicture.Sidebar?,
                                        size: NSSize, scale: CGFloat, appearance: String, labels: Bool,
                                        image: CGImage, then done: (() -> Void)?) {
         var request = URLRequest(url: base.appendingPathComponent("api/flush"))
@@ -155,7 +176,7 @@ extension CanvasModel {
                   OpeningPicture.signature(file) == signature,
                   let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return }
             let saved = OpeningPicture(signature: signature, appearance: appearance, labels: labels, width: size.width,
-                                       height: size.height, scale: scale, view: view, png: png)
+                                       height: size.height, scale: scale, view: view, sidebar: sidebar, png: png)
             status = saved.write(file) ? "saved" : "cache write failed"
         }.resume()
     }

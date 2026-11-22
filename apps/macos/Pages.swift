@@ -94,17 +94,31 @@ struct PagesSection: View {
                 SectionHeader(title: "Pages")
                 IconButton(symbol: "plus", help: "Add page", bounce: model.pages.count) {
                     model.addPage { id, name in startRename(PageInfo(id: id, name: name, count: 0)) }
-                }.qaID("page-add",label:"Add page").disabled(model.cloudReadOnly)
+                }.qaID("page-add",label:"Add page").disabled(model.cloudReadOnly || model.revision.isEmpty)
             }
-            VStack(spacing: PageDrag.spacing) {
-                ForEach(Array(model.pages.enumerated()), id: \.element.id) { i, page in
-                    pageRow(page, at: i)
+            if model.revision.isEmpty {
+                if let sidebar = model.openingSidebar {
+                    VStack(spacing: PageDrag.spacing) {
+                        ForEach(sidebar.pages) { page in
+                            ListRow(title: page.name, symbol: "rectangle.portrait", active: page.id == sidebar.activePage)
+                                .disabled(true)
+                                .qaID("page-row", label: page.id)
+                        }
+                    }
+                    .padding(.vertical, PageDrag.spacing)
+                    .allowsHitTesting(false)
                 }
+            } else {
+                VStack(spacing: PageDrag.spacing) {
+                    ForEach(Array(model.pages.enumerated()), id: \.element.id) { i, page in
+                        pageRow(page, at: i)
+                    }
+                }
+                // The list owns the hit area, including the gaps and the insertion boundary above the first row.
+                .padding(.vertical, PageDrag.spacing)
+                .contentShape(Rectangle())
+                .onDrop(of: [.text], delegate: PageDrop(model: model, dragging: $dragging, target: $dropTarget, watch: watchDrop))
             }
-            // The list owns the hit area, including the gaps and the insertion boundary above the first row.
-            .padding(.vertical, PageDrag.spacing)
-            .contentShape(Rectangle())
-            .onDrop(of: [.text], delegate: PageDrop(model: model, dragging: $dragging, target: $dropTarget, watch: watchDrop))
         }
         .onChange(of: model.currentFile) { _, _ in
             editing = nil

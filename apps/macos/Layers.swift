@@ -394,17 +394,31 @@ struct LayersRows: View {
         HStack(spacing: 0) {
             SectionHeader(title: "Layers")
         }
-        ForEach(store.rows) { row in
-            LayerRowView(model: model, store: store, row: row, selected: selected.contains(row.id), purpleSelection: purple,
-                         lockShown: store.lockPreview(row) ?? row.locked,
-                         mark: store.dropMark?.id == row.id ? store.dropMark : nil,
-                         editing: store.renaming == row.id || (row.isBoard && model.renamingBoard == row.id))
-                .equatable()
-                .id(row.id)
-        }
-        if model.boards.isEmpty {
+        if model.revision.isEmpty {
+            ForEach(model.openingSidebar?.boards ?? []) { board in
+                HStack(spacing: 6) {
+                    Image(systemName: "number").symbolRenderingMode(.hierarchical)
+                        .font(.system(size: GlyphSize.row, weight: .medium)).foregroundStyle(Palette.mutedFg).frame(width: 16)
+                    Text(board.name).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1)
+                }
+                .padding(.leading, 18).padding(.trailing, 6)
+                .frame(maxWidth: .infinity, alignment: .leading).frame(height: Metric.row)
+                .qaID("layer-row", label: board.id)
+                .allowsHitTesting(false)
+            }
+        } else if model.boards.isEmpty {
             Text("No boards on this page").font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                .qaText("No boards on this page")
                 .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).frame(height: Metric.row)
+        } else {
+            ForEach(store.rows) { row in
+                LayerRowView(model: model, store: store, row: row, selected: selected.contains(row.id), purpleSelection: purple,
+                             lockShown: store.lockPreview(row) ?? row.locked,
+                             mark: store.dropMark?.id == row.id ? store.dropMark : nil,
+                             editing: store.renaming == row.id || (row.isBoard && model.renamingBoard == row.id))
+                    .equatable()
+                    .id(row.id)
+            }
         }
     }
 }
