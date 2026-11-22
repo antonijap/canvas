@@ -19,6 +19,7 @@ const LSREGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks
 /** Builds the QA app into `dir` (once per run). */
 export function buildQaApp(dir: string): string {
   const app = path.join(dir, "Canvas QA.app");
+  execFileSync("bash", [path.join(ROOT, "scripts/ensure-engine.sh")], { stdio: ["ignore", "ignore", "pipe"] });
   execFileSync("bash", [path.join(ROOT, "apps/macos/build.sh")], { env: { ...process.env, QA: "1", CANVAS_APP_OUT: app }, stdio: ["ignore", "ignore", "pipe"] });
   if (!fs.existsSync(path.join(app, "Contents/MacOS/Canvas"))) throw new Error("the QA build produced no app");
   return app;

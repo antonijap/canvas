@@ -52,6 +52,8 @@ function saveBudgets(original: string, budgets: Budgets) {
 }
 
 async function main() {
+  // Measure the engine these sources build, never a stale engine/pkg.
+  execFileSync("bash", [path.join(ROOT, "scripts/ensure-engine.sh")], { stdio: ["ignore", "ignore", "inherit"] });
   const { update, ids } = flags(process.argv.slice(2));
   const started = performance.now();
   const original = fs.readFileSync(FILE, "utf8");

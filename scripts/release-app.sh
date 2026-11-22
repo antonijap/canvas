@@ -20,6 +20,7 @@ fail() { printf 'pnpm release:app: %s\n' "$*" >&2; exit 1; }
 VERSION="$(node -p 'require("./package.json").version')"
 PLIST="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' apps/macos/Info.plist)"
 [ "$VERSION" = "$PLIST" ] || fail "package.json says $VERSION and apps/macos/Info.plist says $PLIST: make them the same version first"
+scripts/ensure-engine.sh || fail "the engine build failed: run pnpm build:engine to see why"
 [ -f engine/pkg/canvas_engine.js ] || fail "no engine build in engine/pkg: run pnpm build:engine first"
 
 ID="${CANVAS_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)}"
