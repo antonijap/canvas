@@ -30,6 +30,26 @@ Assume every pull request is reviewed as if it came from someone trying to sneak
 - **Review.** Every pull request needs the maintainer's approval (`CODEOWNERS`), after the last push. Dependency, build-script, MCP and server changes get a line-by-line read.
 - **main** cannot be force-pushed or deleted, and changes reach it only through a reviewed pull request.
 
+## Performance gate
+
+Run `pnpm perf:gate` on a quiet machine with the engine built. The release checklist runs
+the gate too. Its `--quick` option runs the server and page measurements only.
+For the native measurements, build an isolated QA app from the current sources first.
+
+```sh
+QA=1 CANVAS_APP_OUT="$PWD/build/perf-native/Canvas QA.app" bash apps/macos/build.sh
+```
+
+The gate uses fixed fixtures, a warm-up, and the median of three samples. It reports the
+spread and retries a metric once if the range exceeds 5% of the median. A result more
+than 5% above its budget fails. A stable improvement greater than 3% tightens the budget.
+Review and commit any updates to `bench/budgets.json` with the change that was measured.
+
+Use `pnpm perf:gate --only open-2000,server-memory` to check individual metrics.
+A missing machine class or budget needs the maintainer. Use `--update` to register a
+separate machine class or accept an intentional trade-off. The native metrics are skipped
+on machines without the QA app build.
+
 ## Licence
 
 By opening a pull request you agree that your contribution is released under the project's licence (see [LICENSE](LICENSE)), and that you have the right to release it.

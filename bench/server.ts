@@ -8,11 +8,23 @@ import { OUT, PORT, ROOT, round, sleep, stats, type BenchFile } from "./lib.ts";
 
 type Stat = { heapUsed: number; rss: number; external: number; arrayBuffers: number; cpuUserMs: number; cpuSystemMs: number };
 
-export async function startHost(): Promise<{ proc: ChildProcess; stats: (gc?: boolean) => Promise<Stat>; stop: () => void }> {
-  const proc = fork(path.join(ROOT, "bench/server-host.ts"), [], { env: { ...process.env, CANVAS_PORT: String(PORT), CANVAS_ROOTS: "" }, execArgv: ["--expose-gc"], stdio: ["ignore", "inherit", "inherit", "ipc"] });
-  await new Promise<void>((res, rej) => { proc.once("message", (m: any) => (m.ready ? res() : rej(new Error("bad ready")))); proc.once("exit", (c) => rej(new Error(`server host exited ${c}`))); });
+export async function startHost(options: { port?: number; env?: NodeJS.ProcessEnv } = {}): Promise<{ proc: ChildProcess; stats: (gc?: boolean) => Promise<Stat>; stop: () => void }> {
+  const proc = fork(path.join(ROOT, "bench/server-host.ts"), [], { env: { ...process.env, CANVAS_ROOTS: "", ...options.env, CANVAS_PORT: String(options.port ?? PORT) }, execArgv: ["--expose-gc"], stdio: ["ignore", "inherit", "inherit", "ipc"] });
+  await new Promise<void>((res, rej) => {
+    const timer = setTimeout(() => { proc.kill("SIGKILL"); rej(new Error("server host startup timed out")); }, 30_000);
+    proc.once("message", (m: any) => { clearTimeout(timer); if (m.ready) res(); else { proc.kill(); rej(new Error("bad ready")); } });
+    proc.once("error", (e) => { clearTimeout(timer); rej(e); });
+    proc.once("exit", (c) => { clearTimeout(timer); rej(new Error(`server host exited ${c}`)); });
+  });
   let id = 0;
-  const get = (gc = false) => new Promise<Stat>((res) => { const my = ++id; const h = (m: any) => { if (m.id === my) { proc.off("message", h); res(m.stats); } }; proc.on("message", h); proc.send({ id: my, gc }); });
+  const get = (gc = false) => new Promise<Stat>((res, rej) => {
+    const my = ++id;
+    const cleanup = () => { clearTimeout(timer); proc.off("message", reply); };
+    const reply = (m: any) => { if (m.id === my) { cleanup(); res(m.stats); } };
+    const timer = setTimeout(() => { cleanup(); rej(new Error("server host stats timed out")); }, 10_000);
+    proc.on("message", reply);
+    proc.send({ id: my, gc }, (error) => { if (error) { cleanup(); rej(error); } });
+  });
   return { proc, stats: get, stop: () => proc.kill("SIGTERM") };
 }
 

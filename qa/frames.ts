@@ -31,6 +31,7 @@ export const RECORDER_JS = String.raw`(() => {
   e.frame = function () {
     const more = own.call(e);
     if (rec && rec.frames.length < rec.max) {
+      if (!rec.region) { rec.frames.push({ t: performance.now() }); return more; }
       // Where the drag drew its layer (autolayout.js state.drawn) and where the pointer was, in world units.
       const st = h.autolayout && h.autolayout.state, c = h.cam, vr = h.view.getBoundingClientRect();
       rec.frames.push({ t: performance.now(), px, py, wx: (px - vr.left - c.x) / c.z, wy: (py - vr.top - c.y) / c.z, drawn: st && st.drawn ? { x: st.drawn.x, y: st.drawn.y } : null, data: grab(rec.region) });
@@ -39,7 +40,7 @@ export const RECORDER_JS = String.raw`(() => {
   };
   window.__frames = {
     dpr: () => canvas.width / Math.max(1, canvas.clientWidth),
-    start(region, max = 900) { rec = { region, frames: [], max }; return true; },
+    start(region = null, max = 900) { rec = { region, frames: [], max }; return true; },
     stop() { const r = rec; rec = null; return r; },
     // The pictures the frames are checked against: before the gesture (A) and after it settled (B). Composited once
     // more and copied in the same task (engine-view's capture): outside a frame the drawing buffer may be cleared.
@@ -48,6 +49,23 @@ export const RECORDER_JS = String.raw`(() => {
   };
   return true;
 })()`;
+
+/** Measure engine frame spacing without copying pixels. */
+export async function recordFrameGaps(
+  ev: <R>(js: string) => Promise<R>,
+  gesture: () => Promise<unknown>,
+): Promise<number[]> {
+  if (!(await ev<boolean>(RECORDER_JS))) throw new Fail("no engine to record");
+  await ev("window.__frames.start()");
+  let times: number[];
+  try {
+    await gesture();
+  } finally {
+    times = await ev<number[]>("window.__frames.stop().frames.map((f) => f.t)");
+  }
+  if (times.length < 10) throw new Fail(`only ${times.length} engine frames during the gesture`);
+  return times.slice(1).map((time, i) => time - times[i]);
+}
 
 /**
  * Checks the recorded frames of a drag in auto layout (FRAME_CHECK_JS(spec)), every frame against A (before the

@@ -14,7 +14,7 @@ type Meta = { id: string; x: number; y: number; width?: number; height?: number 
 type Cam = { x: number; y: number; z: number };
 
 // Runs before the page's own scripts. Collects paint, long tasks, board swaps and a settle detector.
-const INSTRUMENT = (seed: { key: string; cam: Cam } | null) => `(() => {
+export const INSTRUMENT = (seed: { key: string; cam: Cam } | null) => `(() => {
   const T = window.__bench = { swaps: [], long: [], paint: {}, firstBoardEl: 0, firstBoardPainted: 0, settled: 0, polls: 0, errors: 0 };
   ${seed ? `try { localStorage.setItem(${JSON.stringify(seed.key)}, ${JSON.stringify(JSON.stringify(seed.cam))}); } catch {}` : ""}
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) T.long.push([e.startTime, e.duration]); }).observe({ type: "longtask", buffered: true }); } catch {}

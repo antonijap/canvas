@@ -14,6 +14,8 @@ Rules for AI coding agents (Claude Code, Codex and others) working in this repos
 
 ## Testing: only what changed
 
+Before a release, `pnpm perf:gate` must pass; a change that makes a gated metric more than 5% slower is not done until it is fixed or the maintainer accepts it with --update.
+
 Test the change, not the whole app. Full runs take hours and find nothing a targeted run misses.
 
 1. Always run the fast checks: `pnpm typecheck` and the unit tests for the files you touched (`node --test test/<name>.test.ts`). Run all of `pnpm test` only when you changed shared code (`src/`, `cloud/core`, `engine/`).

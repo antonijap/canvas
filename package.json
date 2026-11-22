@@ -15,6 +15,7 @@
     "bench:baseline": "node bench/run.ts",
     "bench:latency": "node bench/latency.ts",
     "bench:cache": "node bench/cache.ts",
+    "perf:gate": "node bench/perf-gate.ts",
     "mcp": "node mcp/server.ts",
     "fidelity": "node fidelity/run.ts",
     "test:golden": "node test/golden/run.ts",

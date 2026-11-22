@@ -1,6 +1,6 @@
 // pnpm qa:release: the release checklist (docs/qa-plan.md section 8). Runs each check, prints one line per item
 // (PASS, FAIL, NEEDS-MAINTAINER for a decision only the maintainer can make, MANUAL for a step a person has to do) and
-// writes qa/out/release/report.md. Exit code 1 when anything fails.
+// writes qa/out/release/report.md. Exit code 1 on failure, 2 when perf needs the maintainer.
 //
 //   pnpm qa:release                  the checklist, then pnpm test, qa, qa:matrix, qa:coverage, qa:native and bench (those defined)
 //   pnpm qa:release --quick          the checklist only, with shorter fuzz and crash runs
@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import { freePort, ROOT, sleep, startServer, type Scratch } from "./lib.ts";
 import { crashCheck } from "./release-crash.ts";
+import { WEB_METRICS } from "../bench/perf-budgets.ts";
 
 type Status = "PASS" | "FAIL" | "NEEDS-MAINTAINER" | "MANUAL" | "SKIP";
 type Item = { status: Status; text: string; details?: string[] };
@@ -680,6 +681,23 @@ function suite(name: string, script: string, timeoutMs: number) {
   };
 }
 
+function performanceGate(c: Ctx): Item[] {
+  const args = c.quick ? ["--only", WEB_METRICS.join(",")] : [];
+  const r = run("pnpm", ["perf:gate", ...args], { timeoutMs: 1_800_000 });
+  const log = path.join(c.out, "perf-gate.log");
+  fs.writeFileSync(log, r.out);
+  const items = r.stdout.split("\n").flatMap((line) => {
+    const result = /^(PASS|FAIL|NEEDS-MAINTAINER|SKIP) (.+)$/.exec(line);
+    return result ? [item(result[1] as Status, result[2])] : [];
+  });
+  if (r.error || !items.length || (r.code !== 0 && r.code !== 2 && !items.some((i) => i.status === "FAIL"))) {
+    items.push(item("FAIL", `pnpm perf:gate failed (exit ${r.code})`, r.out.split("\n").filter(Boolean).slice(-5)));
+  }
+  const timing = r.stdout.split("\n").find((line) => line.startsWith("Performance gate finished"));
+  if (timing) items.push(item("PASS", `${timing} Log: ${rel(log)}`));
+  return items;
+}
+
 // ---------------------------------------------------------------- the list
 
 const CHECKS: Check[] = [
@@ -693,6 +711,7 @@ const CHECKS: Check[] = [
   { id: "a11y", title: "8. Contrast passes AA; VoiceOver reaches the chrome", run: accessibility },
   { id: "install", title: "9. Fresh install from a clone, following the README", run: freshInstall },
   { id: "docs", title: "10. README and docs claims match the code", run: docsClaims },
+  { id: "perf", title: "11. Performance stays within its budgets", run: performanceGate },
 ];
 const SUITES: Check[] = [
   { id: "test", title: "pnpm test", run: suite("test", "test", 900_000) },
@@ -755,7 +774,8 @@ async function main() {
   fs.writeFileSync(report, md);
   console.log(`\n${counts("PASS")} pass, ${counts("FAIL")} fail, ${counts("NEEDS-MAINTAINER")} need the maintainer, ${counts("MANUAL")} manual in ${Math.round((Date.now() - t0) / 1000)} s`);
   console.log(`report: ${rel(report)}`);
-  process.exitCode = counts("FAIL") ? 1 : 0;
+  const perfNeedsMaintainer = results.some(({ check, items }) => check.id === "perf" && items.some((i) => i.status === "NEEDS-MAINTAINER"));
+  process.exitCode = counts("FAIL") ? 1 : perfNeedsMaintainer ? 2 : 0;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) await main();

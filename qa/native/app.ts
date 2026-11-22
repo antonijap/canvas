@@ -85,7 +85,7 @@ export class QaApp {
     };
   }
 
-  async start(builtApp: string) {
+  async start(builtApp: string, onLaunch?: () => void) {
     for (const d of [this.home, this.docs, this.logs, path.join(this.dir, "tunnels")]) fs.mkdirSync(d, { recursive: true });
     // Fonts the maintainer installed are read (never written) so text measures as it does in her app.
     const fonts = path.join(os.homedir(), "Library", "Fonts");
@@ -115,7 +115,7 @@ export class QaApp {
     this.server.stdout!.on("data", (d) => this.serverLog.push(String(d)));
     this.server.stderr!.on("data", (d) => this.serverLog.push(String(d)));
     await this.waitHealth();
-    await this.launch();
+    await this.launch(onLaunch);
   }
 
   async relaunch() {
@@ -128,11 +128,12 @@ export class QaApp {
     throw new Error("QA app did not quit before relaunch");
   }
 
-  private async launch() {
+  private async launch(onLaunch?: () => void) {
     // `open -g -n`: a new instance, launched in the background. Started any other way (a child of a frontmost
     // terminal or app), macOS brings it to the front and it takes the keyboard from whoever is typing.
     // -ApplePersistenceIgnoreState: no "reopen windows?" alert after the last run's kill (it blocks all input).
     const env = Object.entries(this.env()).filter(([, v]) => v !== undefined).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
+    onLaunch?.();
     execFileSync("open", ["-g", "-n", "-a", this.app, "--stdout", this.appLogFile, "--stderr", this.appLogFile, ...env,
       "--args", "-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"], { stdio: "ignore" });
     const t0 = Date.now();
@@ -142,7 +143,7 @@ export class QaApp {
         if (pid !== this.pid) { this.pid = pid; break; }
       } catch {}
       if (Date.now() - t0 > 40_000) throw new Error(`QA app did not connect in 40 s: ${this.log().slice(-2000)}`);
-      await sleep(250);
+      await sleep(onLaunch ? 25 : 250);
     }
   }
 
