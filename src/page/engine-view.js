@@ -950,6 +950,15 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       }
       return [...assets].sort();
     },
+    hasPortableAssets(id, file) {
+      const board = loaded.get(id), text = sceneText(id);
+      return !!board && !!text && !text.includes('"type":"shader"') && (board.images || []).every((src) => {
+        if (src.startsWith("data:")) return true;
+        const url = new URL(src, location.href);
+        const path = url.searchParams.get("p");
+        return url.origin === location.origin && url.pathname === "/asset" && path?.startsWith(file + "/") && !path.toLowerCase().endsWith(".gif");
+      });
+    },
     pictureState() {
       if (simpleOverview?.canvas.isConnected) return { missing: 0, blank: 0, exact: true, boardPixels: overviewBoards > 0 };
       const [missing, blank, exact, pixels] = engine.pictureState();

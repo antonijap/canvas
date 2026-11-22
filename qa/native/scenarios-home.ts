@@ -1,3 +1,4 @@
+import { openingState } from "../../bench/native-opening-picture.ts";
 // Home, the pinned first tab (apps/macos/Home.swift, HomeLogic.swift): the tab is first and cannot be closed, the
 // shortcut and Window > Home show it, a card opens its file, a missing file offers Remove from recents, the comment
 // count and the cloud on a shared card, the server view, the first-launch header and line, thumbnails in the state folder,
@@ -345,9 +346,22 @@ sc("tabs", "Warm tab switching keeps the same document page", { covers: ["tabs:w
   try {
     await t.app.openShown(other);
     await t.waitState(s => s.file === other && s.pages.length > 0, "the second tab to open");
-    await t.systemClick(center(await t.mark({ id: "file-tab", label: baseName(t.file), exact: true })));
-    await t.waitState(s => s.file === t.file && s.pages.length > 0, "the original tab to return");
-    t.eq(await t.js<number>("return performance.timeOrigin;"), before, "the page did not navigate again");
+    const out = center(await t.mark({ id: "file-tab", label: baseName(other), exact: true }));
+    const back = center(await t.mark({ id: "file-tab", label: baseName(t.file), exact: true }));
+    const samples = [];
+    for (let i = 0; i < 5; i++) {
+      if (i) {
+        await t.systemClick(out);
+        await t.waitState(s => s.file === other, "the second tab to return");
+      }
+      await t.systemClick(back);
+      await t.waitState(s => s.file === t.file && s.pages.length > 0, "the original tab to return");
+      const marks = await openingState(t.app);
+      if (marks.switched != null) samples.push(marks.switched - marks.action);
+      t.eq(await t.js<number>("return performance.timeOrigin;"), before, "the page did not navigate again");
+    }
+    t.note(`switch samples ${JSON.stringify(samples)} ms`);
+    t.ok(samples.length === 5 && samples.sort((a, b) => a - b)[2] < 100, "the median warm switch is under 100 ms");
   } finally {
     await t.cmd("close", { file: other });
     fs.rmSync(other, { recursive: true, force: true });

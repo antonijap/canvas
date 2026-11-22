@@ -12,6 +12,7 @@ import { openFixture } from "./fixtures/open.ts";
 import { Tab, wheelFrames } from "./latency.ts";
 import { stats } from "./lib.ts";
 import { gpuWarm, measureOpen, NATIVE_APP, openSeven } from "./native-open.ts";
+import { measureOpeningPicture } from "./native-opening-picture.ts";
 import { INSTRUMENT } from "./page.ts";
 import { startHost } from "./server.ts";
 import { NATIVE_METRICS, type Metric } from "./perf-budgets.ts";
@@ -155,6 +156,9 @@ export function measurements(imageSeedDir?: string) {
       }
       let started = 0;
       await app.start(NATIVE_APP, () => { started = performance.now(); });
+      if (id === "launch-last-file" || id === "open-recent") {
+        return (await measureOpeningPicture(app, id)).picture;
+      }
       if (id === "native-launch") {
         const paint = await app.cmd<{ method: string }>({ op: "qa.shot", args: { maxSide: 16 } });
         if (paint.method !== "windowServer") throw new Error("the window server returned no painted window");

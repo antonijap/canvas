@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { reconnectingStream } from "./event-stream.ts";
 import { forgetStore } from "./widgets/store.ts";
 import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers, waitForCachedCloudSettings } from "./cloud-files.ts";
 import { readOnlyRoute } from "./cloud-files-gate.ts";
@@ -612,13 +613,14 @@ try {
         const file = url.searchParams.get("file");
         if (file) {
           // The WebView starts its document and bridge streams as soon as it reads this page.
-          // If the shell has yet to send its Cloud list, both streams would fail before they can reconnect.
+          // Give the shell a chance to send its Cloud list before the streams start retrying.
           const settings = url.searchParams.get("shell") === "native" && waitForCachedCloudSettings(file);
           if (settings) await settings;
           void prime(file).catch(() => {});
         }
         const engine = fs.existsSync(path.join(enginePkgDir(), "canvas_engine.js")) ? "ok" : "missing";
-        return send(res, 200, "text/html; charset=utf-8", PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}" data-image-previews="${process.env.CANVAS_IMAGE_PREVIEWS_BIN ? "1" : "0"}">`));
+        const preload = file && engine === "ok" ? '<link rel="modulepreload" href="/page/engine-view.js"><link rel="preload" href="/engine/canvas_engine_bg.wasm" as="fetch" crossorigin>' : "";
+        return send(res, 200, "text/html; charset=utf-8", PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}" data-image-previews="${process.env.CANVAS_IMAGE_PREVIEWS_BIN ? "1" : "0"}">`).replace("<head>", "<head>" + preload));
       }
       let bodyFile: string | undefined;
       if (readOnlyRoute(req.method ?? "GET", url.pathname) && String(req.headers["content-type"] ?? "").startsWith("application/json")) {
@@ -1230,6 +1232,7 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 #props details{margin-top:10px}
 #props summary{color:var(--c-muted-fg);cursor:pointer;font-size:var(--c-size-2xs)}
 #props pre{font:10px/1.55 var(--c-font-mono);background:var(--c-muted);border-radius:var(--c-radius);padding:8px;overflow:auto;max-height:260px;white-space:pre-wrap;word-break:break-all}
+.opening-capture :is(#hov,#sel,#marquee,#guides){visibility:hidden}
 #msg{line-height:100%;position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--c-island);border:0;border-radius:var(--c-radius-island);padding:9px 14px;font-size:var(--c-size-xs);display:none;z-index:20;box-shadow:0 3px 3px #0000001f}
 #wtoast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%);display:none;align-items:center;gap:10px;background:var(--c-island);border:1px solid var(--c-island-rim);border-radius:var(--c-radius-island);padding:5px 8px 5px 14px;font-size:var(--c-size-xs);z-index:30;box-shadow:0 3px 3px #0000001f}
 /* The browser page says what it is: the engine build missing, and that the Mac app is the main way (src/onboarding.ts). */
@@ -1359,6 +1362,7 @@ if (!native) {
   hint.querySelector("button").onclick = () => { hint.hidden = true; try { localStorage.setItem("canvas:webhint", "hidden"); } catch {} };
 }
 let insets = { l: 0, t: 0, r: 0, b: 0 };
+let initialInsets = !native;
 const post = (m) => { try { window.webkit.messageHandlers.canvasState.postMessage(JSON.stringify(m)); } catch {} };
 // Settings the app owns (Canvas > Settings, apps/macos/SettingsLogic.swift): the shell sends them as {cmd: "prefs"}
 // (with the snapping ones, whenever the page says snapHello) and the page keeps a copy, so the next load starts with
@@ -1452,7 +1456,15 @@ function settle() {
   queueHover();
 }
 // A camera made while the view had no size (a hidden window at launch) is meaningless: never kept.
-function saveCam() { if (cam && activePage && !zeroFit && view.clientWidth && view.clientHeight) store.set(camStoreKey(activePage), cam); }
+let sentOpeningCamera = "";
+function saveCam() {
+  if (!cam || !activePage || zeroFit || !view.clientWidth || !view.clientHeight) return;
+  store.set(camStoreKey(activePage), cam);
+  if (!native || (rememberedPage && rememberedPage !== activePage)) return;
+  const next = { page: activePage, x: cam.x, y: cam.y, z: cam.z };
+  const key = JSON.stringify(next);
+  if (sentOpeningCamera !== key) { sentOpeningCamera = key; post({ openingCamera: next }); }
+}
 function postZoom() {
   if (!native || shownPct === postedPct) return;
   const wait = 100 - (performance.now() - lastPostAt);
@@ -1851,6 +1863,7 @@ async function loadBoard(b) {
   syncSel();
   queueHover();
   host.emit("render", b.meta.id);
+  if (boardInView(b)) presentOpeningFrame();
 }
 let visTimer = 0;
 function scheduleVisible() { if (!visTimer) visTimer = setTimeout(() => { visTimer = 0; loadVisible(); host.emit("visible"); }, 16); }
@@ -2163,6 +2176,7 @@ function setDoc(d) {
     const fb = boards.get(firstBoardId()); if (fb && !fb.measured) firstFit = fb;
   }
   showSnaps();
+  if (!seen.size) presentOpeningFrame();
   if (mode === "engine") loadVisible(); // changed boards reload now, not a frame later
   pruneSnaps();
   syncSel(); // boards may have moved
@@ -2345,7 +2359,51 @@ const perf = host.perf = { load: null, look: null, paint: null, show: null, page
 const perfAt = (k) => {
   if (perf[k] !== null) return;
   perf[k] = Math.round(performance.now());
+  if (k === "picture") presentOpeningFrame();
   if (k === "look" || k === "paint" || k === "picture") host.emit("perf", perf);
+};
+let openingPresented = false;
+function presentOpeningFrame() {
+  if (!native || openingPresented) return;
+  openingPresented = true;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    post({ openingFrame: { at: performance.timeOrigin + performance.now() } });
+  }));
+}
+function openingView() {
+  if (!doc || !cam || !activePage) return null;
+  return { revision: doc.revision, dark: matchMedia("(prefers-color-scheme: dark)").matches, page: activePage, x: cam.x, y: cam.y, z: cam.z };
+}
+// Capture only a settled camera and assets that the shell can validate as part of the package.
+function canCaptureOpeningView() {
+  if (!ev || (rememberedPage && rememberedPage !== activePage) ||
+      camDirty || tween || gesturing || drag || host.live?.busy || host.textEdit?.active ||
+      host.widgetsShown?.().length || prefs.openView !== "restore" || ev.imagesPending()) return false;
+  const state = ev.pictureState();
+  if (!state.boardPixels || !state.exact || state.missing || state.blank) return false;
+  for (const b of boards.values()) {
+    if (boardInView(b) && (b.loadedKey !== b.meta.key || host.live?.touched(b.meta.id) ||
+        !ev.hasPortableAssets(b.meta.id, file))) return false;
+  }
+  return true;
+}
+let lastCapture = null, captureTimer = 0;
+host.openingSnapshot = () => {
+  const state = openingView();
+  if (!state || lastCapture || !canCaptureOpeningView() || !ev.freeze().frozen) return null;
+  saveCam();
+  lastCapture = state;
+  view.classList.add("opening-capture");
+  captureTimer = setTimeout(() => host.finishOpeningSnapshot(), 1200);
+  return state;
+};
+host.finishOpeningSnapshot = () => {
+  clearTimeout(captureTimer);
+  const state = lastCapture && openingView();
+  lastCapture = null;
+  view.classList.remove("opening-capture");
+  ev?.thaw();
+  return state;
 };
 let perfWait = [], perfT = 0;
 function perfMark(kind, t0) {
@@ -3725,24 +3783,9 @@ if (!file) { say("Pick a file from the top-left menu."); }
 // The document stream. In the app a hidden tab closes it (canvasCmd "tab"): WebKit allows six connections per host,
 // and every tab kept alive would hold two. Shown again, it reconnects with the revision it has; the server answers
 // with the whole document only when that changed, so nothing the tab missed stays on screen.
-function docStream() {
-  const listeners = [];
-  let src = null, onerr = null;
-  const s = {
-    addEventListener(n, f) { listeners.push([n, f]); if (src) src.addEventListener(n, f); },
-    set onerror(f) { onerr = f; if (src) src.onerror = f; },
-    get open() { return !!src; },
-    connect() {
-      if (src) return;
-      src = new EventSource(api("/events") + (doc && doc.revision ? "&since=" + encodeURIComponent(doc.revision) : ""));
-      for (const [n, f] of listeners) src.addEventListener(n, f);
-      if (onerr) src.onerror = onerr;
-    },
-    close() { if (src) { src.close(); src = null; } },
-  };
-  return s;
-}
-const es = docStream();
+const reconnect = ${reconnectingStream};
+host.reconnectingStream = reconnect;
+const es = reconnect(() => api("/events") + (doc && doc.revision ? "&since=" + encodeURIComponent(doc.revision) : ""));
 const onDoc = (d) => {
   // The first document waits for the pages (they follow on the same stream) so no other page's board loads.
   if (!pagesReady) {
@@ -3754,7 +3797,6 @@ const onDoc = (d) => {
   setDoc(d);
   if (first) perfAt("doc");
   if (sel && !isW(sel.id)) select(sel.id, true); // properties stay current when the agent edits the selected node
-  if (first && !restoredCam && native) setTimeout(() => { if (!restoredCam) fitAll({ instant: true }); }, 250); // insets arrive just after load
 };
 function pagesArrived() {
   if (pagesReady) return;
@@ -3807,13 +3849,12 @@ es.addEventListener('presence', e => {
 });
 // widgets.js is a deferred module; keep what the stream says before it starts listening.
 for (const n of ["hello", "widgets", "wdata"]) es.addEventListener(n, (e) => { if (host.early) host.early.push([n, e.data]); });
-es.onerror = () => {};
-es.connect();
+if (file) es.connect();
 let tabShown = true;
 function setTabShown(on) {
   if (on === tabShown) return;
   tabShown = on;
-  if (on) { es.connect(); requestFlush(false); scheduleVisible(); } else es.close();
+  if (on) { if (file) es.connect(); requestFlush(false); scheduleVisible(); } else { saveCam(); es.close(); }
   host.emit("tab", on);
 }
 readViewBox();
@@ -3839,7 +3880,14 @@ window.canvasCmd = (c) => {
     applyCam();
   } else if (c.cmd === "select") select(c.id);
   else if (c.cmd === "deselect") deselect();
-  else if (c.cmd === "insets") { insets = { l: c.l, t: c.t, r: c.r, b: c.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); sizeGuides(); requestFlush(); host.emit("cmd", c); }
+  else if (c.cmd === "insets") {
+    insets = { l: c.l, t: c.t, r: c.r, b: c.b };
+    VW = view.clientWidth; VH = view.clientHeight;
+    readViewBox(); sizeGuides();
+    if (!initialInsets && cam && !restoredCam && perf.picture === null && !drag) fitAll({ instant: true });
+    initialInsets = true;
+    requestFlush(); host.emit("cmd", c);
+  }
   else if (c.cmd === "zoomCorner") {
     host.emit("cmd", c);
     // Keep geometry on the root even when the comments module has not loaded yet.

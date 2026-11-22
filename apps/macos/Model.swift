@@ -274,6 +274,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             // A changed list of Clouds is a newer revision: the server takes only the newest (src/cloud-config.ts).
             if prefs.clouds != oldValue.clouds && prefs.cloudsRev == oldValue.cloudsRev { prefs.cloudsRev += 1; return }
             prefs.save(.standard)
+            if prefs.openView != oldValue.openView || prefs.boardLabels != oldValue.boardLabels { tabHost.clearPicture() }
             pushPrefs(everywhere: true)
             if prefs.keptTabs != oldValue.keptTabs { evictTabs() }
         }
@@ -283,6 +284,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var theme = AppTheme.stored {
         didSet {
             UserDefaults.standard.set(theme.rawValue, forKey: "canvas.theme")
+            tabHost.clearPicture()
             NSApplication.shared.appearance = theme.appearance
         }
     }
@@ -332,13 +334,17 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             gpuWarmView = nil
             return
         }
-        // Only the shown tab speaks for the window: a hidden one's selection, toasts or document are not on screen.
-        guard message.frameInfo.isMainFrame, message.webView === webView else { return }
+        guard message.frameInfo.isMainFrame else { return }
         guard let text = message.body as? String, let data = text.data(using: .utf8),
               let m = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         let query = message.frameInfo.request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: true)?.queryItems }
         let native = query?.contains { $0.name == "shell" && $0.value == "native" } == true
         let key = query?.first { $0.name == "file" }?.value ?? ""
+        if native, let camera = m["openingCamera"] as? [String: Any], let source = message.webView, live[key] === source {
+            UserDefaults.standard.set(camera, forKey: openingCameraKey(key))
+        }
+        // Only the shown tab speaks for the window.
+        guard message.webView === webView else { return }
         let token = loadToken
         DispatchQueue.main.async {
             guard token == self.loadToken, !native || key == self.activeKey else { return }
@@ -347,6 +353,13 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func apply(_ m: [String: Any]) {
+        if let frame = m["openingFrame"] as? [String: Any] {
+            tabHost.clearPicture()
+            openingPictureFile = nil
+            #if CANVAS_QA
+            openingTimings["live"] = frame["at"]
+            #endif
+        }
         if let open = m["commentsSidebar"] as? Bool { commentsSidebarOpen = open }
         if m["cloudRemoved"] as? Bool == true, let file = currentFile { close(file); flash("Your access to this Cloud was removed"); return }
         if let file = m["file"] as? String, file != currentFile { noteOpened(file) }
@@ -608,6 +621,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             return
         }
         guard let url = DocURL.page(base: base, file: file) else { return }
+        #if CANVAS_QA
+        openingAction = Date().timeIntervalSince1970 * 1000
+        #endif
         homeShown = false
         // Opening a file on purpose (a card, Open, a tab) is "last opened", even when its tab already shows it.
         if !quietRecents.contains(file) { MainActor.assumeIsolated { HomeStore.shared.touch(file) } }
@@ -652,6 +668,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func show(_ key: String, url: URL) {
         loadToken += 1
         let token = loadToken
+        if activeKey == nil {
+            switchTo(key, url: url)
+            return
+        }
         flushTextEdit { ok in
             guard token == self.loadToken else { return } // another load since: that one wins
             if !ok && !self.textSaveFailed {
@@ -664,6 +684,33 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
     }
 
+    var openingAppearance: String {
+        NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])?.rawValue ?? ""
+    }
+
+    private func openingCameraKey(_ file: String) -> String { "canvas.openingCamera." + Thumbnails.key(file) }
+
+    private var openingPictureFile: String?
+    func showOpeningPicture(_ file: String) {
+        guard !file.isEmpty, prefs.openView == .restore, let saved = OpeningPicture.read(file),
+              saved.labels == prefs.boardLabels, saved.appearance == openingAppearance,
+              let camera = UserDefaults.standard.dictionary(forKey: openingCameraKey(file)),
+              NSDictionary(dictionary: camera).isEqual(to: saved.view.camera),
+              let image = NSImage(data: saved.png),
+              tabHost.showPicture(image, size: NSSize(width: saved.width, height: saved.height), scale: saved.scale) else { return }
+        openingPictureFile = file
+        #if CANVAS_QA
+        openingTimings["saved"] = Date().timeIntervalSince1970 * 1000
+        openingTimings["view"] = ["page": saved.view.page, "x": saved.view.x, "y": saved.view.y, "z": saved.view.z]
+        #endif
+    }
+
+    #if CANVAS_QA
+    var openingTimings: [String: Any] = [:]
+    var openingWindow: Double = 0
+    var openingAction: Double = 0
+    #endif
+
     private func switchTo(_ key: String, url: URL) {
         let old = webView, oldKey = activeKey
         if key == oldKey, live[key] === old {
@@ -672,7 +719,12 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             return
         }
         // The page going out of sight is photographed for its card on Home (it must be in the window to be drawn).
-        if let k = oldKey, !k.isEmpty, !homeShown, !boards.isEmpty { saveThumbnail(of: old, file: k) }
+        if let k = oldKey, !k.isEmpty, !homeShown, !boards.isEmpty {
+            saveThumbnail(of: old, file: k)
+            saveOpeningPicture(of: old, file: k)
+        }
+        let alreadyShowingPicture = oldKey == nil && openingPictureFile == key
+        if !alreadyShowingPicture { tabHost.clearPicture() }
         // The inspector must never write the old document's selection into the new one (same node ids).
         clearDocumentState()
         // The panels show nothing (not the old tab's pages and layers) until the new tab's page reports its state.
@@ -707,7 +759,11 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         tabHost.show(next)
         if hadFocus || next.window?.firstResponder === next.window { next.window?.makeFirstResponder(next) }
         if fresh {
+            #if CANVAS_QA
+            if !alreadyShowingPicture { openingTimings = [:] }
+            #endif
             next.load(URLRequest(url: url))
+            if !alreadyShowingPicture { showOpeningPicture(key) }
         } else {
             if !key.isEmpty { noteOpened(key) }
             tabActive(next, true)
@@ -715,6 +771,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             run("{cmd:'resync'}")
             resendInsets()
         }
+        #if CANVAS_QA
+        openingTimings["switched"] = Date().timeIntervalSince1970 * 1000
+        #endif
         evictTabs()
         objectWillChange.send()
     }

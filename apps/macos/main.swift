@@ -202,6 +202,38 @@ Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
   DispatchQueue.global(qos: .utility).async { keepServerUp() }
 }
 
+// Start the server while AppKit creates the window and WebKit prepares its first view.
+DispatchQueue.global(qos: .userInitiated).async {
+  startOrReplaceServer()
+  for _ in 0..<800 { if serverUp() { break }; usleep(25_000) }
+  DispatchQueue.main.async {
+    // Usage counts (src/usage-counts.ts): this launch, and a crash when the last run never quit.
+    if lastRunCrashed { UsageCount.send("crash", to: base) }
+    UsageCount.send("app.open", to: base)
+    serverReady = true
+    let remembered = UserDefaults.standard.string(forKey: "canvas.lastFile")
+    if pendingFinderFile == nil, pendingLink == nil, !(remembered.map { FileManager.default.fileExists(atPath: $0) } ?? false) {
+      model.warmGpu()
+    }
+    // Whether the update the last quit installed took (a toast and a usage count).
+    MainActor.assumeIsolated { Updater.shared.launched() }
+    // A Finder open that arrived before the server was up goes first; otherwise the remembered file.
+    model.refreshAgentReady()
+    model.startCloudFileNames()
+    let defaults = UserDefaults.standard, env = ProcessInfo.processInfo.environment
+    let last = defaults.string(forKey: "canvas.lastFile")
+    if FirstRun.marksWelcomed(lastFile: last, openFiles: model.openFiles, env: env) { defaults.set(true, forKey: FirstRun.key) }
+    // Hosting was on when Canvas quit: the Cloud starts again.
+    MainActor.assumeIsolated { CloudAccount.shared.resumeHosting(model) }
+    if let invite = pendingInvite { pendingInvite = nil; MainActor.assumeIsolated { openInvite(invite) } }
+    if let l = pendingLink { pendingLink = nil; model.openLink(l) }
+    else if let f = pendingFinderFile { pendingFinderFile = nil; model.open(f) }
+    else if FirstRun.shouldWelcome(welcomed: defaults.bool(forKey: FirstRun.key), lastFile: last, openFiles: model.openFiles, env: env) { openWelcome() }
+    else if let last, FileManager.default.fileExists(atPath: last) { model.open(last) }
+    else { DispatchQueue.global(qos: .userInitiated).async { loadDesign() } }
+  }
+}
+
 let config = WKWebViewConfiguration()
 config.websiteDataStore = .default() // the camera position per file lives in localStorage
 
@@ -257,10 +289,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   // (or a server that does not answer) keeps the app open, with the edit still on screen. With every edit saved and
   // an update ready, the updater stops the server and starts its helper before the app goes (Updater.beforeQuit).
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    // The shown file is photographed for its card on Home (a second at most), then the saves below.
-    var photographed = false
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { if !photographed { photographed = true; self.finishQuit() } }
-    model.snapshotShown { if !photographed { photographed = true; self.finishQuit() } }
+    finishQuit()
     return .terminateLater
   }
   func finishQuit() {
@@ -268,7 +297,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
       let finish = { (ok: Bool) in
         if !ok { model.flash("Canvas could not save the last change, so it stayed open. Try again, or quit once more to discard it.") }
         if ok {
-          MainActor.assumeIsolated { Updater.shared.beforeQuit { go in NSApp.reply(toApplicationShouldTerminate: go) } }
+          var photographed = false
+          let continueQuit = {
+            guard !photographed else { return }
+            photographed = true
+            MainActor.assumeIsolated { Updater.shared.beforeQuit { go in NSApp.reply(toApplicationShouldTerminate: go) } }
+          }
+          DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: continueQuit)
+          model.snapshotShown(then: continueQuit)
         } else {
           if !quitAnyway { MainActor.assumeIsolated { Updater.shared.quitCancelled() } }
           NSApp.reply(toApplicationShouldTerminate: quitAnyway)
@@ -1109,6 +1145,15 @@ MainActor.assumeIsolated { QA.install(model: model, window: window) }
 
 app.windows.forEach { _ in }
 window.makeKeyAndOrderFront(nil)
+#if CANVAS_QA
+model.openingWindow = Date().timeIntervalSince1970 * 1000
+#endif
+DispatchQueue.main.async {
+  guard !openedFromFinder, pendingLink == nil, !serverReady,
+        let last = UserDefaults.standard.string(forKey: "canvas.lastFile") else { return }
+  window.contentView?.layoutSubtreeIfNeeded()
+  model.showOpeningPicture(last)
+}
 // The palette's keys (Cmd+K, Cmd+/, and its arrows while open) from the first key press, not from whenever SwiftUI
 // first shows its layer: Cmd+/ has no menu item to fall back on.
 PaletteController.shared.install(model)
@@ -1153,32 +1198,6 @@ func loadDesign() {
   }.resume()
 }
 
-DispatchQueue.global(qos: .userInitiated).async {
-  startOrReplaceServer()
-  for _ in 0..<200 { if serverUp() { break }; usleep(100_000) }
-  // Usage counts (src/usage-counts.ts): this launch, and a crash when the last run never quit.
-  if lastRunCrashed { UsageCount.send("crash", to: base) }
-  UsageCount.send("app.open", to: base)
-  DispatchQueue.main.async {
-    serverReady = true
-    model.warmGpu()
-    // Whether the update the last quit installed took (a toast and a usage count).
-    MainActor.assumeIsolated { Updater.shared.launched() }
-    // A Finder open that arrived before the server was up goes first; otherwise the remembered file.
-    model.refreshAgentReady()
-    model.startCloudFileNames()
-    let defaults = UserDefaults.standard, env = ProcessInfo.processInfo.environment
-    let last = defaults.string(forKey: "canvas.lastFile")
-    if FirstRun.marksWelcomed(lastFile: last, openFiles: model.openFiles, env: env) { defaults.set(true, forKey: FirstRun.key) }
-    // Hosting was on when Canvas quit: the Cloud starts again.
-    MainActor.assumeIsolated { CloudAccount.shared.resumeHosting(model) }
-    if let invite = pendingInvite { pendingInvite = nil; MainActor.assumeIsolated { openInvite(invite) } }
-    if let l = pendingLink { pendingLink = nil; model.openLink(l) }
-    else if let f = pendingFinderFile { pendingFinderFile = nil; model.open(f) }
-    else if FirstRun.shouldWelcome(welcomed: defaults.bool(forKey: FirstRun.key), lastFile: last, openFiles: model.openFiles, env: env) { openWelcome() }
-    else { DispatchQueue.global(qos: .userInitiated).async { loadDesign() } }
-  }
-}
 
 /// The first launch: the Welcome file (a copy of the sample with the welcome card, src/onboarding.ts). If the server
 /// cannot make it, the usual start (the most recent file, else the empty window).

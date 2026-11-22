@@ -277,7 +277,7 @@ final class BridgeClient {
   private func postStatus(_ path: String, _ body: [String: Any]) async -> Int {
     #if CANVAS_QA
     if path == "api/state", let raw = ProcessInfo.processInfo.environment["CANVAS_QA_SETTINGS_DELAY_MS"],
-       let ms = UInt64(raw), ms <= 3000 {
+       let ms = UInt64(raw), ms <= 10_000 {
       try? await Task.sleep(nanoseconds: ms * 1_000_000)
     }
     #endif

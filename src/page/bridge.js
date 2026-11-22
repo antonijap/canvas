@@ -366,20 +366,15 @@ function run(msg) {
 
 // ---------- stream ----------
 const qs = new URLSearchParams({ client: clientId, role: "page", host: host.native ? "native" : "browser", file: host.file });
-let es = null;
-function connect() {
-  if (es) return;
-  es = new EventSource("/api/bridge/events?" + qs);
-  es.onmessage = (e) => {
-    let m; try { m = JSON.parse(e.data); } catch { return; }
-    if (m.type === "hello") { open = true; flush(); }
-    else if (m.type === "cmd") run(m);
-  };
-  es.onerror = () => { open = false; };
-}
-connect();
-// A hidden tab in the app (canvasCmd "tab") leaves the bridge: agents talk to the tab that is shown.
-host.on("tab", (on) => { if (on) connect(); else if (es) { es.close(); es = null; open = false; } });
+const es = host.reconnectingStream(() => "/api/bridge/events?" + qs, () => { open = false; });
+es.addEventListener("message", (e) => {
+  let m; try { m = JSON.parse(e.data); } catch { return; }
+  if (m.type === "hello") { open = true; flush(); }
+  else if (m.type === "cmd") run(m);
+});
+es.connect();
+// A hidden tab leaves the bridge so agents talk to the tab that is shown.
+host.on("tab", (on) => { if (on) es.connect(); else es.close(); });
 // op and ensureLoaded: the page's own scripts (context.js) reuse the agent ops and the board loading.
 window.canvasBridge = { clientId, flush, op: (name, args) => ops[name](args || {}), ensureLoaded };
 })();

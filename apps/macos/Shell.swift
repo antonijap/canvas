@@ -10,12 +10,49 @@ import WebKit
 /// window is hidden to WebKit, so its page stops drawing (document.hidden) and keeps everything it had.
 final class TabHostView: NSView {
     private(set) weak var shown: NSView?
+    private let picture = NSImageView()
+    private var pictureSize = NSSize.zero
+    private var pictureScale: CGFloat = 1
+    private var pictureAppearance: NSAppearance.Name?
+
+    func showPicture(_ image: NSImage, size: NSSize, scale: CGFloat) -> Bool {
+        clearPicture()
+        guard bounds.size == size, window?.backingScaleFactor == scale else { return false }
+        picture.frame = bounds
+        picture.imageScaling = .scaleAxesIndependently
+        picture.image = image
+        pictureSize = size
+        pictureScale = scale
+        pictureAppearance = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+        addSubview(picture, positioned: .above, relativeTo: shown)
+        return true
+    }
+
+    func clearPicture() {
+        picture.removeFromSuperview()
+        picture.image = nil
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        if picture.superview != nil, pictureAppearance != effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) {
+            clearPicture()
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        if picture.superview != nil, bounds.size != pictureSize || window?.backingScaleFactor != pictureScale {
+            clearPicture()
+        }
+    }
+
     func show(_ v: NSView) {
         guard v !== shown else { return }
         shown?.removeFromSuperview()
         v.frame = bounds
         v.autoresizingMask = [.width, .height]
-        addSubview(v)
+        addSubview(v, positioned: .below, relativeTo: picture.superview == self ? picture : nil)
         shown = v
     }
 }

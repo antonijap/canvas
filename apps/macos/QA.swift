@@ -233,13 +233,27 @@ enum QA {
             return ["bytes": sample.totalMemory, "pageBytes": pageBytes,
                     "roles": Dictionary(uniqueKeysWithValues: sample.rows.map { ($0.role.rawValue, $0.memory) }),
                     "pages": sample.rows.first { $0.role == .page }?.pids.count ?? 0]
+        case "qa.opening":
+            return model.openingTimings.merging(["window": model.openingWindow, "action": model.openingAction]) { _, new in new }
+        case "qa.savepicture":
+            await withCheckedContinuation { continuation in
+                model.snapshotOpeningPicture { continuation.resume() }
+            }
+            return ["ok": true]
         case "qa.gpuwarm": return model.gpuWarm ?? [:]
         case "qa.ping": return ["qa": true, "pid": Int(ProcessInfo.processInfo.processIdentifier)]
         case "qa.quit":
             // Let the bridge acknowledge before exiting. The synthetic event loop cannot wait for AppKit's quit dialog.
             RunMarker.quit(.standard)
             UserDefaults.standard.synchronize()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { exit(EXIT_SUCCESS) }
+            var acknowledged = false
+            let exitSoon = {
+                guard !acknowledged else { return }
+                acknowledged = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { exit(EXIT_SUCCESS) }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: exitSoon)
+            model.snapshotOpeningPicture(then: exitSoon)
             return ["ok": true]
         case "qa.window": return try windowOp(a)
         case "qa.mouse": return try await mouse(a)

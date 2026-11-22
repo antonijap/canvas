@@ -139,8 +139,17 @@ extension CanvasModel {
     func showHome() {
         guard !homeShown else { return }
         flushTextEdit { _ in
-            self.snapshotShown()
-            self.homeShown = true
+            let view = self.webView
+            let file = self.currentFile
+            var moved = false
+            let show = {
+                guard !moved, self.webView === view, self.currentFile == file else { return }
+                moved = true
+                self.homeShown = true
+            }
+            // Take the picture while WebKit still has a window to draw into.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: show)
+            self.snapshotShown(then: show)
         }
     }
 
@@ -173,10 +182,15 @@ extension CanvasModel {
         }
     }
 
-    /// A snapshot of the shown page, for its card on Home. Only a page that has a document drawn.
+    /// Save both sizes while the page is shown. A caller can wait for the writes before quitting.
     func snapshotShown(then done: (() -> Void)? = nil) {
         guard let file = currentFile, !boards.isEmpty, !homeShown else { done?(); return }
-        saveThumbnail(of: webView, file: file, then: done)
+        let snapshots = DispatchGroup()
+        snapshots.enter()
+        saveThumbnail(of: webView, file: file) { snapshots.leave() }
+        snapshots.enter()
+        snapshotOpeningPicture { snapshots.leave() }
+        if let done { snapshots.notify(queue: .main, execute: done) }
     }
 
     /// Writes a 480 px wide PNG of the page to the state folder. Nothing when the page is not up, or draws nothing.

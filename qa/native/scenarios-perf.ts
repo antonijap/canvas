@@ -1,7 +1,13 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { decodePng } from "../../fidelity/png.ts";
 import { openFixture } from "../../bench/fixtures/open.ts";
 import { IMAGE_BOARDS, IMAGE_FILES, OVERVIEW_BOARDS, OVERVIEW_FILES } from "../../bench/fixtures/images.ts";
 import { stats } from "../../bench/lib.ts";
 import { gpuWarm, measureOpen, openImages } from "../../bench/native-open.ts";
+import { measureOpeningPicture, openingState, recentCard } from "../../bench/native-opening-picture.ts";
 import { recordFrameGaps } from "../frames.ts";
 import { sleep } from "../lib.ts";
 import { center, Fail, NT, sc } from "./harness.ts";
@@ -36,7 +42,9 @@ for (const kind of ["empty", "many"] as const) {
   });
 }
 
-sc("open", "startup GPU warm-up finishes before a later file opens", { covers: [] }, async (t: NT) => {
+sc("open", "startup GPU warm-up finishes before a later file opens", { startEmpty: true, covers: [] }, async (t: NT) => {
+  for (const file of (await t.state()).openFiles) await t.cmd("close", { file });
+  await t.app.relaunch();
   const warm = await gpuWarm(t.app, true);
   t.ok(warm.started != null && warm.finished != null && warm.finished >= warm.started && !warm.error,
     `startup GPU warm-up: ${JSON.stringify(warm)}`);
@@ -111,3 +119,60 @@ sc("open-images-10k", "draws ten thousand distinct JPEGs at fit and sharpens on 
     await t.cmd("close", { file });
   }
 });
+
+for (const kind of ["launch-last-file", "open-recent"] as const) {
+  sc("open-picture", `${kind} presents the saved view and replaces it with the exact frame`,
+    { startEmpty: true, covers: ["render:open-cache"] }, async (t: NT) => {
+      const samples = [];
+      for (const count of [7, 36, 72, 120, 150]) samples.push(await measureOpeningPicture(t.app, kind, count));
+      t.note(JSON.stringify(samples));
+      t.ok(samples.every(s => s.saved), "each opening used a validated saved picture");
+      t.ok(stats(samples.map(s => s.picture)).p50 <= (kind === "launch-last-file" ? 300 : 150), "median picture latency");
+      t.ok(stats(samples.map(s => s.live)).p50 <= (kind === "launch-last-file" ? 1200 : 600), "median exact latency");
+    });
+}
+
+sc("open-picture", "Home captures actual canvas pixels and rejects an old theme or replaced image",
+  { startEmpty: true, covers: ["home:thumbnail", "render:open-cache"] }, async (t: NT) => {
+    const file = openFixture(t.app.docs, "seven", "Saved view.canvas");
+    const key = createHash("sha256").update(file).digest("hex").slice(0, 32);
+    const picture = path.join(t.app.dir, "state", "opening-pictures", key + ".plist");
+    const view = new NT(t.app, file);
+    try {
+      await t.cmd("qa.theme", { theme: "light" });
+      t.ok((await measureOpen(t.app, file)).picture != null, "the sample draws");
+      let card = await recentCard(view, file);
+      await t.waitFor(async () => fs.existsSync(picture), "Home to save the view").catch(async error => {
+        t.note(JSON.stringify(await openingState(t.app)));
+        throw error;
+      });
+      const png = execFileSync("plutil", ["-extract", "png", "raw", "-o", "-", picture], { maxBuffer: 20 << 20 });
+      const decoded = decodePng(Buffer.from(png.toString(), "base64"));
+      let coloured = 0;
+      for (let i = 0; i < decoded.data.length; i += 16) {
+        const [r, g, b, a] = decoded.data.subarray(i, i + 4);
+        if (a > 240 && Math.max(r, g, b) - Math.min(r, g, b) > 36) coloured++;
+      }
+      t.ok(coloured > 1000, "the saved pixels include the coloured artwork");
+
+      await t.cmd("close", { file });
+      await t.waitState(s => s.homeShown && !s.openFiles.includes(file), "the sample tab to close");
+      await t.cmd("qa.theme", { theme: "dark" });
+      await t.click(card);
+      await t.waitFor(async () => (await openingState(t.app)).live != null, "the dark view to draw");
+      t.eq((await openingState(t.app)).saved, undefined, "a light picture is rejected in the dark theme");
+
+      await t.cmd("close", { file });
+      await t.waitState(s => !s.openFiles.includes(file), "the dark sample tab to close");
+      await t.cmd("qa.theme", { theme: "light" });
+      card = await recentCard(view, file);
+      fs.copyFileSync(path.join(file, "media", "img-1.png"), path.join(file, "media", "img-0.png"));
+      await t.click(card);
+      await t.waitFor(async () => (await openingState(t.app)).live != null, "the edited design to draw");
+      t.eq((await openingState(t.app)).saved, undefined, "a changed image invalidates the saved view");
+    } finally {
+      await t.cmd("close", { file }).catch(() => {});
+      await t.cmd("qa.theme", { theme: "system" });
+      fs.rmSync(file, { recursive: true, force: true });
+    }
+  });
