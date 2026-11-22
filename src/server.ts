@@ -589,6 +589,23 @@ export function startServer(port = PORT()): Promise<http.Server> {
     noteAgent(req);
     noteMcp(req);
     try {
+      if (url.pathname === "/gpu-warm") {
+        return send(res, 200, "text/html; charset=utf-8", `<!doctype html><canvas width="64" height="64"></canvas>
+<script type="module">
+import { warmEngine } from "/page/engine-view.js";
+const started = performance.timeOrigin + performance.now();
+try {
+  await warmEngine(document.querySelector("canvas"));
+  window.webkit?.messageHandlers.canvasState.postMessage(JSON.stringify({ gpuWarm: {
+    started, finished: performance.timeOrigin + performance.now()
+  } }));
+} catch (error) {
+  window.webkit?.messageHandlers.canvasState.postMessage(JSON.stringify({ gpuWarm: {
+    started, finished: performance.timeOrigin + performance.now(), error: String(error)
+  } }));
+}
+</script>`);
+      }
       // Start the WebView and the document read together. The event stream still waits for the current snapshot.
       if (url.pathname === "/") {
         const file = url.searchParams.get("file");

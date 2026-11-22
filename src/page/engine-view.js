@@ -43,18 +43,10 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   canvas.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;display:block";
   let engine, device = null, late = false;
   const start = async () => {
-    // A new wasm instance for every engine after the first (engineModuleUrl): one that trapped (a panic aborts) stays
-    // trapped, and an engine started in it again never came up.
-    const mod = await import(engineModuleUrl(engineStarts++));
-    await mod.default();
-    // Keep the GPUDevice the engine asks for, only to hear when it is lost (driver reset, GPU switch).
-    const proto = window.GPUAdapter && GPUAdapter.prototype, orig = proto && proto.requestDevice;
-    if (orig) proto.requestDevice = async function (...a) { const d = await orig.apply(this, a); device = d; return d; };
-    let e;
-    try { e = await mod.Engine.create(canvas); } finally { if (orig) proto.requestDevice = orig; }
-    // Came after the page gave up on it (ENGINE_START_MS): let it go.
-    if (late) { try { e.free(); } catch {} return null; }
-    return e;
+    const started = await startEngine(canvas);
+    device = started.device;
+    if (late) { started.engine.free(); return null; }
+    return started.engine;
   };
   try {
     engine = await withTimeout(start(), ENGINE_START_MS, "the engine did not start within " + ENGINE_START_MS / 1000 + " s");
@@ -214,7 +206,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     }
     return planImageDecodes(items, IMAGE_BUDGET);
   }
-  const mayDecode = (m) => !m.busy && !m.gone && performance.now() >= m.retryAt;
+  const mayDecode = (m) => !m.busy && performance.now() >= m.retryAt;
   /** Start what the plan asks for: first decodes always, bigger ones only while the camera is still. */
   function applyImagePlan(only) {
     if (dead) return;
@@ -254,7 +246,9 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       const response = await fetch(url);
       if (!response.ok) throw Object.assign(new Error(String(response.status)), { status: response.status });
       const blob = await response.blob();
-      const bm = await createImageBitmap(blob);
+      const bm = await createImageBitmap(blob).catch((cause) => {
+        throw Object.assign(new Error("invalid bitmap", { cause }), { invalidBitmap: true });
+      });
       const nw = bm.width, nh = bm.height;
       return { bm: await capBitmap(bm, cap), nw, nh, opaque: blob.type === "image/jpeg" ? true : undefined, etag: response.headers.get("etag") };
     };
@@ -266,7 +260,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       if (dead) { bm.close(); return; } // the engine is gone: nobody will ever draw it
       // The board that wanted it left (another page, a removal) while it decoded: never register it.
       if (images.get(url) !== m || !m.boards.size) { bm.close(); releaseUnusedImages(); return; }
-      m.cap = cap; m.fails = 0; m.retryAt = 0;
+      m.cap = cap; m.fails = 0; m.retryAt = 0; m.gone = false;
       m.nw = nw || bm.width; m.nh = nh || bm.height;
       // `opaque` (no transparency, known for sure) saves the engine reading the pixels before it tiles the image.
       if (opaque === undefined) engine.registerImage(url, bm, bm.width, bm.height);
@@ -281,18 +275,16 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       applyImagePlan();
     }).catch((e) => {
       m.busy = false;
-      const gone = e && e.status >= 400 && e.status < 500;
+      const gone = imageUnavailable(e);
       if (!gone || !toldGone.has(url)) console.warn("[canvas] image", url, e && e.message);
       if (gone) toldGone.add(url);
       if (dead) return;
-      // Not there (yet): an agent or a script often writes the picture a moment after the layer that uses it. It does
-      // not hold up "fully drawn" (gone), and it is asked for again with the same backoff while a board still uses it.
-      if (gone) m.gone = true;
+      // A missing or unreadable file can appear later. Draw the available content while retrying.
+      if (gone && !m.gone) { m.gone = true; onChange(); }
       const wait = imageRetryDelay(++m.fails);
       m.retryAt = performance.now() + wait;
       setTimeout(() => {
         if (dead || images.get(url) !== m || !m.boards.size) return;
-        m.gone = false;
         if (!mayDecode(m)) return;
         applyImagePlan(new Set([url]));
       }, wait + 10);
@@ -817,6 +809,45 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   };
 }
 
+async function startEngine(canvas) {
+  // A trapped wasm instance cannot start another engine.
+  const mod = await import(engineModuleUrl(engineStarts++));
+  await mod.default();
+  let device;
+  const proto = window.GPUAdapter?.prototype, requestDevice = proto?.requestDevice;
+  if (requestDevice) proto.requestDevice = async function (...args) {
+    device = await requestDevice.apply(this, args);
+    return device;
+  };
+  try { return { engine: await mod.Engine.create(canvas), device }; }
+  finally { if (requestDevice) proto.requestDevice = requestDevice; }
+}
+
+/** Compile and submit the stock tile and compositor pipelines before a document needs them. */
+export async function warmEngine(canvas) {
+  const { engine, device } = await startEngine(canvas);
+  try {
+    engine.resize(64, 64, 1);
+    engine.setBoard("warm", 0, 0, JSON.stringify({ root: {
+      id: "warm", type: "frame", width: 64, height: 64, fill: "#FFFFFF",
+      children: [{ id: "shape", type: "ellipse", x: 8, y: 8, width: 32, height: 32, fill: "#204080" }],
+    } }));
+    // A detached WebView has no animation frames. Submit from a task once Vello is ready.
+    const deadline = performance.now() + ENGINE_START_MS;
+    do {
+      engine.frame();
+      if (engine.pictureState()[3] === 1) {
+        await device.queue.onSubmittedWorkDone();
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    } while (performance.now() < deadline);
+    throw new Error("GPU warm-up drew no board");
+  } finally {
+    engine.free();
+  }
+}
+
 // ---------------------------------------------------------------- pure helpers (node-tested)
 
 /** Engines started in this page so far (engineModuleUrl). */
@@ -1170,6 +1201,9 @@ export function planImageDecodes(items, budget) {
 export function decodeScale(w, h, cap) {
   return Math.min(1, cap / Math.max(w, h), cap > MAX_IMAGE_SIDE ? Math.sqrt(FULL_IMAGE_PX / (w * h)) : 1);
 }
+
+/** An asset that answered but cannot be drawn can settle while its retries continue. */
+export const imageUnavailable = (error) => !!(error && (error.invalidBitmap || (error.status >= 400 && error.status < 500)));
 
 /**
  * Bounded backoff for an image that could not be drawn: 1 s, 2 s, 4 s ... at most 30 s. That covers a missing file

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 // @ts-expect-error: a browser module without types
-import { boardsToReorder, contentKey, sceneTextAndKey, cssColorToHex, DECODE_CONCURRENCY, decodedBytes, DECODER_SRC, engineModuleUrl, ENGINE_MAX_RESTARTS, ENGINE_RESTART_WINDOW_MS, engineRestartDelay, FULL_IMAGE_SIDE, hash53, IMAGE_BUDGET, IMAGE_CAPS, imageCapFor, imageRetryDelay, indexScene, inSlices, MAX_IMAGE_SIDE, PARK_MAX_BOARDS, PARK_MAX_NODES, parkedToEvict, PLACE_SLICE_IDLE_MS, PLACE_SLICE_MS, placeOrder, planImageDecodes, raiseInOrder, SMALL_IMAGE_SIDE, useInView, withTimeout } from "../src/page/engine-view.js";
+import { boardsToReorder, contentKey, sceneTextAndKey, cssColorToHex, DECODE_CONCURRENCY, decodedBytes, DECODER_SRC, engineModuleUrl, ENGINE_MAX_RESTARTS, ENGINE_RESTART_WINDOW_MS, engineRestartDelay, FULL_IMAGE_SIDE, hash53, IMAGE_BUDGET, IMAGE_CAPS, imageCapFor, imageRetryDelay, imageUnavailable, indexScene, inSlices, MAX_IMAGE_SIDE, PARK_MAX_BOARDS, PARK_MAX_NODES, parkedToEvict, PLACE_SLICE_IDLE_MS, PLACE_SLICE_MS, placeOrder, planImageDecodes, raiseInOrder, SMALL_IMAGE_SIDE, useInView, withTimeout } from "../src/page/engine-view.js";
 
 describe("cssColorToHex (the engine background follows the page's canvas colour)", () => {
   test("rgb, rgba and hex forms", () => {
@@ -351,4 +351,12 @@ test("a resize draws in the same task, with the page's camera", async () => {
   const now = { ...engine, redraw: () => { calls.push("redraw"); return false; } };
   assert.equal(resizeAndDraw(now, 800, 600, 2, null), false);
   assert.deepEqual(calls, ["resize 800 600 2", "redraw"]);
+});
+
+
+test("an unreadable bitmap can settle while transient fetch failures remain pending", () => {
+  assert.equal(imageUnavailable({ invalidBitmap: true }), true);
+  assert.equal(imageUnavailable({ status: 404 }), true);
+  assert.equal(imageUnavailable({ status: 503 }), false);
+  assert.equal(imageUnavailable(new Error("network error")), false);
 });

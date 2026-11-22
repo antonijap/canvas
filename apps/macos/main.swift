@@ -1159,6 +1159,7 @@ DispatchQueue.global(qos: .userInitiated).async {
   UsageCount.send("app.open", to: base)
   DispatchQueue.main.async {
     serverReady = true
+    model.warmGpu()
     // Whether the update the last quit installed took (a toast and a usage count).
     MainActor.assumeIsolated { Updater.shared.launched() }
     // A Finder open that arrived before the server was up goes first; otherwise the remembered file.

@@ -307,9 +307,31 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         watchMemoryPressure()
     }
 
+    private var gpuWarmView: WKWebView?
+    private(set) var gpuWarm: [String: Any]?
+
+    func warmGpu() {
+        guard gpuWarmView == nil, gpuWarm == nil else { return }
+        let wv = WKWebView(frame: NSRect(x: 0, y: 0, width: 64, height: 64), configuration: configuration)
+        gpuWarmView = wv
+        wv.load(URLRequest(url: base.appendingPathComponent("gpu-warm")))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self, weak wv] in
+            guard let self, let wv, self.gpuWarmView === wv else { return }
+            self.gpuWarm = ["error": "GPU warm-up timed out"]
+            self.gpuWarmView = nil
+        }
+    }
+
     // MARK: page -> shell
 
     func userContentController(_ c: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.frameInfo.isMainFrame, let warming = gpuWarmView, message.webView === warming,
+           let text = message.body as? String, let data = text.data(using: .utf8),
+           let result = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["gpuWarm"] as? [String: Any] {
+            gpuWarm = result
+            gpuWarmView = nil
+            return
+        }
         // Only the shown tab speaks for the window: a hidden one's selection, toasts or document are not on screen.
         guard message.frameInfo.isMainFrame, message.webView === webView else { return }
         guard let text = message.body as? String, let data = text.data(using: .utf8),

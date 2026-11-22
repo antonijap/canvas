@@ -1,5 +1,7 @@
 export const UNITS = {
   "open-2000": "ms",
+  "open-first-7": "ms",
+  "open-warm-7": "ms",
   "server-memory": "MiB",
   "drag-frames": "ms",
   "pan-zoom-frames": "ms",
@@ -10,7 +12,7 @@ export const UNITS = {
 
 export type Metric = keyof typeof UNITS;
 export const METRICS = Object.keys(UNITS) as Metric[];
-export const NATIVE_METRICS: readonly Metric[] = ["native-launch", "native-drag-frames"];
+export const NATIVE_METRICS: readonly Metric[] = ["native-launch", "native-drag-frames", "open-first-7", "open-warm-7"];
 export const WEB_METRICS = METRICS.filter((id) => !NATIVE_METRICS.includes(id));
 export const SAMPLE_COUNT = 5;
 const MIN_TOLERANCE = 0.05;

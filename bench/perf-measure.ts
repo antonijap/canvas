@@ -3,24 +3,26 @@ import os from "node:os";
 import path from "node:path";
 import { launchChrome, type Chrome } from "../fidelity/cdp.ts";
 import { recordFrameGaps } from "../qa/frames.ts";
-import { freePort, openTab, ROOT, sleep } from "../qa/lib.ts";
+import { freePort, openTab, sleep } from "../qa/lib.ts";
 import { QaApp } from "../qa/native/app.ts";
 import { NT } from "../qa/native/harness.ts";
 import { measureNativeDrag } from "../qa/native/scenarios-perf.ts";
 import { fixture, scratchCopy } from "./fixtures/gen.ts";
 import { Tab, wheelFrames } from "./latency.ts";
 import { stats } from "./lib.ts";
+import { NATIVE_APP, openSeven } from "./native-open.ts";
 import { INSTRUMENT } from "./page.ts";
 import { startHost } from "./server.ts";
-import type { Metric } from "./perf-budgets.ts";
+import { NATIVE_METRICS, type Metric } from "./perf-budgets.ts";
 
-export const NATIVE_APP = path.join(ROOT, "build/perf-native/Canvas QA.app");
 export const hasNativeBuild = () => process.platform === "darwin" && fs.existsSync(path.join(NATIVE_APP, "Contents/MacOS/Canvas"));
+
+// QaApp uses the shard in its bundle identifier. Keep it unique across gate passes.
+let nativeShard = 0;
 
 export function measurements() {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "canvas-perf-gate-")));
   let chrome: Chrome | undefined;
-  let shard = 0;
   const browser = async () => chrome ??= await launchChrome([
     "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1", "--disable-component-update", "--disable-sync",
   ]);
@@ -139,7 +141,7 @@ export function measurements() {
   }
 
   async function native(id: Metric) {
-    const app = new QaApp(root, ++shard);
+    const app = new QaApp(root, ++nativeShard);
     try {
       let started = 0;
       await app.start(NATIVE_APP, () => { started = performance.now(); });
@@ -147,6 +149,14 @@ export function measurements() {
         const paint = await app.cmd<{ method: string }>({ op: "qa.shot", args: { maxSide: 16 } });
         if (paint.method !== "windowServer") throw new Error("the window server returned no painted window");
         return performance.now() - started;
+      }
+      if (id === "open-first-7" || id === "open-warm-7") {
+        const first = await openSeven(app);
+        if (first.picture == null) throw new Error("the first file did not reach an exact picture");
+        if (id === "open-first-7") return first.picture;
+        const second = await openSeven(app, true);
+        if (second.picture == null) throw new Error("the second file did not reach an exact picture");
+        return second.picture;
       }
       const f = scratchCopy(fixture(200), app.docs);
       const t = new NT(app, f.dir);
@@ -163,7 +173,7 @@ export function measurements() {
   }
 
   return {
-    measure: (id: Metric) => id.startsWith("native-") ? native(id) : web(id),
+    measure: (id: Metric) => NATIVE_METRICS.includes(id) ? native(id) : web(id),
     close: async () => {
       try { await chrome?.stop(); }
       finally { fs.rmSync(root, { recursive: true, force: true }); }

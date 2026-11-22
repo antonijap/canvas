@@ -1132,7 +1132,7 @@ impl Engine {
         let near = view.inflate(view.width() * 0.5, view.height() * 0.5);
         let mut near_ink: Vec<Rect> = Vec::new();
         for b in &mut self.boards {
-            if !b.hidden && b.world_ink().overlaps(near) {
+            if !b.hidden && !b.ink.is_zero_area() && b.world_ink().overlaps(near) {
                 b.seen_frame = frame;
                 near_ink.push(b.ink);
             }
@@ -1150,7 +1150,8 @@ impl Engine {
         // Tiles and their cache slots are in board space (a board that moves keeps them): the view goes there.
         for (bi, b) in self.boards.iter().enumerate() {
             let wink = b.world_ink();
-            if b.hidden || !wink.overlaps(near) {
+            // An empty board cannot produce a base tile. Keeping it in work would keep the frame loop alive.
+            if b.hidden || b.ink.is_zero_area() || !wink.overlaps(near) {
                 continue;
             }
             let pos = kurbo::Vec2::new(b.x, b.y);

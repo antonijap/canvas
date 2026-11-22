@@ -90,7 +90,7 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   const wide = await t.mark({ id: "home-tab" });
   t.ok(wide.w > 60, `with no file open the tab shows its name (${wide.w} wide)`);
   t.near(wide.h, 32, 0.6, "the same control height");
-  await t.app.cmd({ op: "open", args: { file: t.file }, timeoutMs: 20_000 });
+  await t.app.openShown(t.file);
   await t.waitState((s) => s.file === t.file && !s.homeShown, "the file to open again");
 });
 
@@ -107,7 +107,7 @@ sc("home", "Home: recents newest first, comment count and a cloud on a shared ca
   sharedComments(b, url, 3, 2);
   sharedComments(c, null, 2, 1);
   const open = async (f: string) => {
-    await t.app.cmd({ op: "open", args: { file: f }, timeoutMs: 20_000 });
+    await t.app.openShown(f);
     await t.waitState((s) => s.file === f && s.pages.length > 0, `${baseName(f)} to open`, 20_000);
     await t.settle();
     await sleep(300);
@@ -203,11 +203,11 @@ sc("home", "Home: recents newest first, comment count and a cloud on a shared ca
     await t.click(center(await t.mark({ id: "home-remove" })));
     await t.waitState((s) => !s.recents.includes(gone), "the missing file to leave the recents");
     t.ok(!(await cards(t)).includes("home-gone"), "its card is gone");
-    // Right-click offers Open, Show in Finder and Remove from recents.
+    // The local card offers file and recents actions.
     await t.click(center(await t.mark({ id: "home-card", label: "home-c" })), { right: true });
     await t.waitState((s) => s.menu, "the card's menu");
     const menu = (await t.state()).menu.items as string[];
-    t.eq(menu, ["Open", "Show in Finder", "Remove from recents"], "the card's menu");
+    t.eq(menu, ["Open", "Duplicate", "Rename", "Copy Link", "Show in Finder", "Move to Cloud", "Remove from recents", "Move to Trash"], "the card's menu");
     await t.pickMenu("Remove from recents");
     await t.waitState((s) => !s.recents.includes(c), "home-c to leave the recents");
     // The Cloud's row and its page: no dot while it works (a row speaks only when it needs the person), the same cards
@@ -359,7 +359,7 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   const mk = (n: string) => { const f = path.join(t.app.docs, `tabs-${n}.canvas`); copyDir(PLAYGROUND, f); return f; };
   const [b, c] = [mk("b"), mk("c")];
   for (const f of [b, c]) {
-    await t.app.cmd({ op: "open", args: { file: f }, timeoutMs: 20_000 });
+    await t.app.openShown(f);
     await t.waitState((s) => s.file === f && s.pages.length > 0, `${baseName(f)} to open`, 20_000);
   }
   await t.settle();
@@ -431,7 +431,7 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   await t.drag(mid(tb[0]), { x: l3.x + l3.w - 6, y: mid(tb[0]).y }, { steps: 24 });
   await sleep(500);
   t.eq(await order(), [b, c, t.file], "dragged again: the order is b, c, the first file");
-  await t.app.cmd({ op: "open", args: { file: b }, timeoutMs: 20_000 });
+  await t.app.openShown(b);
   await t.waitState((s) => s.file === b && !s.homeShown, "b to show");
   t.eq((await t.cmd("qa.mainmenu", { title: "Next Tab" })).mods, (1 << 17) | (1 << 20), "Window > Next Tab has Shift and Cmd");
   await t.key("]", ["cmd", "shift"]);
@@ -451,7 +451,7 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
   const files = ["Studio Plan", "Anna Notes", "Studio Schedule", "Studio Reference", "Studio Draft", "Studio Review"]
     .map((name) => { const file = path.join(t.app.docs, name + ".canvas"); copyDir(PLAYGROUND, file); return file; });
   const open = async (file: string) => {
-    await t.app.cmd({ op: "open", args: { file }, timeoutMs: 20_000 });
+    await t.app.openShown(file);
     await t.waitState((s) => s.file === file && !s.homeShown, "overflow file active");
     await t.settle();
   };
