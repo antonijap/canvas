@@ -1939,7 +1939,7 @@ function syncSel() {
     selWorld = rs.length ? rs.reduce((u, r) => { const x = Math.min(u.x, r.x), y = Math.min(u.y, r.y); return { x, y, w: Math.max(u.x + u.w, r.x + r.w) - x, h: Math.max(u.y + u.h, r.y + r.h) - y }; }) : null;
   } else if (sel && isW(sel.id)) {
     // Widgets are placed by math from the camera, so a card mid-drag still gets its box.
-    selWorld = host.widgetRect ? host.widgetRect(sel.id) : null;
+    selWorld = host.widgetRect ? host.widgetRect(sel.id, true) : null;
   } else if (mode === "engine") {
     selWorld = sel && ev && cam ? ev.rect(sel.id) : null;
   } else {
@@ -2808,7 +2808,7 @@ function beginMove(e) {
     else return false;
   } else return pressSelect(e);
   const r0 = kind === "board" ? { x: b.meta.x, y: b.meta.y, w: b.w, h: b.h } : { x: selWorld.x, y: selWorld.y, w: selWorld.w, h: selWorld.h };
-  mv = { kind, b, id: kind === "board" ? b.meta.id : sel.id, r0, cx: e.clientX, cy: e.clientY, moved: false, pos: null, guides: [], index: null, node0: kind === "node" ? { x: selMove.x || 0, y: selMove.y || 0 } : null, dup: e.altKey, shownDup: false };
+  mv = { kind, b, id: kind === "board" ? b.meta.id : sel.id, r0, cx: e.clientX, cy: e.clientY, moved: false, pos: null, guides: [], index: null, node0: kind === "node" ? { x: selMove.x || 0, y: selMove.y || 0 } : null, dup: host.optionForDrag(e), shownDup: false };
   endTween(true);
   firstFit = null;
   try { view.setPointerCapture(e.pointerId); } catch {}
@@ -2851,7 +2851,7 @@ function pendingMove(e, id) {
   if (cloudReadOnly) return true;
   const r = worldRectOf(id);
   if (!r) return true;
-  mv = { kind: "node", b: null, id, r0: { x: r.x, y: r.y, w: r.w, h: r.h }, cx: e.clientX, cy: e.clientY, moved: false, pos: null, guides: [], index: null, node0: null, dup: e.altKey, shownDup: false, pending: true };
+  mv = { kind: "node", b: null, id, r0: { x: r.x, y: r.y, w: r.w, h: r.h }, cx: e.clientX, cy: e.clientY, moved: false, pos: null, guides: [], index: null, node0: null, dup: host.optionForDrag(e), shownDup: false, pending: true };
   endTween(true);
   firstFit = null;
   try { view.setPointerCapture(e.pointerId); } catch {}
@@ -2871,20 +2871,20 @@ function resolvePending() {
   m.node0 = { x: selMove.x || 0, y: selMove.y || 0 };
   m.pending = false;
   clearTimeout(m.pendT);
-  if (m.last) movePointer(m.last);
+  if (m.last) movePointer(m.last, m.last.altKey);
   if (mv === m && m.endAfter) endMove(false);
   return true;
 }
 view.addEventListener("pointermove", (e) => {
   if (!mv) return;
   if (mv.pending) {
-    mv.last = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey, ctrlKey: e.ctrlKey };
-    if (!resolvePending()) return;
-    if (!mv) return;
+    mv.last = { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, altKey: host.optionForDrag(e), metaKey: e.metaKey, ctrlKey: e.ctrlKey };
+    resolvePending();
+    return;
   }
   movePointer(e);
 });
-function movePointer(e) {
+function movePointer(e, copy = host.optionForDrag(e)) {
   if (!mv) return;
   let dxp = e.clientX - mv.cx, dyp = e.clientY - mv.cy;
   if (!mv.moved) { if (Math.hypot(dxp, dyp) < 3) return; mv.moved = true; if (down) down.moved = true; }
@@ -2898,7 +2898,7 @@ function movePointer(e) {
   // Where the drop lands is judged at the pointer as the layer carries it: with Shift, on the locked axis, not where
   // the pointer wandered off to (QA round 2 #11).
   mv.px = mv.cx + dxp; mv.py = mv.cy + dyp; mv.mods = { ctrl: e.ctrlKey, meta: e.metaKey };
-  mv.dup = e.altKey; // Option: drag copies, the originals stay; pressing or letting go mid-drag switches
+  mv.dup = copy;
   mv.keep = keepParent || !!mv.keepUp; // Space held: the layer keeps its parent, so no frame lights up to take it
   if ((mv.kind === "node" || mv.kind === "board") && host.autolayout) { if (mv.keep) host.autolayout.clearInto(); else host.autolayout.overInto(mv.id, mv.px, mv.py, mv.mods); }
   mvDirty = true;
@@ -2910,9 +2910,14 @@ view.addEventListener("pointerup", () => {
   endMove(false);
 });
 // Option pressed or let go while the pointer holds still: the drag switches between moving and copying now.
-const altFlip = (e) => { if (e.key !== "Alt" || !mv || !mv.moved || mv.dup === e.altKey) return; mv.dup = e.altKey; mvDirty = true; requestFlush(false); };
-addEventListener("keydown", altFlip, true);
-addEventListener("keyup", altFlip, true);
+host.on("option", (held) => {
+  if (!mv || mv.endAfter) return;
+  if (mv.last) mv.last.altKey = held;
+  if (!mv.moved || mv.dup === held) return;
+  mv.dup = held;
+  mvDirty = true;
+  requestFlush(false);
+});
 host.moving = () => !!mv;
 /** Put a board somewhere now: engine, DOM, title. The file is written separately. */
 function placeBoardAt(b, x, y) {
@@ -2965,7 +2970,7 @@ function beginGroupMove(e) {
   if (e.button !== 0 || space || !cam || !doc || !multi || mv) return false;
   const items = groupItems();
   if (!items.length) return false;
-  mv = { kind: "group", items, id: "group", r0: unionRect(items.map((i) => i.r0)), cx: e.clientX, cy: e.clientY, moved: false, pos: null, guides: [], index: null, exclude: new Set(multi) };
+  mv = { kind: "group", items, id: "group", r0: unionRect(items.map((i) => i.r0)), cx: e.clientX, cy: e.clientY, moved: false, pos: null, guides: [], index: null, exclude: new Set(multi), dup: host.optionForDrag(e), shownDup: false };
   endTween(true);
   firstFit = null;
   try { view.setPointerCapture(e.pointerId); } catch {}
@@ -3517,13 +3522,17 @@ addEventListener("keydown", (e) => { if (e.key === "Meta") cmdHeld = true; else 
 addEventListener("keyup", (e) => { if (e.key === "Meta") cmdHeld = shellCmd = false; }, true);
 host.cmdHeld = () => cmdHeld;
 addEventListener("blur", () => { cmdHeld = false; });
-// Option during a drag from the shell (a component onto an instance swaps it, /page/drops.js): WebKit's drag events
-// do not always carry it, so the shell sends it with Command in {cmd: "mods", alt}.
+// The shell reports Option even when WebKit omits a modifier flag or the canvas does not have keyboard focus.
 let altHeld = false;
-addEventListener("keydown", (e) => { if (e.key === "Alt") altHeld = true; else if (!e.altKey) altHeld = false; }, true);
-addEventListener("keyup", (e) => { if (e.key === "Alt") altHeld = false; }, true);
+function setAltHeld(held) {
+  altHeld = held;
+  host.emit("option", held);
+}
+addEventListener("keydown", (e) => { if (e.key === "Alt") setAltHeld(true); else if (!native && !e.altKey) altHeld = false; }, true);
+addEventListener("keyup", (e) => { if (e.key === "Alt") setAltHeld(false); }, true);
 addEventListener("blur", () => { altHeld = false; });
 host.altHeld = () => altHeld;
+host.optionForDrag = (e) => !!(e.altKey || (native && altHeld));
 let drag = null;
 view.addEventListener("pointerdown", (e) => { if (secondary(e)) return; if (beginMove(e)) return; if (host.beginMarquee && host.beginMarquee(e)) { if (down) down.moved = false; return; } endTween(true); firstFit = null; drag = { x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y }; view.setPointerCapture(e.pointerId); view.classList.add("panning"); clearHover(); });
 view.addEventListener("pointermove", (e) => { if (down && !down.moved && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) down.moved = true; if (drag) { cam = { ...cam, x: drag.cx + e.clientX - drag.x, y: drag.cy + e.clientY - drag.y }; applyCam(); } });
@@ -3730,7 +3739,7 @@ if (mode === "pending") startEngine(); else announceRenderer();
 window.canvasCmd = (c) => {
   // Fit and zoom commands carry the shell's current insets: a fit never uses a stale or missing free area.
   if (c.insets && typeof c.insets.l === "number") { insets = { l: c.insets.l, t: c.insets.t, r: c.insets.r, b: c.insets.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); }
-  if (c.cmd === "mods") { shellCmd = !!c.meta; cmdHeld = shellCmd; if (c.alt !== undefined) altHeld = !!c.alt; return; }
+  if (c.cmd === "mods") { shellCmd = !!c.meta; cmdHeld = shellCmd; if (c.alt !== undefined && !!c.alt !== altHeld) setAltHeld(!!c.alt); return; }
   // The app shows or hides this page's tab (one web view per tab, apps/macos/Model.swift).
   if (c.cmd === "tab") { setTabShown(!!c.active); return; }
   if (c.cmd === "resync") { resync(); return; }

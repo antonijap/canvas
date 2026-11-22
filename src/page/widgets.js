@@ -243,10 +243,10 @@ function start(host) {
   host.widgetsShown = () => shown();
 
   // ---------- selection ----------
-  host.widgetRect = (id) => {
+  host.widgetRect = (id, selection = false) => {
     const e = entries.get(bare(id));
     if (!e) return null;
-    if (act && act.entry === e && act.rect) return act.rect;
+    if (act && act.entry === e && act.rect && (!act.dup || selection)) return act.rect;
     const r = shownRect(e.w);
     return { x: r.x, y: r.y, w: r.w, h: r.h };
   };
@@ -357,7 +357,7 @@ function start(host) {
     const lock = act.type === "move" && ev.shiftKey ? (Math.abs(dxp) >= Math.abs(dyp) ? "y" : "x") : null;
     if (lock === "y") dyp = 0; else if (lock === "x") dxp = 0;
     act.moved = true;
-    if (act.type === "move") act.dup = ev.altKey; // Option: drag a copy, the card stays
+    if (act.type === "move") act.dup = host.optionForDrag(ev);
     const z = host.cam.z;
     act.rect = act.type === "move" ? moveRect(act.r0, dxp / z, dyp / z) : resizeRect(act.r0, act.handle, dxp / z, dyp / z, minOf(act.entry.w.kind), (act.entry.w.kind === "video" && !!act.entry.w.config?.src) || ev.shiftKey, ev.altKey, host.blueprintEdge(ev));
     if (act.type === "resize" && act.entry.w.kind === "note" && act.entry.impl?.measure) {
@@ -471,13 +471,11 @@ function start(host) {
   }
   function onActCancel() { endAct(true); }
   // Pressing or letting go of Option mid-drag switches between moving the card and dragging a copy.
-  const altFlip = (ev) => {
-    if (ev.key !== "Alt" || !act || act.type !== "move" || !act.moved || act.dup === ev.altKey) return;
-    act.dup = ev.altKey;
+  host.on("option", (held) => {
+    if (!act || act.type !== "move" || !act.moved || act.dup === held) return;
+    act.dup = held;
     if (!act.frame) act.frame = requestAnimationFrame(paintAct);
-  };
-  addEventListener("keydown", altFlip, true);
-  addEventListener("keyup", altFlip, true);
+  });
 
   // ---------- Option-drag copies ----------
   // While a card is Option-dragged, a clone of it follows the pointer and the card stays (a copy drag).

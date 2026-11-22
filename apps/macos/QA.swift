@@ -474,7 +474,7 @@ enum QA {
 
     static func sleep(_ ms: Double) async throws { try await Task.sleep(nanoseconds: UInt64(max(0, ms) * 1_000_000)) }
 
-    /// {action: move|down|up|click|doubleClick|rightClick, x, y, mods?, clicks?, button?: left|right}
+    /// {action: move|down|drag|up|click|doubleClick|rightClick, x, y, mods?, clicks?, button?: left|right}
     private static func mouse(_ a: [String: Any]) async throws -> [String: Any] {
         let w = try target(a)
         guard let (x, y) = point(a) else { throw QAError(code: "invalid", message: "mouse needs x and y") }
@@ -491,6 +491,8 @@ enum QA {
             else { post(mouseEvent(.mouseMoved, w, p, f, clicks: 0, pressure: 0)) }
         case "down":
             post(mouseEvent(down, w, p, f, clicks: (a["clicks"] as? NSNumber)?.intValue ?? 1))
+        case "drag":
+            post(mouseEvent(right ? .rightMouseDragged : .leftMouseDragged, w, p, f))
         case "up":
             if let v = VirtualDrag.current { try await v.drop(at: p, in: w) }
             do { post(mouseEvent(up, w, p, f, clicks: (a["clicks"] as? NSNumber)?.intValue ?? 1, pressure: 0)) }
@@ -674,8 +676,9 @@ enum QA {
     // MARK: keys
 
     /// Modifier key changes, so code that reads NSEvent.modifierFlags from flagsChanged sees them.
-    private static func flagsChanged(_ f: NSEvent.ModifierFlags, _ w: NSWindow) -> NSEvent? {
-        let code: UInt16 = f.contains(.command) ? 55 : f.contains(.option) ? 58 : f.contains(.shift) ? 56 : f.contains(.control) ? 59 : 55
+    private static func flagsChanged(_ f: NSEvent.ModifierFlags, _ w: NSWindow, released: NSEvent.ModifierFlags = []) -> NSEvent? {
+        let changed = released.isEmpty ? f : released
+        let code: UInt16 = changed.contains(.command) ? 55 : changed.contains(.option) ? 58 : changed.contains(.shift) ? 56 : changed.contains(.control) ? 59 : 55
         guard let cg = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true) else { return nil }
         cg.type = .flagsChanged
         cg.flags = CGEventFlags(rawValue: UInt64(f.rawValue))
@@ -690,8 +693,9 @@ enum QA {
         if w !== NSApp.modalWindow && !w.isKeyWindow { w.makeKey() }
         let f = flags(a)
         if a["release"] as? Bool == true {
+            let released = heldMods
             heldMods = []
-            post(flagsChanged([], w))
+            post(flagsChanged([], w, released: released))
             try await sleep(30)
             return [:]
         }

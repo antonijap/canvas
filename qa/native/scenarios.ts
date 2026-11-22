@@ -33,6 +33,53 @@ const WIDGET_GREY = { light: "#626267", dark: "#bcbcc4" };
 /** A point on the canvas in world space: the card dropped there should be centred on it. */
 async function dropWorld(t: NT, p: Pt) { return t.world(p); }
 
+sc("move", "Option-drag preview keeps the original still and switches mid-drag", { covers: ["option-drag-duplicate:mouse"] }, async (t: NT) => {
+  await t.showPage("layout");
+  await t.look(1440, 0);
+  const id = "clip_off_dot";
+  await t.selectIds([id]);
+  const before = await t.rect(id), from = center(before);
+  const originalX = () => t.js<number>(`return canvasHost.worldRectOf(${JSON.stringify(id)}).x * canvasHost.cam.z;`);
+  const startX = await originalX();
+  const frames = () => t.js("await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));");
+  const ghostX = () => t.js<number | null>(`
+    const h = canvasHost, ghost = "\\u0000dup-ghost";
+    const box = h.engineView.engine.nodeRectIn(ghost, ghost);
+    return box ? box.x * h.cam.z : null;
+  `);
+  const mouse = (action: string, dx: number, mods: string[]) =>
+    t.cmd("qa.mouse", { action, x: from.x + dx, y: from.y, mods });
+  await mouse("move", 0, []);
+  await t.cmd("qa.key", { mods: ["alt"], hold: true });
+  await mouse("down", 0, ["alt"]);
+  let dx = 0;
+  try {
+    let copyX: number | null = null;
+    for (dx of [-12, -26, -42]) {
+      await mouse("drag", dx, ["alt"]);
+      t.eq(await t.rect(id), before, `the original stays at offset ${dx}`);
+      const x = await ghostX();
+      t.ok(x !== null, "the copy preview is drawn");
+      t.near(x, startX + dx, 6, "the copy follows the pointer");
+      copyX = x;
+    }
+    await t.cmd("qa.key", { release: true });
+    await frames();
+    t.ok(!(await t.js("return canvasHost.ghost.shown;")), "releasing Option removes the copy preview");
+    t.ok(copyX !== null, "the copy was drawn before releasing Option");
+    t.near(await originalX(), copyX, 1, "the original takes the copy's position with the pointer stationary");
+    await t.cmd("qa.key", { mods: ["alt"], hold: true });
+    await frames();
+    t.eq(await t.rect(id), before, "pressing Option restores the original with the pointer stationary");
+    t.ok(await t.js("return canvasHost.ghost.shown;"), "pressing Option restores the copy preview");
+  } finally {
+    await mouse("up", dx, ["alt"]);
+    await t.cmd("qa.key", { release: true });
+  }
+  await t.waitDisk(() => t.node("clip_off")?.children?.find((n: any) => n.id !== id && n.name === "Spill"), "a copy in the frame");
+  t.eq(await t.rect(id), before, "the original stays after the drop");
+});
+
 // ---------------------------------------------------------------- the sidebar's drags
 
 sc("widgets", "widget picker shows drawn previews in a two-column grid", { covers: ["card-add:card-note"] }, async (t: NT) => {

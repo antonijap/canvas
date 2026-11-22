@@ -171,7 +171,7 @@ function start(host) {
       slot: A.slotOf(f.flow, f.ids), others: f.flow.filter((id) => !f.ids.includes(id)),
       pRect: pr, pOrigin: { x: pr.x, y: pr.y }, pSize: { w: pr.w, h: pr.h }, srcSize: { w: pr.w, h: pr.h },
       from: shown, to: new Map(shown), shown, t0: 0, settle: null,
-      p: p0, mods: { ctrl: false, meta: false }, target: null, trees: new Map(), started: false, copy: !!e.altKey,
+      p: p0, mods: { ctrl: false, meta: false }, target: null, trees: new Map(), started: false, copy: host.optionForDrag(e),
     };
     try { view.setPointerCapture(e.pointerId); } catch {}
     return true;
@@ -214,15 +214,18 @@ function start(host) {
     const pr = ovRect(d.pid);
     if (!pr) return;
     const to = new Map();
+    const pr0 = d.rects0.get(d.pid);
     for (const id of d.children) {
       if (leaving(d).includes(id)) continue;
-      const r = ovRect(id);
-      if (r) to.set(id, A.rel(r, pr));
+      const r = d.copy ? d.rects0.get(id) : ovRect(id);
+      if (r) to.set(id, A.rel(r, d.copy ? pr0 : pr));
     }
     d.slotRects = new Map(d.ids.map((id) => { const r = ovRect(d.copy ? cid(id) : id); return [id, r ? A.rel(r, pr) : null]; }));
+    // Insertion geometry is only for the drop. Until then the source frame and its children keep their positions.
+    if (d.copy) d.shown = to;
     d.from = new Map(d.shown);
     d.to = to;
-    const size = { w: pr.w, h: pr.h };
+    const size = d.copy ? { w: pr0.w, h: pr0.h } : { w: pr.w, h: pr.h };
     if (size.w !== d.pSize.w || size.h !== d.pSize.h) { d.pSize = size; d.srcSize = size; redrawBoard(d.board); }
     d.t0 = performance.now();
     stats.measures++;
@@ -247,10 +250,10 @@ function start(host) {
     const t0 = performance.now();
     const k = progress(d);
     const P = frameClone(d, d.children.filter((id) => !leaving(d).includes(id)));
-    P.layout = "none";
+    if (!d.copy) P.layout = "none";
     P.width = d.pSize.w; P.height = d.pSize.h;
     for (const c of P.children) {
-      if (c.layoutPosition === "absolute") continue;
+      if (d.copy || c.layoutPosition === "absolute") continue;
       const a = d.from.get(c.id) || d.to.get(c.id), b = d.to.get(c.id) || a;
       if (!a) continue;
       const r = A.lerpRect(a, b, k);
@@ -266,6 +269,7 @@ function start(host) {
     const ghost = [];
     for (const id of d.ids) {
       const n = Object.assign({}, d.nodes.get(id));
+      if (d.copy) n.id = cid(id);
       const r0 = d.rects0.get(id);
       let r = { x: r0.x + dx - d.pOrigin.x, y: r0.y + dy - d.pOrigin.y, w: r0.w, h: r0.h };
       if (s && d.slotRects && d.slotRects.get(id)) r = A.lerpRect(r, d.slotRects.get(id), ks);
@@ -363,21 +367,22 @@ function start(host) {
   addEventListener("pointermove", (e) => {
     const d = dg;
     if (!d || d.settle || d.slide) return;
-    if (!d.moved) {
+    const first = !d.moved;
+    if (first) {
       if (Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 3) return;
       d.moved = true;
       d.started = true;
       stats.drags++;
       selBoxShown(false); // its box would stay where the layer was; the half-transparent layer shows where it is
       hover = null;
-      measure(d);
       redrawBoard(d.board); // the frame leaves its board for the overlay
     }
     const p = worldAt(e.clientX, e.clientY);
     d.p = p;
     d.mods = { ctrl: e.ctrlKey, meta: e.metaKey };
-    const flipped = !!e.altKey !== d.copy;
-    d.copy = !!e.altKey;
+    const copy = host.optionForDrag(e);
+    const flipped = copy !== d.copy;
+    d.copy = copy;
     const z = host.cam.z;
     const wasMode = d.mode, wasSlot = d.slot;
     const pr = { x: d.pOrigin.x, y: d.pOrigin.y, w: d.pSize.w, h: d.pSize.h };
@@ -386,7 +391,7 @@ function start(host) {
     if (d.mode === "in" && !keep && (A.outside(pr, p, A.OUT_PX / z) || e.ctrlKey)) d.mode = "out";
     else if (d.mode === "out" && (keep || (A.contains(pr, p) && !e.ctrlKey))) d.mode = "in";
     place(d, p);
-    if (flipped || d.mode !== wasMode || (d.mode === "in" && d.slot !== wasSlot)) measure(d);
+    if (first || flipped || d.mode !== wasMode || (d.mode === "in" && d.slot !== wasSlot)) measure(d);
     else tick();
     paint();
   }, true);
@@ -401,16 +406,14 @@ function start(host) {
     }
   }
   // Option pressed or let go mid-drag: copies or the layers themselves, now.
-  const altFlip = (e) => {
+  host.on("option", (held) => {
     const d = dg;
-    if (e.key !== "Alt" || !d || !d.started || d.settle || d.slide || d.copy === e.altKey) return;
-    d.copy = e.altKey;
+    if (!d || !d.started || d.settle || d.slide || d.copy === held) return;
+    d.copy = held;
     place(d, d.p);
     measure(d);
     paint();
-  };
-  addEventListener("keydown", altFlip, true);
-  addEventListener("keyup", altFlip, true);
+  });
   /** Space pressed or let go mid-drag (server.ts): out of the frame the block comes back to its slot there, or leaves again. */
   function keepParent(on) {
     const d = dg;

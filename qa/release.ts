@@ -645,7 +645,7 @@ async function docsClaims(): Promise<Item[]> {
   claim(/e\.key !== "Enter" \|\| !\(e\.metaKey \|\| e\.ctrlKey\) \|\| !e\.shiftKey/.test(page("variations.js")), "README: Shift+Cmd+Return starts variations (src/page/variations.js)");
   claim(/Digit2: "fitSelection"/.test(page("shortcuts-logic.js")), "README: Shift+2 zooms to the selection (src/page/shortcuts-logic.js)");
   claim(/e\.code === "KeyK" && !e\.shiftKey\) \{ e\.preventDefault\(\); setScaleMode/.test(page("live.js")), "README: K scales a layer with its contents (src/page/live.js)");
-  claim(/mv\.dup = e\.altKey/.test(read("src/server.ts")), "README: Option-drag duplicates (src/server.ts page script)");
+  claim(/function movePointer\(e, copy = host\.optionForDrag\(e\)\)/.test(read("src/server.ts")), "README: Option-drag duplicates (src/server.ts page script)");
 
   // Architecture claims.
   const cargo = read("engine/Cargo.toml");

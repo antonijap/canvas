@@ -178,6 +178,67 @@ sc("move", "Option-drag duplicates; one undo removes the copy", { covers: ["opti
   t.eq(allIds(t.disk()).length, n0 + 1, "redo brings the copy back");
 });
 
+sc("move", "Option-drag preview keeps the original still from the first move", { skip: { visual: "Checks drawing geometry during the gesture." }, covers: ["option-drag-duplicate:mouse"] }, async (t: T) => {
+  for (const { board, id, dx, flow } of [
+    { board: "lay_auto", id: "al_b", dx: -24, flow: true },
+    { board: "lay_nest", id: "r_free", dx: 14 },
+    { board: "lay_nest", id: "g_pair", dx: 14 },
+    { board: "lay_nest", id: "lay_nest", dx: -14 },
+    { board: "cmp_main", id: "cmp_button", dx: 14 },
+    { board: "cmp_inst", id: "inst_plain", dx: 14 },
+    { board: "cmp_inst", id: "inst_r2", dx: -24, flow: true },
+  ]) {
+    await t.focus(board);
+    await t.select([id]);
+    const before = await t.rect(id);
+    const p = await t.center(id);
+    const overlay = flow ? "\u0000autolayout-drag" : "\u0000dup-ghost";
+    const copyId = flow ? id + "\u0000copy" : overlay;
+    await t.io.withMods({ alt: true }, async () => {
+      await t.io.move(p.x, p.y);
+      await t.io.down();
+      try {
+        for (let step = 1; step <= 3; step++) {
+          await t.io.move(p.x + dx * step, p.y, 1, 1);
+          await t.frames();
+          t.eq(await t.rect(id), before, `${id} stays in place on step ${step}`);
+          const x = await t.ev<number | null>(`(() => {
+            const h = canvasHost, box = h.engineView.engine.nodeRectIn(${JSON.stringify(overlay)}, ${JSON.stringify(copyId)});
+            return box ? h.viewBox.l + box.x * h.cam.z + h.cam.x : null;
+          })()`);
+          t.ok(x !== null, `${id} has a drawn copy on step ${step}`);
+          t.near(x, before.x + dx * step, 6, `${id}'s copy follows on step ${step}`);
+        }
+      } finally {
+        await t.io.up();
+      }
+    });
+    await t.flush();
+  }
+
+  await cards(t, "posthog");
+  const { id, r } = await card(t, "posthog");
+  const x = r.x + r.w / 2, y = r.y + r.h - 30;
+  await t.io.withMods({ alt: true }, async () => {
+    await t.io.move(x, y);
+    await t.io.down();
+    try {
+      for (const dx of [16, 32, 48]) {
+        await t.io.move(x + dx, y, 1, 1);
+        await t.frames();
+        t.eq(await t.rect(id), r, `the original card stays at offset ${dx}`);
+        t.eq((await card(t, "posthog")).r, r, "the card DOM stays in place");
+        const left = await t.ev<number | null>("document.querySelector('.wd[data-ghost]')?.getBoundingClientRect().left ?? null");
+        t.ok(left !== null, "the card copy is drawn");
+        t.near(left, r.x + dx, 6, "the card copy follows the pointer");
+      }
+    } finally {
+      await t.io.up();
+    }
+  });
+  await t.flush();
+});
+
 sc("move", "an arrow pressed right after selecting still nudges", { covers: ["nudge:rectangle", "nudge:keyboard", "nudge:in-frame"] }, async (t: T) => {
   // The page asks the server how a selected layer moves (GET /api/move); the matrix lost nudges pressed before the
   // answer came. Hold that answer back, press, then let it through.

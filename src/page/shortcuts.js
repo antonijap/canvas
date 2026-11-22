@@ -91,6 +91,7 @@ function start(host) {
     try {
       e.setBoard(GH, u.x, u.y, JSON.stringify({ version: 2, id: GH, x: 0, y: 0, root, fonts: [...fonts.values()], images: [...images], warnings: [] }));
       e.raiseBoards([GH]);
+      if (e.drawNow) e.drawNow(GH);
     } catch (err) { console.error(err); return false; }
     ghost = { origin: { x: u.x, y: u.y } };
     host.requestFrame();

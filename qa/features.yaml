@@ -168,7 +168,7 @@ features:
   - id: option-drag-duplicate
     name: Option-drag copies, the original stays
     area: move
-    driven: [page]
+    driven: [page, native]
     cases: [one, many, rectangle, mouse]
   - id: nudge
     name: Arrows nudge 1 px, Shift+arrows big nudge
