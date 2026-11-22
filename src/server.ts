@@ -719,19 +719,19 @@ export function startServer(port = PORT()): Promise<http.Server> {
         const type = ASSET_TYPES[path.extname(p).toLowerCase()];
         const st = type ? await fs.promises.stat(p).catch(() => null) : null;
         if (!type || !st?.isFile()) return send(res, 404, "text/plain", "not found");
-        // Revalidated by size and modification time after a minute: a reload asks, and an unchanged image is a 304
-        // with no bytes; a file replaced on disk under the same name is fetched again.
+        // Revalidate on reuse so replacing a file under the same name changes both the image and its saved picture.
         const etag = `"${st.ino}-${st.size}-${st.mtimeMs}-${st.ctimeMs}"`;
-        if (etag && req.headers["if-none-match"] === etag) {
-          res.writeHead(304, { etag, "cache-control": "max-age=60", "cross-origin-resource-policy": "same-origin" });
+        if (req.headers["if-none-match"] === etag) {
+          res.writeHead(304, { etag, "cache-control": "no-cache", "cross-origin-resource-policy": "same-origin" });
           res.end();
           return;
         }
         // An SVG opened as a document must not run script with this origin (it could call /api/*): the sandbox CSP
         // gives it an opaque origin and no script. Images and fonts loaded by the page are unaffected.
         // Any image on disk is reachable by path: another site may not embed one (and learn that it exists, or its size).
-        res.writeHead(200, { "content-type": type, "cache-control": "max-age=60", ...(etag ? { etag } : {}), "x-content-type-options": "nosniff", "content-security-policy": ASSET_CSP, "cross-origin-resource-policy": "same-origin" });
-        streamFile(p, res);
+        res.writeHead(200, { "content-type": type, "cache-control": "no-cache", etag, "x-content-type-options": "nosniff", "content-security-policy": ASSET_CSP, "cross-origin-resource-policy": "same-origin" });
+        if (req.method === "HEAD") res.end();
+        else streamFile(p, res);
         return;
       }
       // The inspector's manual controls: one node's properties, merged. The same write path the
@@ -1167,7 +1167,7 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 .cmpi{display:inline-block;width:10px;height:10px;flex:none;background:var(--c-component);-webkit-mask:var(--cmp-icon) center/contain no-repeat;mask:var(--cmp-icon) center/contain no-repeat}
 #labels>div.cmp::before{content:"";display:inline-block;width:9px;height:9px;margin-right:4px;vertical-align:-1px;background:currentColor;-webkit-mask:var(--cmp-icon) center/contain no-repeat;mask:var(--cmp-icon) center/contain no-repeat}
 .board>.ph,.eph{background:#FFFFFF66;border-radius:2px}
-.eph{position:absolute;pointer-events:none}
+.eph,.opening-preview{position:absolute;pointer-events:none}
 #phc{position:absolute;left:0;top:0;pointer-events:none}
 .eph.snap{background:none;border-radius:0}
 .eph>img{display:block;width:100%;height:100%}
@@ -1440,6 +1440,7 @@ function flushCam() {
   if (tween) { stepTween(performance.now()); camDirty = true; gestureTick(); }
   if (camDirty) { camDirty = false; camWork(); phDirty = true; }
   if (phDirty) drawPh();
+  placeOpeningPreview();
   if (blueprint && ev && typeof ev.engine.setBlueprint !== "function") engineFailed("rebuild the engine for Blueprint");
   if (drawBlueprint) drawBlueprint(blueprint, cam, ev && ev.engine, VW, VH);
   if (mode === "engine" && ev) {
@@ -1447,6 +1448,11 @@ function flushCam() {
     let more = false;
     try { ev.setCam(cam); more = ev.frame(); } catch (err) { engineLost("engine frame failed: " + (err && err.message || err)); return; }
     engineBusy = more;
+    if (!document.hidden && (perf.look === null || openingPreview?.el)) {
+      const painted = ev.paintedBoards();
+      if (painted.length && perf.landed !== null) perfAt("look");
+      if (openingPreview?.el && openingPreview.board.loadedKey === openingPreview.key && painted.includes(openingPreview.board.meta.id)) clearOpeningPreview();
+    }
     // A hidden page draws nothing (its tab or window is out of sight): the work waits until it shows again.
     if (more && !document.hidden) camRaf = requestAnimationFrame(flushCam);
     else shaderWake();
@@ -2111,8 +2117,10 @@ function setDoc(d) {
     fitAll({ instant: true });
     const fb = boards.get(firstBoardId()); if (fb && !fb.measured) firstFit = fb;
   }
-  if (mode === "engine") loadVisible(); // changed boards reload now, not a frame later
   showSnaps();
+  showOpeningPreview();
+  if (!boards.size || blueprint) startOpeningEngine();
+  if (mode === "engine") loadVisible(); // changed boards reload now, not a frame later
   pruneSnaps();
   syncSel(); // boards may have moved
   renderLeft(d);
@@ -2196,6 +2204,7 @@ function announceRenderer() {
 function useDom(note) {
   if (mode === "dom") return;
   const old = ev;
+  clearOpeningPreview();
   ev = null;
   mode = "dom";
   rendererNote = note;
@@ -2281,7 +2290,7 @@ window.__canvas = {
 // ---------- timings ----------
 // How long until the canvas is fully drawn (settled: every board near the view is in and the engine idle) after
 // the page loaded (load, from navigation start), was shown again (show: a hidden tab or window comes back) and
-// after a page switch (page). look: until every board in view shows its content or its snapshot. Reported to the
+// after a page switch (page). look: first visible board pixels or a saved picture. Reported to the
 // bridge (canvas_status) and read by bench/cache.ts.
 // doc, engine, landed: when the document arrived, the engine was up and the first board was laid out (from navigation start).
 // picture: the first complete picture after the load: every board in view laid out, its images in, and every tile in
@@ -2289,7 +2298,14 @@ window.__canvas = {
 // to go idle too, which includes work no one sees yet (base textures, tiles ahead of the view): bench/speed.ts reads
 // picture.
 const perf = host.perf = { load: null, look: null, show: null, page: null, shows: 0, pages: 0, snapshots: 0, doc: null, engine: null, landed: null, idle: null, imgs: null, picture: null };
-const perfAt = (k) => { if (perf[k] === null) perf[k] = Math.round(performance.now()); };
+const perfAt = (k) => {
+  if (perf[k] !== null) return;
+  perf[k] = Math.round(performance.now());
+  if (k === "look") {
+    host.emit("perf", perf);
+    startOpeningEngine();
+  }
+};
 let perfWait = [], perfT = 0;
 function perfMark(kind, t0) {
   perfWait = perfWait.filter((w) => w.kind !== kind);
@@ -2302,7 +2318,7 @@ function perfPoll() {
   perfWait = mode === "dom" ? [] : perfWait.filter((w) => now - w.t0 < 60_000);
   if (!perfWait.length) { clearInterval(perfT); perfT = 0; return; }
   if (document.hidden) return;
-  if (perf.look === null && host.looksDone && host.looksDone()) perf.look = Math.round(now);
+  if (perf.look === null && snapshotInView()) perfAt("look");
   // The camera at rest (no move waiting for its frame, no fly-to): the last frame drew this view. Not "no frame
   // requested": the engine asks for frames while it renders work no one sees yet (base textures), and that held
   // picture back until load.
@@ -2318,6 +2334,70 @@ function perfPoll() {
   host.emit("perf", perf);
 }
 perfMark("load", 0);
+// Draw one board with the existing HTML renderer while the GPU and board resources start up.
+let openingPreview = null, askedForPreview = false, openingEngineTimer = 0, openingEngineStarted = false;
+function startOpeningEngine() {
+  if (mode !== "pending" || openingEngineStarted) return;
+  openingEngineStarted = true;
+  clearTimeout(openingEngineTimer);
+  void startEngine();
+}
+function clearOpeningPreview() {
+  openingPreview?.el?.remove();
+  openingPreview = null;
+}
+function boardInView(b) {
+  const sx = b.meta.x * cam.z + cam.x, sy = b.meta.y * cam.z + cam.y;
+  return sx < VW && sx + (b.w || 400) * cam.z > 0 && sy < VH && sy + (b.h || 400) * cam.z > 0;
+}
+function placeOpeningPreview() {
+  if (!openingPreview) return;
+  const { board, key, el } = openingPreview;
+  if (boards.get(board.meta.id) !== board || board.meta.key !== key || board.snap?.el || blueprint) {
+    clearOpeningPreview();
+    return;
+  }
+  if (!el) return;
+  el.style.left = board.meta.x + "px";
+  el.style.top = board.meta.y + "px";
+}
+async function showOpeningPreview() {
+  if (askedForPreview || perf.look !== null || blueprint || mode === "dom" || !cam || !VW || !VH) return;
+  let board = null, best = Infinity;
+  for (const b of boards.values()) {
+    if (b.loadedKey || b.snap?.el || !boardInView(b)) continue;
+    const x = (b.meta.x + b.w / 2) * cam.z + cam.x - VW / 2;
+    const y = (b.meta.y + b.h / 2) * cam.z + cam.y - VH / 2;
+    const distance = x * x + y * y;
+    if (distance < best) { best = distance; board = b; }
+  }
+  if (!board) return;
+  askedForPreview = true;
+  const key = board.meta.key;
+  const preview = (openingPreview = { board, key, el: null });
+  try {
+    const r = await fetch(api("/api/board") + "&id=" + encodeURIComponent(board.meta.id) + keyedQ(key));
+    const d = await r.json();
+    if (d.key !== key || !d.html || openingPreview !== preview || board.snap?.el || perf.look !== null) return;
+    // A template is inert. Remove images before attaching the preview so it never starts decoding them.
+    const template = document.createElement("template");
+    template.innerHTML = d.html;
+    for (const img of template.content.querySelectorAll("[data-img],img,image")) img.remove();
+    const el = document.createElement("div");
+    el.className = "opening-preview";
+    el.inert = true;
+    el.setAttribute("aria-hidden", "true");
+    el.appendChild(template.content);
+    preview.el = el;
+    placeOpeningPreview();
+    if (openingPreview !== preview) return;
+    world.appendChild(el);
+    window.__fit(el, cam.z);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (openingPreview === preview && !document.hidden && boardInView(board)) perfAt("look");
+    }));
+  } catch { clearOpeningPreview(); } // the live renderer still opens the file
+}
 // ---------- board snapshots ----------
 // What the engine last drew of each board, kept by content key (/page/snapshots.js): a board not laid out yet shows
 // its picture at once, and the engine's drawing takes its place. Captured when the canvas is at rest and fully drawn.
@@ -2382,13 +2462,21 @@ function takeSnaps() {
   const cards = host.widgetsShown ? host.widgetsShown().map((w) => host.widgetRect(w.id)).filter(Boolean) : [];
   const list = [];
   for (const b of boards.values()) if (!b.gone && b.measured) list.push({ id: b.meta.id, key: b.meta.key, loadedKey: b.loadedKey, rect: { x: b.meta.x, y: b.meta.y, w: b.w, h: b.h } });
-  // A zoomed-out page can have many small boards. Limit the batch by count and pixel area.
-  const todo = picLib.toCapture(list, { cam, vw: VW, vh: VH, dpr, cards, limit: 24, pixelBudget: 2 << 20, touched: (id) => !!(host.live && host.live.touched && host.live.touched(id)), have: (x) => snaps.meta(x.id, x.key, bg) });
+  const assets = new Map();
+  const todo = picLib.toCapture(list, {
+    cam, vw: VW, vh: VH, dpr, cards, limit: 24, pixelBudget: 2 << 20,
+    touched: (id) => {
+      const signatures = ev.snapshotAssets(id);
+      assets.set(id, signatures);
+      return !signatures || !!host.live?.touched?.(id);
+    },
+    have: (x) => snaps.meta(x.id, x.key, bg, assets.get(x.id)),
+  });
   if (!todo.length) return;
   let pics;
   try { pics = ev.capture(todo.map((t) => t.crop)); } catch (err) { console.warn("[canvas] snapshot", err); return; }
   Promise.all(todo.map((t, i) => new Promise((resolve) => {
-    pics[i].toBlob((blob) => resolve(blob && { board: t.id, key: t.key, bg, blob, size: { w: t.crop.w, h: t.crop.h, ww: t.rect.w, wh: t.rect.h } }), "image/jpeg", 0.85);
+    pics[i].toBlob((blob) => resolve(blob && { board: t.id, key: t.key, bg, assets: assets.get(t.id), blob, size: { w: t.crop.w, h: t.crop.h, ww: t.rect.w, wh: t.rect.h } }), "image/jpeg", 0.85);
   }))).then((batch) => snaps.putBatch(batch.filter((p) => p && boards.get(p.board)?.meta.key === p.key))).then((stored) => {
     if (stored) scheduleSnap();
   });
@@ -2399,20 +2487,15 @@ function pruneSnaps() {
   clearTimeout(pruneT);
   pruneT = setTimeout(() => { if (doc) snaps.evict(new Map(doc.boards.map((m) => [m.id, m.key]))); }, 5000);
 }
-/** Every board in view shows its content or its snapshot (the "look" timing). */
-host.looksDone = () => {
-  if (!cam || !boards.size) return false;
-  let any = false;
+/** A saved picture already shown in the viewport. */
+function snapshotInView() {
+  if (!cam || !perf.snapshots) return false;
   for (const b of boards.values()) {
-    const sx = b.meta.x * cam.z + cam.x, sy = b.meta.y * cam.z + cam.y;
-    if (!(sx < VW && sx + (b.w || 400) * cam.z > 0 && sy < VH && sy + (b.h || 400) * cam.z > 0)) continue;
-    any = true;
-    if (b.snap && b.snap.el) continue;
-    if (b.loadedKey === b.meta.key && !engineBusy && !(ev && ev.imagesPending() > 0)) continue;
-    return false;
+    if (!b.snap?.el?.isConnected) continue;
+    if (boardInView(b)) return true;
   }
-  return any;
-};
+  return false;
+}
 document.addEventListener("visibilitychange", () => { if (!document.hidden) perfMark("show"); });
 // ---------- left rail ----------
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
@@ -3544,7 +3627,7 @@ view.addEventListener("pointermove", (e) => { if (down && !down.moved && Math.hy
 const endDrag = () => { drag = null; view.classList.remove("panning"); };
 view.addEventListener("pointerup", endDrag);
 view.addEventListener("pointercancel", () => { down = null; endDrag(); endMove(true); });
-addEventListener("resize", () => { VW = view.clientWidth; VH = view.clientHeight; if (zeroFit && VW && VH) { zeroFit = false; fitAll({ instant: true }); } readViewBox(); sizeGuides(); requestFlush(); scheduleVisible(); });
+addEventListener("resize", () => { VW = view.clientWidth; VH = view.clientHeight; if (zeroFit && VW && VH) { zeroFit = false; fitAll({ instant: true }); showOpeningPreview(); } readViewBox(); sizeGuides(); requestFlush(); scheduleVisible(); });
 addEventListener("keydown", (e) => {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable || (t.closest && t.closest("[contenteditable]")))) return;
@@ -3707,6 +3790,7 @@ es.addEventListener("cloudfile", (e) => {
   document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });
 });
 es.addEventListener("cloudremoved", () => {
+  clearOpeningPreview();
   world.replaceChildren(); doc = null; es.close();
   if (native) post({ cloudRemoved: true });
 });
@@ -3740,7 +3824,9 @@ function setTabShown(on) {
   host.emit("tab", on);
 }
 readViewBox();
-if (mode === "pending") startEngine(); else announceRenderer();
+// Give the browser a chance to paint the first board before starting the cold GPU pipelines.
+if (mode === "pending") openingEngineTimer = setTimeout(startOpeningEngine, 500);
+else announceRenderer();
 window.canvasCmd = (c) => {
   // Fit and zoom commands carry the shell's current insets: a fit never uses a stale or missing free area.
   if (c.insets && typeof c.insets.l === "number") { insets = { l: c.insets.l, t: c.insets.t, r: c.insets.r, b: c.insets.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); }

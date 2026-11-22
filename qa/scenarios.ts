@@ -4,7 +4,7 @@ import "./scenarios-blueprint.ts";
 // Coordinates in the playground are fixed (qa/playground.ts); layers are found by id.
 import path from "node:path";
 import { fixture, scratchCopy } from "../bench/fixtures/gen.ts";
-import { decodePng } from "../fidelity/png.ts";
+import { decodePng, encodePng } from "../fidelity/png.ts";
 import { checkDragFrames, dragBoard, pageDriver } from "./frames.ts";
 import { allIds, sc, T, type Rect } from "./harness.ts";
 import fs from "node:fs";
@@ -52,6 +52,89 @@ sc("open-cache", "A 200-board file paints sooner from saved snapshots", { covers
     t.ok(secondOpen.snapshots > 0, "the second open displayed saved pictures");
     t.ok(secondOpen.look < firstOpen.look, `cached look ${secondOpen.look} ms, cold look ${firstOpen.look} ms`);
     t.note(`first look ${firstOpen.look} ms cold, ${secondOpen.look} ms warm`);
+  } finally {
+    await t.open();
+  }
+});
+
+sc("open-cache", "A board paints while its fonts and images are pending", { covers: ["render:open-cache"], skip: { visual: "Holds resource requests until the first live paint." } }, async (t: T) => {
+  const f = scratchCopy(fixture(1), path.dirname(t.file), "Slow resources.canvas");
+  const design = JSON.parse(fs.readFileSync(f.file, "utf8"));
+  const board = design.children.find((n: any) => n.type === "frame");
+  board.children.push(
+    { id: "slow-text", type: "text", x: 10, y: 10, content: "Hello", fontFamily: "system-ui", fill: "#000000" },
+    { id: "slow-image", type: "rectangle", x: 20, y: 50, width: 50, height: 50, fill: { type: "image", url: "slow.png" } },
+  );
+  fs.writeFileSync(f.file, JSON.stringify(design));
+  fs.writeFileSync(path.join(f.dir, "slow.png"), encodePng({ width: 1, height: 1, data: new Uint8Array([255, 0, 0, 255]) }));
+  const held: string[] = [];
+  t.page.on("Fetch.requestPaused", ({ requestId }) => held.push(requestId));
+  await t.page.send("Fetch.enable", { patterns: [
+    { urlPattern: "*/api/fonts/file?*" }, { urlPattern: "*/asset?*" },
+  ] });
+  const tab = new T(t.page, f.dir, t.srv);
+  try {
+    await t.page.goto(t.srv.base + "/?file=" + encodeURIComponent(f.dir));
+    await tab.waitFor("window.canvasHost?.perf.look != null && document.querySelector('.opening-preview')?.hasChildNodes()", "live board paint before resources", 5000);
+    await tab.waitFor("window.canvasHost?.perf.engine != null", "the engine to start");
+    const until = Date.now() + 3000;
+    while (!held.length && Date.now() < until) await sleep(25);
+    t.ok(held.length > 0, "at least one resource is still pending");
+    t.eq(await tab.ev("window.canvasHost.perf.picture"), null, "the full picture still waits for resources");
+  } finally {
+    for (const requestId of held) await t.page.send("Fetch.continueRequest", { requestId }).catch(() => {});
+    await t.page.send("Fetch.disable");
+    await t.open();
+  }
+});
+
+sc("open-cache", "Replacing an image at its old URL misses its saved picture", { covers: ["render:open-cache"], skip: { visual: "Checks the saved picture against the asset ETag." } }, async (t: T) => {
+  const f = scratchCopy(fixture(1), path.dirname(t.file), "Replaced image.canvas");
+  const png = path.join(f.dir, "picture.png");
+  const image = (red: number) => encodePng({ width: 1, height: 1, data: new Uint8Array([red, 0, 0, 255]) });
+  fs.writeFileSync(png, image(255));
+  fs.writeFileSync(f.file, JSON.stringify({ version: "2.21", children: [
+    { type: "frame", id: "board", x: 0, y: 0, width: 300, height: 200, fill: { type: "image", url: "picture.png" }, children: [] },
+  ] }));
+  const asset = "/asset?p=" + encodeURIComponent(png);
+  const tab = new T(t.page, f.dir, t.srv);
+  const displayed = `[...window.canvasHost.boards.values()].some(b => b.snap?.el?.isConnected)`;
+  const saved = `(async () => {
+    const {createSnapshots} = await import("/page/snapshots.js");
+    const host = window.canvasHost, board = host.boards.get("board");
+    const store = createSnapshots(host.file, {env: document.documentElement.dataset.env});
+    await store.ready();
+    return store.meta("board", board.meta.key, getComputedStyle(document.querySelector("#view")).backgroundColor);
+  })()`;
+  try {
+    await tab.open();
+    const before = await tab.waitFor<{ id: string }>(saved, "the first image snapshot to be saved");
+    const held: string[] = [];
+    t.page.on("Fetch.requestPaused", ({ requestId }) => held.push(requestId));
+    await t.page.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/scene?*" }] });
+    const reopen = async () => {
+      await t.page.goto(t.srv.base + "/?file=" + encodeURIComponent(f.dir));
+      await tab.waitFor("window.canvasHost?.perf.engine != null", "the reopened engine");
+    };
+    try {
+      await reopen();
+      await tab.waitFor(displayed, "an unchanged image snapshot");
+      const tag = await tab.ev(`fetch(${JSON.stringify(asset)}, {method:"HEAD"}).then(r => r.headers.get("etag"))`);
+      fs.writeFileSync(png, image(64));
+      await reopen();
+      const current = await tab.ev(`fetch(${JSON.stringify(asset)}, {method:"HEAD", cache:"no-cache"}).then(r => r.headers.get("etag"))`);
+      t.ok(tag && current && tag !== current, "the replacement has a different ETag");
+      await tab.waitFor("window.canvasHost.boards.has('board') && !window.canvasHost.boards.get('board').snap", "the stale snapshot lookup to finish");
+      t.eq(await tab.ev(displayed), false, "the stale image is never shown");
+    } finally {
+      for (const requestId of held) await t.page.send("Fetch.continueRequest", { requestId }).catch(() => {});
+      await t.page.send("Fetch.disable");
+    }
+    await tab.waitFor(`(async () => {
+      const snapshot = await ${saved};
+      return snapshot && snapshot.id !== ${JSON.stringify(before.id)};
+    })()`, "a new snapshot key after the replacement");
+    t.eq(await tab.ev("window.canvasHost.perf.snapshots"), 0, "the replacement opened without a stale snapshot");
   } finally {
     await t.open();
   }

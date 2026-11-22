@@ -89,3 +89,11 @@ describe("toEvict", () => {
     assert.notEqual(S.snapId("f", "b", "k", "white", "old"), S.snapId("f", "b", "k", "white", "new"));
   });
 });
+
+test("replacing an asset at the same URL changes the snapshot key", () => {
+  const url = "/asset?p=picture.png";
+  assert.notEqual(
+    S.snapId("f", "b", "k", "white", "env", [[url, '"old"']]),
+    S.snapId("f", "b", "k", "white", "env", [[url, '"new"']]),
+  );
+});

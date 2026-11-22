@@ -258,7 +258,7 @@ describe("image decoder worker (stress: 8k shrink blocked the main thread 80 ms;
     let live = 0, peak = 0;
     const posted: any[] = [], resized: any[] = [];
     const g: any = {
-      fetch: async (url: string) => { live++; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 5)); return url.includes("gone") ? { ok: false, status: 404 } : { ok: true, blob: async () => ({ url, type: url.endsWith(".jpg") ? "image/jpeg" : "image/png" }) }; },
+      fetch: async (url: string) => { live++; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 5)); return url.includes("gone") ? { ok: false, status: 404 } : { ok: true, headers: new Headers({ etag: '"image"' }), blob: async () => ({ url, type: url.endsWith(".jpg") ? "image/jpeg" : "image/png" }) }; },
       createImageBitmap: async (src: any, o?: any) => { if (o) { resized.push([o.resizeWidth, o.resizeHeight]); return { width: o.resizeWidth, height: o.resizeHeight, close() {} }; } const [w, h] = dims(src.url); return { width: w, height: h, close() { live--; } }; },
       postMessage: (m: any) => { if (!m.bm) live--; posted.push(m); },
     };
@@ -288,6 +288,7 @@ describe("image decoder worker (stress: 8k shrink blocked the main thread 80 ms;
     const jpg = r.posted.find((m) => m.id === 1), png = r.posted.find((m) => m.id === 2);
     assert.deepEqual([jpg.nw, jpg.nh, jpg.bm.width], [8192, 4096, 2048]);
     assert.equal(jpg.opaque, true);
+    assert.equal(jpg.etag, '"image"');
     assert.equal(png.opaque, undefined, "a small PNG is never tiled: nobody needs to know");
   });
   test("a small image is not resized", async () => {

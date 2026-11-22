@@ -226,11 +226,18 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
   function decode(url, cap) {
     const m = imageOf(url);
     m.busy = true;
-    const onMain = () => fetch(url).then((r) => (r.ok ? r.blob() : Promise.reject(Object.assign(new Error(String(r.status)), { status: r.status })))).then((b) => createImageBitmap(b).then((bm) => { const nw = bm.width, nh = bm.height; return capBitmap(bm, cap).then((small) => ({ bm: small, nw, nh, opaque: b.type === "image/jpeg" ? true : undefined })); }));
+    const onMain = async () => {
+      const response = await fetch(url);
+      if (!response.ok) throw Object.assign(new Error(String(response.status)), { status: response.status });
+      const blob = await response.blob();
+      const bm = await createImageBitmap(blob);
+      const nw = bm.width, nh = bm.height;
+      return { bm: await capBitmap(bm, cap), nw, nh, opaque: blob.type === "image/jpeg" ? true : undefined, etag: response.headers.get("etag") };
+    };
     const viaWorker = decodeOffThread(url, cap);
     // A worker that could not decode (no ImageBitmap in workers, the worker died): this image on the main thread,
     // and when that works the worker is the problem (counted; a broken file fails both and counts nothing).
-    return (viaWorker ? viaWorker.catch((e) => (e && e.status ? Promise.reject(e) : onMain().then((r) => { workerFailed(); return r; }))) : onMain()).then((r) => (url.includes("#adjust=") ? adjusted(url, r) : r)).then(({ bm, nw, nh, opaque }) => {
+    return (viaWorker ? viaWorker.catch((e) => (e && e.status ? Promise.reject(e) : onMain().then((r) => { workerFailed(); return r; }))) : onMain()).then((r) => (url.includes("#adjust=") ? adjusted(url, r) : r)).then(({ bm, nw, nh, opaque, etag }) => {
       m.busy = false;
       if (dead) { bm.close(); return; } // the engine is gone: nobody will ever draw it
       // The board that wanted it left (another page, a removal) while it decoded: never register it.
@@ -243,6 +250,7 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
       // The engine let go of the smaller decode when it took this one: free it now, not at the next GC.
       if (m.bm && m.bm !== bm) m.bm.close();
       m.bm = bm;
+      m.etag = etag;
       m.bytes = bm.width * bm.height * 4;
       onChange();
       // A decode that lands after the camera settled missed refineImages(): its size, and the budget, now.
@@ -336,7 +344,7 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
           const j = d.jobs.get(e.data.id);
           if (!j) { if (e.data.bm) e.data.bm.close(); return; }
           d.jobs.delete(e.data.id);
-          if (e.data.bm) { workerFails = 0; j.res({ bm: e.data.bm, nw: e.data.nw, nh: e.data.nh, opaque: e.data.opaque }); }
+          if (e.data.bm) { workerFails = 0; j.res({ bm: e.data.bm, nw: e.data.nw, nh: e.data.nh, opaque: e.data.opaque, etag: e.data.etag }); }
           else j.rej(Object.assign(new Error(e.data.error || "decode failed"), e.data.status ? { status: e.data.status } : {}));
         };
         // A worker that died (out of memory) fails what the pool held; the next decode starts a new pool.
@@ -502,7 +510,8 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
       rec.content = content;
       for (const m of images.values()) { m.boards.delete(meta.id); m.uses.delete(meta.id); } // the new content decides which images this board still uses
       measureImages(meta.id, uses, at);
-      for (const url of scene.images || []) imageOf(url).boards.add(meta.id);
+      rec.images = scene.images || [];
+      for (const url of rec.images) imageOf(url).boards.add(meta.id);
       releaseUnusedImages();
     }
     rec.x = at.x; rec.y = at.y; rec.rect = root;
@@ -726,6 +735,22 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
     sceneText, fetchScene, install, moveNode, updateNode,
     stats: () => engine.stats(),
     /** { missing, blank, exact } of the last frame, without stats()'s walk over every board. */
+    snapshotAssets(id) {
+      const assets = new Map();
+      for (const url of loaded.get(id)?.images ?? []) {
+        if (url.startsWith("data:")) continue; // the bytes already contribute to the board key
+        const etag = images.get(url)?.etag;
+        if (!url.startsWith("/asset?") || !etag) return null;
+        const asset = url.split("#", 1)[0];
+        if (assets.has(asset) && assets.get(asset) !== etag) return null;
+        assets.set(asset, etag);
+      }
+      return [...assets].sort();
+    },
+    paintedBoards() {
+      const s = engine.pictureState();
+      return s[2] === 1 && s[1] === 0 ? engine.boardsInView() : [];
+    },
     pictureState: () => { const s = engine.pictureState(); return { missing: s[0], blank: s[1], exact: s[2] === 1 }; },
     loseDevice: () => device && device.destroy(),
     destroy() {
@@ -809,7 +834,7 @@ async function run({ id, url, cap, px }) {
       bm.close();
       bm = small;
     }
-    postMessage({ id, bm, nw, nh, opaque: opaqueOf(bm, blob.type) }, [bm]);
+    postMessage({ id, bm, nw, nh, opaque: opaqueOf(bm, blob.type), etag: r.headers.get("etag") }, [bm]);
   } catch (e) {
     if (bm) bm.close(); // the full-size decode, when shrinking it failed
     postMessage({ id, error: String((e && e.message) || e) });
