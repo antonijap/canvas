@@ -1169,12 +1169,16 @@ impl Engine {
             }
             // Not while boards are still arriving (an open, a page switch): how many boards are near the view decides
             // how big base textures are (`base_px_for`), and each step down rendered every one of them again.
-            if t0 - self.last_added < BASE_WAIT_MS {
-                bases_waiting = true;
-            } else if !(base == desired && !tiles.is_empty()) && !self.gpu.tiles.fresh(&base_key, b.generation) && !failed(&base_key) {
-                let has_any = self.gpu.tiles.get(&base_key).is_some();
-                let d = wink.center().distance(center) + if has_any { 1e9 } else { 0.0 };
-                work.push((3, d, Work::Base(bi)));
+            // At overview scale, a fully visible board's tiles already cover it. Drawing a second
+            // picture at a larger scale spends time and cache space on pixels the view never uses.
+            if !(base.scale() >= s && view.contains_rect(wink)) && !(base == desired && !tiles.is_empty()) {
+                if t0 - self.last_added < BASE_WAIT_MS {
+                    bases_waiting = true;
+                } else if !self.gpu.tiles.fresh(&base_key, b.generation) && !failed(&base_key) {
+                    let has_any = self.gpu.tiles.get(&base_key).is_some();
+                    let d = wink.center().distance(center) + if has_any { 1e9 } else { 0.0 };
+                    work.push((3, d, Work::Base(bi)));
+                }
             }
             let is_ok = |key: &TileKey| if moving { self.gpu.tiles.fresh(key, b.generation) } else { self.gpu.tiles.sharp(key, b.generation) };
             // Ahead of the view: what a pan shows next, and half a tile around a view at rest. Not during a zoom

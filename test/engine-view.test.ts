@@ -136,8 +136,9 @@ describe("decoded image budget and retries", () => {
   type Plan = { url: string; cap: number };
   const total = (items: any[], plan: Plan[]) => items.reduce((n, it) => n + decodedBytes(it, (plan.find((p: Plan) => p.url === it.url) ?? it).cap), 0);
   test("the decode step follows the size on screen", () => {
-    assert.deepEqual([100, 460, 461, 1843, 1844, 2751, 2752, 3840, 3892, 5503, 7782, 7783, 11005, 40000].map(imageCapFor), [512, 512, 2048, 2048, 2896, 2896, 4096, 4096, 5792, 8192, 8192, 11584, 16384, 16384]);
-    assert.deepEqual([IMAGE_CAPS[0], IMAGE_CAPS[1], IMAGE_CAPS.at(-1)], [SMALL_IMAGE_SIDE, MAX_IMAGE_SIDE, FULL_IMAGE_SIDE]);
+    assert.deepEqual([50, 100, 200, 460, 461, 1843, 1844, 2751, 2752, 3840, 3892, 5503, 7782, 7783, 11005, 40000].map(imageCapFor), [64, 128, 256, 512, 2048, 2048, 2896, 2896, 4096, 4096, 5792, 8192, 8192, 11584, 16384, 16384]);
+    assert.ok(IMAGE_CAPS.includes(SMALL_IMAGE_SIDE) && IMAGE_CAPS.includes(MAX_IMAGE_SIDE));
+    assert.equal(IMAGE_CAPS.at(-1), FULL_IMAGE_SIDE);
     assert.ok(IMAGE_CAPS.every((c: number, i: number) => i === 0 || c > IMAGE_CAPS[i - 1]));
   });
   test("30 full-page screenshots at 16% on a 2x display stay far inside the budget", () => {
@@ -254,12 +255,25 @@ describe("restacking on a 1,000-board file (stress: 15 s of 20 in nodeRect + all
 
 describe("image decoder worker (stress: 8k shrink blocked the main thread 80 ms; 200 at once failed)", () => {
   // Run the worker's source with fake fetch / createImageBitmap / postMessage.
-  async function runWorker(jobs: { id: number; url: string; cap: number }[], dims: (url: string) => [number, number]) {
+  async function runWorker(jobs: { id: number; url: string; cap: number }[], dims: (url: string) => [number, number], pngHeader = false) {
     let live = 0, peak = 0;
     const posted: any[] = [], resized: any[] = [];
     const g: any = {
-      fetch: async (url: string) => { live++; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 5)); return url.includes("gone") ? { ok: false, status: 404 } : { ok: true, headers: new Headers({ etag: '"image"' }), blob: async () => ({ url, type: url.endsWith(".jpg") ? "image/jpeg" : "image/png" }) }; },
-      createImageBitmap: async (src: any, o?: any) => { if (o) { resized.push([o.resizeWidth, o.resizeHeight]); return { width: o.resizeWidth, height: o.resizeHeight, close() {} }; } const [w, h] = dims(src.url); return { width: w, height: h, close() { live--; } }; },
+      fetch: async (url: string) => { live++; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 5)); return url.includes("gone") ? { ok: false, status: 404 } : { ok: true, headers: new Headers({ etag: '"image"' }), blob: async () => {
+        if (pngHeader) {
+          const [w, h] = dims(url);
+          const header = Buffer.from("89504e470d0a1a0a0000000d494844520000000000000000", "hex");
+          header.writeUInt32BE(w, 16);
+          header.writeUInt32BE(h, 20);
+          return Object.assign(new Blob([header], { type: "image/png" }), { url });
+        }
+        return { url, type: url.endsWith(".jpg") ? "image/jpeg" : "image/png" };
+      } }; },
+      createImageBitmap: async (src: any, o?: any) => {
+        if (o) { resized.push([o.resizeWidth, o.resizeHeight, ...(src instanceof Blob ? ["blob"] : [])]); if (src instanceof Blob) live--; return { width: o.resizeWidth, height: o.resizeHeight, close() {} }; }
+        const [w, h] = dims(src.url);
+        return { width: w, height: h, close() { live--; } };
+      },
       postMessage: (m: any) => { if (!m.bm) live--; posted.push(m); },
     };
     const self: any = {};
@@ -296,6 +310,46 @@ describe("image decoder worker (stress: 8k shrink blocked the main thread 80 ms;
     assert.equal(r.resized.length, 0);
     assert.equal(r.posted[0].bm.width, 300);
   });
+  test("a PNG at fit zoom is resized from the blob using its intrinsic dimensions", async () => {
+    const r = await runWorker([{ id: 1, url: "/phone.png", cap: 64 }], () => [1170, 2532], true);
+    assert.deepEqual(r.resized, [[30, 64, "blob"]]);
+    assert.deepEqual([r.posted[0].nw, r.posted[0].nh], [1170, 2532]);
+  });
+  test("a disk preview is used only after its source ETag is revalidated", async () => {
+    const origin = "http://localhost";
+    const url = new URL("/asset?p=phone.png", origin);
+    const key = new URL(url);
+    key.searchParams.set("preview", "64");
+    const cache = {
+      keys: async () => [{ url: key.href }],
+      match: async () => new Response("preview", { headers: { etag: '"old"', width: "1170", height: "2532" } }),
+    };
+    const self: { location: { origin: string }; onmessage?: (e: unknown) => void } = { location: { origin } };
+    const tags: string[] = [], decoded: string[] = [];
+    const fetch = async (_url: string, options: RequestInit) => {
+      tags.push(new Headers(options.headers).get("if-none-match")!);
+      return tags.length === 1 ? new Response(null, { status: 304 })
+        : new Response("replacement", { headers: { etag: '"new"', "content-type": "image/jpeg" } });
+    };
+    const bitmap = async (blob: Blob) => {
+      decoded.push(await blob.text());
+      return { width: 30, height: 64 };
+    };
+    const posted: any[] = [];
+    new Function("self", "fetch", "createImageBitmap", "postMessage", "caches", "OffscreenCanvas",
+      DECODER_SRC.replace("__MAX__", String(DECODE_CONCURRENCY)))(
+      self, fetch, bitmap, (msg: unknown) => posted.push(msg), { open: async () => cache }, class {});
+    for (let id = 1; id <= 2; id++) {
+      self.onmessage!({ data: { id, url: url.href, cap: 64 } });
+      while (posted.length < id) await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    assert.deepEqual(tags, ['"old"', '"old"']);
+    assert.deepEqual(decoded, ["preview", "replacement"]);
+    assert.deepEqual(posted.map(({ cached, etag, nw, nh }) => ({ cached, etag, nw, nh })), [
+      { cached: true, etag: '"old"', nw: 1170, nh: 2532 },
+      { cached: undefined, etag: '"new"', nw: 30, nh: 64 },
+    ]);
+  });
 });
 
 describe("parked boards (page switches hide boards instead of removing them)", () => {
@@ -317,8 +371,8 @@ describe("parked boards (page switches hide boards instead of removing them)", (
 // engine as 307 x 2048. An image shown larger than that now gets its own pixels, capped by area.
 test("an image shown large is decoded at its own pixels, capped by area", async () => {
   // @ts-expect-error engine-view.js is an untyped page module
-  const { imageCapFor, decodeScale, MAX_IMAGE_SIDE, SMALL_IMAGE_SIDE, FULL_IMAGE_SIDE, FULL_IMAGE_PX } = await import("../src/page/engine-view.js");
-  assert.equal(imageCapFor(100), SMALL_IMAGE_SIDE);
+  const { imageCapFor, decodeScale, MAX_IMAGE_SIDE, FULL_IMAGE_SIDE, FULL_IMAGE_PX } = await import("../src/page/engine-view.js");
+  assert.equal(imageCapFor(100), 128);
   assert.equal(imageCapFor(1000), MAX_IMAGE_SIDE);
   assert.equal(decodeScale(1200, 8000, imageCapFor(8000)), 1, "a tall screenshot at 100% on a 2x display: its own pixels");
   assert.equal(imageCapFor(20000), FULL_IMAGE_SIDE);

@@ -8,7 +8,7 @@ import { openFixture, type OpenFixture } from "./fixtures/open.ts";
 
 export const NATIVE_APP = path.join(ROOT, "build/perf-native/Canvas QA.app");
 
-type Mark = "paint" | "look" | "picture" | "load" | "engine" | "landed" | "epoch";
+type Mark = "paint" | "look" | "picture" | "imgs" | "load" | "engine" | "landed" | "epoch" | "snapshots";
 type OpenMarks = Partial<Record<Mark, number | null>>;
 type WarmMarks = { started?: number; finished?: number; error?: string };
 
@@ -28,16 +28,35 @@ export async function measureOpen(app: QaApp, file: string, timeout = 12_000) {
   await app.openShown(file);
   const deadline = start + timeout;
   let result: OpenMarks | null;
+  let nextTrace = 0;
   do {
     result = await tab.js<OpenMarks | null>(`return new URL(location.href).searchParams.get("file") === ${JSON.stringify(file)}
       && window.canvasHost?.perf ? { ...window.canvasHost.perf, epoch: performance.timeOrigin, now: performance.now() } : null;`).catch(() => null);
     if (result?.picture != null && result.load != null) break;
+    if (process.argv.includes("--trace") && result && performance.now() >= nextTrace) {
+      nextTrace = performance.now() + 500;
+      const trace = await tab.js(`const s = window.__canvas?.stats(), ev = window.canvasHost?.engineView;
+        return { now: Math.round(performance.now()), boards: s?.boards, images: ev?.imageStats(), pending: ev?.imagesPending(),
+          gpuImages: s?.imageLevels, gpuBytes: s?.imageBytes, missing: s?.tilesMissing, unattached: s?.imagesUnattached,
+          snapshotBytes: await (await import("/page/snapshots.js")).totalBytes() };`).catch(() => null);
+      if (trace) console.log("open trace", JSON.stringify(trace));
+    }
     await sleep(60);
   } while (performance.now() < deadline);
-  const status = await tab.js(`const s = window.__canvas?.stats();
+  const status = await tab.js(`const s = window.__canvas?.stats(), view = window.canvasHost?.engineView;
     return s ? { rendererInitMs: s.rendererInitMs, boards: s.boards, visibleBoards: s.visibleBoards,
-      missing: s.tilesMissing, tileWork: s.tileWork, errors: s.errors, settled: window.__canvas.settled() } : null;`).catch(() => null);
+      missing: s.tilesMissing, tileWork: s.tileWork, errors: s.errors, settled: window.__canvas.settled(),
+      zoom: window.canvasHost.cam?.z, images: view?.imageStats(), pending: view?.imagesPending() } : null;`).catch(() => null);
   return { ...result, status };
+}
+
+export async function openImages(app: QaApp, file: string) {
+  const first = await measureOpen(app, file);
+  if (process.argv.includes("--trace")) console.log("first", JSON.stringify(first));
+  const tab = new NT(app, file);
+  await sleep(1000); // Let the preview and snapshot writes finish before closing.
+  await tab.cmd("close", { file });
+  return { first, second: await measureOpen(app, file) };
 }
 
 export function openSeven(app: QaApp, second = false) {
@@ -50,18 +69,26 @@ if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
     const count = Number(process.argv[2] ?? 3);
     const kind = (process.argv[3] ?? "seven") as OpenFixture;
     const wait = process.argv.includes("--ready");
+    const seed = kind === "images" ? openFixture(root, kind) : null;
     for (let i = 0; i < count; i++) {
       const app = new QaApp(root, i + 1);
       try {
+        const images = seed ? path.join(app.docs, "images.canvas") : null;
+        if (seed && images) fs.cpSync(seed, images, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
         await app.start(NATIVE_APP);
         if (wait) console.log("startup", JSON.stringify(await gpuWarm(app, true)));
         if (kind === "seven") {
           console.log("first", JSON.stringify(await openSeven(app)));
           console.log("warm", JSON.stringify(await openSeven(app, true)));
+        } else if (images) {
+          console.log("images", JSON.stringify(await openImages(app, images)));
         } else {
           console.log(kind, JSON.stringify(await measureOpen(app, openFixture(app.docs, kind))));
         }
         if (process.argv.includes("--trace")) console.log("startup", JSON.stringify(await gpuWarm(app)));
+      } catch (error) {
+        if (process.argv.includes("--trace")) console.error(app.serverLog.slice(-4).join(""), app.log().split("\n").slice(-8).join("\n"));
+        throw error;
       } finally {
         await app.stop();
       }

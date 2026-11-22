@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fixture, scratchCopy } from "./gen.ts";
+import { writeImageFixture } from "./images.ts";
 
-export type OpenFixture = "seven" | "many" | "empty";
+export type OpenFixture = "seven" | "many" | "empty" | "images";
 
 export function openFixture(into: string, kind: OpenFixture, name = kind + ".canvas") {
+  if (kind === "images") return writeImageFixture(path.join(into, name));
   if (kind === "many") {
     const { dir } = scratchCopy(fixture(2000), into, name);
     fs.writeFileSync(path.join(dir, "media", "img-0.png"), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));

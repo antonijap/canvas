@@ -2336,7 +2336,10 @@ function perfPoll() {
   if (document.hidden) return;
   if (perf.paint === null && snapshotInView()) perfAt("paint");
   if (perf.look === null && host.looksDone()) perfAt("look");
-  if (perf.landed !== null) { if (!engineBusy && !camRaf) perfAt("idle"); if (ev && ev.imagesPending() === 0) perfAt("imgs"); }
+  if (perf.landed !== null) {
+    if (!engineBusy && !camRaf) perfAt("idle");
+    if (perf.imgs === null && ev && ev.imagesPending() === 0 && window.__canvas.inViewLoaded(PREFETCH)) perfAt("imgs");
+  }
   if (!window.__canvas.settled() || (ev && ev.imagesPending() > 0)) return;
   for (const w of perfWait) { perf[w.kind] = Math.round(now - w.t0); if (w.kind === "show") perf.shows++; if (w.kind === "page") perf.pages++; }
   // An empty view finishes at load. A failed visible board has no first-look mark.
@@ -2451,7 +2454,7 @@ function snapshotInView() {
 host.looksDone = () => {
   if (!cam || !VW || !VH) return false;
   let any = false;
-  const liveReady = !engineBusy && !(ev && ev.imagesPending() > 0);
+  const liveReady = !engineBusy && !camRaf && !(ev && ev.imagesPending() > 0);
   for (const b of boards.values()) {
     if (!boardInView(b)) continue;
     any = true;

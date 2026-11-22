@@ -22,7 +22,7 @@ export const FULL_IMAGE_PX = 32e6;
  * One step from 2048 straight to its own pixels gave every full-page screenshot on an overview (1920 device px
  * tall, 0.4 Mpx on screen) a 32 Mpx decode: 30 of them, 3.8 GB.
  */
-export const IMAGE_CAPS = [512, 2048, 2896, 4096, 5792, 8192, 11584, 16384];
+export const IMAGE_CAPS = [64, 128, 256, 512, 2048, 2896, 4096, 5792, 8192, 11584, 16384];
 /** Decoded bytes of all images together: past it, images out of view go small and the ones in view give way (planImageDecodes). */
 export const IMAGE_BUDGET = 768 << 20;
 /** What an image is decoded at while no board shows it large (the engine's 512 level). */
@@ -160,9 +160,8 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     idle(next);
   }
 
-  // ---- images: decoded at the size the screen needs, in steps (IMAGE_CAPS). A board far out (the overview) only
-  // ever draws an image's small mip levels, so it is decoded at most SMALL_IMAGE_SIDE px long; when the image
-  // itself is in or near the view and drawn bigger, it is decoded again at the next step above its size on screen,
+  // ---- images: decoded at the size the screen needs, in steps (IMAGE_CAPS). At fit zoom the decode may be just
+  // 64 px long; when the image gets larger, it is decoded again at the next step above its size on screen,
   // up to its own pixels. Which image gets which size is one plan over all of them (planImageDecodes): each image
   // by its own rectangle against the view, and all decoded bytes together within IMAGE_BUDGET. The bitmap the
   // engine holds is never closed while registered; the one it replaces is the engine's to drop.
@@ -181,41 +180,51 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
    * How an image shows now: the long side (device px) of its largest use in or near the view, 0 when none is,
    * -1 when a board in view lists it but where it draws it is not known (it gets the 2048 step, as before).
    */
-  function shownPx(m, view, inView) {
-    const c = getCam(), dpr = window.devicePixelRatio || 1;
-    if (!c || !view) return 0;
-    let side = 0, unmeasured = false;
+  function imageUse(m, view, scale) {
+    let side = 0, unmeasured = false, distance = Infinity;
+    if (!view) return { px: 0, distance };
     for (const b of m.boards) {
       const rec = loaded.get(b), rects = m.uses.get(b);
-      if (!rec) continue; // parked: not drawn
-      if (!rects || !rects.length || !Number.isFinite(rec.x)) { unmeasured = unmeasured || inView.has(b); continue; }
-      side = Math.max(side, useInView(rects, rec.x, rec.y, view));
+      if (!rec?.rect) continue; // parked or not laid out
+      const shown = rects?.length ? useInView(rects, rec.x, rec.y, view) : 0;
+      if (!rects?.length && overlaps({ ...rec.rect, x: rec.x, y: rec.y }, view)) unmeasured = true;
+      side = Math.max(side, shown);
+      distance = Math.min(distance, (rec.x + rec.rect.w / 2 - view.x - view.w / 2) ** 2 +
+        (rec.y + rec.rect.h / 2 - view.y - view.h / 2) ** 2);
     }
-    return side > 0 ? side * c.z * dpr : unmeasured ? -1 : 0;
+    return { px: side > 0 ? side * scale : unmeasured ? -1 : 0, distance };
   }
   /** The decodes to start now: [{ url, cap }] (see planImageDecodes). */
   function imagePlan() {
-    const view = nearView(), inView = new Set(engine.boardsInView()), now = performance.now();
+    const view = nearView(), scale = (getCam()?.z || 1) * (window.devicePixelRatio || 1), now = performance.now();
     const items = [];
     for (const [url, m] of images) {
       if (!m.boards.size) continue;
-      const px = shownPx(m, view, inView);
+      const { px, distance } = imageUse(m, view, scale);
       if (px !== 0) m.usedAt = now;
       const want = px < 0 ? MAX_IMAGE_SIDE : px > 0 ? imageCapFor(px) : SMALL_IMAGE_SIDE;
-      items.push({ url, cap: m.cap, bytes: m.bytes, nw: m.nw, nh: m.nh, aspect: m.aspect || 1, want, shown: px !== 0, busy: m.busy || !mayDecode(m), at: m.usedAt });
+      items.push({ url, cap: m.cap, bytes: m.bytes, nw: m.nw, nh: m.nh, aspect: m.aspect || 1, want,
+        shown: px !== 0, busy: !mayDecode(m), at: m.usedAt, distance });
     }
+    items.sort((a, b) => Number(b.shown) - Number(a.shown) || a.distance - b.distance);
     return planImageDecodes(items, IMAGE_BUDGET);
   }
   const mayDecode = (m) => !m.busy && performance.now() >= m.retryAt;
-  /** Start what the plan asks for: first decodes always, bigger ones only while the camera is still. */
-  function applyImagePlan(only) {
-    if (dead) return;
-    for (const { url, cap } of imagePlan()) {
-      const m = images.get(url);
-      if (!m || !mayDecode(m) || (only && !only.has(url))) continue;
-      if (m.cap && cap > m.cap && !isIdle()) continue;
-      decode(url, cap);
-    }
+  let decoding = 0, planQueued = false, previewHits = 0;
+  function requestImagePlan() {
+    if (dead || planQueued || decoding >= DECODE_SLOTS) return;
+    planQueued = true;
+    queueMicrotask(() => {
+      planQueued = false;
+      if (dead) return;
+      for (const { url, cap } of imagePlan()) {
+        if (decoding >= DECODE_SLOTS) break;
+        const m = images.get(url);
+        if (m.cap && cap > m.cap && !isIdle()) continue;
+        decoding++;
+        void decode(url, cap).finally(() => { decoding--; requestImagePlan(); });
+      }
+    });
   }
   // A URL that answered 4xx is said once per page: a page switch makes a new record, which asks again (the file
   // may exist by then), and repeated warnings drowned the console in the soak.
@@ -246,20 +255,19 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       const response = await fetch(url);
       if (!response.ok) throw Object.assign(new Error(String(response.status)), { status: response.status });
       const blob = await response.blob();
-      const bm = await createImageBitmap(blob).catch((cause) => {
+      const decoded = await bitmapFromBlob(blob, cap).catch((cause) => {
         throw Object.assign(new Error("invalid bitmap", { cause }), { invalidBitmap: true });
       });
-      const nw = bm.width, nh = bm.height;
-      return { bm: await capBitmap(bm, cap), nw, nh, opaque: blob.type === "image/jpeg" ? true : undefined, etag: response.headers.get("etag") };
+      return { ...decoded, opaque: blob.type === "image/jpeg" ? true : undefined, etag: response.headers.get("etag") };
     };
     const viaWorker = decodeOffThread(url, cap);
     // A worker that could not decode (no ImageBitmap in workers, the worker died): this image on the main thread,
     // and when that works the worker is the problem (counted; a broken file fails both and counts nothing).
-    return (viaWorker ? viaWorker.catch((e) => (e && e.status ? Promise.reject(e) : onMain().then((r) => { workerFailed(); return r; }))) : onMain()).then((r) => (url.includes("#adjust=") ? adjusted(url, r) : r)).then(({ bm, nw, nh, opaque, etag }) => {
+    return (viaWorker ? viaWorker.catch((e) => (e && e.status ? Promise.reject(e) : onMain().then((r) => { workerFailed(); return r; }))) : onMain()).then((r) => (url.includes("#adjust=") ? adjusted(url, r) : r)).then(({ bm, nw, nh, opaque, etag, cached }) => {
       m.busy = false;
       if (dead) { bm.close(); return; } // the engine is gone: nobody will ever draw it
       // The board that wanted it left (another page, a removal) while it decoded: never register it.
-      if (images.get(url) !== m || !m.boards.size) { bm.close(); releaseUnusedImages(); return; }
+      if (images.get(url) !== m || !m.boards.size) { bm.close(); releaseImage(url, m); return; }
       m.cap = cap; m.fails = 0; m.retryAt = 0; m.gone = false;
       m.nw = nw || bm.width; m.nh = nh || bm.height;
       // `opaque` (no transparency, known for sure) saves the engine reading the pixels before it tiles the image.
@@ -270,33 +278,28 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       m.bm = bm;
       m.etag = etag;
       m.bytes = bm.width * bm.height * 4;
+      if (cached) previewHits++;
       onChange();
-      // A decode that lands after the camera settled missed refineImages(): its size, and the budget, now.
-      applyImagePlan();
     }).catch((e) => {
       m.busy = false;
       const gone = imageUnavailable(e);
       if (!gone || !toldGone.has(url)) console.warn("[canvas] image", url, e && e.message);
       if (gone) toldGone.add(url);
       if (dead) return;
+      if (!m.boards.size) { releaseImage(url, m); return; }
       // A missing or unreadable file can appear later. Draw the available content while retrying.
       if (gone && !m.gone) { m.gone = true; onChange(); }
       const wait = imageRetryDelay(++m.fails);
       m.retryAt = performance.now() + wait;
       setTimeout(() => {
         if (dead || images.get(url) !== m || !m.boards.size) return;
-        if (!mayDecode(m)) return;
-        applyImagePlan(new Set([url]));
+        requestImagePlan();
       }, wait + 10);
     });
   }
-  function registerImages(urls) {
-    const fresh = new Set(urls.filter((url) => { const m = imageOf(url); return !m.cap && mayDecode(m); }));
-    if (fresh.size) applyImagePlan(fresh);
-  }
   /** After the camera settles: decode again, bigger, the images now in view and shown large; keep within the budget. */
   function refineImages() {
-    applyImagePlan();
+    requestImagePlan();
   }
   /** Images a drawn board uses that have no decode yet (or one in flight): the canvas is not fully drawn until 0. */
   function imagesPending() {
@@ -306,17 +309,26 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   }
   /** Decoded bytes the engine holds, for stats and tests. */
   function imageStats() {
-    let bytes = 0, big = 0;
-    for (const m of images.values()) { bytes += m.bytes; if (m.cap > MAX_IMAGE_SIDE) big++; }
-    return { decodedBytes: bytes, budget: IMAGE_BUDGET, images: images.size, big };
+    let bytes = 0, big = 0, full = 0;
+    for (const m of images.values()) {
+      bytes += m.bytes;
+      if (m.cap > MAX_IMAGE_SIDE) big++;
+      if (m.bm?.width === m.nw && m.bm?.height === m.nh) full++;
+    }
+    return { decodedBytes: bytes, budget: IMAGE_BUDGET, images: images.size, big, full,
+      active: decoding, slots: DECODE_SLOTS, workers: decoder ? DECODE_WORKERS : 0, previewHits };
   }
   /** An image no loaded board references any more: unregister it (frees its GPU levels) and only then close the bitmap. */
-  function releaseUnusedImages() {
-    for (const [url, m] of images) {
-      if (m.boards.size || m.busy) continue;
-      if (m.cap) { try { engine.unregisterImage(url); } catch (e) { console.warn("[canvas] unregisterImage", url, e && e.message); } }
-      if (m.bm) { try { m.bm.close(); } catch {} m.bm = null; }
-      images.delete(url);
+  function releaseImage(url, m) {
+    if (m.boards.size || m.busy || images.get(url) !== m) return;
+    if (m.cap) { try { engine.unregisterImage(url); } catch (e) { console.warn("[canvas] unregisterImage", url, e && e.message); } }
+    if (m.bm) m.bm.close();
+    images.delete(url);
+  }
+  function detachImages(id, urls) {
+    for (const url of urls) {
+      const m = images.get(url);
+      if (m) { m.boards.delete(id); m.uses.delete(id); }
     }
   }
   /** Where a board draws each image, from the engine's own layout: rectangles relative to the board (at `at`). */
@@ -360,7 +372,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
           const j = d.jobs.get(e.data.id);
           if (!j) { if (e.data.bm) e.data.bm.close(); return; }
           d.jobs.delete(e.data.id);
-          if (e.data.bm) { workerFails = 0; j.res({ bm: e.data.bm, nw: e.data.nw, nh: e.data.nh, opaque: e.data.opaque, etag: e.data.etag }); }
+          if (e.data.bm) { workerFails = 0; j.res(e.data); }
           else j.rej(Object.assign(new Error(e.data.error || "decode failed"), e.data.status ? { status: e.data.status } : {}));
         };
         // A worker that died (out of memory) fails what the pool held; the next decode starts a new pool.
@@ -371,21 +383,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       } catch { decoder = false; return null; }
     }
     const d = decoder, id = ++d.seq;
-    return new Promise((res, rej) => { d.jobs.set(id, { res, rej }); d.worker.postMessage({ id, url: new URL(url, location.href).href, cap, px: cap > MAX_IMAGE_SIDE ? FULL_IMAGE_PX : 0 }); });
-  }
-
-  // A bigger decode than `cap` px long side is memory for nothing (a 4000 x 6000 render is 96 MB decoded,
-  // 16 MB at 2048). The full decode is closed right away.
-  async function capBitmap(bm, cap) {
-    const k = decodeScale(bm.width, bm.height, cap);
-    if (k >= 1) return bm;
-    try {
-      const small = await createImageBitmap(bm, { resizeWidth: Math.max(1, Math.round(bm.width * k)), resizeHeight: Math.max(1, Math.round(bm.height * k)), resizeQuality: "high" });
-      bm.close();
-      return small;
-    } catch {
-      return bm;
-    }
+    return new Promise((res, rej) => { d.jobs.set(id, { res, rej }); d.worker.postMessage({ id, url: new URL(url, location.href).href, cap }); });
   }
 
   // ---- boards
@@ -537,14 +535,15 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       const uses = [];
       rec.ids = indexScene(scene.root, meta.id, nodeIndex, uses);
       rec.content = content;
-      for (const m of images.values()) { m.boards.delete(meta.id); m.uses.delete(meta.id); } // the new content decides which images this board still uses
+      const previousImages = rec.images || [];
+      detachImages(meta.id, previousImages);
       measureImages(meta.id, uses, at);
       rec.images = scene.images || [];
       for (const url of rec.images) imageOf(url).boards.add(meta.id);
-      releaseUnusedImages();
+      for (const url of previousImages) { const m = images.get(url); if (m) releaseImage(url, m); }
     }
     rec.x = at.x; rec.y = at.y; rec.rect = root;
-    registerImages(scene.images || []);
+    if (rec.images?.length) requestImagePlan();
     // Only a board that overlaps another loaded one can be stacked wrong. Checked once per batch (loadBoards), by
     // reorder's sweep over cached rects (n log n): a check of each new board against every loaded one here was n²,
     // 330 ms of a 5,000-board open.
@@ -598,9 +597,9 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     if (pi >= 0) paint.splice(pi, 1);
     keepScene(id, null);
     for (const n of rec.ids) if (nodeIndex.get(n) && nodeIndex.get(n).board === id) nodeIndex.delete(n);
-    for (const m of images.values()) { m.boards.delete(id); m.uses.delete(id); }
+    detachImages(id, rec.images || []);
     engine.removeBoard(id);
-    releaseUnusedImages();
+    for (const url of rec.images || []) { const m = images.get(url); if (m) releaseImage(url, m); }
     onChange();
   }
   /** Move a loaded board now (the content reload that follows keeps it there unless it changed). */
@@ -893,25 +892,110 @@ export function parkedToEvict(parked, nodes, maxNodes = PARK_MAX_NODES, maxBoard
 export const DECODE_CONCURRENCY = 2;
 /** Decoder workers (each runs DECODE_CONCURRENCY decodes at once). */
 export const DECODE_WORKERS = 3;
+const DECODE_SLOTS = DECODE_CONCURRENCY * DECODE_WORKERS;
+
+// A preview is derived from one local asset at one size. Keep it on disk in the browser
+// cache and ask /asset to revalidate its source ETag before reusing it.
+function openThumbnailCache() {
+  if (typeof caches === "undefined" || typeof OffscreenCanvas === "undefined") return null;
+  const limit = 2048;
+  let ready, writes = 0;
+  async function init() {
+    const cache = await caches.open("canvas-image-previews-v1");
+    const prune = async () => {
+      const keys = await cache.keys();
+      await Promise.all(keys.slice(0, Math.max(0, keys.length - limit)).map((key) => cache.delete(key)));
+      return new Set(keys.slice(-limit).map((key) => key.url));
+    };
+    return { cache, existing: await prune(), prune };
+  }
+  return async (url, cap) => {
+    if (cap > 128) return null;
+    const key = new URL(url);
+    if (key.origin !== self.location.origin || key.pathname !== "/asset") return null;
+    key.hash = "";
+    key.searchParams.set("preview", String(cap));
+    const store = await (ready ||= init().catch(() => null));
+    if (!store) return null;
+    const { cache, existing, prune } = store;
+    return {
+      read: () => existing.has(key.href) ? cache.match(key.href).catch(() => null) : null,
+      write(bm, nw, nh, etag, opaque) {
+        if (!etag || Math.max(bm.width, bm.height) > cap || (nw === bm.width && nh === bm.height)) return;
+        const canvas = new OffscreenCanvas(bm.width, bm.height);
+        canvas.getContext("2d").drawImage(bm, 0, 0);
+        void canvas.convertToBlob().then(async (blob) => {
+          await cache.put(key.href, new Response(blob, { headers: { etag, width: String(nw), height: String(nh), opaque: opaque ? "1" : "0" } }));
+          existing.add(key.href);
+          if (++writes % 128 === 0) await prune();
+        }).catch(() => {});
+      },
+    };
+  };
+}
+
+async function bitmapFromBlob(blob, cap, px = cap > MAX_IMAGE_SIDE ? FULL_IMAGE_PX : 0) {
+  const resize = (w, h) => {
+    const k = Math.min(1, cap / Math.max(w, h), px ? Math.sqrt(px / (w * h)) : 1);
+    if (k >= 1) return undefined;
+    return { resizeWidth: Math.max(1, Math.round(w * k)), resizeHeight: Math.max(1, Math.round(h * k)), resizeQuality: "high" };
+  };
+  let bm;
+  // PNG's IHDR gives the dimensions without decoding the full bitmap. Some WebKit versions ignore
+  // resize options, so verify the returned dimensions and keep the bitmap fallback.
+  if (blob.type === "image/png" && blob.size >= 24) {
+    const header = new DataView(await blob.slice(0, 24).arrayBuffer());
+    if (header.getUint32(0) === 0x89504e47 && header.getUint32(4) === 0x0d0a1a0a && header.getUint32(12) === 0x49484452) {
+      const nw = header.getUint32(16), nh = header.getUint32(20);
+      const options = nw && nh && resize(nw, nh);
+      if (options) {
+        bm = await createImageBitmap(blob, options).catch(() => null);
+        if (bm?.width === options.resizeWidth && bm?.height === options.resizeHeight) return { bm, nw, nh };
+      }
+    }
+  }
+  bm ||= await createImageBitmap(blob);
+  const nw = bm.width, nh = bm.height, options = resize(nw, nh);
+  if (options) {
+    const small = await createImageBitmap(bm, options).catch(() => null);
+    if (small) { bm.close(); bm = small; }
+  }
+  return { bm, nw, nh };
+}
+
 /** The decoder worker: fetch, decode, shrink to `cap` px on the long side (and `px` pixels, when given), hand the bitmap over; a queue in front. */
 export const DECODER_SRC = `"use strict";
+const MAX_IMAGE_SIDE = ${MAX_IMAGE_SIDE}, FULL_IMAGE_PX = ${FULL_IMAGE_PX};
+${bitmapFromBlob.toString()}
+${openThumbnailCache.toString()}
+const thumbnailCache = openThumbnailCache();
 const q = []; let busy = 0;
 const pump = () => { while (busy < __MAX__ && q.length) { busy++; run(q.shift()).finally(() => { busy--; pump(); }); } };
 async function run({ id, url, cap, px }) {
   let bm = null;
   try {
-    const r = await fetch(url);
+    const thumb = await thumbnailCache?.(url, cap);
+    const cached = await thumb?.read();
+    const etag = cached?.headers.get("etag");
+    let r = await fetch(url, etag ? { cache: "no-store", headers: { "if-none-match": etag } } : undefined);
+    if (r.status === 304 && cached) {
+      bm = await cached.blob().then((blob) => createImageBitmap(blob)).catch(() => null);
+      if (bm) {
+        postMessage({ id, bm, nw: Number(cached.headers.get("width")), nh: Number(cached.headers.get("height")),
+          opaque: cached.headers.get("opaque") === "1" || undefined, etag, cached: true }, [bm]);
+        return;
+      }
+      r = await fetch(url, { cache: "reload" });
+    }
     if (!r.ok) { postMessage({ id, status: r.status, error: String(r.status) }); return; }
     const blob = await r.blob();
-    bm = await createImageBitmap(blob);
-    const nw = bm.width, nh = bm.height;
-    const k = Math.min(1, cap / Math.max(bm.width, bm.height), px ? Math.sqrt(px / (bm.width * bm.height)) : 1);
-    if (k < 1) {
-      const small = await createImageBitmap(bm, { resizeWidth: Math.max(1, Math.round(bm.width * k)), resizeHeight: Math.max(1, Math.round(bm.height * k)), resizeQuality: "high" });
-      bm.close();
-      bm = small;
-    }
-    postMessage({ id, bm, nw, nh, opaque: opaqueOf(bm, blob.type), etag: r.headers.get("etag") }, [bm]);
+    const decoded = await bitmapFromBlob(blob, cap, px);
+    bm = decoded.bm;
+    const { nw, nh } = decoded;
+    const opaque = opaqueOf(bm, blob.type);
+    const sourceTag = r.headers.get("etag");
+    try { thumb?.write(bm, nw, nh, sourceTag, opaque); } catch { /* optional cache */ }
+    postMessage({ id, bm, nw, nh, opaque, etag: sourceTag }, [bm]);
   } catch (e) {
     if (bm) bm.close(); // the full-size decode, when shrinking it failed
     postMessage({ id, error: String((e && e.message) || e) });
@@ -1130,7 +1214,7 @@ export function resizeAndDraw(engine, cssWidth, cssHeight, dpr, cam) {
 
 /**
  * The decode an image needs when its long side covers `devicePx` on screen: the first step of IMAGE_CAPS with a
- * little room above it (a tenth on the two small steps, as before; a twentieth on the large ones, where room is
+ * little room above it (a tenth on the small steps; a twentieth on the large ones, where room is
  * megabytes).
  */
 export function imageCapFor(devicePx) {
