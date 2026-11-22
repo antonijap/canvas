@@ -44,7 +44,7 @@ describe("widget store", () => {
 
   test("output is deterministic: 2-space JSON, trailing newline, fixed key order", async () => {
     const docFile = fresh("determinism");
-    await w.addWidget(docFile, { kind: "note", id: "w_aaaaaaaa", x: 5, y: 6, name: "N", config: { text: "hi" } });
+    await w.addWidget(docFile, { kind: "note", id: "w_aaaaaaaa", x: 5, y: 6, allowOverlap: true, name: "N", config: { text: "hi" } });
     const raw = fs.readFileSync(sidecarPath(docFile), "utf8");
     assert.ok(raw.endsWith("}\n"));
     assert.match(raw, /^\{\n  "version": 1,\n  "widgets": \[\n    \{\n      "id": "w_aaaaaaaa",\n      "kind": "note",\n      "name": "hi",\n      "x": 5,\n      "y": 6,\n      "w": 480,\n      "h": 80,\n      "locked": false,\n      "config": \{\n        "text": "hi",\n        "tone": "plain"\n/);
@@ -187,15 +187,16 @@ describe("widget store", () => {
     await assert.rejects(w.updateWidget(docFile, "w_missing1", { x: 1 }), (e: any) => e.status === 404);
   });
 
-  test("auto-place goes right of the boards and stacks down; index and restore by id work", async () => {
+  test("auto-place goes right of the boards and earlier cards; index and restore by id work", async () => {
     const docFile = fresh("place");
     const a = await w.addWidget(docFile, { kind: "note" });
     const b = await w.addWidget(docFile, { kind: "todo" });
-    // Boards end at x=1100 (500+600); 80px gap.
-    assert.equal(a.widget.x, 1180);
+    // Boards end at x=1100 (500+600); a 40px gap, level with the top board.
+    assert.equal(a.widget.x, 1140);
     assert.equal(a.widget.y, 0);
-    assert.equal(b.widget.x, 1180);
-    assert.equal(b.widget.y, a.widget.y + a.widget.h + 24);
+    // The next card goes right of the first one, clear of it.
+    assert.equal(b.widget.x, a.widget.x + a.widget.w + 40);
+    assert.equal(b.widget.y, 0);
     const removed = await w.removeWidget(docFile, a.widget.id);
     assert.equal(removed.index, 0);
     const back = await w.addWidget(docFile, { ...a.widget, index: removed.index });
