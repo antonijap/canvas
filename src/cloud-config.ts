@@ -82,6 +82,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  *                      one in force at the removal names it again.
  */
 let shellList: CloudEntry[] | null = null;
+const shellListWaiters = new Set<() => void>();
 let shellRev = -Infinity;
 const added = new Map<string, { entry: CloudEntry; rev: number }>();
 const held = new Map<string, number>();
@@ -132,6 +133,21 @@ export function isConfigured(url: unknown): url is string {
   return typeof url === "string" && cleanServerUrl(url) === url && cloudConfigs().some((e) => e.url === url);
 }
 
+/** A restored native tab can reach a fresh server before the shell posts its Cloud list. */
+export function waitForShellCloudList(): Promise<void> {
+  if (shellList !== null) return Promise.resolve();
+  return new Promise(resolve => {
+    const finish = () => {
+      clearTimeout(timer);
+      shellListWaiters.delete(finish);
+      resolve();
+    };
+    // A request from a browser or a disconnected shell must still finish.
+    const timer = setTimeout(finish, 3000).unref();
+    shellListWaiters.add(finish);
+  });
+}
+
 /** The development email for exactly this address, else "". Never another origin's, never a fallback. */
 export function devEmailFor(url: string): string {
   if (!isLocalDev(url)) return "";
@@ -173,6 +189,7 @@ export function setCloudConfig(raw: unknown): void {
     held.clear();
   }
   changed(before);
+  for (const finish of shellListWaiters) finish();
 }
 
 /** A Cloud joined or started here: it counts until the shell's next list (see above). */

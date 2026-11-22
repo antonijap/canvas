@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { forgetStore } from "./widgets/store.ts";
-import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers } from "./cloud-files.ts";
+import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers, waitForCachedCloudSettings } from "./cloud-files.ts";
 import { readOnlyRoute } from "./cloud-files-gate.ts";
 import { applyView, docKeysEffect } from "./docwriter.ts";
 import { updateVariables, variableEditBody } from "./doc/variables.ts";
@@ -609,7 +609,13 @@ try {
       // Start the WebView and the document read together. The event stream still waits for the current snapshot.
       if (url.pathname === "/") {
         const file = url.searchParams.get("file");
-        if (file) void prime(file).catch(() => {});
+        if (file) {
+          // The WebView starts its document and bridge streams as soon as it reads this page.
+          // If the shell has yet to send its Cloud list, both streams would fail before they can reconnect.
+          const settings = url.searchParams.get("shell") === "native" && waitForCachedCloudSettings(file);
+          if (settings) await settings;
+          void prime(file).catch(() => {});
+        }
         const engine = fs.existsSync(path.join(enginePkgDir(), "canvas_engine.js")) ? "ok" : "missing";
         return send(res, 200, "text/html; charset=utf-8", PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}">`));
       }

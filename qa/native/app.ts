@@ -112,28 +112,41 @@ export class QaApp {
     pb("Add :LSUIElement bool true"); // no Dock icon
     execFileSync("codesign", ["--force", "--sign", "-", this.app], { stdio: "ignore" });
 
+    await this.startServer();
+    await this.launch(onLaunch);
+  }
+
+  private async startServer() {
     this.server = spawn(process.execPath, [path.join(ROOT, "src/server.ts")], { cwd: ROOT, env: { ...this.env(), HOME: this.home }, stdio: ["ignore", "pipe", "pipe"] });
     this.server.stdout!.on("data", (d) => this.serverLog.push(String(d)));
     this.server.stderr!.on("data", (d) => this.serverLog.push(String(d)));
     await this.waitHealth();
-    await this.launch(onLaunch);
   }
 
-  async relaunch() {
+  async relaunch({ restartServer = false, env = {}, onLaunch }: {
+    restartServer?: boolean; env?: Record<string, string>; onLaunch?: () => void;
+  } = {}) {
     const pid = this.pid;
     await this.cmd({ op: "qa.quit" });
     for (let i = 0; i < 80; i++) {
-      try { process.kill(pid, 0); } catch { await this.launch(); return; }
+      try { process.kill(pid, 0); } catch {
+        if (restartServer) {
+          await this.stopServer();
+          await this.startServer();
+        }
+        await this.launch(onLaunch, env);
+        return;
+      }
       await sleep(100);
     }
     throw new Error("QA app did not quit before relaunch");
   }
 
-  private async launch(onLaunch?: () => void) {
+  private async launch(onLaunch?: () => void, extraEnv: Record<string, string> = {}) {
     // `open -g -n`: a new instance, launched in the background. Started any other way (a child of a frontmost
     // terminal or app), macOS brings it to the front and it takes the keyboard from whoever is typing.
     // -ApplePersistenceIgnoreState: no "reopen windows?" alert after the last run's kill (it blocks all input).
-    const env = Object.entries(this.env()).filter(([, v]) => v !== undefined).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
+    const env = Object.entries({ ...this.env(), ...extraEnv }).filter(([, v]) => v !== undefined).flatMap(([k, v]) => ["--env", `${k}=${v}`]);
     onLaunch?.();
     execFileSync("open", ["-g", "-n", "-a", this.app, "--stdout", this.appLogFile, "--stderr", this.appLogFile, ...env,
       "--args", "-ApplePersistenceIgnoreState", "YES", "-NSQuitAlwaysKeepsWindows", "NO"], { stdio: "ignore" });
@@ -198,8 +211,16 @@ export class QaApp {
     }
   }
 
+  private async stopServer() {
+    const server = this.server;
+    if (!server || server.exitCode !== null || server.signalCode !== null) return;
+    const exited = new Promise<void>(resolve => server.once("exit", () => resolve()));
+    server.kill("SIGTERM");
+    const timeout = setTimeout(() => server.kill("SIGKILL"), 6000);
+    try { await exited; } finally { clearTimeout(timeout); }
+  }
+
   async stop() {
-    const gone = (p?: ChildProcess) => !p || p.exitCode !== null || p.signalCode !== null;
     const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
     if (this.pid && alive(this.pid)) {
       // Only ever this instance's own pid, checked against its bundle path first.
@@ -210,11 +231,7 @@ export class QaApp {
         for (let i = 0; i < 30 && alive(this.pid); i++) await sleep(100);
       }
     }
-    if (!gone(this.server)) {
-      this.server!.kill("SIGTERM");
-      await Promise.race([new Promise((r) => this.server!.once("exit", r)), sleep(6000)]);
-      if (!gone(this.server)) this.server!.kill("SIGKILL");
-    }
+    await this.stopServer();
     try { if (this.app) execFileSync(LSREGISTER, ["-u", this.app], { stdio: "ignore" }); } catch {}
     this.clearDomain();
     fs.rmSync(this.dir, { recursive: true, force: true });

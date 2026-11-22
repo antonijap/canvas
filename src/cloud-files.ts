@@ -7,7 +7,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type http from 'node:http';
 import { target } from './cloud.ts';
-import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump, hostedId } from './cloud-config.ts';
+import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump, hostedId, waitForShellCloudList } from './cloud-config.ts';
 import { FileStateStore } from './cloud-files-store.ts';
 import { DocTree } from './cloud-files-tree.ts';
 import { documentOf, envelopeOf } from '../cloud/core/files/state.ts';
@@ -114,6 +114,14 @@ function clearPresence(s: Session) {
 function docFile(file: string) {
     const f = file.endsWith('document.json') ? path.resolve(file) : path.join(path.resolve(file), 'document.json');
     return fs.existsSync(f) ? fs.realpathSync(f) : f;
+}
+export function waitForCachedCloudSettings(file: string): Promise<void> | undefined {
+    const prefix = root() + path.sep;
+    const pkg = path.resolve(file);
+    if (!pkg.startsWith(prefix)) return;
+    const key = pkg.slice(prefix.length).split(path.sep, 1)[0];
+    if (cloudConfigs().some(c => cloudKey(c.url) === key)) return;
+    if (fs.existsSync(path.join(path.dirname(docFile(pkg)), '.cloud', 'state.sqlite'))) return waitForShellCloudList();
 }
 export function fileSession(file: string, importing = false): Session | undefined {
     const f = docFile(file);

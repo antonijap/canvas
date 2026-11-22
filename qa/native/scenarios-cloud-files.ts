@@ -7,6 +7,68 @@ import { startServer, ROOT, type Scratch } from '../lib.ts';
 import { PLAYGROUND } from '../playground.ts';
 import { expectedMove } from '../cloud-files-fixture.ts';
 const post = async (base: string, p: string, b: unknown) => { const r = await fetch(base + p, { method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, j: await r.json() as any }; };
+
+sc('cloud-files', 'Selected Cloud file draws its board on relaunch', { covers: ['cloud-files:open'] }, async (t: NT) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-native-cloud-launch-'));
+    let host: Scratch | undefined;
+    let file: string | undefined;
+    try {
+        host = await startServer(dir, {
+            HOME: dir, CANVAS_STATE_DIR: path.join(dir, 'state'), CANVAS_CLOUD_SECRETS_FILE: path.join(dir, 'secrets.json'),
+            CANVAS_TUNNEL_BIN: path.join(ROOT, 'test/fixtures/fake-tunnel.sh'),
+            CANVAS_FAKE_TUNNEL_DIR: path.join(t.app.dir, 'tunnels'), CANVAS_FAKE_TUNNEL_NODE: process.execPath,
+            CANVAS_FAKE_TUNNEL_ANY_PORT: '1', CANVAS_CLOUD_HOST_PORT: '0',
+        });
+        const started = await post(host.base, '/api/cloud/host/start', { name: 'Studio', label: 'Ben' });
+        t.eq(started.status, 200, 'Cloud starts');
+        const cloud = started.j.url;
+        const made = await post(host.base, '/api/cloud/files/create', { cloud, name: 'Design' });
+        t.eq(made.status, 201, 'Cloud file created');
+        const added = await post(host.base, '/api/structure', {
+            file: made.j.file, op: 'add', nodes: [{ id: 'StudioBoard', type: 'frame', width: 320, height: 240 }],
+        });
+        t.eq(added.status, 200, 'Cloud board created');
+        const invite = await post(host.base, '/api/cloud/host/invite', { hostId: started.j.hostId, label: 'Anna', role: 'editor' });
+        const joined = await post(t.app.base, '/api/cloud/join', { link: invite.j.link, device: 'A Mac' });
+        t.eq(joined.status, 200, 'editor joins');
+        await t.cmd('qa.cloud', { clouds: [{ url: cloud, name: 'Studio' }] });
+        const opened = await post(t.app.base, '/api/cloud/files/open', { cloud, id: made.j.id });
+        t.eq(opened.status, 200, 'editor opens the file');
+        file = opened.j.file;
+        await t.app.openShown(file!);
+        await t.waitState(s => s.file === file && s.boards.includes('StudioBoard'), 'Cloud board before quitting');
+
+        // Let the WebView reach the fresh server before the shell's settings post can arrive.
+        let launched = 0;
+        await t.app.relaunch({
+            restartServer: true, env: { CANVAS_QA_SETTINGS_DELAY_MS: '1000' },
+            onLaunch: () => { launched = performance.now(); },
+        });
+        const readPage = async () => {
+            const status = await fetch(t.app.base + '/api/bridge/status', { signal: AbortSignal.timeout(500) });
+            const { pages } = await status.json() as { pages: { file: string; perf?: { look?: number; doc?: number } }[] };
+            return pages.find(p => p.file === file);
+        };
+        const page = await t.waitFor(async () => {
+            const state = await readPage();
+            return state?.perf?.look != null && state;
+        }, 'the restored Cloud tab to report perf.look', Math.max(0, 3000 - (performance.now() - launched))).catch(async error => {
+            const doc = await fetch(t.app.base + '/api/doc?file=' + encodeURIComponent(file!), { signal: AbortSignal.timeout(500) });
+            t.note(`bridge perf ${JSON.stringify((await readPage())?.perf ?? null)}, GET /api/doc ${doc.status}`);
+            throw error;
+        });
+        const elapsed = Math.round(performance.now() - launched);
+        t.ok(elapsed <= 3000, `the restored page reports within 3 s (${elapsed} ms)`);
+        t.ok((await t.state()).boards.includes('StudioBoard'), 'the restored tab shows its board');
+        t.note(`perf.look ${page.perf!.look} ms, reported ${elapsed} ms after launch`);
+    } finally {
+        if (file) await t.cmd('close', { file }).catch(() => {});
+        await t.cmd('qa.cloud', { clouds: [] }).catch(() => {});
+        await host?.stop();
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 sc('cloud-files', 'Cloud tab name survives a background open and relaunch', { covers: ['cloud-files:open'] }, async (t: NT) => {
     const host = await post(t.app.base, '/api/cloud/host/start', { name: 'Studio', label: 'Owner' });
     t.eq(host.status, 200, 'Cloud starts');
