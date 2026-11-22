@@ -6,6 +6,65 @@ import path from 'node:path';
 import {writeBoardCheckpoint,evictClosedPackages} from '../src/cloud-files-cache.ts';
 import {FileStateStore} from '../src/cloud-files-store.ts';
 import {stateFromFiles} from '../cloud/core/files/state.ts';
+import {cloudKey, openCloudFile} from '../src/cloud-files.ts';
+import {resetCloudConfig, setCloudConfig} from '../src/cloud-config.ts';
+
+test('a configured Cloud opens its local replica when the host is unreachable', async (t) => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-offline-open-')));
+  const cloud = 'http://127.0.0.1:9191';
+  const id = crypto.randomUUID();
+  const pkg = path.join(dir, 'Library', 'Application Support', 'Canvas', 'cloud-files', cloudKey(cloud), id + '.canvas');
+  const oldHome = process.env.HOME;
+  process.env.HOME = dir;
+  const get = t.mock.method(globalThis, 'fetch', async () => { throw new Error('Host unreachable'); });
+  setCloudConfig({ clouds: [{ url: cloud, devEmail: 'editor@example.test' }] });
+  try {
+    const store = new FileStateStore(pkg, {
+      cloud, file: id, name: 'Design', role: 'editor', author: { id: 'editor', name: 'Editor' },
+      state: stateFromFiles({ children: [] }),
+    });
+    store.materialize();
+    store.close();
+    const opened = await openCloudFile(cloud, id);
+    assert.equal(opened.file, pkg);
+    assert.equal(opened.name, 'Design');
+    assert.ok(get.mock.calls.length <= 1, 'background sync can attempt to reconnect');
+    setCloudConfig({ clouds: [] });
+    await assert.rejects(() => openCloudFile(cloud, id), /Cloud is not added/);
+  } finally {
+    setCloudConfig({ clouds: [] });
+    if (oldHome === undefined) delete process.env.HOME;
+    else process.env.HOME = oldHome;
+    resetCloudConfig();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('reopening a Cloud replica keeps a verified view and rebuilds changed bytes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-replica-view-'));
+  const pkg = path.join(dir, 'copy.canvas');
+  const doc = path.join(pkg, 'document.json');
+  const view = new FileStateStore(pkg, {
+    cloud: 'mac://studio', file: crypto.randomUUID(), name: 'Design', role: 'editor',
+    author: { id: 'editor', name: 'Editor' }, state: stateFromFiles({ children: [] }),
+  });
+  try {
+    view.materialize();
+    const bytes = fs.readFileSync(doc, 'utf8');
+    const inode = fs.statSync(doc).ino;
+    view.restoreView();
+    assert.equal(fs.statSync(doc).ino, inode);
+    fs.writeFileSync(doc, bytes.replace('2.21', '2.22'));
+    view.restoreView();
+    assert.equal(fs.readFileSync(doc, 'utf8'), bytes);
+    view.commit(); // a crash between the durable commit and materialize clears the old hash
+    view.restoreView();
+    assert.ok(view.db.prepare('SELECT view_hash FROM meta').get()?.view_hash);
+  } finally {
+    view.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 test('board checkpoints verify hashes and reuse unchanged objects',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-boards-'));
  try{const children=[{id:'Board',type:'frame',children:[]}];const a=writeBoardCheckpoint(dir,children),b=writeBoardCheckpoint(dir,children);assert.deepEqual(a,b);assert.equal(fs.readdirSync(dir).length,1);fs.writeFileSync(path.join(dir,a[0].sha256+'.json.gz'),'broken');assert.throws(()=>writeBoardCheckpoint(dir,children),/hash|invalid|incorrect/i);}finally{fs.rmSync(dir,{recursive:true,force:true});}

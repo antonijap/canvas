@@ -14,12 +14,12 @@ export const SNAP_BUDGET = 200 << 20;
 /** The longest side of a snapshot, in pixels. */
 export const SNAP_MAX_SIDE = 2048;
 /** Smaller on screen than this (short side, device px) is not worth a picture. */
-export const SNAP_MIN_SIDE = 48;
+export const SNAP_MIN_SIDE = 24;
 /** A new capture replaces a stored one only when it is this much sharper. */
 export const SNAP_SHARPER = 1.25;
 
 /** The record id of one board's snapshot. `bg`: the canvas colour under it (a theme change is another picture). */
-export const snapId = (file, board, key, bg) => file + "\u001f" + board + "\u001f" + key + "\u001f" + (bg || "");
+export const snapId = (file, board, key, bg, env = "") => JSON.stringify([file, board, key, bg || "", env]);
 
 /**
  * Where to read a board from the engine's canvas, or null when it is not wholly on screen or too small.
@@ -47,14 +47,18 @@ const overlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h
  * card or another board, without live edits on top (`touched`), and with no stored picture this sharp (`have(meta)`).
  * `list`: [{ id, key, loadedKey, rect }]; returns [{ id, key, rect, crop }].
  */
-export function toCapture(list, { cam, vw, vh, dpr, cards = [], touched = () => false, have = () => null }) {
+export function toCapture(list, { cam, vw, vh, dpr, cards = [], touched = () => false, have = () => null, limit = Infinity, pixelBudget = Infinity }) {
   const out = [];
+  let pixels = 0;
   for (const b of list) {
-    if (!b.key || b.loadedKey !== b.key || touched(b.id)) continue;
-    if (cards.some((c) => c && overlaps(c, b.rect))) continue;
-    if (list.some((o) => o !== b && overlaps(o.rect, b.rect))) continue; // another board drawn over it would end up in its picture
+    if (out.length >= limit) break;
+    if (!b.key || b.loadedKey !== b.key) continue;
     const crop = captureRect(b.rect, cam, vw, vh, dpr);
     if (!crop || !worthStoring(have(b), crop.w)) continue;
+    if (touched(b.id) || cards.some((c) => c && overlaps(c, b.rect))) continue;
+    if (list.some((o) => o !== b && overlaps(o.rect, b.rect))) continue;
+    if (out.length && pixels + crop.w * crop.h > pixelBudget) continue;
+    pixels += crop.w * crop.h;
     out.push({ id: b.id, key: b.key, rect: b.rect, crop });
   }
   return out;
@@ -100,7 +104,7 @@ const result = (req) => new Promise((resolve, reject) => { req.onsuccess = () =>
 
 /**
  * The page's snapshot store for one file. `get` answers { url, w, h, ww, wh } (an object URL to show; the world
- * size it covers) or null; `put` stores a picture; `prune` drops what a document no longer has. Every call fails
+ * size it covers) or null; `putBatch` stores pictures; `evict` drops what a document no longer has. Every call fails
  * quietly (no IndexedDB, private mode): a missing snapshot only means the placeholder shows, as before.
  */
 /** Every file's snapshots together, in bytes (Settings > Performance shows it). 0 when there is no store. */
@@ -126,7 +130,7 @@ export async function clearAll() {
   } catch { return false; }
 }
 
-export function createSnapshots(file, { budget = SNAP_BUDGET } = {}) {
+export function createSnapshots(file, { budget = SNAP_BUDGET, env = "" } = {}) {
   let dbp = null;
   const db = () => (dbp ??= openDb().catch(() => null));
   /** id -> meta, for this file: what is stored, without reading pictures. */
@@ -135,7 +139,7 @@ export function createSnapshots(file, { budget = SNAP_BUDGET } = {}) {
   const load = () => (loaded ??= db().then(async (d) => {
     if (!d) return;
     const list = await result(d.transaction(META).objectStore(META).index("file").getAll(file));
-    for (const m of list) known.set(m.id, m);
+    for (const m of list) if (m.env === env) known.set(m.id, m);
   }).catch(() => {}));
   let usedT = 0;
   const usedIds = new Set();
@@ -149,7 +153,10 @@ export function createSnapshots(file, { budget = SNAP_BUDGET } = {}) {
       const d = await db();
       if (!d) return;
       const tx = d.transaction(META, "readwrite"), st = tx.objectStore(META), now = Date.now();
-      for (const id of ids) { const m = known.get(id); if (m) { m.used = now; st.put(m); } }
+      for (const id of ids) {
+        const req = st.get(id);
+        req.onsuccess = () => { if (req.result) st.put({ ...req.result, used: now }); };
+      }
       done(tx).catch(() => {});
     }, 2000);
   }
@@ -160,33 +167,35 @@ export function createSnapshots(file, { budget = SNAP_BUDGET } = {}) {
     /** Forget what this page knew was stored (after clearAll). */
     forget() { known.clear(); },
     /** The stored picture's meta for a board at a key (after ready()), or null. */
-    meta: (board, key, bg) => known.get(snapId(file, board, key, bg)) || null,
+    meta: (board, key, bg) => known.get(snapId(file, board, key, bg, env)) || null,
     async get(board, key, bg) {
       await load();
-      const id = snapId(file, board, key, bg);
+      const id = snapId(file, board, key, bg, env);
       if (!known.has(id)) return null;
       const d = await db();
       if (!d) return null;
       try {
         const blob = await result(d.transaction(BLOB).objectStore(BLOB).get(id));
-        if (!blob) return null;
-        touch(id);
         const m = known.get(id);
+        if (!blob || !m) { known.delete(id); return null; }
+        touch(id);
         return { url: URL.createObjectURL(blob), w: m.w, h: m.h, ww: m.ww, wh: m.wh };
       } catch { return null; }
     },
-    async put(board, key, bg, blob, size) {
+    async putBatch(pictures) {
       const d = await db();
-      if (!d || !blob) return false;
-      const id = snapId(file, board, key, bg);
-      const m = { id, file, board, key, bg: bg || "", w: size.w, h: size.h, ww: size.ww, wh: size.wh, bytes: blob.size, used: Date.now() };
+      if (!d || !pictures.length) return false;
+      const records = pictures.map(({ board, key, bg, blob, size }) => ({
+        blob, meta: { id: snapId(file, board, key, bg, env), file, board, key, bg, env, ...size, bytes: blob.size, used: Date.now() },
+      }));
       try {
         const tx = d.transaction([META, BLOB], "readwrite");
-        tx.objectStore(META).put(m);
-        tx.objectStore(BLOB).put(blob, id);
+        const metas = tx.objectStore(META), blobs = tx.objectStore(BLOB);
+        for (const { meta, blob } of records) { metas.put(meta); blobs.put(blob, meta.id); }
+        const evicted = trim(metas, blobs);
         await done(tx);
-        known.set(id, m);
-        await this.evict();
+        for (const { meta } of records) if (!evicted.has(meta.id)) known.set(meta.id, meta);
+        for (const id of evicted) known.delete(id);
         return true;
       } catch { return false; }
     },
@@ -195,14 +204,25 @@ export function createSnapshots(file, { budget = SNAP_BUDGET } = {}) {
       const d = await db();
       if (!d) return 0;
       try {
-        const metas = await result(d.transaction(META).objectStore(META).getAll());
-        const ids = toEvict(metas, budget, keys ? file : null, keys);
-        if (!ids.length) return 0;
         const tx = d.transaction([META, BLOB], "readwrite");
-        for (const id of ids) { tx.objectStore(META).delete(id); tx.objectStore(BLOB).delete(id); known.delete(id); }
+        const ids = trim(tx.objectStore(META), tx.objectStore(BLOB), keys);
         await done(tx);
-        return ids.length;
+        for (const id of ids) known.delete(id);
+        return ids.size;
       } catch { return 0; }
     },
   };
+
+  function trim(metas, blobs, keys = null) {
+    const ids = new Set();
+    const req = metas.getAll();
+    req.onsuccess = () => {
+      for (const id of toEvict(req.result, budget, keys ? file : null, keys)) {
+        metas.delete(id);
+        blobs.delete(id);
+        ids.add(id);
+      }
+    };
+    return ids;
+  }
 }

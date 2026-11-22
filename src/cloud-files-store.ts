@@ -12,6 +12,9 @@ import { actionSha, type Action, type Author, type FileOp, type FileServerMessag
 import type { ObjectStore } from '../cloud/core/files/objects.ts';
 import { shift } from './page/text-spans.js';
 import { shiftLists, type ListItem } from './page/text-paras.js';
+const viewHash = (document: string | Buffer, widgets: string | Buffer) =>
+    createHash('sha256').update(document).update('\0').update(widgets).digest('hex');
+
 export interface FileMeta {
     cloud: string;
     file: string;
@@ -159,6 +162,19 @@ export class FileStateStore {
             throw e;
         }
     }
+    /** A durable commit clears view_hash before either package file can change. Verify both files on reopen. */
+    restoreView(): void {
+        const expected = this.db.prepare('SELECT view_hash FROM meta WHERE id=1').get()?.view_hash;
+        if (expected) {
+            try {
+                const document = path.join(this.pkg, 'document.json');
+                const widgets = path.join(this.pkg, 'widgets.json');
+                if (fs.lstatSync(document).isFile() && fs.lstatSync(widgets).isFile() &&
+                    viewHash(fs.readFileSync(document), fs.readFileSync(widgets)) === expected) return;
+            } catch { /* missing or unreadable: rebuild from the replica */ }
+        }
+        this.materialize();
+    }
     materialize(): void {
         const view = materialize(this.replica.view());
         for (const [name, bytes] of [['document.json', view.document], ['widgets.json', view.widgets]]) {
@@ -173,8 +189,7 @@ export class FileStateStore {
             }
             fs.renameSync(tmp, dest);
         }
-        const hash = createHash('sha256').update(view.document).update('\0').update(view.widgets).digest('hex');
-        this.db.prepare('UPDATE meta SET view_hash=? WHERE id=1').run(hash);
+        this.db.prepare('UPDATE meta SET view_hash=? WHERE id=1').run(viewHash(view.document, view.widgets));
     }
     checkpoint(dir:string):void {
         const children=this.replica.tree.children(null).map(id=>this.replica.tree.subtree(id)!);

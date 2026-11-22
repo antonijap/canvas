@@ -18,7 +18,7 @@ describe("captureRect", () => {
   test("partly off screen, or too small, is not captured", () => {
     assert.equal(S.captureRect({ x: -1, y: 0, w: 100, h: 100 }, cam, 800, 600, 1), null);
     assert.equal(S.captureRect({ x: 750, y: 0, w: 100, h: 100 }, cam, 800, 600, 1), null);
-    assert.equal(S.captureRect({ x: 0, y: 0, w: 40, h: 400 }, cam, 800, 600, 1), null);
+    assert.equal(S.captureRect({ x: 0, y: 0, w: S.SNAP_MIN_SIDE - 1, h: 400 }, cam, 800, 600, 1), null);
     assert.equal(S.captureRect({ x: 0, y: 0, w: 0, h: 100 }, cam, 800, 600, 1), null);
     assert.equal(S.captureRect(null, cam, 800, 600, 1), null);
   });
@@ -55,6 +55,13 @@ describe("toCapture", () => {
     assert.equal(S.worthStoring({ w: 100 }, 124), false);
     assert.equal(S.worthStoring({ w: 100 }, 126), true);
   });
+  test("capture stops checking storage once its batch is full", () => {
+    const list = [board("a", { rect: { x: 0, y: 0, w: 100, h: 100 } }), board("b", { rect: { x: 300, y: 0, w: 100, h: 100 } })];
+    let checks = 0;
+    const got = S.toCapture(list, { ...opts, limit: 1, have: () => { checks++; return null; } });
+    assert.deepEqual(got.map((x: { id: string }) => x.id), ["a"]);
+    assert.equal(checks, 1);
+  });
 });
 
 describe("toEvict", () => {
@@ -77,5 +84,8 @@ describe("toEvict", () => {
   test("ids keep file, board, key and canvas colour apart", () => {
     const ids = new Set([S.snapId("f", "b", "k", "white"), S.snapId("f", "b", "k", "black"), S.snapId("f", "b", "k2", "white"), S.snapId("g", "b", "k", "white")]);
     assert.equal(ids.size, 4);
+  });
+  test("a different render environment cannot reuse an old board image", () => {
+    assert.notEqual(S.snapId("f", "b", "k", "white", "old"), S.snapId("f", "b", "k", "white", "new"));
   });
 });

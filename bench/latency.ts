@@ -56,14 +56,14 @@ function summary(xs: number[]) {
   return { n: s.length, p50: r1(pct(s, 50)), p95: r1(pct(s, 95)), max: r1(s[s.length - 1] ?? NaN) };
 }
 
-export type Line = { group: "frame" | "input" | "write" | "info" | "open" | "memory" | "export" | "mcp"; name: string; file: string; n: number; p50: number; p95: number; max: number; budget: number | null; status: "PASS" | "FAIL" | "INFO" | "SKIP"; note: string; extra?: Record<string, unknown>; samples?: number[] };
+export type Line = { group: "frame" | "input" | "write" | "info" | "open" | "memory" | "export" | "mcp"; id?: string; name: string; file: string; n: number; p50: number; p95: number; max: number; budget: number | null; status: "PASS" | "FAIL" | "INFO" | "SKIP"; note: string; extra?: Record<string, unknown>; samples?: number[] };
 export const lines: Line[] = [];
 // Inputs whose change showed only in the second frame or later, since the last line was added.
 let late = 0;
 type Sample = { ms: number | null; frames?: number; why?: string; work?: number; wall?: number; snapped?: boolean };
 let snapHeld = 0;
 function take(xs: number[], s: Sample): boolean { if (s.ms === null && s.snapped) { snapHeld++; return true; } if (s.ms === null) return false; xs.push(s.ms); if ((s.frames ?? 1) > 1) late++; return true; }
-export function addLine(group: Line["group"], file: string, name: string, xs: number[], note = "", extra?: Record<string, unknown>, opts: { budget?: number | null; missed?: number } = {}) {
+export function addLine(group: Line["group"], file: string, name: string, xs: number[], note = "", extra?: Record<string, unknown>, opts: { id?: string; budget?: number | null; missed?: number } = {}) {
   const s = summary(xs);
   const budget = opts.budget !== undefined ? opts.budget : group === "info" ? null : (BUDGET as Record<string, number>)[group] ?? null;
   let status: Line["status"] = budget === null ? "INFO" : !s.n ? "SKIP" : s.p95 <= budget + 0.05 ? "PASS" : "FAIL";
@@ -71,7 +71,7 @@ export function addLine(group: Line["group"], file: string, name: string, xs: nu
   if (group === "input" && late) { note = `${late} shown a frame late${note ? "; " + note : ""}`; }
   if (group === "input" && snapHeld) { note = `${snapHeld} held by snapping${note ? "; " + note : ""}`; }
   late = 0; snapHeld = 0;
-  const l: Line = { group, name, file, ...s, budget, status, note, extra, samples: xs.map(r1) };
+  const l: Line = { group, id: opts.id, name, file, ...s, budget, status, note, extra, samples: xs.map(r1) };
   lines.push(l);
   console.log(`  ${l.status.padEnd(4)} ${group.padEnd(5)} ${file.padEnd(10)} ${name.padEnd(34)} n=${String(s.n).padStart(3)}  p50 ${fmt(s.p50)}  p95 ${fmt(s.p95)}  max ${fmt(s.max)}${note ? "  " + note : ""}`);
 }

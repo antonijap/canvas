@@ -30,6 +30,33 @@ const pos = (n: any) => ({ x: n?.x, y: n?.y });
 
 // ---------------------------------------------------------------- render
 
+sc("open-cache", "A 200-board file paints sooner from saved snapshots", { covers: ["render:open-cache"], skip: { visual: "Measures the first look and verifies a snapshot was displayed." } }, async (t: T) => {
+  const f = scratchCopy(fixture(200), path.dirname(t.file), "Open cache.canvas");
+  // Keep the opening view deterministic, with the first boards fully in view.
+  const design = JSON.parse(fs.readFileSync(f.file, "utf8"));
+  const first = design.children.find((n: any) => n.id === "b0");
+  for (const board of design.children) if (board !== first) board.x += 50_000;
+  fs.writeFileSync(f.file, JSON.stringify(design));
+  const key = JSON.stringify("canvas:" + f.dir);
+  await t.ev(`localStorage.setItem(${key}, JSON.stringify({ x: 200, y: 50, z: 0.6 }))`);
+  const big = new T(t.page, f.dir, t.srv);
+  try {
+    const readPerf = () => big.waitFor<{ look: number; snapshots: number }>(
+      "window.canvasHost?.perf.look != null && window.canvasHost.perf", "the first look", 15_000);
+    await big.open();
+    const firstOpen = await readPerf();
+    t.eq(firstOpen.snapshots, 0, "the first open has no saved pictures");
+    await big.waitFor(`(async () => (await (await import("/page/snapshots.js")).totalBytes()) > 0)()`, "the cache to write", 10_000);
+    await big.open();
+    const secondOpen = await readPerf();
+    t.ok(secondOpen.snapshots > 0, "the second open displayed saved pictures");
+    t.ok(secondOpen.look < firstOpen.look, `cached look ${secondOpen.look} ms, cold look ${firstOpen.look} ms`);
+    t.note(`first look ${firstOpen.look} ms cold, ${secondOpen.look} ms warm`);
+  } finally {
+    await t.open();
+  }
+});
+
 sc("render", "every page draws, nothing warns", { covers: ["render:rectangle","render:ellipse","render:frame","render:group","render:text","render:image","render:instance","render:board","render:component","render:card-todo","render:card-note","render:card-posthog","render:card-shader","render:card-video","render:rotated","render:nested","render:light","render:dark","render:tiny","fit:keyboard","fit:other-page","file-integrity:tiny"] }, async (t: T) => {
   for (const p of ["layout", "components", "style", "cards"]) {
     await t.showPage(p);

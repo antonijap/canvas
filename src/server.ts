@@ -589,6 +589,13 @@ export function startServer(port = PORT()): Promise<http.Server> {
     noteAgent(req);
     noteMcp(req);
     try {
+      // Start the WebView and the document read together. The event stream still waits for the current snapshot.
+      if (url.pathname === "/") {
+        const file = url.searchParams.get("file");
+        if (file) void prime(file).catch(() => {});
+        const engine = fs.existsSync(path.join(enginePkgDir(), "canvas_engine.js")) ? "ok" : "missing";
+        return send(res, 200, "text/html; charset=utf-8", PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}">`));
+      }
       let bodyFile: string | undefined;
       if (readOnlyRoute(req.method ?? "GET", url.pathname) && String(req.headers["content-type"] ?? "").startsWith("application/json")) {
         const raw = await readBodyText(req, 20_000_000); cacheBody(req, raw);
@@ -710,12 +717,11 @@ export function startServer(port = PORT()): Promise<http.Server> {
       if (url.pathname === "/asset") {
         const p = path.resolve(url.searchParams.get("p") ?? "");
         const type = ASSET_TYPES[path.extname(p).toLowerCase()];
-        const ok = type ? await fs.promises.stat(p).then((st) => st.isFile(), () => false) : false;
-        if (!type || !ok) return send(res, 404, "text/plain", "not found");
+        const st = type ? await fs.promises.stat(p).catch(() => null) : null;
+        if (!type || !st?.isFile()) return send(res, 404, "text/plain", "not found");
         // Revalidated by size and modification time after a minute: a reload asks, and an unchanged image is a 304
         // with no bytes; a file replaced on disk under the same name is fetched again.
-        const st = await fs.promises.stat(p).catch(() => null);
-        const etag = st ? `"${st.size.toString(36)}-${Math.floor(st.mtimeMs).toString(36)}"` : "";
+        const etag = `"${st.ino}-${st.size}-${st.mtimeMs}-${st.ctimeMs}"`;
         if (etag && req.headers["if-none-match"] === etag) {
           res.writeHead(304, { etag, "cache-control": "max-age=60", "cross-origin-resource-policy": "same-origin" });
           res.end();
@@ -971,12 +977,6 @@ export function startServer(port = PORT()): Promise<http.Server> {
       if (url.pathname === "/api/files") return json(res, await listFiles());
       // The GPU engine's inputs: a resolved board tree and font file bytes (src/scene.ts).
       if (await handleEngineRoute(url, res, (f) => watched(resolveDocPath(f)), req)) return;
-      // The scene environment rides on the page (src/keyed.ts): keyed board requests carry it as v.
-      // data-engine: whether the engine build is there, so a browser can say why it draws with the fallback renderer.
-      if (url.pathname === "/") {
-        const engine = fs.existsSync(path.join(enginePkgDir(), "canvas_engine.js")) ? "ok" : "missing";
-        return send(res, 200, "text/html; charset=utf-8", PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}">`));
-      }
       const fileParam = url.searchParams.get("file");
       if (!fileParam) return json(res, { error: "file is required" }, 400);
       let snap: Snapshot;
@@ -2332,7 +2332,7 @@ import("/page/blueprint.js").then((m) => {
   drawBlueprint = m.createBlueprintView(view, () => requestFlush(false));
   requestFlush(false);
 });
-if (file && mode !== "dom") import("/page/snapshots.js").then((m) => { picLib = m; snaps = m.createSnapshots(file, { budget: Math.max(16, Number(prefs.snapshotMB) || 200) * 1048576 }); return snaps.ready(); }).then(() => showSnaps()).catch((err) => console.warn("[canvas] snapshots", err));
+if (file && mode !== "dom") import("/page/snapshots.js").then((m) => { picLib = m; snaps = m.createSnapshots(file, { budget: Math.max(16, Number(prefs.snapshotMB) || 200) * 1048576, env: document.documentElement.dataset.env }); return snaps.ready(); }).then(() => showSnaps()).catch((err) => console.warn("[canvas] snapshots", err));
 // Settings > Performance: how much the snapshots take, and Clear (every file's; the store is shared by all pages).
 function snapshotsCmd(op) {
   import("/page/snapshots.js").then(async (m) => {
@@ -2370,7 +2370,7 @@ function wantSnap(b) {
       perf.snapshots++;
       syncPh(b);
       setTimeout(() => syncPh(b), Math.max(0, tok.until - performance.now()) + 20);
-    });
+    }, () => { URL.revokeObjectURL(s.url); if (b.snap === tok) b.snap = null; });
   }).catch(() => { if (b.snap === tok) b.snap = null; });
 }
 function scheduleSnap() { if (snaps && !snapT) snapT = setTimeout(takeSnaps, 700); }
@@ -2382,11 +2382,16 @@ function takeSnaps() {
   const cards = host.widgetsShown ? host.widgetsShown().map((w) => host.widgetRect(w.id)).filter(Boolean) : [];
   const list = [];
   for (const b of boards.values()) if (!b.gone && b.measured) list.push({ id: b.meta.id, key: b.meta.key, loadedKey: b.loadedKey, rect: { x: b.meta.x, y: b.meta.y, w: b.w, h: b.h } });
-  const todo = picLib.toCapture(list, { cam, vw: VW, vh: VH, dpr, cards, touched: (id) => !!(host.live && host.live.touched && host.live.touched(id)), have: (x) => snaps.meta(x.id, x.key, bg) }).slice(0, 4);
+  // A zoomed-out page can have many small boards. Limit the batch by count and pixel area.
+  const todo = picLib.toCapture(list, { cam, vw: VW, vh: VH, dpr, cards, limit: 24, pixelBudget: 2 << 20, touched: (id) => !!(host.live && host.live.touched && host.live.touched(id)), have: (x) => snaps.meta(x.id, x.key, bg) });
   if (!todo.length) return;
   let pics;
   try { pics = ev.capture(todo.map((t) => t.crop)); } catch (err) { console.warn("[canvas] snapshot", err); return; }
-  todo.forEach((t, i) => pics[i].toBlob((blob) => { if (blob) snaps.put(t.id, t.key, bg, blob, { w: t.crop.w, h: t.crop.h, ww: t.rect.w, wh: t.rect.h }).then(() => scheduleSnap()); }, "image/jpeg", 0.85));
+  Promise.all(todo.map((t, i) => new Promise((resolve) => {
+    pics[i].toBlob((blob) => resolve(blob && { board: t.id, key: t.key, bg, blob, size: { w: t.crop.w, h: t.crop.h, ww: t.rect.w, wh: t.rect.h } }), "image/jpeg", 0.85);
+  }))).then((batch) => snaps.putBatch(batch.filter((p) => p && boards.get(p.board)?.meta.key === p.key))).then((stored) => {
+    if (stored) scheduleSnap();
+  });
 }
 /** Snapshots of keys this document's boards no longer have go, a while after the document changed. */
 function pruneSnaps() {

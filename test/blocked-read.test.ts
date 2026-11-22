@@ -29,16 +29,18 @@ test("a document whose read blocks does not stop other routes; it loads once the
   const stuck = fetch(`${base}/api/doc?file=${encodeURIComponent(fifo)}`).then((r) => r.json() as Promise<any>);
   await new Promise((r) => setTimeout(r, 150)); // the request is in, the read is waiting
 
-  for (const route of ["/", "/api/bridge/status", "/health", "/api/files"]) {
-    const r = await within(fetch(base + route), 2000, route);
-    assert.equal(r.status, 200, route);
-    await r.arrayBuffer();
+  try {
+    for (const route of ["/", `/?file=${encodeURIComponent(fifo)}&shell=native`, "/api/bridge/status", "/health", "/api/files"]) {
+      const r = await within(fetch(base + route), 2000, route);
+      assert.equal(r.status, 200, route);
+      await r.arrayBuffer();
+    }
+  } finally {
+    // Release it even if the page waited for the read and timed out.
+    const fd = fs.openSync(fifo, "w");
+    fs.writeSync(fd, JSON.stringify(FIXTURE_DOC));
+    fs.closeSync(fd);
   }
-
-  // Release it: a writer opens the FIFO and the document arrives.
-  const fd = fs.openSync(fifo, "w");
-  fs.writeSync(fd, JSON.stringify(FIXTURE_DOC));
-  fs.closeSync(fd);
   const doc = await within(stuck, 5000, "the blocked document");
   assert.ok(Array.isArray(doc.boards) && doc.boards.length === 2, JSON.stringify(doc).slice(0, 200));
 });

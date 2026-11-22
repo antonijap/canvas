@@ -114,6 +114,8 @@ function docFile(file: string) {
 export function fileSession(file: string): Session | undefined {
     const f = docFile(file);
     let s = sessions.get(f);
+    if (s?.status === 'missing')
+        fail(404, 'not_found', 'This Cloud file is no longer available');
     if (s)
         return s;
     if (!f.startsWith(root() + path.sep) || !fs.existsSync(path.join(path.dirname(f), '.cloud', 'state.sqlite')))
@@ -129,7 +131,7 @@ export function fileSession(file: string): Session | undefined {
     if (c)
         Object.assign(s, JSON.parse(String(c.json)));
     sessions.set(f, s);
-    store.materialize();
+    store.restoreView();
     checkpointSession(s);
     void connect(s);
     return s;
@@ -353,11 +355,17 @@ function reconnect(s: Session) { if (s.stopped || s.offline)
 async function connect(s: Session) {
     if (s.stopped || s.offline)
         return;
+    const { cloud, file, name } = s.store.meta;
     try {
-        await request(s.store.meta.cloud, '/v1/me');
+        const remote = await cloudJson(await request(cloud, `/v1/files/${file}`)) as { name?: string };
         if (s.stopped)
             return;
-        const t = await target(s.store.meta.cloud);
+        if (remote.name && s.store.meta.name === name && remote.name !== name) {
+            s.store.meta.name = remote.name;
+            s.store.commit();
+            fileEvents.view?.(path.join(s.store.pkg, 'document.json'));
+        }
+        const t = await target(cloud);
         if ('fail' in t)
             throw new Error(t.fail);
         if (s.stopped)
@@ -379,7 +387,14 @@ async function connect(s: Session) {
         } });
         ws.addEventListener('error', () => ws.close());
     }
-    catch {
+    catch (e) {
+        if (!s.stopped && (e as { status?: number }).status === 404) {
+            s.status = 'missing';
+            s.stopped = true;
+            clearPresence(s);
+            fileEvents.removed?.(path.join(s.store.pkg, 'document.json'));
+            return;
+        }
         reconnect(s);
     }
 }
@@ -398,11 +413,15 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
     cloud = resolveCloud(cloud); const openingGeneration=generation(cloud);
     if (!UUID.test(id))
         fail(400, 'invalid', 'Invalid file id');
+    if (revoked.has(cloud))
+        fail(403, 'removed', 'Cloud membership was removed');
+    const pkg = path.join(root(), cloudKey(cloud), id + '.canvas');
+    const cached = fileSession(pkg);
+    if (cached) return { id, file: pkg, name: cached.store.meta.name, cloud, role: cached.store.meta.role };
     const listed = importingName === undefined ? await cloudFiles(cloud) as any : null;
     const item = importingName === undefined ? listed.files?.find((f: any) => f.id === id) : {id,name:importingName};
     if (!item)
         fail(404, 'not_found', 'No such Cloud file');
-    const pkg = path.join(root(), cloudKey(cloud), id + '.canvas');
     let s = sessions.get(path.join(pkg, 'document.json'));
     if (!s && fs.existsSync(path.join(pkg, '.cloud', 'state.sqlite')))
         s = fileSession(pkg);

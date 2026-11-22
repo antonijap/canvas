@@ -338,6 +338,22 @@ sc("home", "Both sidebars drag from their right edge, stop at a minimum and a ma
   t.eq(stored("canvas.sidebarWidth"), 274, "the editor panel's width is kept in preferences");
 });
 
+sc("tabs", "Warm tab switching keeps the same document page", { covers: ["tabs:warm-switch"] }, async (t: NT) => {
+  const other = path.join(t.app.docs, "warm-tab.canvas");
+  copyDir(PLAYGROUND, other);
+  const before = await t.js<number>("return performance.timeOrigin;");
+  try {
+    await t.app.openShown(other);
+    await t.waitState(s => s.file === other && s.pages.length > 0, "the second tab to open");
+    await t.click(center(await t.mark({ id: "file-tab", label: baseName(t.file), exact: true })));
+    await t.waitState(s => s.file === t.file && s.pages.length > 0, "the original tab to return");
+    t.eq(await t.js<number>("return performance.timeOrigin;"), before, "the page did not navigate again");
+  } finally {
+    await t.cmd("close", { file: other });
+    fs.rmSync(other, { recursive: true, force: true });
+  }
+});
+
 sc("tabs", "File tabs: drag one left or right to reorder, a short move is a click, Home stays first, the order is kept and Shift+Cmd+[ and ] follow it", { covers: ["tabs:drag", "tabs:threshold", "tabs:home-pinned", "tabs:saved", "tabs:step"] }, async (t: NT) => {
   for (const f of (await t.state()).openFiles.filter((x: string) => x !== t.file)) await t.app.cmd({ op: "close", args: { file: f } });
   const mk = (n: string) => { const f = path.join(t.app.docs, `tabs-${n}.canvas`); copyDir(PLAYGROUND, f); return f; };
