@@ -60,11 +60,11 @@
           "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
         },
         "open-first-7": {
-          "value": 2944,
-          "spread": 0.06997282608695653,
-          "tolerance": 0.13994565217391305,
+          "value": 2247,
+          "spread": 0.037383177570093455,
+          "tolerance": 0.07476635514018691,
           "date": "2026-11-22",
-          "commit": "1975286786fb4ae1fda38b96207f4ef985e05983"
+          "commit": "f028a678c1a3558082714237d63e267fcfd78f70"
         },
         "open-warm-7": {
           "value": 238,
