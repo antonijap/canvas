@@ -58,6 +58,20 @@
           "tolerance": 0.05,
           "date": "2026-11-22",
           "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
+        },
+        "open-first-7": {
+          "value": 2944,
+          "spread": 0.06997282608695653,
+          "tolerance": 0.13994565217391305,
+          "date": "2026-11-22",
+          "commit": "1975286786fb4ae1fda38b96207f4ef985e05983"
+        },
+        "open-warm-7": {
+          "value": 238,
+          "spread": 0.07983193277310924,
+          "tolerance": 0.15966386554621848,
+          "date": "2026-11-22",
+          "commit": "1975286786fb4ae1fda38b96207f4ef985e05983"
         }
       }
     }
