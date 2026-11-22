@@ -125,6 +125,7 @@ struct FrameStats {
     /// Slots that showed the grey placeholder somewhere (no texture of any scale covered them).
     blank: u32,
     fallbacks: u32,
+    board_pixels: bool,
     /// vello renders the tiles took (more than `tiles_rendered`: dense tiles were rendered in parts).
     parts: u32,
     /// Tiles rendered ahead of the view (the prefetch ring), among `tiles_rendered`.
@@ -1016,11 +1017,14 @@ impl Engine {
         if (x, y, z) == self.cam {
             return;
         }
-        let t = now();
-        if z != self.cam.2 {
-            self.last_zoom = t;
+        // The opening camera has no previous picture to stretch.
+        if self.frames > 0 {
+            let t = now();
+            if z != self.cam.2 {
+                self.last_zoom = t;
+            }
+            self.last_cam = t;
         }
-        self.last_cam = t;
         self.cam = (x, y, z);
         self.dirty = true;
     }
@@ -1073,8 +1077,7 @@ impl Engine {
             return self.shaders_waiting();
         }
         if !self.gpu.ready() {
-            // vello's pipelines are still being built: show the background, come back next frame.
-            let _ = self.gpu.composite(&[], t0, 0.0, 0.0);
+            // The view already shows its CSS background while the renderer starts.
             self.more = true;
             return true;
         }
@@ -1560,6 +1563,7 @@ impl Engine {
                     let uv = interior_uv(slot.px);
                     self.gpu.tiles.touch(k, frame);
                     st.fallbacks += 1;
+                    st.board_pixels = true;
                     quads.push((Source::Tile(*k), Quad { rect: r32(d), uv, tint: white, scissor: Some(sc), extra: [0.0; 4] }));
                     if self.debug & DEBUG_TILES != 0 {
                         outline(&mut quads, d, [0.9, 0.6, 0.0, 0.9]);
@@ -1593,6 +1597,7 @@ impl Engine {
                     let (x0, y0) = (d.x0.round(), d.y0.round());
                     d = Rect::new(x0, y0, x0 + f64::from(px.0), y0 + f64::from(px.1));
                 }
+                st.board_pixels = true;
                 quads.push((Source::Tile(sd.key), Quad { rect: r32(d), uv: interior_uv(px), tint: white, scissor: None, extra: [0.0; 4] }));
                 if self.debug & DEBUG_TILES != 0 {
                     outline(&mut quads, d, if zooming { [0.0, 0.3, 0.9, 0.9] } else { [0.9, 0.1, 0.1, 0.9] });
@@ -1614,6 +1619,7 @@ impl Engine {
         st.tile_mpx = mpx;
         if let Err(e) = self.gpu.composite(&quads, t0, mpx, shader_ms) {
             self.push_error(e);
+            st.board_pixels = false;
         }
         // 4. Stay under the texture budgets.
         let info: HashMap<u64, (u64, ScaleKey)> = self.boards.iter().map(|b| (b.uid, (b.generation, base_scale_at(b.world_ink(), base_px)))).collect();
@@ -2695,11 +2701,11 @@ impl Engine {
         self.boards.iter().filter(|b| !b.hidden && b.world_ink().overlaps(view)).map(|b| b.id.clone()).collect()
     }
 
-    /// What the page's timing poll asks every 16 ms: [tiles missing, slots blank, drawn at the exact scale (0 or 1)]
+    /// What the page's timing poll asks every 16 ms: [tiles missing, slots blank, exact scale, board pixels] (flags are 0 or 1)
     /// of the last frame. stats() walks every board for its totals (4 ms with 5,000 boards: 1.5 s of an open).
     #[wasm_bindgen(js_name = pictureState)]
     pub fn picture_state(&self) -> Vec<f64> {
-        vec![f64::from(self.last.missing), f64::from(self.last.blank), if self.last.exact { 1.0 } else { 0.0 }]
+        vec![f64::from(self.last.missing), f64::from(self.last.blank), if self.last.exact { 1.0 } else { 0.0 }, if self.last.board_pixels { 1.0 } else { 0.0 }]
     }
 
     /// Timings and cache sizes of the last frame.

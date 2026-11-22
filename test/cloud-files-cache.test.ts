@@ -7,6 +7,7 @@ import {writeBoardCheckpoint,evictClosedPackages} from '../src/cloud-files-cache
 import {FileStateStore} from '../src/cloud-files-store.ts';
 import {stateFromFiles} from '../cloud/core/files/state.ts';
 import {cloudKey, fileEvents, fileSession, openCloudFile} from '../src/cloud-files.ts';
+import {setToken} from '../src/cloud.ts';
 import {cloudFileHooks} from '../src/cloud-files-runtime.ts';
 import {resetCloudConfig, setCloudConfig} from '../src/cloud-config.ts';
 
@@ -137,27 +138,28 @@ for (const scenario of ['missing file', 'old host', 'role downgrade', 'removed m
       if (missing || scenario === 'removed member') store.propose([{ k: 'set', id: 'Board', props: { name: { v: 'Draft' } } }]);
       store.materialize();
       store.close();
-      assert.equal((await openCloudFile(cloud, id)).role, 'editor');
-      const s = fileSession(pkg)!;
-      await new Promise<void>((resolve) => setImmediate(resolve));
       if (missing || scenario === 'removed member') {
+        await assert.rejects(() => openCloudFile(cloud, id), {
+          status: missing ? 404 : 403,
+        });
         assert.equal(removed, 1);
         const recovered = path.join(dir, 'Documents', 'Canvas Recovered');
         assert.match(fs.readFileSync(path.join(recovered, fs.readdirSync(recovered)[0], 'unsent-actions.json'), 'utf8'), /Draft/);
-        assert.throws(() => s.store.db.prepare('SELECT 1'), /open/i);
         if (scenario === 'removed member') {
           assert.equal(socket.mock.calls.length, 0);
           assert.equal(fs.existsSync(pkg), false);
           await assert.rejects(() => openCloudFile(cloud, id), /membership was removed/);
           return;
         }
+        await assert.rejects(() => openCloudFile(cloud, id), { status: 404 });
+        assert.equal(fs.readdirSync(recovered).length, 1);
         missing = false;
         await openCloudFile(cloud, id);
         await new Promise<void>((resolve) => setImmediate(resolve));
         assert.equal(fileSession(pkg)?.store.meta.name, 'Restored');
       } else {
+        assert.equal((await openCloudFile(cloud, id)).role, role);
         assert.equal(removed, 0);
-        assert.equal(s.store.meta.role, role);
         if (role === 'viewer') {
           assert.equal(notifiedRole, 'viewer');
           const assertEdit = cloudFileHooks.assertEdit;
@@ -174,6 +176,67 @@ for (const scenario of ['missing file', 'old host', 'role downgrade', 'removed m
       else process.env.HOME = oldHome;
       resetCloudConfig();
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const scenario of ['sign-out during file listing', 'socket closes during import'] as const) {
+  test(scenario, async (t) => {
+    const originalHome = process.env.HOME;
+    const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-cache-race-')));
+    process.env.HOME = home;
+    const cloud = 'http://127.0.0.1:9193', id = crypto.randomUUID();
+    const pkg = path.join(home, 'Library', 'Application Support', 'Canvas', 'cloud-files', cloudKey(cloud), id + '.canvas');
+    const signingOut = scenario === 'sign-out during file listing';
+    const listed = Response.json({ files: signingOut ? [{ id, name: 'Design' }] : [], role: 'editor' });
+    let started!: () => void;
+    const requestStarted = new Promise<void>(resolve => { started = resolve; });
+    let finishList!: (response: Response) => void;
+    const firstList = new Promise<Response>(resolve => { finishList = resolve; });
+    let requests = 0;
+    t.mock.method(globalThis, 'fetch', async () => {
+      started();
+      if (signingOut && requests++ === 0) return firstList;
+      return listed.clone();
+    });
+    const sockets: EventTarget[] = [];
+    t.mock.method(globalThis, 'WebSocket', function () {
+      const socket = Object.assign(new EventTarget(), { close() { socket.dispatchEvent(new Event('close')); } });
+      sockets.push(socket);
+      return socket;
+    });
+    setCloudConfig({ clouds: [{ url: cloud, devEmail: 'editor@example.test' }] });
+    try {
+      const store = new FileStateStore(pkg, {
+        cloud, file: id, name: 'Design', role: 'editor', author: { id: 'editor', name: 'Editor' },
+        state: stateFromFiles({ children: [] }),
+      });
+      store.materialize();
+      store.close();
+      const session = fileSession(pkg, !signingOut)!;
+      await requestStarted;
+      if (signingOut) {
+        setToken(cloud, null);
+        finishList(Response.json({}, { status: 403 }));
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(fs.existsSync(pkg), true);
+        setToken(cloud, 'test-token');
+        assert.equal((await openCloudFile(cloud, id)).file, pkg);
+      } else {
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(sockets.length, 1);
+        sockets[0].dispatchEvent(new Event('close'));
+        await new Promise<void>(resolve => setTimeout(resolve, 600));
+        assert.equal(session.stopped, false);
+        assert.equal(sockets.length, 2);
+      }
+    } finally {
+      setToken(cloud, null);
+      setCloudConfig({ clouds: [] });
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      resetCloudConfig();
+      fs.rmSync(home, { recursive: true, force: true });
     }
   });
 }

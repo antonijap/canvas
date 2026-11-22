@@ -67,6 +67,8 @@ interface Session {
     store: FileStateStore;
     ws?: WebSocket;
     connecting?: boolean;
+    initialConnect?: Promise<'missing' | void>;
+    importing?: boolean;
     status: string;
     timer?: NodeJS.Timeout;
     chain: Promise<unknown>;
@@ -115,8 +117,10 @@ function docFile(file: string) {
 export function fileSession(file: string, importing = false): Session | undefined {
     const f = docFile(file);
     let s = sessions.get(f);
-    if (s)
+    if (s) {
+        if (importing) s.importing = true;
         return s;
+    }
     if (!f.startsWith(root() + path.sep) || !fs.existsSync(path.join(path.dirname(f), '.cloud', 'state.sqlite')))
         return;
     const store = new FileStateStore(path.dirname(f));
@@ -124,7 +128,7 @@ export function fileSession(file: string, importing = false): Session | undefine
         store.close();
         fail(403, 'removed', 'This Cloud is not added');
     }
-    s = { store, status: 'offline', chain: Promise.resolve(), stopped: false, offline: false, comments: [], commentsSeq: 0, commentsPending: [] };
+    s = { store, importing, status: 'offline', chain: Promise.resolve(), stopped: false, offline: false, comments: [], commentsSeq: 0, commentsPending: [] };
     store.db.exec('CREATE TABLE IF NOT EXISTS comments_state(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL)');
     const c = store.db.prepare('SELECT json FROM comments_state WHERE id=1').get();
     if (c)
@@ -132,7 +136,7 @@ export function fileSession(file: string, importing = false): Session | undefine
     sessions.set(f, s);
     store.restoreView();
     checkpointSession(s);
-    void connect(s, importing);
+    s.initialConnect = connect(s);
     return s;
 }
 cloudFileHooks.isCloud = f => !!fileSession(f);
@@ -152,25 +156,36 @@ cloudFileHooks.undoConflict = (file, writers) => {
 cloudFileHooks.assertEdit = f => { const s = fileSession(f); if (s && !CAN_EDIT[s.store.meta.role])
     fail(403, 'read_only', 'This Cloud file is read only'); };
 export function fileInfo(file: string) { const s = fileSession(file); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
+class CloudHttpError extends Error {
+    readonly status: number;
+    readonly code: string;
+    constructor(status: number, code: string, message: string) {
+        super(message);
+        this.status = status;
+        this.code = code;
+    }
+}
+const checkGeneration = (cloud: string, g: number) => {
+    if (generation(cloud) !== g || !isConfigured(cloud))
+        fail(409, 'cloud_changed', 'Cloud sign-in or configuration changed');
+};
 async function request(cloud: string, p: string, method = 'GET', body?: unknown): Promise<Response> {
     cloud = resolveCloud(cloud);
     if(revoked.has(cloud))fail(403,'removed','Cloud membership was removed');
     const g = generation(cloud), t = await target(cloud);
-    if ('fail' in t) {
-        if (t.fail === 'removed') removeCaches(cloud);
-        fail(503, t.fail, 'The Cloud is unavailable');
-    }
+    checkGeneration(cloud, g);
+    if ('fail' in t) fail(503, t.fail, 'The Cloud is unavailable');
     const r = await fetch((t as any).base + p, { method, headers: { ...(t as any).headers, ...(body === undefined ? {} : { 'content-type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json' }) }, body: body === undefined ? undefined : body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body), signal: AbortSignal.timeout(30000), redirect: 'error' });
-    if (generation(cloud) !== g || !isConfigured(cloud))
-        fail(403, 'removed', 'This Cloud was removed');
-    if (r.status === 401 || r.status === 403) {
-        if (r.status === 401)
-            removeCaches(cloud);
-        fail(r.status, r.status === 401 ? 'removed' : 'forbidden', 'Access to this Cloud was refused');
+    checkGeneration(cloud, g);
+    if (r.status === 403) {
+        void r.body?.cancel().catch(() => {});
+        throw new CloudHttpError(403, 'forbidden', 'Access to this Cloud was refused');
     }
     if (!r.ok) {
         const j = await cloudJson(r).catch(() => ({})) as any;
-        fail(r.status, j.code ?? 'cloud', j.message ?? 'The Cloud refused the request');
+        checkGeneration(cloud, g);
+        if (r.status === 401 && j.code === 'removed') removeCaches(cloud);
+        throw new CloudHttpError(r.status, j.code ?? 'cloud', j.message ?? 'The Cloud refused the request');
     }
     return r;
 }
@@ -351,8 +366,19 @@ async function send(s: Session) {
 }
 function reconnect(s: Session) { if (s.stopped || s.offline)
     return; s.status = 'offline'; s.timer = setTimeout(() => void connect(s), 500); s.timer.unref(); }
-function closeSession(file: string, s: Session) {
-    if (s.store.replica.pending.length || s.store.replica.refused.length || s.commentsPending.length || s.commentsRejected?.length) recoverDrafts(s);
+function closeSession(file: string, s: Session, missing = false) {
+    const replica = s.store.replica;
+    if (replica.pending.length || replica.refused.length || s.commentsPending.length || s.commentsRejected?.length) {
+        recoverDrafts(s);
+        if (missing) {
+            replica.pending = [];
+            replica.refused = [];
+            s.commentsPending = [];
+            s.commentsRejected = [];
+            s.store.commit();
+            saveComments(s);
+        }
+    }
     s.stopped = true;
     clearPresence(s);
     if (s.timer) clearTimeout(s.timer);
@@ -361,13 +387,14 @@ function closeSession(file: string, s: Session) {
     sessions.delete(file);
     fileEvents.removed?.(file);
 }
-async function connect(s: Session, importing = false) {
+async function connect(s: Session): Promise<'missing' | void> {
     if (s.stopped || s.offline || s.connecting || s.ws)
         return;
     if (s.timer) clearTimeout(s.timer);
     s.connecting = true;
     const { cloud, file, name } = s.store.meta;
     const doc = path.join(s.store.pkg, 'document.json');
+    const g = generation(cloud);
     try {
         // The list predates the per-file route and reports the same Cloud role used for socket authentication.
         const listed = await cloudFiles(cloud) as { files?: { id: string; name: string }[]; role?: Role };
@@ -378,11 +405,13 @@ async function connect(s: Session, importing = false) {
         const role = listed.role ?? (await cloudJson(await request(cloud, '/v1/me')) as { role: Role }).role;
         if (s.stopped || s.offline)
             return;
+        checkGeneration(cloud, g);
         const remote = listed.files.find(item => item.id === file);
         // During a move the new file is private to its importer until import/complete.
-        if (!remote && !importing) {
-            closeSession(doc, s);
-            return;
+        if (remote) s.importing = false;
+        else if (!s.importing) {
+            closeSession(doc, s, true);
+            return 'missing';
         }
         if (!Object.hasOwn(CAN_EDIT, role))
             throw new Error('Invalid Cloud role');
@@ -394,29 +423,38 @@ async function connect(s: Session, importing = false) {
             fileEvents.view?.(doc);
         }
         const t = await target(cloud);
+        checkGeneration(cloud, g);
         if ('fail' in t)
             throw new Error(t.fail);
         if (s.stopped || s.offline)
             return;
         const ws = new WebSocket(t.base.replace(/^http/, 'ws') + `/v1/files/${s.store.meta.file}/socket`, { headers: t.headers } as unknown as string[]);
         s.ws = ws;
-        ws.addEventListener('open', () => { if (s.stopped) {
-            ws.close();
-            return;
-        } ws.send(JSON.stringify(s.store.replica.hello(s.store.meta.file))); });
-        ws.addEventListener('message', e => { s.chain = s.chain.then(() => asOneAction(path.join(s.store.pkg, 'document.json'), () => receive(s, JSON.parse(String(e.data))))).catch(() => { if (!s.stopped) {
-            s.status = 'offline';
-            ws.close();
-        } }); });
-        ws.addEventListener('close', () => { if (s.ws === ws) {
+        ws.addEventListener('open', () => {
+            if (s.stopped || generation(cloud) !== g) { ws.close(); return; }
+            ws.send(JSON.stringify(s.store.replica.hello(file)));
+        });
+        ws.addEventListener('message', e => {
+            s.chain = s.chain.then(() => asOneAction(doc, () => {
+                if (generation(cloud) !== g) { ws.close(); return; }
+                return receive(s, JSON.parse(String(e.data)));
+            })).catch(() => {
+                if (!s.stopped) {
+                    s.status = 'offline';
+                    ws.close();
+                }
+            });
+        });
+        ws.addEventListener('close', () => {
+            if (s.ws !== ws) return;
             clearPresence(s);
             s.ws = undefined;
             reconnect(s);
-        } });
+        });
         ws.addEventListener('error', () => ws.close());
     }
     catch (e) {
-        if (!s.stopped && (e as { status?: number }).status === 403)
+        if (!s.stopped && generation(cloud) === g && e instanceof CloudHttpError && e.status === 403)
             removeCaches(cloud);
         else
             reconnect(s);
@@ -442,22 +480,35 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
     if (revoked.has(cloud))
         fail(403, 'removed', 'Cloud membership was removed');
     const pkg = path.join(root(), cloudKey(cloud), id + '.canvas');
-    const cached = fileSession(pkg);
-    if (cached) return { id, file: pkg, name: cached.store.meta.name, cloud, role: cached.store.meta.role };
+    const cached = fileSession(pkg, importingName !== undefined);
+    if (cached) {
+        // Give a reachable host time to confirm a cold cached replica while still allowing offline opens.
+        if (cached.initialConnect) {
+            let timer: NodeJS.Timeout | undefined;
+            try {
+                const result = await Promise.race([cached.initialConnect, new Promise<void>(resolve => {
+                    timer = setTimeout(resolve, 750);
+                })]);
+                if (result === 'missing') fail(404, 'not_found', 'No such Cloud file');
+            } finally { clearTimeout(timer); }
+        }
+        if (cached.stopped) fail(403, 'removed', 'Cloud membership was removed during open');
+        return { id, file: pkg, name: cached.store.meta.name, cloud, role: cached.store.meta.role };
+    }
     const listed = importingName === undefined ? await cloudFiles(cloud) as any : null;
     const item = importingName === undefined ? listed.files?.find((f: any) => f.id === id) : {id,name:importingName};
     if (!item)
         fail(404, 'not_found', 'No such Cloud file');
     let s = sessions.get(path.join(pkg, 'document.json'));
     if (!s && fs.existsSync(path.join(pkg, '.cloud', 'state.sqlite')))
-        s = fileSession(pkg);
+        s = fileSession(pkg, importingName !== undefined);
     if (!s) {
         const me = await cloudJson(await request(cloud, '/v1/me')) as any;
         const m = await cloudJson(await request(cloud, `/v1/files/${id}/manifest`)) as Manifest;
         if (m.file !== id)
             throw new Error('Manifest names another file');
         const { state } = await loadManifest(objects(cloud, id), JSON.stringify(m));
-        if(revoked.has(cloud)||generation(cloud)!==openingGeneration)fail(403,'removed','Cloud membership was removed during open');
+        checkGeneration(cloud, openingGeneration);
         const store = new FileStateStore(pkg, { cloud, file: id, name: item.name, role: me.role, author: { id: me.id, name: me.name }, state });
         store.replica.seq = m.seq;
         store.replica.epoch = m.epoch;
@@ -640,7 +691,11 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                 }
                 // Reopen from the host's verified snapshot before the local package can go to the Trash.
                 return openCloudFile(b.cloud, created.id, b.name || name);
-            }, async dest => {await request(b.cloud, `/v1/files/${dest.id}/import/complete`, 'POST', {});});
+            }, async dest => {
+                await request(b.cloud, `/v1/files/${dest.id}/import/complete`, 'POST', {});
+                const session = sessions.get(docFile(dest.file));
+                if (session) session.importing = false;
+            });
             return out(200, moved);
             } catch(error) {
                 fileEvents.problem?.((error as Error).message);

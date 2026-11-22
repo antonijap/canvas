@@ -139,6 +139,7 @@ async function openFile(chrome: Chrome, srv: Scratch, f: Fixture): Promise<{ tab
 
 async function openScenario(chrome: Chrome, srv: Scratch, f: Fixture) {
   const label = `${f.boards}`;
+  const paints: (number | null)[] = [];
   const xs: number[] = [], looks: number[] = [], docs: number[] = [], firsts: number[] = [], loads: (number | null)[] = [];
   let incomplete = 0;
   for (let k = 0; k < 3; k++) {
@@ -148,6 +149,8 @@ async function openScenario(chrome: Chrome, srv: Scratch, f: Fixture) {
     // load: the engine idle too (base textures and tiles ahead of the view drawn); null when the open moved on first.
     if (complete && perf.load === null) await tab.waitFor("window.canvasHost.perf.load !== null", "the engine idle", 30_000).catch(() => null);
     loads.push(complete ? await tab.ev<number | null>("window.canvasHost.perf.load").catch(() => null) : null);
+    const paint = await tab.ev<number | null>("window.canvasHost.perf.paint ?? null").catch(() => null);
+    paints.push(paint);
     looks.push(await tab.ev<number | null>("window.canvasHost.perf.look").catch(() => null) ?? OPEN_MS);
     // Capture settled boards before closing the cold tab so a warm open can also use saved pictures.
     if (k === 0 && complete) await sleep(2500);
@@ -158,6 +161,9 @@ async function openScenario(chrome: Chrome, srv: Scratch, f: Fixture) {
   // The first open is the cold one (server and Chrome have not seen the file); the line's budget is held to it.
   addLine("open", label, "cold open to complete picture (1st)", [xs[0]], `${incomplete ? `NOT complete after ${OPEN_MS / 1000} s; ` : ""}doc ${docs[0]} ms, first board ${firsts[0]} ms, engine idle ${loads[0] ?? "-"} ms; ${(f.bytes / 1048576).toFixed(0)} MB, ${f.nodes} nodes`, undefined, { id: "open.cold.picture", budget });
   addLine("open", label, "warm open to complete picture", xs.slice(1), `doc p50 ${docs.slice(1).sort((a, b) => a - b)[0]} ms`, undefined, { id: "open.warm.picture", budget: null });
+  if (paints[0] != null) addLine("open", label, "cold open to first board pixels", [paints[0]], "", undefined, { id: "open.cold.paint", budget: null });
+  const warmPaints = paints.slice(1).filter((ms) => ms !== null);
+  if (warmPaints.length) addLine("open", label, "warm open to first board pixels", warmPaints, "", undefined, { id: "open.warm.paint", budget: null });
   addLine("open", label, "cold open to first look", looks.slice(0, 1), "", undefined, { id: "open.cold.look", budget: null });
   addLine("open", label, "warm open to first look", looks.slice(1), "", undefined, { id: "open.warm.look", budget: null });
 }

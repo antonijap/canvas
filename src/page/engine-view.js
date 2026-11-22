@@ -31,16 +31,16 @@ export const SMALL_IMAGE_SIDE = 512;
 /**
  * Start the engine on a new canvas inserted as the first child of `view`.
  * opts: { view, api(path) -> url with ?file=, onChange() (a frame is wanted), onLost(reason), getCam() -> {x, y, z},
+ *         waitForGpu: fence startup work before the first native frame,
  *         isIdle() -> false while the camera moves, posOf(id) -> {x, y} where the page has the board now,
  *         orderOf(id) -> its index in the document (paint order), onLayout() (boards were laid out again),
  *         rebase(id, scene, fetchedAt) -> true when it put live edits on a server scene (src/page/live.js) }
  */
-export async function createEngineView({ view, api, sceneEnv = "", onChange, onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, rebase = () => false }) {
+export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, rebase = () => false }) {
   if (!navigator.gpu) throw new Error("no WebGPU");
   const canvas = document.createElement("canvas");
   canvas.id = "engine";
   canvas.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;display:block";
-  view.prepend(canvas);
   let engine, device = null, late = false;
   const start = async () => {
     // A new wasm instance for every engine after the first (engineModuleUrl): one that trapped (a panic aborts) stays
@@ -64,13 +64,37 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
     throw e;
   }
   let dead = false;
+  let gpuReady = !waitForGpu || !device;
+  if (!gpuReady) {
+    // Vello submits its pipeline creation in the first task after Engine.create. Fence that work
+    // before presenting so WebKit does not wait in the compositor while scenes and images arrive.
+    const queue = device.queue;
+    setTimeout(() => {
+      if (dead) return;
+      void queue.onSubmittedWorkDone().catch(() => {}).then(() => {
+        gpuReady = true;
+        if (!dead) onChange();
+      });
+    }, 0);
+  }
   if (device) device.lost.then((info) => { if (!dead) onLost("GPU device lost: " + (info && (info.message || info.reason) || "unknown")); });
 
   // ---- size: CSS size x devicePixelRatio, from a ResizeObserver (no layout reads per frame)
   let dprQuery = null;
-  let cssW = canvas.clientWidth, cssH = canvas.clientHeight;
-  // Draws in the observer's own task (resizeAndDraw below): a frame left to the next rAF showed an empty canvas.
-  const resize = () => { if (dead) return; cssW = canvas.clientWidth; cssH = canvas.clientHeight; try { resizeAndDraw(engine, cssW, cssH, window.devicePixelRatio || 1, getCam()); } catch { /* a lost engine fails again in the page's own frame, which handles it */ } onChange(); };
+  let cssW = view.clientWidth, cssH = view.clientHeight;
+  let presenting = false;
+  // Resize immediately. After the first presentation, redraw in the same task to avoid a blank frame.
+  const resize = () => {
+    if (dead) return;
+    cssW = view.clientWidth;
+    cssH = view.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    try {
+      if (presenting) resizeAndDraw(engine, cssW, cssH, dpr, getCam());
+      else engine.resize(cssW, cssH, dpr);
+    } catch { /* a lost engine fails again in the page's own frame, which handles it */ }
+    onChange();
+  };
   const watchDpr = () => {
     if (dprQuery) dprQuery.removeEventListener("change", onDpr);
     dprQuery = matchMedia("(resolution: " + (window.devicePixelRatio || 1) + "dppx)");
@@ -78,7 +102,7 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
   };
   function onDpr() { resize(); watchDpr(); }
   const ro = new ResizeObserver(resize);
-  ro.observe(canvas);
+  ro.observe(view);
   watchDpr();
 
   // ---- background follows the page's canvas colour (light and dark)
@@ -375,6 +399,7 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
   // ---- boards
   const loaded = new Map(); // board id -> { seq, content, x, y, ids:Set }
   const nodeIndex = new Map(); // node id -> { board, radius }
+  let opening = true;
   /**
    * Load boards in one batch: every scene is fetched first, then the fonts they need are registered once, then
    * each board is laid out. A font registered after a board exists lays that board out again (the system-ui
@@ -382,6 +407,8 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
    * Resolves to one result per meta: { key, root } | { stale: true } | null (no such board / error).
    */
   async function loadBoards(metas, onEach) {
+    const firstLoad = opening;
+    opening = false;
     const jobs = metas.map((meta) => {
       const rec = loaded.get(meta.id) || unpark(meta.id) || { seq: 0, content: null, x: NaN, y: NaN, ids: new Set() };
       loaded.set(meta.id, rec);
@@ -418,9 +445,19 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
       if (restack && !dead) { restack = false; reorder(); }
       return out;
     }
-    const got = await Promise.all(jobs.map((j) => fetch(sceneUrl(api, j.meta.id, j.meta.key, sceneEnv)).then((r) => r.text()).then((text) => ({ text, scene: JSON.parse(text) })).catch(() => null)));
-    await registerFonts(fontsOf(got));
-    await inSlices(order, (i) => placeOne(i, got[i]), slices);
+    async function loadGroup(indices) {
+      const got = await Promise.all(indices.map((i) => {
+        const { meta } = jobs[i];
+        return fetch(sceneUrl(api, meta.id, meta.key, sceneEnv)).then((r) => r.text())
+          .then((text) => ({ text, scene: JSON.parse(text) })).catch(() => null);
+      }));
+      await registerFonts(fontsOf(got));
+      const ready = new Map(indices.map((i, n) => [i, got[n]]));
+      await inSlices(indices, (i) => placeOne(i, ready.get(i)), slices);
+    }
+    // The nearest board can start drawing without waiting for every scene in the opening batch.
+    if (firstLoad && order.length > 1) await Promise.all([loadGroup(order.slice(0, 1)), loadGroup(order.slice(1))]);
+    else await loadGroup(order);
     if (restack && !dead) { restack = false; reorder(); }
     return out;
   }
@@ -673,6 +710,7 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
   // ---- snapshot help: a 2D copy of the current frame over the GPU canvas
   let frozen = null;
   function freeze() {
+    if (!presenting) return { frozen: false };
     thaw();
     const c2 = document.createElement("canvas");
     c2.width = canvas.width; c2.height = canvas.height;
@@ -718,7 +756,15 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
   return {
     engine, canvas,
     setCam: (c) => engine.setCamera(c.x, c.y, c.z),
-    frame: () => engine.frame(),
+    frame(show = true) {
+      if (!presenting) {
+        if (!show) return false;
+        if (!gpuReady) return true;
+        presenting = true;
+        view.prepend(canvas);
+      }
+      return engine.frame();
+    },
     pick: (x, y) => engine.hitTest(x, y) ?? null,
     // Every layer under a point, topmost first (right-click > Select layer).
     pickAll: (x, y) => (engine.hitTestAll ? engine.hitTestAll(x, y) : []),
@@ -747,11 +793,11 @@ export async function createEngineView({ view, api, sceneEnv = "", onChange, onL
       }
       return [...assets].sort();
     },
-    paintedBoards() {
-      const s = engine.pictureState();
-      return s[2] === 1 && s[1] === 0 ? engine.boardsInView() : [];
+    pictureState() {
+      const [missing, blank, exact, pixels] = engine.pictureState();
+      const boardPixels = pixels === undefined ? blank === 0 && engine.boardsInView().length > 0 : pixels === 1;
+      return { missing, blank, exact: exact === 1, boardPixels };
     },
-    pictureState: () => { const s = engine.pictureState(); return { missing: s[0], blank: s[1], exact: s[2] === 1 }; },
     loseDevice: () => device && device.destroy(),
     destroy() {
       dead = true;

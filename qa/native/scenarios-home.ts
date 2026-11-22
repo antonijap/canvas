@@ -345,7 +345,7 @@ sc("tabs", "Warm tab switching keeps the same document page", { covers: ["tabs:w
   try {
     await t.app.openShown(other);
     await t.waitState(s => s.file === other && s.pages.length > 0, "the second tab to open");
-    await t.click(center(await t.mark({ id: "file-tab", label: baseName(t.file), exact: true })));
+    await t.systemClick(center(await t.mark({ id: "file-tab", label: baseName(t.file), exact: true })));
     await t.waitState(s => s.file === t.file && s.pages.length > 0, "the original tab to return");
     t.eq(await t.js<number>("return performance.timeOrigin;"), before, "the page did not navigate again");
   } finally {

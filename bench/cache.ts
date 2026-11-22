@@ -43,7 +43,7 @@ async function measure(label: string) {
     await sleep(50);
   }
   const res = await page.eval(`(() => { const out = { scene: [0, 0, 0], asset: [0, 0, 0] }; for (const e of performance.getEntriesByType("resource")) { const k = e.name.includes("/api/scene?") ? "scene" : e.name.includes("/asset?") ? "asset" : null; if (!k) continue; out[k][0]++; if (e.transferSize === 0) out[k][1]++; out[k][2] = Math.max(out[k][2], Math.round(e.responseEnd)); } return out; })()`);
-  const row = { run: label, look: perf?.look, load: perf?.load, doc: perf?.doc, engine: perf?.engine, landed: perf?.landed, snapshots: perf?.snapshots, scenes: `${res.scene[0]} (${res.scene[1]} cached)`, scenesDoneAt: res.scene[2], assets: `${res.asset[0]} (${res.asset[1]} cached)`, wallMs: Date.now() - t0 };
+  const row = { run: label, paint: perf?.paint, look: perf?.look, picture: perf?.picture, load: perf?.load, doc: perf?.doc, engine: perf?.engine, landed: perf?.landed, snapshots: perf?.snapshots, scenes: `${res.scene[0]} (${res.scene[1]} cached)`, scenesDoneAt: res.scene[2], assets: `${res.asset[0]} (${res.asset[1]} cached)`, wallMs: Date.now() - t0 };
   console.log(JSON.stringify(row));
   // Snapshots are taken a moment after the canvas settles.
   await sleep(2500);

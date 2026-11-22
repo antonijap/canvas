@@ -9,7 +9,7 @@ use kurbo::{Affine, Rect};
 use peniko::{Color, ImageAlphaType, ImageData};
 use wasm_bindgen::{JsCast, JsValue};
 use wgpu::util::DeviceExt;
-use vello::util::{RenderContext, RenderSurface};
+use vello::util::RenderContext;
 use vello::{AaConfig, AaSupport, RenderParams, Renderer, RendererOptions, Scene, wgpu};
 
 use crate::board::Board;
@@ -193,15 +193,16 @@ pub enum Source {
 
 pub struct Gpu {
     pub ctx: RenderContext,
-    pub surf: RenderSurface<'static>,
-    /// vello's renderer: its pipelines take ~0.6 s to build in WKWebView, so they are built in a
-    /// task right after `Engine.create` resolves (overlapping the page's first fetches), then
-    /// warmed with one small render. Anything that needs it earlier builds it on the spot.
+    surface: wgpu::Surface<'static>,
+    config: wgpu::SurfaceConfiguration,
+    dev_id: usize,
+    configured: bool,
+    /// Create Vello's pipelines in a task after `Engine.create` resolves so scene fetches can overlap compilation.
+    /// An operation that needs the renderer sooner builds it directly.
     renderer: Option<Renderer>,
     warm: Rc<RefCell<Warm>>,
     pub init_ms: Rc<Cell<f64>>,
     pipeline: wgpu::RenderPipeline,
-    pipeline_pm: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     /// Small tiles (an overview's boards, base textures): cells of one array texture, drawn by `pipeline_atlas`.
     atlas: Rc<RefCell<AtlasPool>>,
@@ -218,8 +219,7 @@ pub struct Gpu {
     pub tiles: TileCache<GpuTile>,
     pub bg: Color,
     pub adapter: String,
-    blur: wgpu::RenderPipeline,
-    blur_layout: wgpu::BindGroupLayout,
+    blur: Option<(wgpu::RenderPipeline, wgpu::BindGroupLayout)>,
     /// Blurred effect-job textures by the id of the placeholder image the board's scene draws.
     /// (placeholder, texture, bytes, last frame a tile render needed it)
     jobs: HashMap<u64, (ImageData, wgpu::Texture, u64, u64)>,
@@ -306,31 +306,9 @@ async fn yield_task() {
     let _ = wasm_bindgen_futures::JsFuture::from(p).await;
 }
 
-/// Build the renderer and run every pipeline once on a tiny scene.
-fn build_renderer(device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Renderer, String> {
-    let mut r = Renderer::new(device, renderer_options()).map_err(|e| format!("vello: {e}"))?;
-    let mut sc = Scene::new();
-    let rect = Rect::new(2.0, 2.0, 30.0, 30.0);
-    sc.fill(peniko::Fill::NonZero, Affine::IDENTITY, Color::from_rgba8(10, 20, 30, 255), None, &rect);
-    let g = peniko::Gradient::new_linear((0.0, 0.0), (32.0, 32.0)).with_stops([Color::BLACK, Color::WHITE].as_slice());
-    sc.push_clip_layer(peniko::Fill::NonZero, Affine::IDENTITY, &kurbo::RoundedRect::from_rect(rect, 6.0));
-    sc.fill(peniko::Fill::NonZero, Affine::IDENTITY, &g, None, &rect);
-    sc.stroke(&kurbo::Stroke::new(2.0), Affine::IDENTITY, Color::BLACK, None, &kurbo::Circle::new((16.0, 16.0), 8.0));
-    sc.draw_blurred_rounded_rect(Affine::IDENTITY, rect, Color::BLACK, 4.0, 3.0);
-    sc.pop_layer();
-    let tex = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("warm"),
-        size: wgpu::Extent3d { width: 32, height: 32, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
-    let params = RenderParams { base_color: Color::TRANSPARENT, width: 32, height: 32, antialiasing_method: AaConfig::Area };
-    r.render_to_texture(device, queue, &sc, &tex.create_view(&Default::default()), &params).map_err(|e| format!("vello warm-up: {e}"))?;
-    Ok(r)
+/// Build the pipelines without submitting a warm-up render before the first board.
+fn build_renderer(device: &wgpu::Device) -> Result<Renderer, String> {
+    Renderer::new(device, renderer_options()).map_err(|e| format!("vello: {e}"))
 }
 
 thread_local! {
@@ -385,8 +363,9 @@ fn sample_fp(uv: vec2<f32>, fp: vec2<f32>, pm: bool) -> vec4<f32> {
   if (max(f.x, f.y) > 9.0) {
     // Wider than the exact loop: 10 x 10 bilinear taps spread over the whole footprint.
     var acc2 = vec4<f32>(0.0);
-    for (var y = 0; y < 10; y++) {
-      for (var x = 0; x < 10; x++) {
+    let taps = i32(clamp(ceil(max(f.x, f.y)), 1.0, 10.0));
+    for (var y = 0; y < taps; y++) {
+      for (var x = 0; x < taps; x++) {
         let q = c + (vec2<f32>(f32(x), f32(y)) + vec2<f32>(0.5, 0.5) - vec2<f32>(5.0, 5.0)) * f / 10.0;
         acc2 += bilinear(q / dim, pm);
       }
@@ -399,12 +378,10 @@ fn sample_fp(uv: vec2<f32>, fp: vec2<f32>, pm: bool) -> vec4<f32> {
   let n = min(vec2<i32>(ceil(up)) - i0, vec2<i32>(10, 10));
   var acc = vec4<f32>(0.0);
   var wsum = 0.0;
-  for (var y = 0; y < 10; y++) {
-    if (y >= n.y) { break; }
+  for (var y = 0; y < n.y; y++) {
     let ty = f32(i0.y + y);
     let wy = min(up.y, ty + 1.0) - max(lo.y, ty);
-    for (var x = 0; x < 10; x++) {
-      if (x >= n.x) { break; }
+    for (var x = 0; x < n.x; x++) {
       let tx = f32(i0.x + x);
       let w = (min(up.x, tx + 1.0) - max(lo.x, tx)) * wy;
       acc += load(vec2<i32>(i0.x + x, i0.y + y), hi, pm) * w;
@@ -419,18 +396,16 @@ fn footprint(uv: vec2<f32>) -> vec2<f32> {
 }
 @fragment fn fs(i: VOut) -> @location(0) vec4<f32> {
   let fp = footprint(i.uv);
-  return sample_fp(i.uv, fp, false) * i.tint;
-}
-// Shader cards: the texture is premultiplied already (never premultiplied twice), corners rounded
-// with a 1 px antialiased edge.
-@fragment fn fs_pm(i: VOut) -> @location(0) vec4<f32> {
-  let fp = footprint(i.uv);
-  let half = i.extra.xy * 0.5;
-  let r = min(i.extra.z, min(half.x, half.y));
-  let q = abs(i.local - half) - (half - vec2<f32>(r));
-  let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
-  let cover = clamp(0.5 - d, 0.0, 1.0);
-  return sample_fp(i.uv, fp, true) * i.tint * cover;
+  let pm = i.extra.w > 0.0;
+  var cover = 1.0;
+  if (pm) {
+    let half = i.extra.xy * 0.5;
+    let r = min(i.extra.z, min(half.x, half.y));
+    let q = abs(i.local - half) - (half - vec2<f32>(r));
+    let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
+    cover = clamp(0.5 - d, 0.0, 1.0);
+  }
+  return sample_fp(i.uv, fp, pm) * i.tint * cover;
 }
 "#;
 
@@ -478,8 +453,9 @@ fn sample_fp(uv: vec2<f32>, fp: vec2<f32>, cell: vec4<f32>, layer: i32) -> vec4<
   let c = uv * dim;
   if (max(f.x, f.y) > 9.0) {
     var acc2 = vec4<f32>(0.0);
-    for (var y = 0; y < 10; y++) {
-      for (var x = 0; x < 10; x++) {
+    let taps = i32(clamp(ceil(max(f.x, f.y)), 1.0, 10.0));
+    for (var y = 0; y < taps; y++) {
+      for (var x = 0; x < taps; x++) {
         let q = c + (vec2<f32>(f32(x), f32(y)) + vec2<f32>(0.5, 0.5) - vec2<f32>(5.0, 5.0)) * f / 10.0;
         acc2 += bilinear(q / dim, cell, layer);
       }
@@ -492,12 +468,10 @@ fn sample_fp(uv: vec2<f32>, fp: vec2<f32>, cell: vec4<f32>, layer: i32) -> vec4<
   let n = min(vec2<i32>(ceil(up)) - i0, vec2<i32>(10, 10));
   var acc = vec4<f32>(0.0);
   var wsum = 0.0;
-  for (var y = 0; y < 10; y++) {
-    if (y >= n.y) { break; }
+  for (var y = 0; y < n.y; y++) {
     let ty = f32(i0.y + y);
     let wy = min(up.y, ty + 1.0) - max(lo.y, ty);
-    for (var x = 0; x < 10; x++) {
-      if (x >= n.x) { break; }
+    for (var x = 0; x < n.x; x++) {
       let tx = f32(i0.x + x);
       let w = (min(up.x, tx + 1.0) - max(lo.x, tx)) * wy;
       acc += load(vec2<i32>(i0.x + x, i0.y + y), hi, off, layer) * w;
@@ -521,21 +495,37 @@ impl Gpu {
     pub async fn new(canvas: web_sys::HtmlCanvasElement) -> Result<Gpu, String> {
         let (w, h) = (canvas.width().max(1), canvas.height().max(1));
         let mut ctx = RenderContext::new();
-        let surf = ctx.create_surface(wgpu::SurfaceTarget::Canvas(canvas), w, h, wgpu::PresentMode::AutoVsync).await.map_err(|e| format!("WebGPU surface: {e}"))?;
-        let dev = &ctx.devices[surf.dev_id];
+        let surface = ctx.instance.create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .map_err(|e| format!("WebGPU surface: {e}"))?;
+        let dev_id = ctx.device(Some(&surface)).await.ok_or("No compatible WebGPU device")?;
+        let dev = &ctx.devices[dev_id];
+        let format = surface.get_capabilities(dev.adapter()).formats.into_iter()
+            .find(|f| matches!(f, wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm))
+            .ok_or("Unsupported WebGPU surface format")?;
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            width: w,
+            height: h,
+            present_mode: wgpu::PresentMode::AutoVsync,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+        };
         let info = dev.adapter().get_info();
         let device = &dev.device;
         let warm = Rc::new(RefCell::new(Warm::Pending));
         let init_ms = Rc::new(Cell::new(0.0));
         {
-            let (warm, init_ms, device, queue) = (warm.clone(), init_ms.clone(), device.clone(), dev.queue.clone());
+            let (warm, init_ms, device) = (warm.clone(), init_ms.clone(), device.clone());
             wasm_bindgen_futures::spawn_local(async move {
                 yield_task().await;
                 if !matches!(*warm.borrow(), Warm::Pending) {
                     return;
                 }
                 let t0 = crate::api::now();
-                let r = build_renderer(&device, &queue);
+                let r = build_renderer(&device);
                 init_ms.set(crate::api::now() - t0);
                 *warm.borrow_mut() = match r {
                     Ok(r) => Warm::Done(Box::new(r)),
@@ -557,7 +547,7 @@ impl Gpu {
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor { label: None, bind_group_layouts: &[Some(&layout)], immediate_size: 0 });
         let blend = wgpu::BlendComponent { src_factor: wgpu::BlendFactor::One, dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha, operation: wgpu::BlendOperation::Add };
-        let make = |fs: &str| device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("composite"),
             layout: Some(&pl),
             vertex: wgpu::VertexState {
@@ -572,9 +562,9 @@ impl Gpu {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
-                entry_point: Some(fs),
+                entry_point: Some("fs"),
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: surf.format, blend: Some(wgpu::BlendState { color: blend, alpha: blend }), write_mask: wgpu::ColorWrites::ALL })],
+                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState { color: blend, alpha: blend }), write_mask: wgpu::ColorWrites::ALL })],
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
@@ -582,8 +572,6 @@ impl Gpu {
             multiview_mask: None,
             cache: None,
         });
-        let pipeline = make("fs");
-        let pipeline_pm = make("fs_pm");
         let amodule = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("composite atlas"), source: wgpu::ShaderSource::Wgsl(ATLAS_SHADER.into()) });
         let atlas_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("tile atlas"),
@@ -612,7 +600,7 @@ impl Gpu {
                 module: &amodule,
                 entry_point: Some("fs"),
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: surf.format, blend: Some(wgpu::BlendState { color: blend, alpha: blend }), write_mask: wgpu::ColorWrites::ALL })],
+                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState { color: blend, alpha: blend }), write_mask: wgpu::ColorWrites::ALL })],
             }),
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
@@ -640,10 +628,8 @@ impl Gpu {
             wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
         );
         let white_bind = bind(device, &layout, &wt);
-        let (blur, blur_layout) = blur_pipeline(device);
         Ok(Gpu {
-            blur,
-            blur_layout,
+            blur: None,
             jobs: HashMap::new(),
             job_bytes: 0,
             blank: None,
@@ -654,12 +640,14 @@ impl Gpu {
             atlas_pin: ImageData { data: peniko::Blob::new(std::sync::Arc::new(vec![0u8; 4])), format: peniko::ImageFormat::Rgba8, alpha_type: ImageAlphaType::Alpha, width: 1, height: 1 },
             adapter: format!("{} ({:?})", info.name, info.backend),
             ctx,
-            surf,
+            surface,
+            config,
+            dev_id,
+            configured: false,
             renderer: None,
             warm,
             init_ms,
             pipeline,
-            pipeline_pm,
             layout,
             atlas: Rc::new(RefCell::new(AtlasPool { alloc: CellAlloc::default(), tex: None, bind: None })),
             atlas_layout,
@@ -705,9 +693,9 @@ impl Gpu {
             let r = match state {
                 Warm::Done(r) => *r,
                 Warm::Pending | Warm::Taken => {
-                    let dev = &self.ctx.devices[self.surf.dev_id];
+                    let dev = &self.ctx.devices[self.dev_id];
                     let t0 = crate::api::now();
-                    let r = build_renderer(&dev.device, &dev.queue)?;
+                    let r = build_renderer(&dev.device)?;
                     self.init_ms.set(crate::api::now() - t0);
                     r
                 }
@@ -719,11 +707,11 @@ impl Gpu {
     }
 
     pub fn device(&self) -> &wgpu::Device {
-        &self.ctx.devices[self.surf.dev_id].device
+        &self.ctx.devices[self.dev_id].device
     }
 
     pub fn queue(&self) -> &wgpu::Queue {
-        &self.ctx.devices[self.surf.dev_id].queue
+        &self.ctx.devices[self.dev_id].queue
     }
 
     /// A bind group the compositor can draw `tex` with.
@@ -732,12 +720,16 @@ impl Gpu {
     }
 
     pub fn size(&self) -> (u32, u32) {
-        (self.surf.config.width, self.surf.config.height)
+        (self.config.width, self.config.height)
     }
 
     pub fn resize(&mut self, w: u32, h: u32) {
         if (w, h) != self.size() {
-            self.ctx.resize_surface(&mut self.surf, w.max(1), h.max(1));
+            self.config.width = w.max(1);
+            self.config.height = h.max(1);
+            if self.configured {
+                self.surface.configure(self.device(), &self.config);
+            }
         }
     }
 
@@ -789,7 +781,7 @@ impl Gpu {
         pin_atlas(&mut self.cull, &self.atlas_pin);
         let [x, y, pw, ph] = part;
         let tex = job.tex.as_ref().expect("held until finished");
-        let dev = &self.ctx.devices[self.surf.dev_id];
+        let dev = &self.ctx.devices[self.dev_id];
         let (device, queue) = (&dev.device, &dev.queue);
         let sub = (!single).then(|| part_texture(device, pw, ph, wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC));
         let view = sub.as_ref().unwrap_or(tex).create_view(&Default::default());
@@ -858,7 +850,7 @@ impl Gpu {
             scene.pop_layer();
         }
         pin_atlas(&mut scene, &self.atlas_pin);
-        let dev = &self.ctx.devices[self.surf.dev_id];
+        let dev = &self.ctx.devices[self.dev_id];
         let (device, queue) = (&dev.device, &dev.queue);
         let atlas = part_texture(device, aw, ah, wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
         let view = atlas.create_view(&Default::default());
@@ -919,7 +911,7 @@ impl Gpu {
             smooth_glyphs(&mut self.cull, 0, true);
             pin_atlas(&mut self.cull, &self.atlas_pin);
             let [x, y, pw, ph] = part;
-            let dev = &self.ctx.devices[self.surf.dev_id];
+            let dev = &self.ctx.devices[self.dev_id];
             let (device, queue) = (&dev.device, &dev.queue);
             let sub = part_texture(device, pw, ph, wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
             let view = sub.create_view(&Default::default());
@@ -971,7 +963,7 @@ impl Gpu {
     /// next render's images fit.
     fn flush_atlas(&mut self) -> Result<(), String> {
         self.vello()?;
-        let dev = &self.ctx.devices[self.surf.dev_id];
+        let dev = &self.ctx.devices[self.dev_id];
         let (device, queue) = (&dev.device, &dev.queue);
         let tex = self.flush_tex.get_or_insert_with(|| {
             device.create_texture(&wgpu::TextureDescriptor {
@@ -1042,7 +1034,7 @@ impl Gpu {
             nx.draw_image_with_offscreen_canvas_and_dw_and_dh(&oc, 0.0, 0.0, f64::from(lw << i), f64::from(lh << i)).map_err(err)?;
             oc = next;
         }
-        let dev = &self.ctx.devices[self.surf.dev_id];
+        let dev = &self.ctx.devices[self.dev_id];
         let tex = dev.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("image"),
             size: wgpu::Extent3d { width: lw, height: lh, depth_or_array_layers: 1 },
@@ -1280,7 +1272,7 @@ impl Gpu {
             self.before_render(atlas_px, images, &b.jobs)?;
         }
         let board_scene = &b.scene;
-        let device = &self.ctx.devices[self.surf.dev_id].device;
+        let device = &self.ctx.devices[self.dev_id].device;
         let make = |usage: wgpu::TextureUsages| {
             device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("effect"),
@@ -1307,13 +1299,14 @@ impl Gpu {
                 let params = RenderParams { base_color: Color::TRANSPARENT, width: w, height: h, antialiasing_method: AaConfig::Area };
                 let content_view = content.create_view(&Default::default());
                 self.vello()?;
-                let dev = &self.ctx.devices[self.surf.dev_id];
+                let dev = &self.ctx.devices[self.dev_id];
                 self.renderer.as_mut().expect("built above").render_to_texture(&dev.device, &dev.queue, &self.scratch, &content_view, &params).map_err(|e| format!("vello render (effect): {e}"))?;
                 content
             }
         };
-        let dev = &self.ctx.devices[self.surf.dev_id];
+        let dev = &self.ctx.devices[self.dev_id];
         let (device, queue) = (&dev.device, &dev.queue);
+        let (blur, blur_layout) = self.blur.get_or_insert_with(|| blur_pipeline(device));
         let sigma_px = (job.sigma * f64::from(w) / job.bounds.width()).max(0.01) as f32;
         let (tint, mode) = match job.kind {
             JobKind::Layer => ([0.0f32; 4], 0.0f32),
@@ -1330,7 +1323,7 @@ impl Gpu {
             let view = src.create_view(&Default::default());
             let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
-                layout: &self.blur_layout,
+                layout: blur_layout,
                 entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }, wgpu::BindGroupEntry { binding: 1, resource: buf.as_entire_binding() }],
             });
             let target = dst.create_view(&Default::default());
@@ -1342,7 +1335,7 @@ impl Gpu {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.blur);
+            pass.set_pipeline(blur);
             pass.set_bind_group(0, &bg, &[]);
             pass.draw(0..3, 0..1);
             drop(pass);
@@ -1362,14 +1355,20 @@ impl Gpu {
     /// `shader_ms`: GPU time the shader cards submitted this frame are predicted to take; it is taken out
     /// of the measurement so the tile cost model stays about tiles.
     pub fn composite(&mut self, quads: &[(Source, Quad)], t_start: f64, tile_mpx: f64, shader_ms: f64) -> Result<(), String> {
-        let dev = &self.ctx.devices[self.surf.dev_id];
+        let dev = &self.ctx.devices[self.dev_id];
         let (device, queue) = (&dev.device, &dev.queue);
-        let frame = match self.surf.surface.get_current_texture() {
+        // WebKit can synchronously wait for a configured canvas at the next display update.
+        // Configure only when the page presents its first frame.
+        if !self.configured {
+            self.surface.configure(device, &self.config);
+            self.configured = true;
+        }
+        let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             _ => return Err("no surface texture".into()),
         };
-        let (w, h) = (self.surf.config.width as f32, self.surf.config.height as f32);
-        let (fw, fh) = (self.surf.config.width, self.surf.config.height);
+        let (w, h) = (self.config.width as f32, self.config.height as f32);
+        let (fw, fh) = (self.config.width, self.config.height);
         let mut data: Vec<f32> = Vec::with_capacity(quads.len() * FLOATS);
         // Per quad, how it draws: None (skipped), or (pipeline 0 straight, 1 premultiplied, 2 atlas; its bind group;
         // its scissor rect). Atlas quads clip in the shader, so their scissor is the whole frame.
@@ -1402,7 +1401,9 @@ impl Gpu {
                     how.push(if scissor.is_some_and(|s| s[2] == 0 || s[3] == 0) { None } else { Some((2, bind, full)) });
                 }
                 _ => {
-                    data.extend_from_slice(&q.extra);
+                    let mut extra = q.extra;
+                    extra[3] = if matches!(src, Source::Premul(_)) { 1.0 } else { 0.0 };
+                    data.extend_from_slice(&extra);
                     data.extend_from_slice(&[0.0; 8]);
                     let bind = match src {
                         Source::White => Some(&self.white.own.as_ref().expect("white has a texture").1),
@@ -1410,7 +1411,7 @@ impl Gpu {
                         Source::Premul(b) => Some(b),
                     };
                     let sc = scissor.unwrap_or(full);
-                    how.push(bind.filter(|_| sc[2] > 0 && sc[3] > 0).map(|b| (u8::from(matches!(src, Source::Premul(_))), b, sc)));
+                    how.push(bind.filter(|_| sc[2] > 0 && sc[3] > 0).map(|b| (0, b, sc)));
                 }
             }
         }
@@ -1456,7 +1457,6 @@ impl Gpu {
                     pipe = Some(p);
                     pass.set_pipeline(match p {
                         0 => &self.pipeline,
-                        1 => &self.pipeline_pm,
                         _ => &self.pipeline_atlas,
                     });
                 }

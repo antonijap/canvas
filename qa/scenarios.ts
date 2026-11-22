@@ -46,7 +46,13 @@ sc("open-cache", "A 200-board file paints sooner from saved snapshots", { covers
     await big.open();
     const firstOpen = await readPerf();
     t.eq(firstOpen.snapshots, 0, "the first open has no saved pictures");
-    await big.waitFor(`(async () => (await (await import("/page/snapshots.js")).totalBytes()) > 0)()`, "the cache to write", 10_000);
+    await big.waitFor(`(async () => {
+      const {createSnapshots} = await import("/page/snapshots.js");
+      const host = window.canvasHost, board = host.boards.get("b0");
+      const store = createSnapshots(host.file, {env: document.documentElement.dataset.env});
+      await store.ready();
+      return store.meta("b0", board.meta.key, getComputedStyle(host.view).backgroundColor);
+    })()`, "this board's snapshot to be saved", 10_000);
     await big.open();
     const secondOpen = await readPerf();
     t.ok(secondOpen.snapshots > 0, "the second open displayed saved pictures");
@@ -57,32 +63,47 @@ sc("open-cache", "A 200-board file paints sooner from saved snapshots", { covers
   }
 });
 
-sc("open-cache", "A board paints while its fonts and images are pending", { covers: ["render:open-cache"], skip: { visual: "Holds resource requests until the first live paint." } }, async (t: T) => {
-  const f = scratchCopy(fixture(1), path.dirname(t.file), "Slow resources.canvas");
-  const design = JSON.parse(fs.readFileSync(f.file, "utf8"));
-  const board = design.children.find((n: any) => n.type === "frame");
-  board.children.push(
-    { id: "slow-text", type: "text", x: 10, y: 10, content: "Hello", fontFamily: "system-ui", fill: "#000000" },
-    { id: "slow-image", type: "rectangle", x: 20, y: 50, width: 50, height: 50, fill: { type: "image", url: "slow.png" } },
-  );
-  fs.writeFileSync(f.file, JSON.stringify(design));
-  fs.writeFileSync(path.join(f.dir, "slow.png"), encodePng({ width: 1, height: 1, data: new Uint8Array([255, 0, 0, 255]) }));
-  const held: string[] = [];
-  t.page.on("Fetch.requestPaused", ({ requestId }) => held.push(requestId));
-  await t.page.send("Fetch.enable", { patterns: [
-    { urlPattern: "*/api/fonts/file?*" }, { urlPattern: "*/asset?*" },
-  ] });
+sc("open-cache", "First paint can precede the full view", { covers: ["render:open-cache"], skip: { visual: "Holds one visible board's scene while measuring the first paint." } }, async (t: T) => {
+  const f = scratchCopy(fixture(1), path.dirname(t.file), "Pending board.canvas");
+  fs.writeFileSync(f.file, JSON.stringify({ version: "2.21", children: [
+    { type: "frame", id: "first", x: 0, y: 0, width: 500, height: 200, fill: "#ff0000", children: [] },
+    { type: "frame", id: "pending", x: 550, y: 0, width: 300, height: 200, fill: "#0000ff", children: [] },
+  ] }));
+  const held = new Map<string, string>();
+  t.page.on("Fetch.requestPaused", ({ requestId, request }) => {
+    held.set(new URL(request.url).searchParams.get("id")!, requestId);
+  });
+  const { identifier } = await t.page.send("Page.addScriptToEvaluateOnNewDocument", { source: `
+    window.__surfaceConfigured = false;
+    const proto = window.GPUCanvasContext?.prototype, configure = proto?.configure;
+    if (configure) proto.configure = function (...args) {
+      if (this.canvas.id === "engine") window.__surfaceConfigured = true;
+      return configure.apply(this, args);
+    };
+  ` });
+  await t.page.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/scene?*" }] });
+  const release = async (id: string) => {
+    const requestId = held.get(id);
+    t.ok(requestId, id + " is waiting for its scene");
+    await t.page.send("Fetch.continueRequest", { requestId });
+    held.delete(id);
+  };
   const tab = new T(t.page, f.dir, t.srv);
   try {
     await t.page.goto(t.srv.base + "/?file=" + encodeURIComponent(f.dir));
-    await tab.waitFor("window.canvasHost?.perf.look != null && document.querySelector('.opening-preview')?.hasChildNodes()", "live board paint before resources", 5000);
-    await tab.waitFor("window.canvasHost?.perf.engine != null", "the engine to start");
-    const until = Date.now() + 3000;
-    while (!held.length && Date.now() < until) await sleep(25);
-    t.ok(held.length > 0, "at least one resource is still pending");
-    t.eq(await tab.ev("window.canvasHost.perf.picture"), null, "the full picture still waits for resources");
+    await tab.waitFor("window.canvasHost?.perf.engine != null", "engine startup");
+    const deadline = Date.now() + 3000;
+    while (held.size < 2 && Date.now() < deadline) await sleep(10);
+    t.eq(await tab.ev("window.__surfaceConfigured"), false, "the engine hasn't configured an empty surface");
+    await release("first");
+    await tab.waitFor("window.canvasHost?.perf.paint != null", "one visible board to paint", 5000);
+    t.eq(await tab.ev("window.canvasHost.perf.look"), null, "the whole view is still incomplete");
+    t.eq(await tab.ev("window.canvasHost.perf.picture"), null, "the exact picture is still incomplete");
+    await release("pending");
+    await tab.waitFor("window.canvasHost.perf.look != null && window.canvasHost.perf.picture != null && window.canvasHost.perf.load != null", "the full view to finish");
   } finally {
-    for (const requestId of held) await t.page.send("Fetch.continueRequest", { requestId }).catch(() => {});
+    for (const requestId of held.values()) await t.page.send("Fetch.continueRequest", { requestId }).catch(() => {});
+    await t.page.send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
     await t.page.send("Fetch.disable");
     await t.open();
   }
@@ -122,7 +143,8 @@ sc("open-cache", "Replacing an image at its old URL misses its saved picture", {
       const tag = await tab.ev(`fetch(${JSON.stringify(asset)}, {method:"HEAD"}).then(r => r.headers.get("etag"))`);
       fs.writeFileSync(png, image(64));
       await reopen();
-      const current = await tab.ev(`fetch(${JSON.stringify(asset)}, {method:"HEAD", cache:"no-cache"}).then(r => r.headers.get("etag"))`);
+      // Read the server's ETag without updating the tab's HTTP cache.
+      const current = (await fetch(t.srv.base + asset, { method: "HEAD" })).headers.get("etag");
       t.ok(tag && current && tag !== current, "the replacement has a different ETag");
       await tab.waitFor("window.canvasHost.boards.has('board') && !window.canvasHost.boards.get('board').snap", "the stale snapshot lookup to finish");
       t.eq(await tab.ev(displayed), false, "the stale image is never shown");
