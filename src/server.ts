@@ -619,8 +619,12 @@ try {
           void prime(file).catch(() => {});
         }
         const engine = fs.existsSync(path.join(enginePkgDir(), "canvas_engine.js")) ? "ok" : "missing";
-        const preload = file && engine === "ok" ? '<link rel="modulepreload" href="/page/engine-view.js"><link rel="preload" href="/engine/canvas_engine_bg.wasm" as="fetch" crossorigin>' : "";
-        return send(res, 200, "text/html; charset=utf-8", PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}" data-image-previews="${process.env.CANVAS_IMAGE_PREVIEWS_BIN ? "1" : "0"}">`).replace("<head>", "<head>" + preload));
+        const page = PAGE.replace('<html lang="en">', `<html lang="en" data-env="${sceneEnv()}" data-engine="${engine}" data-image-previews="${process.env.CANVAS_IMAGE_PREVIEWS_BIN ? "1" : "0"}">`);
+        // WebKit can fetch the engine while the document stream starts. Keep the browser's large-file request order.
+        const nativeEngine = file && engine === "ok" && url.searchParams.get("shell") === "native" && url.searchParams.get("renderer") !== "dom";
+        return send(res, 200, "text/html; charset=utf-8", nativeEngine
+          ? page.replace("<head>", '<head><link rel="modulepreload" href="/page/engine-view.js"><link rel="preload" href="/engine/canvas_engine_bg.wasm" as="fetch" crossorigin>')
+          : page);
       }
       let bodyFile: string | undefined;
       if (readOnlyRoute(req.method ?? "GET", url.pathname) && String(req.headers["content-type"] ?? "").startsWith("application/json")) {
