@@ -14,7 +14,7 @@ Rules for AI coding agents (Claude Code, Codex and others) working in this repos
 
 ## Testing: only what changed
 
-Before a release, `pnpm perf:gate` must pass; a change that makes a gated metric more than 5% slower is not done until it is fixed or the maintainer accepts it with --update.
+Before a release, `pnpm perf:gate` must pass. Fix regressions above the metric's stored tolerance or get the maintainer to accept them with `--update`.
 
 Test the change, not the whole app. Full runs take hours and find nothing a targeted run misses.
 

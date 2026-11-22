@@ -33,22 +33,27 @@ Assume every pull request is reviewed as if it came from someone trying to sneak
 ## Performance gate
 
 Run `pnpm perf:gate` on a quiet machine with the engine built. The release checklist runs
-the gate too. Its `--quick` option runs the server and page measurements only.
+the same gate. In either command, `--quick` selects only the server and page metrics.
 For the native measurements, build an isolated QA app from the current sources first.
 
 ```sh
 QA=1 CANVAS_APP_OUT="$PWD/build/perf-native/Canvas QA.app" bash apps/macos/build.sh
 ```
 
-The gate uses fixed fixtures, a warm-up, and the median of three samples. It reports the
-spread and retries a metric once if the range exceeds 5% of the median. A result more
-than 5% above its budget fails. A stable improvement greater than 3% tightens the budget.
+The gate runs five passes with a fresh runner each time, using fixed fixtures and
+one warm-up before each sample. Both modes and `--update` use this procedure.
+The gate compares the median of the five samples with the stored budget.
+Spread is the range of the five samples divided by their median. Each budget stores
+that spread and a tolerance of twice the spread, with a minimum tolerance of 5%.
+A median above the budget plus its tolerance fails. A run tightens the budget only
+when its spread is below 5% and its median improves by more than the stored tolerance.
+Native launch is report-only because its timing includes QA bridge and window capture delays.
 Review and commit any updates to `bench/budgets.json` with the change that was measured.
 
 Use `pnpm perf:gate --only open-2000,server-memory` to check individual metrics.
-A missing machine class or budget needs the maintainer. Use `--update` to register a
-separate machine class or accept an intentional trade-off. The native metrics are skipped
-on machines without the QA app build.
+A gated metric without a budget for the current machine class needs the maintainer.
+Use `--update` to register a separate machine class or accept an intentional trade-off.
+The native metrics are skipped on machines without the QA app build.
 
 ## Licence
 

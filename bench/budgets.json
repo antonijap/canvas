@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "machines": [
     {
       "machine": {
@@ -11,39 +11,53 @@
       },
       "metrics": {
         "open-2000": {
-          "value": 732.5922080476835,
+          "value": 843.9524168569478,
+          "spread": 0.2859349096319817,
+          "tolerance": 0.5718698192639634,
           "date": "2026-11-22",
-          "commit": "e255e240438e53c7122f35e9f2526662d7371304"
+          "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
         },
         "server-memory": {
-          "value": 67.05924987792969,
+          "value": 66.4709701538086,
+          "spread": 0.03197366353541235,
+          "tolerance": 0.0639473270708247,
           "date": "2026-11-22",
-          "commit": "e255e240438e53c7122f35e9f2526662d7371304"
+          "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
         },
         "drag-frames": {
-          "value": 17.3,
+          "value": 17.4,
+          "spread": 0.02873563218390805,
+          "tolerance": 0.0574712643678161,
           "date": "2026-11-22",
-          "commit": "e255e240438e53c7122f35e9f2526662d7371304"
+          "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
         },
         "pan-zoom-frames": {
-          "value": 18.3,
+          "value": 17.5,
+          "spread": 0.02857142857142857,
+          "tolerance": 0.05714285714285714,
           "date": "2026-11-22",
-          "commit": "e255e240438e53c7122f35e9f2526662d7371304"
+          "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
         },
         "edit-latency": {
-          "value": 36.8,
+          "value": 35.4,
+          "spread": 0.008474576271186562,
+          "tolerance": 0.05,
           "date": "2026-11-22",
-          "commit": "e255e240438e53c7122f35e9f2526662d7371304"
+          "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
         },
         "native-launch": {
-          "value": 1159.296875,
+          "value": 608.8972500000018,
+          "spread": 0.4334681114095872,
+          "tolerance": 0.8669362228191744,
           "date": "2026-11-22",
-          "commit": "e255e240438e53c7122f35e9f2526662d7371304"
+          "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
         },
         "native-drag-frames": {
-          "value": 19,
+          "value": 17,
+          "spread": 0,
+          "tolerance": 0.05,
           "date": "2026-11-22",
-          "commit": "e255e240438e53c7122f35e9f2526662d7371304"
+          "commit": "62bad752de551b8ad094aa9105a17ae36c66278c"
         }
       }
     }

@@ -13,7 +13,6 @@ import os from "node:os";
 import path from "node:path";
 import { freePort, ROOT, sleep, startServer, type Scratch } from "./lib.ts";
 import { crashCheck } from "./release-crash.ts";
-import { WEB_METRICS } from "../bench/perf-budgets.ts";
 
 type Status = "PASS" | "FAIL" | "NEEDS-MAINTAINER" | "MANUAL" | "SKIP";
 type Item = { status: Status; text: string; details?: string[] };
@@ -682,7 +681,7 @@ function suite(name: string, script: string, timeoutMs: number) {
 }
 
 function performanceGate(c: Ctx): Item[] {
-  const args = c.quick ? ["--only", WEB_METRICS.join(",")] : [];
+  const args = c.quick ? ["--quick"] : [];
   const r = run("pnpm", ["perf:gate", ...args], { timeoutMs: 1_800_000 });
   const log = path.join(c.out, "perf-gate.log");
   fs.writeFileSync(log, r.out);

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ROOT } from "../qa/lib.ts";
-import { compare, findMachine, MAX_SPREAD, METRICS, NATIVE_METRICS, parseBudgets, summarize, UNITS, type Budgets, type Machine, type Metric } from "./perf-budgets.ts";
+import { compare, findMachine, METRICS, NATIVE_METRICS, parseBudgets, recordBudget, SAMPLE_COUNT, summarize, UNITS, WEB_METRICS, type Budgets, type Machine, type Metric } from "./perf-budgets.ts";
 import { hasNativeBuild, measurements } from "./perf-measure.ts";
 
 const FILE = path.join(ROOT, "bench", "budgets.json");
@@ -12,15 +12,20 @@ const number = (value: number) => value.toFixed(2);
 
 function flags(args: string[]) {
   const update = args.includes("--update");
+  const quick = args.includes("--quick");
   const keys: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--update") continue;
+    if (args[i] === "--update" || args[i] === "--quick") continue;
     if (args[i] !== "--only" || keys.length) throw new Error(`Unknown argument: ${args[i]}`);
     while (args[i + 1] && !args[i + 1].startsWith("-")) keys.push(...args[++i].split(","));
     if (!keys.length) throw new Error("--only requires one or more metric IDs");
   }
   for (const id of keys) if (!Object.hasOwn(UNITS, id)) throw new Error(`Unknown metric ${id}. Choose from ${METRICS.join(", ")}.`);
-  return { update, ids: keys.length ? [...new Set(keys as Metric[])] : METRICS };
+  const available = quick ? WEB_METRICS : METRICS;
+  for (const id of keys as Metric[]) {
+    if (!available.includes(id)) throw new Error(`${id} is unavailable in --quick mode`);
+  }
+  return { update, ids: available.filter((id) => !keys.length || keys.includes(id)) };
 }
 
 function currentMachine(): Machine {
@@ -56,72 +61,82 @@ async function main() {
   const entry = existing ?? { machine, metrics: {} };
   const commit = git("rev-parse", "HEAD");
   const date = new Date().toISOString().slice(0, 10);
-  const runner = measurements();
   const changes: string[] = [];
   const native = hasNativeBuild();
   const machineName = `${machine.cpu}, ${machine.cores} cores, ${machine.memoryGiB} GiB, ${machine.os}/${machine.arch}`;
   let failed = false;
-  let needs = !existing && !update;
-  if (needs) console.log(`NEEDS-MAINTAINER No budgets for ${machineName}. Use --update to add a separate machine entry.`);
-  else console.log(`Machine: ${machineName}`);
+  let needs = false;
+  console.log(`Machine: ${machineName}`);
 
-  try {
-    for (const id of ids) {
-      if (NATIVE_METRICS.includes(id) && !native) {
-        console.log(`SKIP ${id}: no native QA build at build/perf-native/Canvas QA.app`);
+  const active = ids.filter((id) => {
+    if (native || !NATIVE_METRICS.includes(id)) return true;
+    console.log(`SKIP ${id}: no native QA build at build/perf-native/Canvas QA.app`);
+    return false;
+  });
+  const collected = new Map(active.map((id) => [id, [] as number[]]));
+  for (let round = 1; round <= SAMPLE_COUNT && collected.size; round++) {
+    console.log(`Measurement pass ${round}/${SAMPLE_COUNT} (one warm-up and one sample per metric)`);
+    const runner = measurements();
+    try {
+      for (const [id, samples] of collected) {
+        const gating = id !== "native-launch";
+        try {
+          console.log(`Measuring ${id}`);
+          await runner.measure(id);
+          samples.push(await runner.measure(id));
+        } catch (err) {
+          collected.delete(id);
+          if (gating) failed = true;
+          console.log(`${gating ? "FAIL" : "SKIP"} ${id}: ${(err as Error).message.split("\n")[0]}`);
+        }
+      }
+    } finally {
+      await runner.close();
+    }
+  }
+
+  for (const [id, samples] of collected) {
+    const budget = entry.metrics[id];
+    const gating = id !== "native-launch";
+    try {
+      const result = summarize(samples);
+      const report = `${number(result.median)} ${UNITS[id]} (spread ${number(result.spread * 100)}%, samples ${samples.map(number).join(", ")})`;
+      const prev = budget ? `${number(budget.value)} ${UNITS[id]} (+${number(budget.tolerance * 100)}% tolerance)` : "none";
+      const details = `${id}: measured ${report}, budget ${prev}`;
+      if (!gating && !update) {
+        console.log(`PASS ${details}. Report only.`);
         continue;
       }
-      const budget = entry.metrics[id];
-      try {
-        console.log(`Measuring ${id} (one warm-up, three samples)`);
-        await runner.measure(id);
-        const batch = async () => {
-          const samples = [await runner.measure(id), await runner.measure(id), await runner.measure(id)];
-          const { median, spread } = summarize(samples);
-          const report = `${number(median)} ${UNITS[id]} (spread ${number(spread * 100)}%, samples ${samples.map(number).join(", ")})`;
-          return { median, spread, report };
-        };
-        let result = await batch();
-        if (result.spread > MAX_SPREAD) {
-          console.log(`Retrying ${id}: ${result.report}`);
-          result = await batch();
-        }
-        const noisy = result.spread > MAX_SPREAD;
-        const outcome = compare(budget, result.median, update);
-        const prev = budget ? `${number(budget.value)} ${UNITS[id]}` : "no budget";
-        const details = `${id}: measured ${result.report}, budget ${prev}`;
-        if (outcome === "fail") {
-          failed = true;
-          let commits: string;
-          try {
-            commits = git("log", "--format=%h %s", `${budget!.commit}..${commit}`).replaceAll("\n", " | ") || "none since the recorded commit";
-          } catch {
-            commits = "history unavailable in this checkout";
-          }
-          console.log(`FAIL ${details}. Commits since ${budget!.commit.slice(0, 12)}: ${commits}`);
-        } else if (outcome === "missing") {
-          needs = true;
-          console.log(`NEEDS-MAINTAINER ${details}. Use --update to record this budget.`);
-        } else if (outcome === "update" || (outcome === "ratchet" && !noisy)) {
-          entry.metrics[id] = { value: result.median, date, commit };
-          changes.push(`PASS ${outcome === "ratchet" ? "Ratchet" : "Baseline update"} ${details}`);
-        } else {
-          console.log(`PASS ${details}${noisy ? ". Spread still exceeds 5% after retry." : ""}`);
-        }
-      } catch (err) {
+      const outcome = compare(budget, result, update);
+      if (outcome === "fail") {
         failed = true;
-        console.log(`FAIL ${id}: ${(err as Error).message.split("\n")[0]}`);
+        let commits: string;
+        try {
+          commits = git("log", "--format=%h %s", `${budget!.commit}..${commit}`).replaceAll("\n", " | ") || "none since the recorded commit";
+        } catch {
+          commits = "history unavailable in this checkout";
+        }
+        console.log(`FAIL ${details}. Commits since ${budget!.commit.slice(0, 12)}: ${commits}`);
+      } else if (outcome === "missing") {
+        needs = true;
+        console.log(`NEEDS-MAINTAINER ${details}. Use --update to record this budget.`);
+      } else if (outcome === "update" || outcome === "ratchet") {
+        entry.metrics[id] = recordBudget(result, { date, commit });
+        changes.push(`PASS ${outcome === "ratchet" ? "Ratchet" : "Baseline update"} ${details}${gating ? "" : ". Report only."}`);
+      } else {
+        console.log(`PASS ${details}`);
       }
+    } catch (err) {
+      if (gating) failed = true;
+      console.log(`${gating ? "FAIL" : "SKIP"} ${id}: ${(err as Error).message.split("\n")[0]}`);
     }
-  } finally {
-    await runner.close();
   }
-  if (changes.length) {
+  if (changes.length && !failed && !needs) {
     if (!existing) budgets.machines.push(entry);
     saveBudgets(original, budgets);
     for (const change of changes) console.log(change);
   }
-  if (!existing && !changes.length && !needs) {
+  if (update && !changes.length && !failed) {
     needs = true;
     console.log("NEEDS-MAINTAINER No measurements were available to create a machine entry.");
   }

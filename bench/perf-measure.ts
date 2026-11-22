@@ -35,7 +35,10 @@ export function measurements() {
       const port = await freePort();
       // Browser startup is outside the file-open measurement.
       if (id !== "server-memory") tab = new Tab(await openTab((await browser()).port));
-      if (id === "open-2000") await tab!.page.send("Page.addScriptToEvaluateOnNewDocument", { source: INSTRUMENT(null) });
+      if (id === "open-2000") {
+        await tab!.page.send("Network.setCacheDisabled", { cacheDisabled: true });
+        await tab!.page.send("Page.addScriptToEvaluateOnNewDocument", { source: INSTRUMENT(null) });
+      }
       const t0 = performance.now();
       host = await startHost({ port, env: {
         CANVAS_ROOTS: dir, CANVAS_WEB_FONTS: "0", CANVAS_STATE_DIR: path.join(dir, "state"),
