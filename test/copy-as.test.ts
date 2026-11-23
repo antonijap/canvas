@@ -7,11 +7,33 @@ import path from "node:path";
 import { after, describe, test } from "node:test";
 import { cssFor, hexRgba, swiftUIFor, textOf } from "../src/codegen.ts";
 import { composePng, composeSvg, layoutPicture, over, validateCopy } from "../src/copy-as.ts";
-import { decodePng, encodePng, exportFileName, exportPaths, validateExport } from "../src/export.ts";
+import { decodePng, encodePng, exportFileName, exportPaths, runExport, validateExport } from "../src/export.ts";
 import { chromePath } from "../src/doc/render/chrome-path.ts";
+import { noisePng } from "../qa/lib.ts";
 import { tmpDir } from "./helpers.ts";
 
 const noChrome = (() => { try { chromePath(); return false; } catch { return "no Chromium-family browser"; } })();
+
+test("the export runner delivers a multi-megabyte inline PNG", { skip: noChrome }, async () => {
+  const dir = tmpDir("inline-export");
+  try {
+    const file = path.join(dir, "doc.canvas.json");
+    fs.writeFileSync(path.join(dir, "noise.png"), noisePng(2000, 2000));
+    fs.writeFileSync(file, JSON.stringify({ version: "2.21", children: [
+      { type: "frame", id: "board", width: 1000, height: 1000, layout: "none", fill: { type: "image", url: "noise.png", mode: "fill" } },
+    ] }));
+    const req = validateExport({ file, ids: ["board"], format: "png", scale: 2, inline: true });
+    const { files: [result] } = await runExport(0, file, req, 30_000);
+    assert.ok(result?.data, "an inline PNG");
+    const bytes = Buffer.from(result.data, "base64");
+    assert.equal(bytes.length, result.bytes);
+    assert.ok(bytes.length > 2 * 1024 * 1024, "the PNG exceeds 2 MiB");
+    const png = decodePng(bytes);
+    assert.deepEqual([png.width, png.height], [2000, 2000]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe("export settings and formats", () => {
   test("a suffix goes on the name as typed and replaces the scale's @2x", () => {

@@ -1,17 +1,28 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ROOT, gradientPng, startServer } from '../lib.ts';
+import { ROOT, gradientPng, noisePng, startServer } from '../lib.ts';
 import { decodePng } from '../../src/export.ts';
 import { center, NT, sc } from './harness.ts';
 
 sc('canvas-menu-png', 'Canvas context menu copies decodable 2x PNGs', { covers: ['copy-as:png', 'copy-as:one', 'copy-as:many', 'copy-as:board', 'copy-as:menu'] }, async (t: NT) => {
+  await t.cmd('close', { file: t.file });
+  const doc = t.disk();
+  const largeBoard = doc.children.find(node => node.id === 'lay_nest')!;
+  Object.assign(largeBoard, {
+    width: 1000, height: 1000,
+    fill: { type: 'image', url: 'media/copy-png-noise.png', mode: 'fill' },
+  });
+  fs.writeFileSync(path.join(t.file, 'media', 'copy-png-noise.png'), noisePng(2000, 2000));
+  fs.writeFileSync(path.join(t.file, 'document.json'), JSON.stringify(doc));
+  await t.app.openShown(t.file);
+  await t.waitState(s => s.file === t.file && s.pages.length > 0, 'the updated board document to open');
   await t.showPage('layout');
   await t.look(0, 0);
   const board = await t.rect('lay_nest');
   const free = center(await t.rect('r_free'));
   const cases = [
-    { ids: ['lay_nest'], point: { x: board.x + 20, y: board.y + 8 }, size: [1120, 840] },
+    { ids: ['lay_nest'], point: { x: board.x + 20, y: board.y + 8 }, size: [2000, 2000] },
     { ids: ['r_free'], point: free, size: [140, 100] },
     { ids: ['fr_inner', 'r_free'], point: free, size: [644, 532] },
   ];
@@ -25,6 +36,7 @@ sc('canvas-menu-png', 'Canvas context menu copies decodable 2x PNGs', { covers: 
       return result.pngInfo && result;
     }, `a decodable PNG for ${ids.join(', ')}`, 20_000);
     t.eq([pb.pngInfo.width, pb.pngInfo.height], size, 'selection at 2x');
+    if (ids.includes('lay_nest')) t.ok(pb.pngInfo.bytes > 2 * 1024 * 1024, 'the board PNG exceeds 2 MiB');
     t.ok(pb.types.includes('public.png'), 'PNG on the pasteboard');
     t.ok(pb.types.includes('public.tiff'), 'TIFF on the pasteboard');
     const file = path.join(t.app.dir, 'copied.png');

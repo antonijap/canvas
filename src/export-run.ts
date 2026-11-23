@@ -132,4 +132,5 @@ try {
   code = 1;
 }
 try { shutdownRenderer(); } catch {}
-process.exit(code);
+// Let the pipe drain before Node exits, especially for inline images.
+process.exitCode = code;

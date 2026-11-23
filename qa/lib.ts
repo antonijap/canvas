@@ -1,12 +1,14 @@
 // Shared QA plumbing: a scratch Canvas server on a free port, and headless Chrome pages with real input.
 // Chrome and the DevTools socket come from fidelity/cdp.ts (Node's built-in WebSocket, no extra deps).
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import zlib from "node:zlib";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Page, sleep } from "../fidelity/cdp.ts";
+import { encodePng } from "../src/export.ts";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export { sleep };
@@ -273,4 +275,9 @@ export function gradientPng(w: number, h: number): Buffer {
     rows.push(r);
   }
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(Buffer.concat(rows))), chunk("IEND", Buffer.alloc(0))]);
+}
+
+/** A PNG with enough pixel variation to exercise large exports even after compression. */
+export function noisePng(width: number, height: number): Buffer {
+  return encodePng({ width, height, channels: 3, data: randomBytes(width * height * 3) });
 }
