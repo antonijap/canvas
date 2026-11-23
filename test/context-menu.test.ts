@@ -47,3 +47,9 @@ test("Delete is the last layer action and board creation starts the empty canvas
   assert.ok(canvasMenu.includes("New Board here"));
   assert.ok(canvasMenu.indexOf("New Board here") < canvasMenu.indexOf("ContextMenuLayout.canvas"));
 });
+
+test("Copy ID and Copy name use the canvas pasteboard", () => {
+  const lib = fs.readFileSync(new URL("../apps/macos/Library.swift", import.meta.url), "utf8");
+  const helper = lib.match(/private func copy\(_ text: String, _ what: String\) \{([^}]+)\}/)?.[1] ?? "";
+  assert.match(helper, /canvasPasteboard\.setString\(text, forType: \.string\)/);
+});

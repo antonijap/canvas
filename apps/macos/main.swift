@@ -496,9 +496,10 @@ func canvasClipboardText() -> String {
 /// The page command that pastes the picture on the pasteboard (canvasPasteboard: the general one, a private one in a
 /// QA instance) as an image layer, or nil when Cmd+V pastes
 /// layers or text as before (`PasteImage.choose` decides). The bytes travel as base64; at most 50 MB.
-func pastedImageCommand() -> String? {
+func pastedImageCommand(at point: CGPoint? = nil) -> String? {
   guard let img = pasteboardImage() else { return nil }
-  return "{cmd:'pasteImage',type:\(jsString(img.type)),name:\(jsString(img.name)),data:'\(img.data.base64EncodedString())'}"
+  let at = point.map { ",at:{x:\($0.x),y:\($0.y)}" } ?? ""
+  return "{cmd:'pasteImage',type:\(jsString(img.type)),name:\(jsString(img.name)),data:'\(img.data.base64EncodedString())'\(at)}"
 }
 
 /// The picture on the pasteboard (an image file copied in Finder, a PNG or a TIFF), at most 50 MB, or nil.
@@ -586,6 +587,10 @@ final class StructureActions: NSObject, NSMenuItemValidation {
   @objc func pasteHere(_ s: Any?) {
     guard let p = (s as? NSMenuItem)?.representedObject as? NSValue else { paste(s); return }
     let at = p.pointValue
+    if canvasPasteboard.string(forType: .canvasClipboard) == nil, let js = pastedImageCommand(at: at) {
+      model.run(js)
+      return
+    }
     let text = jsString(canvasClipboardText())
     model.run("{cmd:'paste',inPlace:false,text:\(text),at:{x:\(at.x),y:\(at.y)}}")
   }
@@ -647,7 +652,14 @@ final class StructureActions: NSObject, NSMenuItemValidation {
   /// Menu items whose page op rides on the item (Create Component, Detach Instance, Copy and Paste Properties, Distribute).
   @objc func pageShortcut(_ item: NSMenuItem) { if let op = item.representedObject as? String { shortcut(op) } }
   @objc func addAutoLayout(_ s: Any?) { model.runLayout(["op": "add"]) }
-  @objc func removeAutoLayout(_ s: Any?) { model.runLayout(["op": "remove"]) }
+  @objc func removeAutoLayout(_ s: Any?) {
+    var op: [String: Any] = ["op": "remove"]
+    if let ids = (s as? NSMenuItem)?.representedObject as? [String] {
+      guard !ids.isEmpty else { return }
+      op["ids"] = ids
+    }
+    model.runLayout(op)
+  }
   func validateMenuItem(_ item: NSMenuItem) -> Bool {
     if model.cloudReadOnly && nativeText == nil && item.action != #selector(copy(_:)) && item.action != #selector(selectAll(_:)) { return false }
     switch item.action {
@@ -680,6 +692,7 @@ final class StructureActions: NSObject, NSMenuItemValidation {
       return true
     case #selector(ungroup(_:)):
       // Only groups and frames (and a multi-selection holding one) ungroup; a rectangle has nothing to let go.
+      if let enabled = item.representedObject as? Bool { return enabled }
       guard nativeText == nil, !otherWindowKey, !model.textEditing, let sel = model.selection else { return model.contextOnLayer }
       let type = sel.node["type"] as? String
       return type == "group" || type == "frame" || (sel.ids.count > 1 && type == nil)
@@ -688,7 +701,10 @@ final class StructureActions: NSObject, NSMenuItemValidation {
       // being typed); a menu click or the right-click menu runs it here.
       if NSApp.currentEvent?.type == .keyDown { return false }
       guard nativeText == nil, !otherWindowKey, !model.textEditing, model.selection != nil || model.contextOnLayer else { return false }
-      if item.action == #selector(removeAutoLayout(_:)), let n = model.selection?.node { return LayoutLogic.isAutoLayout(n) }
+      if item.action == #selector(removeAutoLayout(_:)) {
+        if let ids = item.representedObject as? [String] { return !ids.isEmpty }
+        if let n = model.selection?.node { return LayoutLogic.isAutoLayout(n) }
+      }
       return true
     case #selector(cut(_:)), #selector(copy(_:)):
       if let t = nativeText { return t.selectedRange.length > 0 }

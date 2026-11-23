@@ -129,7 +129,7 @@ export function exportTargets(roots: DocNode[], i: RenderInput, targets: ExportT
       return { rect: r, svg: v.svg, warnings: v.warnings, root };
     }
     // JPEG has no alpha: Chrome draws it over white, the way a JPG export usually looks.
-    const [b] = call({ op: "shot", clips: [{ x: r.pageX, y: r.pageY, width: r.width, height: r.height, scale: typeof t.scale === "function" ? t.scale(r) : (t.scale ?? 1) }], format: t.format, ...(t.format === "jpeg" ? { quality: 92, background: "white" } : t.format === "webp" ? { quality: 92 } : {}) }).images;
+    const [b] = call({ op: "shot", target: t.id, clips: [{ x: r.pageX, y: r.pageY, width: r.width, height: r.height, scale: typeof t.scale === "function" ? t.scale(r) : (t.scale ?? 1) }], format: t.format, ...(t.format === "jpeg" ? { quality: 92, background: "white" } : t.format === "webp" ? { quality: 92 } : {}) }).images;
     return { rect: r, png: Buffer.from(b, "base64"), root };
   });
 }

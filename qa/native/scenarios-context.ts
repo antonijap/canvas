@@ -1,8 +1,153 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ROOT, startServer } from '../lib.ts';
+import { ROOT, gradientPng, startServer } from '../lib.ts';
+import { decodePng } from '../../src/export.ts';
 import { center, NT, sc } from './harness.ts';
+
+sc('canvas-menu-png', 'Canvas context menu copies decodable 2x PNGs', { covers: ['copy-as:png', 'copy-as:one', 'copy-as:many', 'copy-as:board', 'copy-as:menu'] }, async (t: NT) => {
+  await t.showPage('layout');
+  await t.look(0, 0);
+  const board = await t.rect('lay_nest');
+  const free = center(await t.rect('r_free'));
+  const cases = [
+    { ids: ['lay_nest'], point: { x: board.x + 20, y: board.y + 8 }, size: [1120, 840] },
+    { ids: ['r_free'], point: free, size: [140, 100] },
+    { ids: ['fr_inner', 'r_free'], point: free, size: [644, 532] },
+  ];
+  for (const { ids, point, size } of cases) {
+    await t.selectIds(ids);
+    await t.cmd('qa.pasteboard', { set: '' });
+    await t.click(point, { right: true });
+    await t.pickMenu('Copy as > Copy as PNG');
+    const pb = await t.waitFor(async () => {
+      const result = await t.cmd('qa.pasteboard');
+      return result.pngInfo && result;
+    }, `a decodable PNG for ${ids.join(', ')}`, 20_000);
+    t.eq([pb.pngInfo.width, pb.pngInfo.height], size, 'selection at 2x');
+    t.ok(pb.types.includes('public.png'), 'PNG on the pasteboard');
+    t.ok(pb.types.includes('public.tiff'), 'TIFF on the pasteboard');
+    const file = path.join(t.app.dir, 'copied.png');
+    await t.cmd('qa.pasteboard', { pngTo: file });
+    const png = decodePng(fs.readFileSync(file));
+    t.eq(png.channels === 4 ? png.data[3] : 255, 0, `outside the rounded corner is transparent for ${ids.join(', ')}`);
+    const inside = (png.width * 12 + 12) * png.channels;
+    t.ok(png.channels === 3 || png.data[inside + 3] > 0, 'the selection itself is drawn');
+  }
+});
+
+sc('canvas-menu-move', 'Canvas context menu moves all selected boards', { covers: ['pages:board'] }, async (t: NT) => {
+  await t.showPage('layout');
+  await t.look(0, 0);
+  await t.selectIds(['lay_nest', 'lay_auto']);
+  const r = await t.rect('lay_nest');
+  await t.click({ x: r.x + 20, y: r.y + 8 }, { right: true });
+  const target = (await t.state()).pages.find((p: any) => p.id === 'components');
+  await t.pickMenu(`Move to Page > ${target.name}`);
+  await t.waitState(s => !s.boards.includes('lay_nest') && !s.boards.includes('lay_auto'), 'both boards left the source page');
+  await t.showPage('components');
+  await t.waitState(s => s.boards.includes('lay_nest') && s.boards.includes('lay_auto'), 'both boards arrived on target page');
+});
+
+sc('canvas-menu-layout', 'Canvas context menu removes auto layout from a mixed selection', { covers: [] }, async (t: NT) => {
+  await t.showPage('layout');
+  await t.look(245, 0);
+  await t.rect('al_row');
+  await t.selectIds(['al_row', 'r_free']);
+  await t.click(center(await t.rect('r_free')), { right: true });
+  await t.pickMenu('Remove auto layout');
+  await t.waitDisk(() => t.node('al_row')?.layout === 'none', 'the auto layout frame becomes freeform');
+});
+
+sc('canvas-menu-fit-content', 'Canvas context menu fits the clicked frame within a multi-selection', { covers: [] }, async (t: NT) => {
+  await t.showPage('layout');
+  await t.look(0, 0);
+  await t.selectIds(['fr_outer', 'r_free']);
+  const r = await t.rect('fr_outer');
+  await t.click({ x: r.x + 10, y: r.y + 10 }, { right: true });
+  await t.pickMenu('Resize to fit content');
+  const fitted = await t.waitDisk(() => {
+    const frame = t.node('fr_outer');
+    return frame?.width === 130 && frame;
+  }, 'the clicked frame resized');
+  t.eq([fitted.x, fitted.y, fitted.width, fitted.height], [48, 84, 130, 90], 'the frame fits its child');
+  t.eq([t.node('fr_inner')?.x, t.node('fr_inner')?.y], [0, 0], 'the child stays in the same place on the canvas');
+  t.eq([t.node('r_free')?.width, t.node('r_free')?.height], [70, 50], 'the other selected layer keeps its size');
+  await t.waitState(s => s.selection?.ids?.length === 2, 'both layers stay selected');
+});
+
+sc('canvas-menu-ungroup', 'Canvas context menu disables Ungroup for main components', { covers: [] }, async (t: NT) => {
+  await t.showPage('components');
+  await t.look(0, 0);
+  await t.selectIds(['cmp_button']);
+  await t.click(center(await t.rect('cmp_button')), { right: true });
+  const item = (await t.cmd('qa.menu')).items.find((i: any) => i.title === 'Ungroup');
+  t.eq(item?.enabled, false, 'a main component cannot be ungrouped');
+  await t.cmd('qa.menu', { cancel: true });
+  await t.showPage('layout');
+  await t.look(0, 0);
+  await t.selectIds(['g_pair', 'r_free']);
+  await t.click(center(await t.rect('r_free')), { right: true });
+  await t.pickMenu('Ungroup');
+  await t.waitDisk(() => !t.node('g_pair') && t.node('r_g1') && t.node('r_free'), 'the ordinary group ungrouped');
+});
+
+sc('canvas-menu-unlock', 'Canvas context menu unlocks a selected locked layer', { covers: ['lock:rectangle'] }, async (t: NT) => {
+  await t.showPage('layout');
+  await t.look(0, 0);
+  await t.selectIds(['r_free']);
+  const point = center(await t.rect('r_free'));
+  await t.click(point, { right: true });
+  await t.pickMenu('Lock');
+  await t.waitDisk(() => t.node('r_free')?.locked === true, 'the layer locked');
+  await t.settle();
+  await t.click(point, { right: true });
+  await t.pickMenu('Unlock');
+  await t.waitDisk(() => t.node('r_free')?.locked !== true, 'the layer unlocked');
+});
+
+sc('canvas-menu-paste-image', 'Canvas context menu pastes an image at the pointer', { covers: ['image-paste:in-frame'] }, async (t: NT) => {
+  await t.showPage('layout');
+  await t.look(0, 0);
+  await t.selectIds(['lay_nest']);
+  const r = await t.rect('lay_nest');
+  await t.cmd('qa.pasteboard', { png: gradientPng(40, 30).toString('base64') });
+  await t.click({ x: r.x + 240, y: r.y + 250 }, { right: true });
+  await t.pickMenu('Paste here');
+  const image = await t.waitDisk(() => t.node('lay_nest')?.children?.find(n => n.name === 'Pasted image'), 'the image to paste into the board');
+  t.eq([image.x, image.y, image.width, image.height], [220, 235, 40, 30], 'the image is centered at the pointer');
+});
+
+sc('canvas-menu-copy-metadata', 'Canvas context menu copies the clicked layer ID and name', { covers: [] }, async (t: NT) => {
+  await t.showPage('layout');
+  await t.look(0, 0);
+  await t.selectIds(['r_free']);
+  const point = center(await t.rect('r_free'));
+  for (const [title, value] of [['Copy ID', 'r_free'], ['Copy name', 'Free rect']]) {
+    await t.cmd('qa.pasteboard', { set: '' });
+    await t.click(point, { right: true });
+    await t.pickMenu(title);
+    t.eq((await t.cmd('qa.pasteboard')).text, value, title);
+  }
+});
+
+sc('canvas-menu-copy-text', 'Canvas context menu copies text from a board and multiple layers', { covers: ['copy-as:board', 'copy-as:many', 'copy-as:text'] }, async (t: NT) => {
+  await t.showPage('layout');
+  await t.look(0, 0);
+  const r = await t.rect('lay_nest');
+  const text = t.node('lay_nest_cap')?.content;
+  t.ok(typeof text === 'string' && text.length > 0, 'board fixture has a caption');
+  for (const { ids, point } of [
+    { ids: ['lay_nest'], point: { x: r.x + 20, y: r.y + 8 } },
+    { ids: ['lay_nest_cap', 'r_free'], point: center(await t.rect('r_free')) },
+  ]) {
+    await t.selectIds(ids);
+    await t.cmd('qa.pasteboard', { set: '' });
+    await t.click(point, { right: true });
+    await t.pickMenu('Copy as > Copy as text');
+    await t.waitFor(async () => (await t.cmd('qa.pasteboard')).text === text, 'the board caption on the pasteboard');
+  }
+});
 
 sc('context-actions', 'context canvas menu creates a component', { covers: ['create-component:menu', 'component-navigation:component'] }, async (t: NT) => {
   await t.showPage('layout');

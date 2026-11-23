@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { test } from 'node:test';
+// @ts-ignore: a plain ES module the page imports too
+import { layoutOf } from '../src/page/autolayout-logic.js';
 
-const source = fs.readFileSync(new URL('../src/page/context.js', import.meta.url), 'utf8').replace('import { usageFocus } from "./geometry.js";', '');
+const source = fs.readFileSync(new URL('../src/page/context.js', import.meta.url), 'utf8')
+  .replace('import { usageFocus } from "./geometry.js";', '')
+  .replace('import { layoutOf } from "./autolayout-logic.js";', '');
 
 async function menu(leaf: string | null, selection: string[], nodes: Record<string, Record<string, unknown>>, card?: string) {
   let handler: (e: unknown) => Promise<void>;
@@ -19,9 +23,9 @@ async function menu(leaf: string | null, selection: string[], nodes: Record<stri
   const fetch = async (url: string) => {
     const u = new URL(url, 'http://localhost');
     const id = u.searchParams.get('id')!;
-    return { ok: true, json: async () => u.pathname === '/api/node' ? { node: nodes[id] } : { id, kind: 'node', type: nodes[id]?.type } };
+    return { ok: true, json: async () => u.pathname === '/api/node' ? { node: nodes[id] && { ...nodes[id], id } } : { id, kind: 'node', type: nodes[id]?.type } };
   };
-  new Function('window', 'fetch', source)({ canvasHost: host }, fetch);
+  new Function('window', 'fetch', 'layoutOf', source)({ canvasHost: host }, fetch, layoutOf);
   await handler!({ preventDefault() {}, clientX: 20, clientY: 30, target: { closest: () => card ? { dataset: { id: card } } : null } });
   return { context: messages.find(m => m.context)?.context, selected };
 }
@@ -49,6 +53,24 @@ test('menu labels reflect all selected layers being hidden or locked', async () 
   const { context } = await menu('a', ['a', 'b'], { a: { type: 'text', locked: true, enabled: false }, b: { type: 'text', locked: true, enabled: false } });
   assert.equal(context.target.locked, true);
   assert.equal(context.target.hidden, true);
+});
+
+test('Remove auto layout targets only selected auto layout frames', async () => {
+  const { context } = await menu('rect', ['rect', 'free', 'row', 'implicit', 'instance'], {
+    rect: { type: 'rectangle' },
+    free: { type: 'frame', layout: 'none' },
+    row: { type: 'frame', layout: 'vertical' },
+    implicit: { type: 'frame' },
+    instance: { type: 'ref' },
+  });
+  assert.deepEqual(context.target.removeAutoLayoutIds, ['row', 'implicit']);
+});
+
+test('Ungroup allows ordinary containers and protects main components', async () => {
+  const nodes = { rect: { type: 'rectangle' }, group: { type: 'group' }, main: { type: 'frame', reusable: true } };
+  assert.equal((await menu('rect', ['rect'], nodes)).context.target.canUngroup, false);
+  assert.equal((await menu('rect', ['group', 'rect'], nodes)).context.target.canUngroup, true);
+  assert.equal((await menu('main', ['group', 'main'], nodes)).context.target.canUngroup, false);
 });
 
 test('cards use the DOM target when the engine hit test skips their overlay', async () => {

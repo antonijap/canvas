@@ -80,15 +80,19 @@ struct ContextInfo {
     /// A video path a caption near the node names, to start the file picker there.
     let videoHint: String?
     let canCreateComponent: Bool
+    let canUngroup: Bool
     let locked: Bool
     let hidden: Bool
+    let removeAutoLayoutIds: [String]
 
     init?(_ d: [String: Any]) {
         guard let id = d["id"] as? String else { return nil }
         self.id = id
         canCreateComponent = d["canCreateComponent"] as? Bool ?? false
+        canUngroup = d["canUngroup"] as? Bool ?? false
         locked = d["locked"] as? Bool ?? false
         hidden = d["hidden"] as? Bool ?? false
+        removeAutoLayoutIds = d["removeAutoLayoutIds"] as? [String] ?? []
         name = d["name"] as? String ?? id
         type = d["type"] as? String ?? ""
         kind = d["kind"] as? String ?? "node"
@@ -308,7 +312,13 @@ extension CanvasModel {
         if head { menu.separator() }
         let targets = exportTargets(c)
         for (k, group) in ContextMenuLayout.node.enumerated() {
-            for e in group { menu.edit(e) }
+            for e in group {
+                switch e.selector {
+                case "removeAutoLayout:": menu.edit(e, representedObject: c.removeAutoLayoutIds)
+                case "ungroup:": menu.edit(e, representedObject: c.canUngroup)
+                default: menu.edit(e)
+                }
+            }
             // Copy/Paste as, after the clipboard items: the layer (or the selection it is in) as a picture,
             // vector or code on the clipboard, and its link.
             if k == 0 {
@@ -328,8 +338,10 @@ extension CanvasModel {
             }
             // Several layers or boards, the click inside them: Align, distribute and tidy up (ArrangeActions).
             if k == 3, boards.contains(where: { $0.id == c.id }) {
+                let boardIDs = Set(boards.map(\.id))
+                let selectedBoards = targets.filter { boardIDs.contains($0) }
                 menu.submenu("Move to Page") { m in
-                    for p in pages { m.action(p.name, enabled: !self.cloudReadOnly && p.id != self.activePage) { self.moveBoard(c.id, toPage: p.id) } }
+                    for p in pages { m.action(p.name, enabled: !self.cloudReadOnly && p.id != self.activePage) { self.moveBoards(selectedBoards, toPage: p.id) } }
                 }
             }
             if k == 3, let sel = selection, ArrangeActions.shows(count: sel.ids.count), sel.ids.contains(c.id) {
@@ -373,7 +385,7 @@ extension CanvasModel {
         menu.action("Zoom to fit selection", key: "2", mods: .shift) { self.run("{cmd:'zoomSel'}") }
         if c.type == "frame" || c.type == "text", !c.id.contains("/") {
             // Resize to fit (Opt+Cmd+Shift+R on the canvas); src/page/live.js.
-            menu.action("Resize to fit content", key: "r", mods: [.command, .option, .shift]) { self.run("{cmd:'fitContent'}") }
+            menu.action("Resize to fit content", key: "r", mods: [.command, .option, .shift]) { self.run("{cmd:'fitContent',id:\(jsString(c.id))}") }
         }
         menu.separator()
         menu.edit(ContextMenuLayout.delete)
@@ -546,27 +558,29 @@ extension CanvasModel {
                 guard token == self.copyToken else { return }
                 self.copyBusy = false
                 guard (200..<300).contains(status) else { self.flash(json["error"] as? String ?? "Could not copy"); return }
-                let pb = canvasPasteboard
-                pb.clearContents()
-                if let b64 = json["data"] as? String, let png = Data(base64Encoded: b64) {
-                    pb.declareTypes([.png, .tiff], owner: nil)
-                    pb.setData(png, forType: .png)
-                    if let rep = NSBitmapImageRep(data: png), let tiff = rep.tiffRepresentation { pb.setData(tiff, forType: .tiff) }
+                let item = NSPasteboardItem()
+                if format == "png" {
+                    guard let b64 = json["data"] as? String, let png = Data(base64Encoded: b64),
+                          let rep = NSBitmapImageRep(data: png), let tiff = rep.tiffRepresentation,
+                          item.setData(png, forType: .png), item.setData(tiff, forType: .tiff)
+                    else { self.flash("Could not copy PNG"); return }
                 } else if let text = json["text"] as? String {
                     if format == "svg" {
-                        pb.declareTypes([.string, NSPasteboard.PasteboardType(UTType.svg.identifier)], owner: nil)
-                        pb.setData(Data(text.utf8), forType: NSPasteboard.PasteboardType(UTType.svg.identifier))
+                        item.setData(Data(text.utf8), forType: NSPasteboard.PasteboardType(UTType.svg.identifier))
                     }
-                    pb.setString(text, forType: .string)
+                    item.setString(text, forType: .string)
                 } else { self.flash("Could not copy"); return }
+                let pb = canvasPasteboard
+                pb.clearContents()
+                guard pb.writeObjects([item]) else { self.flash("Could not copy"); return }
                 self.flash(CopyAs.toast(format, count: layers.count), durationMs: 2500, level: "success")
             }
         }.resume()
     }
 
     private func copy(_ text: String, _ what: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        canvasPasteboard.clearContents()
+        canvasPasteboard.setString(text, forType: .string)
         flash("Copied \(what)")
     }
 }
@@ -605,7 +619,7 @@ final class MenuAction: NSObject, NSMenuItemValidation {
         menu.addItem(item)
     }
 
-    func edit(_ e: ContextMenuLayout.Entry) {
+    func edit(_ e: ContextMenuLayout.Entry, representedObject: Any? = nil) {
         let item = NSMenuItem(title: e.title, action: NSSelectorFromString(e.selector), keyEquivalent: e.key)
         var mods: NSEvent.ModifierFlags = []
         if e.command { mods.insert(.command) }
@@ -613,6 +627,7 @@ final class MenuAction: NSObject, NSMenuItemValidation {
         if e.shift { mods.insert(.shift) }
         item.keyEquivalentModifierMask = mods
         item.target = model.editTarget
+        item.representedObject = representedObject
         if e.selector == "pasteHere:" { item.representedObject = NSValue(point: at) }
         menu.addItem(item)
     }

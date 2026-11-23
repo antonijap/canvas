@@ -147,13 +147,23 @@ async function handle(req: any): Promise<any> {
   if (req.op === "shot") {
     const out: string[] = [];
     const white = req.background === "white";
+    const target = typeof req.target === "string" ? req.target : null;
     if (white) await send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 255, g: 255, b: 255, a: 1 } }, session);
     try {
+      // Keep the target in its laid-out position while hiding the rest of the document.
+      if (target !== null) await send("Runtime.evaluate", { expression: `{
+        const style = document.createElement("style");
+        style.id = "canvas-export-target";
+        const id = CSS.escape(${JSON.stringify(target)});
+        style.textContent = 'body { visibility: hidden } [data-id="' + id + '"] { visibility: visible }';
+        document.head.append(style);
+      }` }, session);
       for (const c of req.clips) {
         const r = await send("Page.captureScreenshot", { format: req.format ?? "png", ...(req.quality ? { quality: req.quality } : {}), captureBeyondViewport: true, clip: { x: c.x, y: c.y, width: Math.max(1, c.width), height: Math.max(1, c.height), scale: c.scale } }, session);
         out.push(r.data);
       }
     } finally {
+      if (target !== null) await send("Runtime.evaluate", { expression: 'document.getElementById("canvas-export-target")?.remove()' }, session);
       if (white) await send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } }, session);
     }
     return { images: out };

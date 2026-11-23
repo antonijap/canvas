@@ -364,19 +364,25 @@ function start(host) {
       if (text === null) uncached.set(board, performance.now() + UNCACHED_MS);
     }
     if (text === null || host.sel !== id) return;
+    info = readResizeInfo(id, board, text);
+    // A rotated layer's selection box turns with it: draw it again now that its turn and size are known.
+    if ((info?.rotation || turnedBefore) && host.syncSel) host.syncSel();
+  }
+  function readResizeInfo(id, board, text) {
+    if (text === null) return null;
     let scene;
-    try { scene = JSON.parse(text); } catch { return; }
+    try { scene = JSON.parse(text); } catch { return null; }
     edits.apply(board, scene); // what the canvas draws: a rotation or resize not yet in the file included
-    const n = findNode(scene.root, id);
-    if (!n) return;
+    const placement = placeIn(scene.root, id);
+    if (!placement) return null;
+    const n = placement.node;
     const layout = n.type === "group" ? "none" : typeof n.layout === "string" ? n.layout : n.type === "frame" ? "horizontal" : "none";
     const kids = (Array.isArray(n.children) ? n.children : [])
       .filter((k) => k && typeof k.id === "string" && !k.id.includes("/") && (layout === "none" || k.layoutPosition === "absolute"))
       .map((k) => ({ id: k.id, x: typeof k.x === "number" ? k.x : 0, y: typeof k.y === "number" ? k.y : 0 }));
     const all = (Array.isArray(n.children) ? n.children : []).map((k) => k && k.id).filter(Boolean);
-    info = { id, board, isBoard: board === id, type: n.type, rotation: Number(n.rotation) || 0, layout, kids, all, textGrowth: n.textGrowth, w: n.width, h: n.height, lockAspect: n.lockAspect === true, min: layout !== "none" ? minSize(sides(n.padding)) : null, flipX: !!n.flipX, flipY: !!n.flipY, ext: n.type === "group" ? turnedGroupSize(scene.root, id, (x) => host.worldRectOf(x)) : null };
-    // A rotated layer's selection box turns with it: draw it again now that its turn and size are known.
-    if ((info.rotation || turnedBefore) && host.syncSel) host.syncSel();
+    return { id, board, isBoard: board === id, type: n.type, rotation: Number(n.rotation) || 0, layout, kids, all, textGrowth: n.textGrowth, w: n.width, h: n.height, lockAspect: n.lockAspect === true, min: layout !== "none" ? minSize(sides(n.padding)) : null, flipX: !!n.flipX, flipY: !!n.flipY, ext: n.type === "group" ? turnedGroupSize(scene.root, id, (x) => host.worldRectOf(x)) : null,
+      positioned: placement.positioned, own: { x: Number(n.x) || 0, y: Number(n.y) || 0 } };
   }
   host.on("select", (id) => { loadInfo(id); });
   host.on("deselect", () => { info = null; setCursor(""); });
@@ -563,8 +569,7 @@ function start(host) {
     return w;
   }
   /** Draw the resize as it stands (op 0 while dragging). */
-  function showResize(op) {
-    const z = rz;
+  function showResize(op, z = rz) {
     if(!op) host.emit('presence', { preview:{kind:'resize',ids:[z.id],dx:z.r.x-z.r0.x,dy:z.r.y-z.r0.y,dw:z.r.w-z.r0.w,dh:z.r.h-z.r0.h} });
     const w = writesOf(z);
     const scene = Object.assign({}, w.props);
@@ -621,21 +626,23 @@ function start(host) {
   }
 
   /** Resize to fit content: all four sides, or one ("n" "e" "s" "w"; a corner fits its two). */
-  function fitContent(side = "all") {
-    const id = host.sel;
-    if (!id || !ev() || !info || info.id !== id) { if (id) tell("Select a frame to fit"); return; }
-    if (info.rotation) { tell("Fitting a rotated layer is not supported yet"); return; }
+  function fitContent(side = "all", id = host.sel) {
+    const v = ev(), board = id && boardOf(id);
+    if (!v || !board || rz) return;
+    const fit = info?.id === id ? info : readResizeInfo(id, board, v.sceneText(board));
+    if (!fit) { tell("Select a frame to fit"); return; }
+    if (fit.rotation) { tell("Fitting a rotated layer is not supported yet"); return; }
     const r0 = host.worldRectOf(id);
     if (!r0) return;
-    const pos = positioned(id);
-    const z = { id, board: info.board, isBoard: info.isBoard, r0, r: r0, info, own: pos.own, positioned: pos.ok, keep: true, touched: new Set() };
+    const pos = fit.isBoard ? positioned(id) : { own: fit.own, ok: fit.positioned };
+    const z = { id, board: fit.board, isBoard: fit.isBoard, r0, r: r0, info: fit, own: pos.own, positioned: pos.ok, keep: true, touched: new Set() };
     const op = nextOp();
-    if (info.type === "text") {
+    if (fit.type === "text") {
       edit(id, { textGrowth: "auto" }, ["width", "height"], op);
       postUpdate(id, { textGrowth: "auto" }, ["width", "height"], op);
       return;
     }
-    if (info.layout !== "none") {
+    if (fit.layout !== "none") {
       // Auto layout sizes itself: hug the content on the axes asked for.
       const props = {};
       if (side === "all" || /[ew]/.test(side)) props.width = "fit_content";
@@ -644,13 +651,11 @@ function start(host) {
       postUpdate(id, props, [], op);
       return;
     }
-    const c = boundsOf(info.all.map((k) => host.worldRectOf(k)));
+    const c = boundsOf(fit.all.map((k) => host.worldRectOf(k)));
     if (!c) { tell("Nothing inside to fit"); return; }
     z.r = fitRect(r0, c, side);
     if (z.r.x === r0.x && z.r.y === r0.y && z.r.w === r0.w && z.r.h === r0.h) return;
-    rz = z;
-    const w = showResize(op);
-    rz = null;
+    const w = showResize(op, z);
     send(z, w, op, "Resize to Fit");
   }
   function postUpdate(id, props, remove, op) {
@@ -930,7 +935,7 @@ function start(host) {
     // The inspector's own edits: it shows them already, so they only keep a later node read from going back.
     if (c.cmd === "edit") edit(c.id, c.props || {}, c.remove || [], c.preview ? 0 : Number(c.op) || 0, false);
     else if (c.cmd === "editDone") ack(c.id, Number(c.op) || 0, !!c.ok);
-    else if (c.cmd === "fitContent") fitContent(c.side || "all");
+    else if (c.cmd === "fitContent") fitContent(c.side || "all", c.id);
     else if (c.cmd === "scale") scaleBy(Number(c.factor), c.anchor);
     else if (c.cmd === "scaleMode") setScaleMode(c.on === undefined ? !scaleMode : !!c.on);
   });

@@ -9,6 +9,7 @@
 // with its name and type; picking one sends {cmd: "selectLayer", id}.
 
 import { usageFocus } from "./geometry.js";
+import { layoutOf } from "./autolayout-logic.js";
 
 const host = window.canvasHost;
 if (host && host.file) start(host);
@@ -35,9 +36,7 @@ function start(host) {
     const x = e.clientX, y = e.clientY;
     const card = e.target && e.target.closest ? e.target.closest(".wd[data-id]") : null;
     const leaf = card ? card.dataset.id : host.pick ? host.pick(x, y) : null;
-    // Empty canvas: a short menu for creating a board, pasting, selecting and zooming. The selection stays as it is.
-    if (!leaf) { host.post({ context: { x, y, target: null, canvas: true } }); return; }
-    if (leaf.startsWith("widget:")) {
+    if (leaf?.startsWith("widget:")) {
       const selected = host.selection ? host.selection() : [];
       if (!selected.includes(leaf)) host.selectId(leaf);
       host.post({ context: { x, y, target: { id: leaf, kind: "card" } } });
@@ -46,8 +45,11 @@ function start(host) {
     // A right-click on a selected layer (or inside one) keeps the selection: the menu acts on all of it.
     // Elsewhere it selects what a click there would (the click rule).
     const selected = host.selection ? host.selection() : host.sel ? [host.sel] : [];
-    const chain = host.chainOf ? host.chainOf(leaf) : [leaf];
-    const inSel = chain.slice().reverse().find((c) => selected.includes(c));
+    const chain = leaf && host.chainOf ? host.chainOf(leaf) : [leaf];
+    // Ordinary hit testing skips locked layers. The selection box still gives access to Unlock.
+    const inSel = selectedLockedAt(selected, x, y) || chain.slice().reverse().find((c) => selected.includes(c));
+    // Empty canvas: the selection stays as it is.
+    if (!leaf && !inSel) { host.post({ context: { x, y, target: null, canvas: true } }); return; }
     const id = inSel || (host.pickSelectable ? host.pickSelectable(x, y, false) : leaf) || leaf;
     if (!selected.includes(id)) host.selectId(id);
     const under = layersAt(x, y);
@@ -60,8 +62,23 @@ function start(host) {
     target.canCreateComponent = nodes.some(n => n && n.type !== "ref" && n.reusable !== true);
     target.locked = nodes.length > 0 && nodes.every(n => n && n.locked);
     target.hidden = nodes.length > 0 && nodes.every(n => n && n.enabled === false);
+    target.removeAutoLayoutIds = nodes.filter(n => n && layoutOf(n) !== "none").map(n => n.id);
+    const containers = nodes.filter(n => n && (n.type === "frame" || n.type === "group"));
+    target.canUngroup = containers.length > 0 && containers.every(n => n.reusable !== true) && !ids.some(i => i.includes("/"));
     host.post({ context: { x, y, target, under } });
   });
+
+  function selectedLockedAt(ids, x, y) {
+    if (!host.cam || !host.isLocked || !host.worldRectOf) return null;
+    const { x: cx, y: cy, z } = host.cam;
+    const { l, t } = host.viewBox || { l: 0, t: 0 };
+    const wx = (x - l - cx) / z, wy = (y - t - cy) / z;
+    return ids.findLast(id => {
+      if (!host.isLocked(id)) return false;
+      const r = host.worldRectOf(id);
+      return r && wx >= r.x && wx <= r.x + r.w && wy >= r.y && wy <= r.y + r.h;
+    });
+  }
 
   /** Every layer under a window point, topmost first, as the Select layer submenu lists them. */
   function layersAt(x, y) {

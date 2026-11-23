@@ -161,7 +161,10 @@ if (host) {
     })()).catch((err) => toast(`Could not ${what} the image: ` + err.message));
   }
   /** A pasted image (bytes, its type): one image layer in the middle of the view, in the selected frame if any. */
-  const pasteImage = (blob, name) => placeImages([new File([blob], name || "Pasted image.png", { type: blob.type || "image/png" })], "paste");
+  const pasteImage = (blob, name, at) => {
+    const files = [new File([blob], name || "Pasted image.png", { type: blob.type || "image/png" })];
+    return at ? dropFiles(files, at.x, at.y, false) : placeImages(files, "paste");
+  };
 
   // ---------- shader tiles (called by /page/widgets.js, which owns the tile drag) ----------
   host.drops = {
@@ -367,7 +370,7 @@ if (host) {
     try {
       const bin = atob(c.data), bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      pasteImage(new Blob([bytes], { type: c.type || "image/png" }), c.name || "Pasted image.png");
+      pasteImage(new Blob([bytes], { type: c.type || "image/png" }), c.name || "Pasted image.png", c.at);
     } catch (err) { toast("Could not paste the image: " + err.message); }
   });
 }
