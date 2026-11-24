@@ -123,6 +123,13 @@ describe("Claude Code first, Codex the backup", () => {
 describe("stream parsers on recorded lines", () => {
   const feed = (evs: AgentEvent[]) => { const t = new StepTracker(); for (const e of evs) t.apply(e); return t; };
 
+  test("a run error or failed result gives terminal sign-in steps", () => {
+    const text = "Not logged in · Please run /login";
+    const hint = "Claude Code is not signed in. Open Terminal, run claude, sign in, then try again.";
+    assert.equal(feed([{ k: "error", text }]).error, hint);
+    assert.equal(feed([{ k: "result", ok: false, text }]).error, hint);
+  });
+
   test("Claude Code at its usage limit: the session, then the error as the run's error", () => {
     const evs = lines("claude-limit.jsonl").flatMap(parseClaudeLine);
     assert.deepEqual(evs[0], { k: "session", id: "3f1c2b4e-1111-4222-8333-123456789abc" });

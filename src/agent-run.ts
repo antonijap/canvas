@@ -357,6 +357,13 @@ const SUMMARY_RE = /^\s*\**\s*Summary\s*\**\s*:\s*(.+)$/im;
 /** One line for the UI: no markdown bold, no middots (Canvas never uses · as a separator), collapsed spaces. */
 const clean = (s: string, max: number) => s.replace(/\*\*/g, "").replace(/\s*·\s*/g, ", ").replace(/\s+/g, " ").trim().slice(0, max);
 
+export function friendlyAgentError(text: string): string {
+  if (/not logged in|\/login/i.test(text)) {
+    return "Claude Code is not signed in. Open Terminal, run claude, sign in, then try again.";
+  }
+  return text;
+}
+
 /**
  * What a run has done so far, from its events: the plan the agent announced (each "Step n:" line moves it on), or
  * one step per kind of tool call when it gave none. Feed it every event in order.
@@ -404,10 +411,10 @@ export class StepTracker {
         const label = toolLabel(e.name, e.input);
         if (this.loose[this.loose.length - 1] !== label) this.loose.push(label);
       } else if (this.current < 0) this.current = 0;
-    } else if (e.k === "error") this.error = clean(e.text, 300);
+    } else if (e.k === "error") this.error = clean(friendlyAgentError(e.text), 300);
     else if (e.k === "result") {
       this.ok = e.ok && !this.error;
-      if (!e.ok && e.text && !this.error) this.error = clean(e.text, 300);
+      if (!e.ok && e.text && !this.error) this.error = clean(friendlyAgentError(e.text), 300);
       if (e.ok && e.text) {
         const sum = SUMMARY_RE.exec(e.text);
         if (sum) this.summary = clean(sum[1], 200);
@@ -751,7 +758,7 @@ function launch(ctx: AgentCtx, a: Active) {
     if (buf.trim()) for (const ev of parse(buf)) a.tracker.apply(ev);
     if (code !== 0 && !a.tracker.error && !a.stopReason && a.tracker.ok !== true) {
       const last = stderr.trim().split("\n").filter(Boolean).slice(-1)[0];
-      a.tracker.error = last ? last.slice(0, 300) : `${harness.label} exited with code ${code}`;
+      a.tracker.error = last ? friendlyAgentError(last).slice(0, 300) : `${harness.label} exited with code ${code}`;
     }
     void end(ctx, a, code);
   });
