@@ -5,6 +5,7 @@
 - "Testing: only what changed" in AGENTS.md is the rule for every gate here: merge, install and release. A release build gets the same delta QA as the changes it ships, plus the scrub.
 - When a delta run finds a bug, rerun only the failing scenario after the fix, not the area.
 - Hand Codex and subagents the exact scenario words to run, so they don't fall back to a full suite.
+- Backups made for a build or install (like `qa/out/release/<version>.backup-<date>`) go to the Trash as soon as the tests pass and the install is verified. Don't ask, don't leave them behind.
 
 ## Speed and token budget
 
