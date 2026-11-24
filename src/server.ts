@@ -2818,6 +2818,7 @@ function titleAt(cx, cy) {
   const t = document.elementFromPoint(cx, cy), lb = t && t.closest && t.closest("#labels>div"), b = lb && labelBoard.get(lb);
   return b ? b.meta.id : null;
 }
+host.titleAt = titleAt;
 // How the selected layer moves (GET /api/move): absolute layers drag and nudge; auto-layout children do not.
 function loadMoveInfo(id, refresh) {
   // A refresh keeps what it knows until the answer comes: arrow presses in between would otherwise be dropped.

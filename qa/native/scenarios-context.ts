@@ -384,6 +384,18 @@ sc('inspector-value-menu', 'Inspector menus copy, paste and reset a rotation and
   await t.waitDisk(() => JSON.stringify(t.node('r_free')?.fill).includes('#123456'), 'pasted color');
 });
 
+sc('board-title-menu', 'Right-click on a board title opens the board menu, not the empty canvas one', { covers: [] }, async (t: NT) => {
+  await t.showPage('layout');
+  const at = await t.js(`const el=[...document.querySelectorAll('#labels>div')].find(d=>{const r=d.getBoundingClientRect();return getComputedStyle(d).display!=='none'&&r.width>30&&r.top>40&&r.left>40&&r.right<innerWidth-40});if(!el)return null;const r=el.getBoundingClientRect(),x=Math.round(r.left+10),y=Math.round(r.top+r.height/2);return {x,y,id:window.canvasHost.titleAt(x,y)}`);
+  t.ok(at && at.id, 'a board title is on screen');
+  await t.click({x: at.x, y: at.y}, {right:true});
+  const items = (await t.cmd('qa.menu')).items.map((i: {title:string}) => i.title);
+  t.ok(items.includes('Export as PNG'), 'board menu has Export as PNG');
+  t.ok(!items.includes('New Board here'), 'not the empty canvas menu');
+  await t.cmd('qa.menu', { cancel: true });
+  t.eq(await t.pageSel(), [at.id], 'the board is selected');
+});
+
 sc('empty-canvas-menu', 'Empty canvas menu creates a board at the click', { covers: ['board-create:context-menu'] }, async (t: NT) => {
   await t.showPage('layout');
   await t.look(-1800, -1200);

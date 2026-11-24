@@ -35,7 +35,9 @@ function start(host) {
     e.preventDefault();
     const x = e.clientX, y = e.clientY;
     const card = e.target && e.target.closest ? e.target.closest(".wd[data-id]") : null;
-    const leaf = card ? card.dataset.id : host.pick ? host.pick(x, y) : null;
+    // A board's title stands for the board, as a left click on it does (titleAt in src/server.ts).
+    const title = !card && host.titleAt ? host.titleAt(x, y) : null;
+    const leaf = card ? card.dataset.id : title || (host.pick ? host.pick(x, y) : null);
     if (leaf?.startsWith("widget:")) {
       const selected = host.selection ? host.selection() : [];
       if (!selected.includes(leaf)) host.selectId(leaf);
@@ -50,7 +52,7 @@ function start(host) {
     const inSel = selectedLockedAt(selected, x, y) || chain.slice().reverse().find((c) => selected.includes(c));
     // Empty canvas: the selection stays as it is.
     if (!leaf && !inSel) { host.post({ context: { x, y, target: null, canvas: true } }); return; }
-    const id = inSel || (host.pickSelectable ? host.pickSelectable(x, y, false) : leaf) || leaf;
+    const id = title || inSel || (host.pickSelectable ? host.pickSelectable(x, y, false) : leaf) || leaf;
     if (!selected.includes(id)) host.selectId(id);
     const under = layersAt(x, y);
     let target = null;
