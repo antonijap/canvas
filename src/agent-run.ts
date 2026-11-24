@@ -32,7 +32,7 @@ import { findNode, resolveDocPath, type CanvasDoc, type DocNode } from "./engine
 import { entries, finishAgent, undo, type Entry, type NodeOp } from "./history.ts";
 import { listPages } from "./pages.ts";
 import { agentSettings, EFFORTS, runCapMs, type ModelChoice } from "./settings.ts";
-import { changeThreads, PROMPT_MAX, readThreads, recentAsks, threadsNow, withOutcome, withRun, type Harness, type Run, type Step, type Thread } from "./threads.ts";
+import { changeThreads, conversations, PROMPT_MAX, readThreads, recentAsks, threadsNow, withOutcome, withRun, type Harness, type Run, type Step, type Thread } from "./threads.ts";
 import { countUsage } from "./usage-counts.ts";
 
 export const OUTPUT_MAX = 20 * 1024 * 1024;
@@ -949,6 +949,7 @@ export async function jsonBody(req: AsyncIterable<Buffer | string>, max = 64 * 1
  * GET  /api/agent/harnesses                  the installed harnesses
  * GET  /api/agent/context?file=&ids=a,b      the chip (name, layers), this layer's thread, the runs going
  * GET  /api/agent/recent?file=               the palette's Recent asks, newest first
+ * GET  /api/agent/conversations?file=      the sidebar: every run in the file, newest first
  * GET  /api/agent/events?file=               SSE: {type:"hello"|"run"|"threads"}
  * GET  /api/agent/symbols/<name>.png         the SF Symbols the page draws (masks)
  * POST /api/agent/run   {file, ids, prompt, harness?, followUp?}
@@ -999,6 +1000,22 @@ export async function handleAgentRoute(req: http.IncomingMessage, res: http.Serv
           return n ? { name: n.name, board: n.board } : null;
         }, (board) => pageOfBoard(file, ctx, board));
         return reply(200, { asks }), true;
+      }
+      if (p === "/api/agent/conversations") {
+        const d = ctx.docOf(file);
+        const list = await readThreads(file);
+        const live = activeRuns(file);
+        const going = new Set(live.map((r) => r.id));
+        // A run going is not in the sidecar yet (it is written when the run ends): add it as a thread of its own.
+        for (const v of live) {
+          if (list.some((t) => t.runs.some((r) => r.id === v.id))) continue;
+          list.push({ key: v.key, ids: v.ids, name: v.key, harness: v.harness, createdAt: v.startedAt, updatedAt: v.startedAt, runs: [{ id: v.id, prompt: v.prompt, at: v.startedAt, status: "running", steps: v.steps }] });
+        }
+        const rows = conversations(list, (id) => {
+          const n = d ? nodeFacts(d.doc, id) : null;
+          return n ? { name: n.name, board: n.board } : null;
+        }, (board) => pageOfBoard(file, ctx, board), going);
+        return reply(200, { conversations: rows }), true;
       }
       if (p === "/api/agent/events") {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });

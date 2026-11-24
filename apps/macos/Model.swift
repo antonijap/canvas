@@ -225,6 +225,8 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var agentReady = false
     @Published var inspectorOpen = true
     @Published var commentsSidebarOpen = false
+    /// The conversations sidebar (src/page/conversations.js) is open: it takes the properties column's place, like comments.
+    @Published var conversationsSidebarOpen = false
     /// The left panel is open (the rail's sidebar button; Rename opens it).
     @Published var panelOpen = true
     /// View > Hide UI: only the canvas and the tabs show.
@@ -361,6 +363,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             #endif
         }
         if let open = m["commentsSidebar"] as? Bool { commentsSidebarOpen = open }
+        if let open = m["conversationsSidebar"] as? Bool { conversationsSidebarOpen = open }
         if m["cloudRemoved"] as? Bool == true, let file = currentFile { close(file); flash("Your access to this Cloud was removed"); return }
         if let file = m["file"] as? String, file != currentFile { noteOpened(file) }
         if m.keys.contains("cloudFile") {
@@ -869,6 +872,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// The lists the left panel shows, emptied: the shown tab's page fills them again (apply, or resync).
     func clearSidebarState() {
         commentsSidebarOpen = false
+        conversationsSidebarOpen = false
         boards = []; pages = []; activePage = nil; components = []; styles = []; variables = []; tokenSections = []; styleEntries = []; widgets = []; revision = ""
         selectedBoard = nil
     }

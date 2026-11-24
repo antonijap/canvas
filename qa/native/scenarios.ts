@@ -16,6 +16,7 @@ import { overlaps, type Rect } from "../../src/placement.ts";
 import { fakeServer, sendJson } from "../../test/helpers.ts";
 import "./scenarios-paste.ts";
 import "./scenarios-firstrun.ts";
+import "./scenarios-conversations.ts";
 import "./scenarios-perf.ts";
 import "./scenarios-cloud.ts";
 import "./scenarios-cloud-files.ts";

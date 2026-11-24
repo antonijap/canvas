@@ -14,7 +14,7 @@ import {
 } from "../src/agent-run.ts";
 import type { Entry } from "../src/history.ts";
 import { loadDoc } from "../src/engine.ts";
-import { changeThreads, cleanThreads, readThreads, recentAsks, RUNS_KEPT, withOutcome, withRun, type Run, type Thread } from "../src/threads.ts";
+import { changeThreads, cleanThreads, readThreads, conversations, recentAsks, RUNS_KEPT, withOutcome, withRun, type Run, type Thread } from "../src/threads.ts";
 import { tmpDir } from "./helpers.ts";
 
 const FIX = fileURLToPath(new URL("./fixtures/agent/", import.meta.url));
@@ -230,6 +230,16 @@ describe("threads", () => {
     const names: Record<string, { name: string; board: string }> = { a: { name: "Pricing card", board: "B1" }, b: { name: "Hero", board: "B2" } };
     const asks = recentAsks(list, (id) => names[id] ?? null, (board) => (board === "B1" ? { id: "p1", name: "Final" } : null));
     assert.deepEqual(asks.map((a) => [a.key, a.prompt, a.name, a.pageName, a.at]), [["b", "Make it calmer", "Hero", null, 40], ["a", "ask 1", "Pricing card", "Final", 10]]);
+  });
+
+  test("Conversations: every run of every thread, newest first, with the layer now, going ones marked", () => {
+    const list: Thread[] = [
+      { ...t0, key: "a", ids: ["a"], name: "Old name", createdAt: 1, updatedAt: 1, runs: [run("1", 10), run("2", 50, { status: "failed", error: "boom" })] },
+      { ...t0, key: "gone", ids: ["gone"], name: "Gone", createdAt: 1, updatedAt: 9, runs: [run("3", 30)] },
+    ];
+    const names: Record<string, { name: string; board: string }> = { a: { name: "Pricing card", board: "B1" } };
+    const rows = conversations(list, (id) => names[id] ?? null, (board) => (board === "B1" ? { id: "p1", name: "Final" } : null), new Set(["2"]));
+    assert.deepEqual(rows.map((r) => [r.run, r.name, r.gone, r.running, r.status, r.pageName]), [["2", "Pricing card", false, true, "running", "Final"], ["3", "Gone", true, false, "done", null], ["1", "Pricing card", false, false, "done", "Final"]]);
   });
 
   test("stored in the sidecar, not the .canvas.json, and read back", async () => {

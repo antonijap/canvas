@@ -149,6 +149,31 @@ export function recentAsks(list: Thread[], nameOf: (id: string) => { name: strin
   return out.slice(0, limit);
 }
 
+export type Conversation = { key: string; ids: string[]; run: string; prompt: string; name: string; page: string | null; pageName: string | null; board: string | null; at: number; status: RunStatus; running: boolean; gone: boolean; harness: Harness; summary?: string; error?: string };
+
+/**
+ * The conversations sidebar: every run of every thread, newest first. `nameOf` gives a layer's current name and board
+ * (null when the layer is gone: the row stays, marked gone, under the name it had), `pageOf` the page a board is on,
+ * `running` the ids of runs going now (their stored status may be stale).
+ */
+export function conversations(list: Thread[], nameOf: (id: string) => { name: string; board: string } | null, pageOf: (board: string) => { id: string; name: string } | null, running: Set<string> = new Set(), limit = 200): Conversation[] {
+  const out: Conversation[] = [];
+  for (const t of list) {
+    const hit = nameOf(t.key);
+    const pg = hit ? pageOf(hit.board) : null;
+    for (const r of t.runs) {
+      const live = running.has(r.id);
+      out.push({
+        key: t.key, ids: t.ids, run: r.id, prompt: r.prompt.split("\n")[0].slice(0, 200), name: hit?.name || t.name, page: pg?.id ?? t.page ?? null, pageName: pg?.name ?? null,
+        board: hit?.board ?? null, at: live ? r.at : r.endedAt ?? r.at, status: live ? "running" : r.status, running: live, gone: !hit, harness: t.harness,
+        ...(r.summary ? { summary: r.summary } : {}), ...(r.error ? { error: r.error } : {}),
+      });
+    }
+  }
+  out.sort((a, b) => b.at - a.at);
+  return out.slice(0, limit);
+}
+
 // ---------- the sidecar ----------
 
 /** The threads of a document as stored now. */

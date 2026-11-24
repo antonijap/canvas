@@ -663,6 +663,11 @@ features:
     area: agent
     driven: [page, native]
     cases: [one, many, card-note, keyboard]
+  - id: conversations
+    name: Sparkle button in the toolbar opens a sidebar of every agent run; a row selects its layer, a running one has Stop
+    area: agent
+    driven: [page, native]
+    cases: [list, open-row, stop]
   - id: variations
     name: Shift+Cmd+Return makes 3 variations; keep, discard, captions
     area: agent
