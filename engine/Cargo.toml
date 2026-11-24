@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-vello = { version = "=0.11.0", default-features = false, features = ["wgpu"] }
+vello = { version = "=0.12.0", default-features = false, features = ["wgpu"] }
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl", "webgpu"] }
 parley = { version = "=0.12.0", default-features = false, features = ["std"] }
 taffy = "=0.15.1"
