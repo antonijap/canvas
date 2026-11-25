@@ -36,7 +36,7 @@ sc("blueprint", "blueprint inspector controls and undo", { covers: ["blueprint:i
   await t.waitFor(async () => (await t.js("return window.canvasHost.snap().blueprint")) === false, "blueprint snapping disabled");
 });
 
-sc("tools", "bottom tool palette geometry, selection and Hide UI", { covers: ["draw:tool-palette", "draw:shortcuts", "draw:hide-ui", "sticky:create", "sticker:place"] }, async (t: NT) => {
+sc("tools", "bottom tool palette geometry, sticky flyouts, selection and Hide UI", { covers: ["draw:tool-palette", "draw:shortcuts", "draw:hide-ui", "sticky:create", "sticker:place", "sticky:compact-controls", "draw:compact-tooltip"] }, async (t: NT) => {
   const initial = await t.state();
   try {
     await t.cmd("qa.window", { width: 720, height: 560 });
@@ -64,7 +64,24 @@ sc("tools", "bottom tool palette geometry, selection and Hide UI", { covers: ["d
     t.near(center(bar).x, webFrame.x + (webFrame.w + l - r) / 2, 1, "palette centered in the free canvas");
     t.ok(l >= 224 && r >= 284, `both sidebars are open (insets ${l}/${r})`);
     t.ok(bar.x >= webFrame.x + l && bar.x + bar.w <= webFrame.x + webFrame.w - r, "palette fits between both sidebars");
+    t.ok(bar.w + (await toolButton("Text")).w + 1 <= webFrame.w - l - r, "the compact palette leaves room for a timer");
     t.ok(b > bar.h + 14, "fit reserves room above the palette");
+    await t.cmd("qa.hovertool", { tool: "text" });
+    try {
+      const tip = await t.mark({ id: "tool-tooltip", label: "Text" });
+      const zoom = await t.mark({ id: "zoom-island" });
+      t.ok(tip.x + tip.w <= zoom.x || tip.x >= zoom.x + zoom.w || tip.y + tip.h <= zoom.y,
+        "the Text tooltip clears the zoom controls with both sidebars open");
+      await t.cmd("qa.mainmenu", { title: "Hide Properties", perform: true });
+      const raisedZoom = await t.mark({ id: "zoom-island" });
+      const raisedTip = await t.mark({ id: "tool-tooltip", label: "Text" });
+      t.ok(raisedZoom.y + raisedZoom.h < (await palette()).y, "zoom moves above the palette with the right sidebar closed");
+      t.ok(raisedTip.y + raisedTip.h <= raisedZoom.y, "the Text tooltip clears the raised zoom controls");
+    } finally {
+      await t.cmd("qa.hovertool");
+      if (!(await t.state()).inspectorOpen) await t.cmd("qa.mainmenu", { title: "Show Properties", perform: true });
+      await palette();
+    }
     await t.key("1", ["shift"]);
     await t.waitJs(`(() => {
       const h = window.canvasHost, c = h.cam;
@@ -92,14 +109,23 @@ sc("tools", "bottom tool palette geometry, selection and Hide UI", { covers: ["d
       const rect = await t.js<{ left: number; right: number; bottom: number }>(
         `return document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON();`);
       t.ok(rect.bottom + webFrame.y <= bar.y - 9, selector + " clears the native palette");
-      // With both sidebars open at 720 pt a flyout is wider than the free area: it stays centred on it.
-      if (rect.right - rect.left <= webFrame.w - l - r) t.ok(rect.left >= l && rect.right <= webFrame.w - r, selector + " fits between the sidebars");
+      t.ok(rect.left >= l && rect.right <= webFrame.w - r, selector + " fits between the sidebars");
     };
     await clickTool("Rectangle");
     await expectSelected("Rectangle");
     await clickTool("Sticky");
     await expectSelected("Sticky");
     await expectFlyout('[aria-label="Sticky colours"]');
+    // The background test window does not forward hover moves to the web view here.
+    await t.js(`
+      const y = document.querySelector('[aria-label="Sticky colours"]').getBoundingClientRect().top - 4;
+      const x = ${center(bar).x - webFrame.x};
+      window.canvasHost.view.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, clientX: x, clientY: y }));
+    `);
+    const hintSelector = ".whiteboard-hint:not([hidden])";
+    await t.waitJs(`document.querySelector("${hintSelector}")`, "sticky placement hint");
+    const hint = await t.js<{ bottom: number }>(`return document.querySelector("${hintSelector}").getBoundingClientRect().toJSON();`);
+    t.ok(hint.bottom + webFrame.y <= bar.y - 9, "sticky hint clears the palette");
     await clickTool("Ellipse");
     await expectSelected("Ellipse");
     await t.key("s", ["shift"]);

@@ -39,7 +39,7 @@ features:
     name: Sticky note placement, editing and quick add
     area: canvas
     driven: [page, native, mcp]
-    cases: [create, resize, edit, style, next, author, undo, cloud, handles, author-removal]
+    cases: [create, resize, edit, style, next, author, undo, cloud, handles, author-removal, compact-controls]
 
   - id: sticker
     name: Anchored stickers and stacked seals
@@ -51,13 +51,13 @@ features:
     name: Local whiteboard voting
     area: canvas
     driven: [page, native, mcp]
-    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable]
+    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable, palette, compact-panels]
 
   - id: draw
     name: Draw boards and layers
     area: canvas
     driven: [page, native]
-    cases: [board, rectangle, ellipse, text, cancel, tool-palette, shortcuts, hide-ui, menu, palette]
+    cases: [board, rectangle, ellipse, text, cancel, tool-palette, shortcuts, hide-ui, menu, palette, compact-tooltip]
 
   - id: render
     name: Every node type draws on the engine renderer

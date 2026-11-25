@@ -616,6 +616,7 @@ struct ShellLogicTests {
         let groups = DrawTool.paletteGroups
         check(groups == [[.frame, .rectangle, .ellipse, .text], [.sticky, .sticker]], "draw tools precede whiteboard tools")
         check(groups.flatMap { $0 }.map(\.keycap) == ["F", "R", "O", "T", "S", "\u{21E7}S"], "palette keycaps match tool shortcuts")
+        check(DrawTool.vote.keycap == "\u{21E7}D", "the Vote control shows its Shift shortcut")
     }
 
     // Sidebar resize: the editor panel and the Home sidebar share one set of rules.

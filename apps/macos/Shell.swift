@@ -121,7 +121,8 @@ struct RootView: View {
 
     private var rightSidebarShown: Bool { inspectorShown || ((model.commentsSidebarOpen || model.conversationsSidebarOpen) && !model.uiHidden && !model.homeShown) }
     private var minimumCanvasWidth: CGFloat {
-        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.Size.compact.width - Metric.inset) : ShellLayout.minCanvas
+        // Leave room for the timer beside Vote when it joins the palette.
+        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.Size.compact.paletteWidth(reserving: 1) - Metric.inset) : ShellLayout.minCanvas
     }
 
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
@@ -143,14 +144,14 @@ struct RootView: View {
     private var zoomAboveTools: Bool {
         guard toolPaletteShown, zoomShown, windowWidth > 0 else { return false }
         let i = canvasInsets()
-        let toolsRight = (windowWidth + i.l - i.r + toolSize.width) / 2
+        let toolsRight = (windowWidth + i.l - i.r + toolSize.paletteWidth()) / 2
         return toolsRight + Metric.islandGap > windowWidth - Metric.inset - ZoomPill.width
     }
 
     /// Full size, or compact when the room between the sidebars is too narrow for every group.
     private var toolSize: ToolPalette.Size {
         let i = canvasInsets()
-        return windowWidth > 0 && windowWidth - i.l - i.r < ToolPalette.Size.full.width + 8 ? .compact : .full
+        return windowWidth > 0 && windowWidth - i.l - i.r < ToolPalette.Size.full.paletteWidth() + 8 ? .compact : .full
     }
 
     private var bottomClearance: CGFloat {
@@ -213,7 +214,7 @@ struct RootView: View {
                 // An overlay never sizes its parent: the palette cannot widen the window.
                 Color.clear.allowsHitTesting(false)
                     .overlay(alignment: .bottom) {
-                        ToolPalette(model: model, size: toolSize)
+                        ToolPalette(model: model, size: toolSize, tooltipClearance: zoomAboveTools ? bottomClearance : 0)
                             .fixedSize()
                             .offset(x: (insets[0] - insets[2]) / 2, y: -ToolPalette.bottomMargin)
                     }
@@ -941,40 +942,49 @@ extension CanvasModel {
 private struct ToolPalette: View {
     @ObservedObject var model: CanvasModel
     let size: Size
+    let tooltipClearance: CGFloat
+    #if CANVAS_QA
+    @AppStorage(QA.hoveredToolKey) private var qaHoveredTool = ""
+    #else
+    private let qaHoveredTool = ""
+    #endif
 
     struct Size {
-        let button: CGFloat, padding: CGFloat, gap: CGFloat, divider: CGFloat, glyph: CGFloat
-        static let full = Size(button: 36, padding: 6, gap: 2, divider: 9, glyph: 18)
-        static let compact = Size(button: 26, padding: 4, gap: 1, divider: 7, glyph: 15)
+        let width: CGFloat, height: CGFloat, padding: CGFloat, gap: CGFloat, divider: CGFloat, glyph: CGFloat
+        static let full = Size(width: 36, height: 36, padding: 6, gap: 2, divider: 9, glyph: 18)
+        static let compact = Size(width: 20, height: 26, padding: 4, gap: 1, divider: 5, glyph: 15)
 
-        @MainActor var width: CGFloat {
-            let count = ToolPalette.groups.reduce(0) { $0 + $1.count }
+        @MainActor func paletteWidth(reserving extra: Int = 0) -> CGFloat {
+            let count = ToolPalette.groups.reduce(extra) { $0 + $1.count }
             let dividers = max(0, ToolPalette.groups.count - 1)
-            return 2 * padding + CGFloat(count) * button + CGFloat(dividers) * divider
+            return 2 * padding + CGFloat(count) * width + CGFloat(dividers) * divider
                 + CGFloat(max(0, count + dividers - 1)) * gap
         }
     }
 
     private struct Item: Identifiable {
-        let id: String
-        let title: String
-        let symbol: String
-        let shortcut: String
-        let action: (CanvasModel) -> Void
+        let tool: DrawTool
+        var id: String { tool.rawValue }
+        var mark: String { tool == .vote ? "vote-tool" : "draw-tool" }
+        var icon: WhiteboardToolIcon? {
+            switch tool {
+            case .sticky: return .sticky
+            case .sticker: return .sticker
+            case .vote: return .vote
+            default: return nil
+            }
+        }
     }
 
-    /// A tool joins the palette through DrawTool.paletteGroups. A control that is not a draw tool (vote, timer):
-    /// append a group of Items here. Empty groups are skipped.
-    private static let groups: [[Item]] = DrawTool.paletteGroups.map { group in
-        group.map { tool in
-            Item(id: tool.rawValue, title: tool.title, symbol: tool.symbol, shortcut: tool.keycap,
-                 action: { $0.draw(tool) })
-        }
-    }.filter { !$0.isEmpty }
+    private static let groups: [[Item]] = {
+        var groups = DrawTool.paletteGroups.map { $0.map { Item(tool: $0) } }
+        groups[groups.count - 1].append(Item(tool: .vote))
+        return groups
+    }()
 
     static let bottomMargin: CGFloat = 14
     /// Room kept free at the bottom, for the full size (the compact one is lower).
-    static let bottomClearance = bottomMargin + Size.full.button + 2 * Size.full.padding + Metric.islandGap
+    static let bottomClearance = bottomMargin + Size.full.height + 2 * Size.full.padding + Metric.islandGap
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 14)
@@ -982,13 +992,18 @@ private struct ToolPalette: View {
             ForEach(Self.groups.indices, id: \.self) { index in
                 if index > 0 {
                     Rectangle().fill(Palette.fg.opacity(0.08))
-                        .frame(width: 1, height: size.button)
+                        .frame(width: 1, height: size.height)
                         .frame(width: size.divider)
                         .accessibilityHidden(true)
                 }
                 HStack(spacing: size.gap) {
                     ForEach(Self.groups[index]) { item in
-                        ToolButton(item: item, size: size, selected: model.activeDrawTool?.rawValue == item.id) { item.action(model) }
+                        ToolButton(item: item, size: size,
+                                   tooltipOffset: max(size.height + 8, tooltipClearance - Self.bottomMargin - size.padding),
+                                   selected: item.tool == .vote ? model.voteToolActive : model.activeDrawTool == item.tool,
+                                   qaHovered: qaHoveredTool == item.id) {
+                            model.draw(item.tool)
+                        }
                     }
                 }
             }
@@ -1004,26 +1019,32 @@ private struct ToolPalette: View {
     private struct ToolButton: View {
         let item: Item
         let size: Size
+        let tooltipOffset: CGFloat
         let selected: Bool
+        let qaHovered: Bool
         let action: () -> Void
         @State private var hovering = false
+        private var showsTooltip: Bool { hovering || qaHovered }
 
         var body: some View {
             let shape = RoundedRectangle(cornerRadius: 10)
             Button(action: action) {
                 Group {
-                    if item.id == DrawTool.text.rawValue {
+                    if let icon = item.icon {
+                        icon.stroke(style: StrokeStyle(lineWidth: size.glyph / 12, lineCap: .round, lineJoin: .round))
+                            .frame(width: size.glyph, height: size.glyph)
+                    } else if item.tool == .text {
                         Text("T").font(.system(size: size.glyph, weight: .light))
                     } else {
-                        Image(systemName: item.symbol).font(.system(size: size.glyph, weight: .medium))
+                        Image(systemName: item.tool.symbol).font(.system(size: size.glyph, weight: .medium))
                     }
                 }
-                .foregroundStyle(selected || hovering ? Palette.fg : Palette.mutedFg)
-                .frame(width: size.button, height: size.button)
+                .foregroundStyle(selected || showsTooltip ? Palette.fg : Palette.mutedFg)
+                .frame(width: size.width, height: size.height)
                 .background {
                     if selected {
-                        shape.fill(Palette.fg.opacity(0.12)).qaID("draw-tool-selected", label: item.title)
-                    } else if hovering {
+                        shape.fill(Palette.fg.opacity(0.12)).qaID(item.mark + "-selected", label: item.tool.title)
+                    } else if showsTooltip {
                         shape.fill(Palette.fg.opacity(0.07))
                     }
                 }
@@ -1032,10 +1053,10 @@ private struct ToolPalette: View {
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
             .overlay(alignment: .bottom) {
-                if hovering {
+                if showsTooltip {
                     HStack(spacing: 6) {
-                        Text(item.title)
-                        Text(item.shortcut)
+                        Text(item.tool.title)
+                        Text(item.tool.keycap)
                             .padding(.horizontal, 3)
                             .frame(minWidth: 18, minHeight: 18, maxHeight: 18)
                             .background(Palette.fg.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
@@ -1046,16 +1067,57 @@ private struct ToolPalette: View {
                     .frame(height: 28)
                     .fixedSize()
                     .background(Palette.popover, in: RoundedRectangle(cornerRadius: 8))
-                    .offset(y: -size.button - 8)
+                    .qaID("tool-tooltip", label: item.tool.title)
+                    .offset(y: -tooltipOffset)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
             }
-            .accessibilityLabel(item.title)
-            .accessibilityHint("Shortcut \(item.shortcut)")
+            .accessibilityLabel(item.tool.title)
+            .accessibilityHint("Shortcut \(item.tool.keycap)")
             .accessibilityAddTraits(selected ? .isSelected : [])
-            .qaID("draw-tool", label: item.title)
+            .qaID(item.mark, label: item.tool.title)
         }
+    }
+}
+
+private enum WhiteboardToolIcon: Shape {
+    case sticky, sticker, vote, timer
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        switch self {
+        case .sticky, .sticker:
+            path.move(to: CGPoint(x: 21, y: 9))
+            path.addLines([CGPoint(x: 21, y: 9), CGPoint(x: 15, y: 3), CGPoint(x: 5, y: 3)])
+            path.addQuadCurve(to: CGPoint(x: 3, y: 5), control: CGPoint(x: 3, y: 3))
+            path.addLine(to: CGPoint(x: 3, y: 19))
+            path.addQuadCurve(to: CGPoint(x: 5, y: 21), control: CGPoint(x: 3, y: 21))
+            path.addLine(to: CGPoint(x: 19, y: 21))
+            path.addQuadCurve(to: CGPoint(x: 21, y: 19), control: CGPoint(x: 21, y: 21))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 15, y: 3))
+            path.addLine(to: CGPoint(x: 15, y: 8))
+            path.addQuadCurve(to: CGPoint(x: 16, y: 9), control: CGPoint(x: 15, y: 9))
+            path.addLine(to: CGPoint(x: 21, y: 9))
+            if self == .sticker {
+                for x in [8.0, 16.0] {
+                    path.addLines([CGPoint(x: x, y: 13), CGPoint(x: x + 0.01, y: 13)])
+                }
+                path.move(to: CGPoint(x: 10, y: 16))
+                path.addQuadCurve(to: CGPoint(x: 14, y: 16), control: CGPoint(x: 12, y: 18))
+            }
+        case .vote:
+            path.addRoundedRect(in: CGRect(x: 5, y: 5, width: 14, height: 14), cornerSize: CGSize(width: 2, height: 2), style: .circular)
+            path.addLines([CGPoint(x: 2, y: 19), CGPoint(x: 22, y: 19)])
+            path.addLines([CGPoint(x: 9, y: 12), CGPoint(x: 11, y: 14), CGPoint(x: 15, y: 10)])
+        case .timer:
+            path.addEllipse(in: CGRect(x: 4, y: 6, width: 16, height: 16))
+            path.addLines([CGPoint(x: 10, y: 2), CGPoint(x: 14, y: 2)])
+            path.addLines([CGPoint(x: 12, y: 14), CGPoint(x: 15, y: 11)])
+        }
+        let transform = CGAffineTransform(translationX: rect.minX, y: rect.minY).scaledBy(x: rect.width / 24, y: rect.height / 24)
+        return path.applying(transform)
     }
 }
 

@@ -32,6 +32,7 @@ typealias QAError = BridgeClient.BridgeError
 
 @MainActor
 enum QA {
+    static let hoveredToolKey = "qaHoveredPaletteTool"
     static var cloudUsage: [String: Any]?
     private static var holdCloudStarts = false
     private static var cloudStartReplies: [CheckedContinuation<Void, Never>] = []
@@ -431,6 +432,10 @@ enum QA {
             UserDefaults.standard.set(a["on"] as? Bool ?? true, forKey: BindQA.key)
             try await sleep(150)
             return ["on": UserDefaults.standard.bool(forKey: BindQA.key)]
+        case "qa.hovertool":
+            // Posted pointer moves do not trigger the native hover callback.
+            UserDefaults.standard.set(a["tool"] as? String ?? "", forKey: hoveredToolKey)
+            return ["ok": true]
         case "qa.idle": try await idle(a); return ["idle": true]
         default: throw QAError(code: "unsupported", message: "no QA op \(op)")
         }

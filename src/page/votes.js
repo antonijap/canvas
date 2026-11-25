@@ -100,6 +100,7 @@ function start(host) {
   const bar = panel("vote-bar", "Voting");
   bar.setAttribute("role", "region");
   layer.append(bar);
+  new ResizeObserver(() => layer.style.setProperty("--vote-bar-height", bar.offsetHeight + "px")).observe(bar);
   const results = panel("vote-results", "Vote results");
   results.dataset.voteResults = "";
   layer.append(results);
@@ -109,6 +110,7 @@ function start(host) {
   const active = () => current()?.state === "active";
   const capturing = () => !!draft || active();
   const path = host.api("/api/votes");
+  const reportTool = () => { if (host.native) host.post({ voteTool: capturing() }); };
 
   function step(delta) {
     if (!draft) return;
@@ -119,14 +121,16 @@ function start(host) {
   }
 
   function closeSheet() {
+    if (!draft) return;
     if (sheet.contains(document.activeElement)) document.activeElement.blur();
     draft = null;
     sheet.hidden = true;
+    reportTool();
     host.requestFrame();
   }
 
   function activate() {
-    if (host.readOnly || !host.page) return;
+    if (host.readOnly || !host.page || host.textEdit?.active) return;
     const v = current();
     if (v?.state === "active") return;
     if (v?.state === "ended") { showResults = v.id; paint(); return; }
@@ -142,6 +146,7 @@ function start(host) {
     anonymous.input.checked = false;
     step(0);
     sheet.hidden = false;
+    reportTool();
     things.group.firstElementChild.focus({ preventScroll: true });
     host.requestFrame();
   }
@@ -303,8 +308,6 @@ function start(host) {
   }
 
   function positionMarks() {
-    if (!bar.hidden) bar.style.top = (host.native ? Math.max(12, host.insets.t + 8) : 60) + "px";
-    if (!results.hidden) results.style.right = (host.native ? host.insets.r + 16 : 16) + "px";
     if (!host.cam) return;
     const { x, y, z } = host.cam;
     const v = current();
@@ -329,6 +332,7 @@ function start(host) {
     paintBar(v);
     paintResults(v);
     paintMarks(v);
+    reportTool();
     host.requestFrame();
   }
 
@@ -369,7 +373,11 @@ function start(host) {
     if (hit !== hovered) { hovered = hit; host.requestFrame(); }
   }, true);
 
-  host.on("cmd", c => { if (c.cmd === "draw" && c.type === "vote") activate(); });
+  host.on("cmd", c => {
+    if (c.cmd === "draw" && c.type === "vote") activate();
+    if (c.cmd === "cancelDraw") closeSheet();
+    if (c.cmd === "syncVoteTool") reportTool();
+  });
   host.on("draw-tool", type => { if (draft && type !== "vote") closeSheet(); });
   host.on("page", () => {
     if (page !== host.page) {
@@ -379,7 +387,10 @@ function start(host) {
     }
     paint();
   });
-  host.on("tab", shown => { if (!shown) closeSheet(); else void load(); });
+  host.on("tab", shown => {
+    if (!shown) closeSheet();
+    else { reportTool(); void load(); }
+  });
   host.on("resync", load);
   host.es?.addEventListener("comments", load);
   host.beforeFrame(positionMarks);

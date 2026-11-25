@@ -2,6 +2,48 @@ import { sc, type T } from "./harness.ts";
 import fs from "node:fs";
 import path from "node:path";
 
+sc("sticky", "Sticky controls and vote panels fit a narrow canvas", {
+  covers: ["sticky:compact-controls", "vote:compact-panels"],
+  skip: { visual: "Checks the actual bounds of the controls and panels against the canvas insets." },
+}, async (t: T) => {
+  const { view, cam, insets } = await t.ev<{
+    view: { x: number; y: number; height: number }; cam: object; insets: object;
+  }>(`(() => {
+    const h = window.canvasHost;
+    const before = { view: h.view.getBoundingClientRect().toJSON(), cam: h.cam, insets: h.insets };
+    window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } });
+    window.canvasCmd({ cmd: "insets", l: 234, t: 60, r: h.view.clientWidth - 416, b: 122, bottomClearance: 122 });
+    return before;
+  })()`);
+  const inspect = async (selector: string) => {
+    const rect = await t.waitFor<{ left: number; right: number; top: number; bottom: number }>(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      return el?.offsetWidth ? el.getBoundingClientRect().toJSON() : null;
+    })()`, selector);
+    t.ok(rect.left >= view.x + 234 && rect.right <= view.x + 416
+      && rect.top >= view.y + 60 && rect.bottom <= view.y + view.height - 122,
+      `${selector} fits in the free canvas (${JSON.stringify(rect)})`);
+  };
+  await t.io.key("s");
+  await inspect('[aria-label="Sticky colours"]');
+  await t.io.move(view.x + 237, view.y + view.height - 130);
+  await inspect(".whiteboard-hint");
+  await t.io.click(view.x + 237, view.y + view.height - 130);
+  await t.waitFor('window.canvasHost.textEdit.active', "sticky editor");
+  await t.io.key("Escape");
+  await inspect(".sticky-controls");
+  await t.io.key("d", { shift: true });
+  await inspect("[data-vote-sheet]");
+  await t.ev(`document.querySelector("[data-vote-start]").click()`);
+  await t.waitFor('document.querySelector("[data-vote-end]")?.offsetWidth', "vote started");
+  await inspect(".vote-bar");
+  await t.ev(`document.querySelector("[data-vote-end]").click()`);
+  await inspect("[data-vote-results]");
+  await t.ev(`document.querySelector("[data-vote-clear]").click()`);
+  await t.waitFor('document.querySelector(".vote-bar").hidden', "vote cleared");
+  await t.ev(`window.canvasCmd({ cmd: "insets", ...${JSON.stringify(insets)} }); window.canvasHost.setCam(${JSON.stringify(cam)});`);
+});
+
 sc("vote", "Vote on objects, reveal results and undo the conclusion", { covers: ["vote:start", "vote:scope", "vote:ballot", "vote:persistence", "vote:results", "vote:undo", "vote:clear"], skip: { visual: "Checks the vote UI at each stage and captures the start, active and results states." } }, async (t: T) => {
   await t.focus("lay_nest");
   await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');

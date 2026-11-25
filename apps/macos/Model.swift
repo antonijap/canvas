@@ -221,6 +221,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var cloudReadOnly = false
     @Published var currentFile: String?
     @Published private(set) var activeDrawTool: DrawTool?
+    @Published private(set) var voteToolActive = false
     /// The Home tab is the shown one (Home.swift): the shown file's page stays alive underneath, hidden, and takes no keys.
     @Published var homeShown = false {
         didSet {
@@ -232,6 +233,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
                 webView.window?.makeFirstResponder(nil)
             } else if let w = webView.window {
                 w.makeFirstResponder(webView)
+                run("{cmd:'syncVoteTool'}")
             }
         }
     }
@@ -407,6 +409,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             let tool = (m["drawTool"] as? String).flatMap(DrawTool.init(rawValue:))
             if tool != nil && sidebarMenuOpen { sidebarMenuOpen = false }
             if activeDrawTool != tool { activeDrawTool = tool }
+        }
+        if !homeShown, let active = m["voteTool"] as? Bool, voteToolActive != active {
+            voteToolActive = active
         }
         if m.keys.contains("selBoard") { selectedBoard = m["selBoard"] as? String }
         if let p = m["pages"] as? [String: Any] {
@@ -1423,7 +1428,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
 
     func showPage(_ id: String) { run("{cmd:'page',id:\(jsString(id))}"); focusCanvas() }
     var canDraw: Bool { currentFile != nil && !homeShown && !cloudReadOnly && !textEditing }
-    func clearDrawTool() { if activeDrawTool != nil { activeDrawTool = nil } }
+    func clearDrawTool() {
+        if activeDrawTool != nil { activeDrawTool = nil }
+        if voteToolActive { voteToolActive = false }
+    }
     func draw(_ tool: DrawTool) {
         guard canDraw else { return }
         if sidebarMenuOpen { sidebarMenuOpen = false }

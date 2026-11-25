@@ -33,6 +33,13 @@ function start(host) {
   layer.style.setProperty("--wb-seal-size", STICKER_SIZE + "px");
   for (const [key, paint] of Object.entries(WHITEBOARD_PAINT)) layer.style.setProperty("--wb-" + key, paint);
   view.append(layer);
+  function updateInsets() {
+    const { l, t, r, b } = host.insets;
+    for (const [side, inset] of Object.entries({ left: l, top: t, right: r, bottom: b })) {
+      view.style.setProperty("--wb-" + side, inset + "px");
+    }
+  }
+  updateInsets();
   // The canvas takes pointer capture for a pan. Controls need the matching release to receive a click.
   layer.addEventListener("pointerdown", (e) => e.stopPropagation());
   const ghost = el("div", "sticky-ghost");
@@ -275,10 +282,14 @@ function start(host) {
     controls.hidden = right.hidden = below.hidden = !r;
     if (!r) return;
     const top = screen(r.x, r.y), bottom = screen(r.x + r.w, r.y + r.h);
+    const area = visibleArea({ w: view.clientWidth, h: view.clientHeight }, host.insets);
     const width = controls.offsetWidth;
-    at(controls, clamp((top.x + bottom.x - width) / 2, 4, Math.max(4, view.clientWidth - width - 4)), top.y > 52 ? top.y - 48 : top.y + 4);
+    const height = controls.offsetHeight;
+    const above = top.y - height - 6;
+    at(controls, clamp((top.x + bottom.x - width) / 2, area.x + 4, area.x + area.w - width - 4),
+      clamp(above >= area.y ? above : top.y + 4, area.y, area.y + area.h - height));
     const box = { ...top, w: bottom.x - top.x, h: bottom.y - top.y };
-    const spark = sparkAt(box, visibleArea({ w: view.clientWidth, h: view.clientHeight }, host.insets));
+    const spark = sparkAt(box, area);
     at(right, bottom.x + 8, Math.max(spark ? spark.y + SPARK + 6 : top.y, (top.y + bottom.y) / 2 - 12));
     at(below, (top.x + bottom.x) / 2 - 12, bottom.y + BADGE + 4);
   }
@@ -300,7 +311,13 @@ function start(host) {
     ghost.style.height = r.h * host.cam.z + "px";
     ghost.style.transform = `translate(${s.x}px,${s.y}px) rotate(${moved ? 0 : 2}deg)`;
     hint.hidden = false;
-    at(hint, s.x, s.y + r.h * host.cam.z + 10);
+    const area = visibleArea({ w: view.clientWidth, h: view.clientHeight }, host.insets);
+    const bottom = Math.min(area.y + area.h, colors.offsetTop - 8);
+    const below = s.y + r.h * host.cam.z + 10;
+    const height = hint.offsetHeight;
+    const y = below + height <= bottom ? below : s.y - height - 10;
+    at(hint, clamp(s.x, area.x + 4, area.x + area.w - hint.offsetWidth - 4),
+      clamp(y, area.y, bottom - height));
   }
 
   function reset() {
@@ -539,6 +556,7 @@ function start(host) {
   host.on("cmd", (c) => {
     if (c.cmd === "draw" && (c.type === "sticky" || c.type === "sticker")) activate(c.type);
     if (c.cmd === "cancelDraw") reset();
+    if (c.cmd === "insets") { updateInsets(); preview(); }
   });
   addEventListener("pagehide", reset);
   host.on("draw-tool", reset);
@@ -549,6 +567,7 @@ function start(host) {
   host.on("deselect", syncSticky);
   host.on("render", () => { enterPending(); syncSticky(); positionSeals(); });
   host.on("cam", preview);
+  addEventListener("resize", preview);
   host.beforeFrame(() => { positionSticky(); positionSeals(); });
   host.whiteboard = { activate, next, rect, isSticker: (id) => byId.has(id) };
   syncSeals(host.doc);

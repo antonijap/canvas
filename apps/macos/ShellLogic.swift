@@ -1276,7 +1276,7 @@ enum DrawTool: String, CaseIterable {
     /// The bottom palette's groups, in order; a divider sits between them (ToolPalette, Shell.swift).
     static let paletteGroups: [[DrawTool]] = [[.frame, .rectangle, .ellipse, .text], [.sticky, .sticker]]
     /// The key as shown on a keycap.
-    var keycap: String { (self == .sticker ? "\u{21E7}" : "") + key.uppercased() }
+    var keycap: String { (usesShift ? "\u{21E7}" : "") + key.uppercased() }
     var title: String { rawValue.capitalized }
     var command: String { "draw-" + rawValue }
     var key: String {

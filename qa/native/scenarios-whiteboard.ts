@@ -2,6 +2,77 @@ import { center, sc, type NT } from "./harness.ts";
 import fs from "node:fs";
 import path from "node:path";
 
+sc("vote", "Vote palette control and panels fit at 720 pt", { covers: ["vote:palette", "vote:compact-panels"] }, async (t: NT) => {
+  const initial = await t.state();
+  try {
+    await t.cmd("qa.cloud", { commentName: "Anna" });
+    await t.cmd("qa.window", { width: 720, height: 420 });
+    await t.section("Layers");
+    if (!initial.inspectorOpen) await t.cmd("qa.mainmenu", { title: "Show Properties", perform: true });
+    await t.showPage("layout");
+    await t.settle();
+    const vote = await t.mark({ id: "vote-tool" });
+    const palette = await t.mark({ id: "tool-palette" });
+    const { webFrame } = await t.state();
+    const { l, t: top, r, b } = await t.js<{ l: number; t: number; r: number; b: number }>("return window.canvasHost.insets");
+    t.ok(l >= 224 && r >= 284, "both sidebars are open");
+    t.ok(palette.x >= webFrame.x + l && palette.x + palette.w <= webFrame.x + webFrame.w - r, "the palette fits between both sidebars");
+    const panel = async (selector: string) => {
+      await t.waitJs(`document.querySelector(${JSON.stringify(selector + ":not([hidden])")})`, selector);
+      const rect = await t.js<{ left: number; right: number; top: number; bottom: number }>(
+        `return document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON();`);
+      t.ok(rect.left >= l && rect.right <= webFrame.w - r && rect.top >= top && rect.bottom <= webFrame.h - b,
+        selector + " fits in the free canvas");
+    };
+    const click = async (selector: string) => {
+      await t.waitJs(`document.querySelector(${JSON.stringify(selector)})?.offsetWidth`, selector);
+      const { x, y } = await t.js<{ x: number; y: number }>(`
+        const el = document.querySelector(${JSON.stringify(selector)});
+        el.scrollIntoView({ block: "nearest" });
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      `);
+      await t.click({ x: webFrame.x + x, y: webFrame.y + y });
+    };
+    const selected = (on: boolean) => t.waitFor(async () =>
+      (await t.marks({ id: "vote-tool-selected" })).length === (on ? 1 : 0), on ? "Vote highlighted" : "Vote highlight cleared");
+    await t.click(center(vote));
+    await panel("[data-vote-sheet]");
+    await selected(true);
+    await t.key("Escape");
+    await t.waitJs('document.querySelector("[data-vote-sheet]").hidden', "sheet dismissed");
+    await selected(false);
+    await t.js('window.canvasHost.selectId("lay_nest");');
+    await t.key("d", ["shift"]);
+    await panel("[data-vote-sheet]");
+    await selected(true);
+    for (let i = 0; i < 7; i++) await click('[aria-label="More votes"]');
+    await click("[data-vote-start]");
+    await t.waitJs('document.querySelector("[data-vote-end]")?.offsetWidth', "vote started");
+    await panel(".vote-bar");
+    await selected(true);
+    await t.showPage("style");
+    await selected(false);
+    await t.showPage("layout");
+    await selected(true);
+    await click("[data-vote-end]");
+    await panel("[data-vote-results]");
+    await selected(false);
+    await click("[data-vote-done]");
+    await panel(".vote-bar");
+    await t.click(center(vote));
+    await panel("[data-vote-results]");
+    await selected(false);
+    await t.shot(path.resolve("qa/out/native/vote-palette-720.png"));
+  } finally {
+    const state = await t.state();
+    if (state.inspectorOpen !== initial.inspectorOpen) {
+      await t.cmd("qa.mainmenu", { title: initial.inspectorOpen ? "Show Properties" : "Hide Properties", perform: true });
+    }
+    await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });
+  }
+});
+
 sc("vote", "Vote on a sticky and reveal the conclusion in the Mac app", { covers: ["vote:start", "vote:ballot", "vote:privacy", "vote:results", "sticky:handles"] }, async (t: NT) => {
   await t.cmd("qa.cloud", { commentName: "Anna" });
   await t.showPage("layout");
