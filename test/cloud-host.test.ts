@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
 import { CloudHost, INVITE_MS, newSecret, parseSecret } from "../cloud/adapters/mac/host.ts";
+import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, type Op, type ServerMessage } from "../cloud/protocol.ts";
 import { blobKey } from "../cloud/core/files/objects.ts";
 import { acceptKey, ServerSocket } from "../cloud/adapters/mac/websocket.ts";
 
@@ -669,4 +670,51 @@ test("duplicate refuses the combined size of its blobs before copying", async t 
   assert.equal(read.mock.callCount(), 0, "no source blob was read");
   const listing = await (await fetch(base + "/v1/files", { headers: owner })).json() as { files: { id: string }[] };
   assert.deepEqual(listing.files.map(file => file.id), [id]);
+});
+
+test("comments rooms give vote views to capable members and keep old sockets in sequence", async t => {
+  const { h, base, port } = await host();
+  const anna = h.ownerDevice("Anna");
+  const ben = (await join(base, h.invite("Ben", "viewer").code)).token;
+  const doc = crypto.randomUUID(), vote = crypto.randomUUID(), ballot = crypto.randomUUID();
+  const route = `/v1/docs/${doc}`;
+  const topology = { pages: ["page"], nodes: [["note", { page: "page", type: "sticky", chain: ["note"] }]] };
+  const design = (token: string) => fetch(base + route + "/vote-design", { method: "PUT",
+    headers: { ...bearer(token), "content-type": "application/json" }, body: JSON.stringify(topology) });
+  assert.equal((await post(base, "/v1/docs", { doc }, bearer(anna))).status, 200);
+  assert.equal((await design(ben)).status, 403);
+  assert.equal((await design(anna)).status, 200);
+
+  async function open(token: string, capabilities?: string[], since = 0) {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}` + route + "/socket", { headers: bearer(token) } as unknown as string[]);
+    t.after(() => ws.close());
+    const got: ServerMessage[] = [];
+    ws.onmessage = e => got.push(JSON.parse(String(e.data)));
+    await new Promise<void>(resolve => { ws.onopen = () => resolve(); });
+    ws.send(JSON.stringify({ type: "hello", protocol: 1, doc, since, capabilities }));
+    await until(() => got.some(m => m.type === "welcome"));
+    return got;
+  }
+
+  const a = await open(anna, [CLOUD_VOTES]), b = await open(ben, [CLOUD_VOTES]), old = await open(anna);
+  const start: Op = { kind: "vote.start", vote, scope: { page: "page" }, on: "stickies", perPerson: 1, hidden: true, anonymous: true };
+  const cast: Op = { kind: "vote.cast", vote, ballot, layer: "note" };
+  const submit = async (op: Op, token: string, capable = true) =>
+    (await post(base, route + "/ops", { ops: [{ doc, op, opId: crypto.randomUUID(), at: new Date().toISOString() }] },
+      { ...bearer(token), ...(capable && { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES }) })).json() as Promise<{ acks: unknown[]; rejected: { code: string }[] }>;
+  assert.equal((await submit(start, anna, false)).rejected[0].code, "version");
+  assert.equal((await submit(start, anna)).acks.length, 1);
+  assert.equal((await submit(cast, ben)).acks.length, 1);
+  await until(() => [a, b, old].every(messages => messages.some(m => m.type === "applied" && m.entries[0]?.seq === 2)));
+  assert.doesNotMatch(JSON.stringify(a), new RegExp(ballot));
+  assert.match(JSON.stringify(b), new RegExp(ballot));
+  assert.doesNotMatch(JSON.stringify(old), new RegExp(ballot + '|"votes"'));
+  const replay = await open(anna, [CLOUD_VOTES], 1);
+  assert.doesNotMatch(JSON.stringify(replay), new RegExp(ballot));
+  assert.equal((await submit({ kind: "vote.end", vote }, ben)).rejected[0].code, "forbidden");
+  assert.equal((await submit({ kind: "vote.end", vote }, anna)).acks.length, 1);
+  await until(() => old.some(m => m.type === "applied" && m.entries[0]?.seq === 3));
+  assert.equal((await submit({ kind: "thread.create", thread: crypto.randomUUID(), comment: crypto.randomUUID(),
+    body: "A viewer comment", anchor: { x: 0, y: 0 } }, ben)).acks.length, 1);
+  await until(() => old.some(m => m.type === "applied" && m.entries[0]?.seq === 4));
 });

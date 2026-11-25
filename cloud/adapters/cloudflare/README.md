@@ -47,7 +47,7 @@ The checked-in compatibility date is `2026-08-22`, the newest date supported by 
 
 A deny wins over exact and domain rules. Otherwise, an exact email wins over its domain. Bootstrap owners override these rules. They are deliberately separate from the editable list. To move an owner entirely into rules, first add another owner, then remove the bootstrap override from configuration and redeploy. Without bootstrap owners, replacing rules must leave an effective owner or returns `409 conflict`. A domain owner rule represents owners in that domain; exact denies may exclude individual addresses.
 
-People and export endpoints require an owner. Owners and editors may register documents. Viewers may read comments. Commenters may edit their own comments; owners and editors may delete anyone's comments or threads. Editors cannot edit another author's text.
+People and export endpoints require an owner. Owners and editors may register documents. All members can comment and vote. Authors can edit their own comments. Owners and editors may delete anyone's comments or threads and manage votes. Comments-only rooms use the page and layer map an editor publishes when starting a vote.
 
 ## Local development
 

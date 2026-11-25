@@ -37,7 +37,7 @@ import { sidebarWidgetTiles } from "./sidebar-widgets.ts";
 import { codeRootId, version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
-import { handleVotesRoute } from "./votes.ts";
+import { handleVotesRoute, syncVoteConclusions } from "./votes.ts";
 import { commentReads } from "./comment-reads.ts";
 import { handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
 import { scrubSecrets } from "./cloud-secrets.ts";
@@ -179,7 +179,7 @@ fileEvents.view = (file) => {
   void storeForAsync(file).then(store => store.refresh()).catch(() => {});
   docChanged(file, watched(file).revision, "remote");
   for (const c of clients.get(file) ?? []) c.write(sse("cloudfile", fileInfo(file)));
-  tellCommentPages(file);
+  fileEvents.comments?.(file);
 };
 fileEvents.removed = (file) => {
   cache.drop(file); forgetStore(file); resetHistory(file);
@@ -199,7 +199,6 @@ function tellCommentPages(f: string | null): void {
   const msg = sse("comments", { at: Date.now() });
   for (const c of clients.get(docFile) ?? []) c.write(msg);
 }
-onCloudChanged((display) => tellCommentPages(display));
 // Undo history changes reach every page showing the document; the native page hands them to the Edit menu.
 // The last repeatable edit's name rides along (Edit > Repeat, src/repeat.ts).
 const historyMsg = (docFile: string) => sse("history", { ...historyState(docFile), repeat: repeatInfo(docFile) });
@@ -577,6 +576,14 @@ export function startServer(port = PORT()): Promise<http.Server> {
     },
   };
 
+  const voteDeps = { changed: tellCommentPages, place: (file: string, body: import("./structure.ts").StructureBody) => varCtx.structure(file, body, { source: "user" }) };
+  function cloudCommentsChanged(file: string | null) {
+    tellCommentPages(file);
+    if (file) setImmediate(() => void syncVoteConclusions(file, voteDeps).catch(() => {}));
+  }
+  fileEvents.comments = cloudCommentsChanged;
+  onCloudChanged(cloudCommentsChanged);
+
   const server = http.createServer((req, res) => withActionAgent(req.headers["x-canvas-source"] === "mcp" ? String(req.headers["x-canvas-agent"] ?? "Agent") : undefined, async () => {
     // canvas-mcp's heartbeat (src/onboarding.ts) says an agent is connected; it is not someone using Canvas.
     if (!(req.url ?? "").startsWith("/api/mcp/hello")) lastActivity = Date.now();
@@ -647,7 +654,7 @@ try {
       if (await handleImageRoute(req, res, url)) return;
       if (await handleVideoRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
       if (await handleWidgetRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
-      if (await handleVotesRoute(req, res, url, { changed: tellCommentPages, place: (file, body) => varCtx.structure(file, body, { source: "user" }) })) return;
+      if (await handleVotesRoute(req, res, url, voteDeps)) return;
       if (await handleCommentsRoute(req, res, url, tellCommentPages)) return;
       if (await handleCloudRoute(req, res, url, tellCommentPages)) return;
       if (await handleAgentRoute(req, res, url, agentCtx)) return;

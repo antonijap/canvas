@@ -117,15 +117,16 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 check(moved.file);
                 if (fixture === 'playground') {
                     const before = readCommentsFile(moved.file)!;
-                    assert.equal(before.votes?.[0].id, vote);
-                    assert.equal(before.votes?.[0].ballots[0].voter.name, 'Anna');
+                    assert.equal(before.cloudVotes?.[0].id, vote);
+                    assert.equal(before.cloudVotes?.[0].ballots[0].layer, 'r_free');
+                    assert.equal(before.votes, undefined);
                     assert.deepEqual(before.outbox, []);
                     const reply = await fetch(server.base + '/api/comments/ops?file=' + encodeURIComponent(moved.file), {
                         method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json', 'x-canvas-source': 'mcp' },
                         body: JSON.stringify({ ops: [envelopeFor({ kind: 'thread.create', thread: randomUUID(), comment: randomUUID(), body: 'Review this frame', anchor: { nodeId: 'lay_nest', x: 0.5, y: 0.5 } })] }),
                     });
                     assert.equal(reply.status, 200);
-                    assert.deepEqual(readCommentsFile(moved.file)?.votes, before.votes);
+                    assert.deepEqual(readCommentsFile(moved.file)?.cloudVotes, before.cloudVotes);
                 }
                 if (fixture === 'children first') {
                     const health = await (await fetch(server.base + '/health')).json() as { version: string };

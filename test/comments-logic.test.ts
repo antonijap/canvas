@@ -8,11 +8,11 @@ import * as L from "../src/page/comments-logic.js";
 const thread = (over: Record<string, unknown> = {}) => ({ id: "t", anchor: { nodeId: "A", x: 0.25, y: 0.5, board: "B" }, comments: [], ...over });
 
 test("refusals explain permissions, deletes and limits in plain words", () => {
-  const reason = (code?: string, message?: string, kind = "comment.add", role?: string) => L.refusalReason({ code, message, kind }, role);
-  assert.equal(reason("forbidden", "This role cannot apply the op", "comment.add", "viewer"), "You can view this file but not comment on it");
+  const reason = (code?: string, message?: string, kind = "comment.add", role?: string, canComment = true) => L.refusalReason({ code, message, kind }, { role, canComment });
+  assert.equal(reason("forbidden", "This role cannot apply the op", "comment.add", "viewer", false), "Update Canvas on the host to let viewers comment");
   for (const kind of ["comment.edit", "comment.delete", "thread.delete"]) {
     assert.equal(reason("forbidden", "This role cannot apply the op", kind, "commenter"), "Only the person who wrote it can change it");
-    assert.equal(reason("forbidden", "This role cannot apply the op", kind, "viewer"), "You can view this file but not comment on it");
+    assert.equal(reason("forbidden", "This role cannot apply the op", kind, "viewer"), "Only the person who wrote it can change it");
   }
   for (const message of ["thread deleted", "comment deleted", "This thread was deleted", "This comment was deleted"]) {
     assert.equal(reason("conflict", message), "This thread was deleted");
@@ -140,7 +140,8 @@ test("who may drag a pin: anyone in a file that is not shared; in a shared one i
   assert.equal(L.mayMove(t, { role: "commenter", me: anna }), true, "the author");
   assert.equal(L.mayMove(t, { role: "owner", me: { email: "ben@studio.test", name: "Ben" } }), true, "the Cloud owner");
   assert.equal(L.mayMove(t, { role: "editor", me: { email: "ben@studio.test", name: "Ben" } }), false, "an editor, not the author");
-  assert.equal(L.mayMove(t, { role: "viewer", me: anna }), false, "a viewer");
+  assert.equal(L.mayMove(t, { role: "viewer", me: anna }), true, "a viewer can move their own pin");
+  assert.equal(L.mayMove(t, { role: "viewer", me: anna, canComment: false }), false, "an older host blocks viewer comments");
   assert.equal(L.mayMove(t, { role: "commenter", me: null }), false, "nobody signed in");
   assert.equal(L.mayMove(thread({ createdBy: { name: "Anna" } }), { role: "commenter", me: anna }), false, "a thread with no author email is nobody's on a server");
 });

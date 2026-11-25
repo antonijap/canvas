@@ -1,4 +1,6 @@
-import { center, sc, type NT } from "./harness.ts";
+import { QaApp } from "./app.ts";
+import { cloudVoteFiles, viewerComment, votePost } from "../cloud-vote-fixture.ts";
+import { center, sc, NT } from "./harness.ts";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -210,4 +212,45 @@ sc("whiteboard-review", "Sticky author removal clears disk and undo restores it"
   await t.waitDisk(() => !t.node(id)?.author, "author removed from disk");
   await t.key("z", ["cmd"]);
   await t.waitDisk(() => t.node(id)?.author?.name === "Anna", "undo restores the author");
+});
+
+sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it", {
+  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer"],
+}, async (t: NT) => {
+  const peer = new QaApp(path.dirname(t.app.dir), 100 + t.app.shard);
+  fs.mkdirSync(peer.dir, { recursive: true });
+  fs.symlinkSync(path.join(t.app.dir, "tunnels"), path.join(peer.dir, "tunnels"));
+  let files: Awaited<ReturnType<typeof cloudVoteFiles>> | undefined;
+  try {
+    await t.cmd("qa.cloud", { commentName: "Anna" });
+    await peer.start(t.app.app);
+    const ben = new NT(peer, t.file);
+    await ben.cmd("qa.cloud", { commentName: "Ben" });
+    files = await cloudVoteFiles(t.app.base, peer.base);
+    await t.app.openShown(files.owner);
+    await peer.openShown(files.viewer);
+    const target = 'window.canvasHost.worldRectOf("BallotTarget")';
+    await t.waitJs(target, "owner sees the board");
+    await ben.waitJs(target, "viewer sees the board");
+    await t.js('window.canvasHost.votes.activate()');
+    await t.waitJs('document.querySelector("[data-vote-sheet]:not([hidden])")', "start sheet");
+    await t.js(`document.querySelector('[data-vote-mode="anything"]').click(); document.querySelector("[data-vote-start]").click()`);
+    await ben.waitJs('document.querySelector(".vote-bar:not([hidden])")', "viewer sees the vote");
+    await ben.look(0, 0);
+    await ben.click(center(await ben.rect("BallotTarget")));
+    await ben.waitJs('document.querySelector("[data-vote-mark]")', "viewer sees their own vote");
+    t.eq(await t.js('return document.querySelectorAll("[data-vote-mark]").length'), 0, "owner sees no hidden votes");
+    await viewerComment(peer.base, files.viewer);
+    await t.js('document.querySelector("[data-vote-end]").click()');
+    await ben.waitJs('document.querySelector("[data-vote-count]")?.textContent.trim() === "1"', "viewer sees the revealed count");
+    await ben.shot(path.resolve("qa/out/native/vote-cloud-revealed.png"));
+    await ben.waitJs('[...window.canvasHost.boards.keys()].filter(id => id.startsWith("vote-conclusion-")).length === 1', "one conclusion on the viewer canvas");
+  } finally {
+    await peer.stop().catch(() => {});
+    if (files) {
+      await t.cmd("close", { file: files.owner }).catch(() => {});
+      await votePost(t.app.base, "/api/cloud/host/stop", { hostId: files.hostId }).catch(() => {});
+      await votePost(t.app.base, "/api/cloud/host/wipe", { hostId: files.hostId }).catch(() => {});
+    }
+  }
 });

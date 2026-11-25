@@ -50,7 +50,7 @@ sc("comments", "alignment: every comment control is optically centred, light and
   // A shared file: pending and refused comments, the bar with people and the server.
   await t.ev(`(() => {
     window.__origFetch = window.fetch; window.fetch = async (u, o) => { const r = await window.__origFetch(u, o); if (typeof u === "string" && u.startsWith("/api/comments?file=") && window.__sync) { const j = await r.json(); j.sync = window.__sync; return new Response(JSON.stringify(j), { headers: { "content-type": "application/json" } }); } return r; };
-    window.__sync = { url: "https://studio-canvas.workers.dev", host: "studio-canvas.workers.dev", role: "viewer", status: "connected", connected: false, pending: [{ opId: "p1", kind: "comment.add", thread: ${JSON.stringify(A)}, comment: ${JSON.stringify(ta[3].id)} }], rejected: [{ opId: "r1", kind: "comment.add", thread: ${JSON.stringify(A)}, comment: ${JSON.stringify(ta[4].id)}, code: "forbidden", message: "x" }] };
+    window.__sync = { url: "https://studio-canvas.workers.dev", host: "studio-canvas.workers.dev", role: "viewer", canComment: false, status: "connected", connected: false, pending: [{ opId: "p1", kind: "comment.add", thread: ${JSON.stringify(A)}, comment: ${JSON.stringify(ta[3].id)} }], rejected: [{ opId: "r1", kind: "comment.add", thread: ${JSON.stringify(A)}, comment: ${JSON.stringify(ta[4].id)}, code: "forbidden", message: "x" }] };
     return window.canvasHost.comments.reload(); })()`);
   await t.waitFor(`document.querySelector(".cm-shared")?.classList.contains("on") && document.querySelectorAll(".cm-pin").length >= 2`, "the shared bar and the pins");
   await t.waitFor(`document.querySelector('.cm-pin[data-thread="${C}"]')?.classList.contains("gone")`, "the deleted layer's pin");

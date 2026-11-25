@@ -12,7 +12,7 @@
 
 import type http from "node:http";
 import { randomUUID } from "node:crypto";
-import { applyOp, checkEnvelope, LIMITS, type Author, type CommentsFile, type Op, type OpEnvelope, type Rejected, type Thread } from "../cloud/protocol.ts";
+import { applyOp, checkEnvelope, isVoteOp, LIMITS, UPDATE_COMMENT_HOST, type Author, type CommentsFile, type Op, type OpEnvelope, type Rejected, type Thread } from "../cloud/protocol.ts";
 import { readBodyText } from "./body.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
 import { resolveDoc } from "./docpath.ts";
@@ -100,6 +100,9 @@ export function applyEnvelopes(pkg: string, envelopes: unknown, by: Author, now 
  * it when the socket is up. Nothing is applied to the confirmed threads: only the server's answer does that.
  */
 function queueShared(pkg: string, file: SyncFile, envelopes: unknown[], by: Author): OpsResult {
+  if (file.voteRole === "viewer" && file.voteCapable === false) throw new CommentsError(426, "version", UPDATE_COMMENT_HOST);
+  if (envelopes.some(e => e && typeof e === "object" && "op" in e && e.op && typeof e.op === "object" && isVoteOp(e.op as Op)))
+    throw new CommentsError(400, "invalid", "Use the vote controls to vote.");
   const list = envelopes.map((e) => (e && typeof e === "object" ? withDoc(e as OpEnvelope, file.doc) : e)) as OpEnvelope[];
   // What the file arrived with is held back first (src/cloud.ts vouch): only the ops made here now go out at once.
   const held = hooks.vouch(pkg, file);

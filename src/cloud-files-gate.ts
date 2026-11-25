@@ -2,7 +2,7 @@
 export const MUTATING_ROUTES = [
     'update', 'structure', 'move', 'resize', 'scale', 'text', 'replace', 'layout', 'overrides', 'pages', 'widgets', 'shaders', 'videos', 'images', 'history', 'variations', 'agent', 'selection-colors', 'repeat', 'component', 'paste', 'delete', 'align', 'distribute', 'group', 'ungroup', 'boolean', 'vector', 'path', 'swap', 'theme', 'variables', 'fonts',
 ] as const;
-const SAFE = new Set(['/api/flush', '/api/mcp/hello', '/api/bridge/poll', '/api/bridge/ack', '/api/bridge/state', '/api/mcp/connect', '/api/usage/count', '/api/copy-as', '/api/export']);
+const SAFE = new Set(['/api/flush', '/api/mcp/hello', '/api/bridge/poll', '/api/bridge/ack', '/api/bridge/state', '/api/mcp/connect', '/api/usage/count', '/api/copy-as', '/api/export', '/api/votes']);
 export function readOnlyRoute(method: string, pathname: string): boolean {
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method))
         return false;

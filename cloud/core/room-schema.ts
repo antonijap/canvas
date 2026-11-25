@@ -10,6 +10,10 @@ export function initializeRoom(storage: SqlStore): void {
       CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS comment_threads (comment_id TEXT PRIMARY KEY, thread_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS op_receipts (op_id TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS room_votes (id TEXT PRIMARY KEY, json TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS room_vote_timers ON room_votes(json_extract(json, '$.timer.endsAt')) WHERE json_extract(json, '$.state') = 'active';
+      CREATE TABLE IF NOT EXISTS room_vote_key (id INTEGER PRIMARY KEY CHECK (id = 1), key TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS room_vote_design (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS room_usage (id INTEGER PRIMARY KEY CHECK (id = 1), bytes INTEGER NOT NULL)`);
     if (!sql.exec("SELECT 1 FROM room_usage WHERE id = 1").toArray().length) {
       sql.exec(`INSERT OR IGNORE INTO op_receipts SELECT op_id, seq FROM ops;
@@ -24,7 +28,7 @@ export function initializeRoom(storage: SqlStore): void {
         INSERT INTO op_receipts (op_id, seq) VALUES (new.op_id, new.seq); END;
       CREATE TRIGGER IF NOT EXISTS receipt_bytes_insert AFTER INSERT ON op_receipts BEGIN
         UPDATE room_usage SET bytes = bytes + length(CAST(new.op_id AS BLOB)) + 8 WHERE id = 1; END`);
-    for (const [table, column] of [["threads", "json"], ["ops", "op_json"]]) {
+    for (const [table, column] of [["threads", "json"], ["ops", "op_json"], ["room_votes", "json"]]) {
       sql.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_bytes_insert AFTER INSERT ON ${table} BEGIN
           UPDATE room_usage SET bytes = bytes + length(CAST(new.${column} AS BLOB)) WHERE id = 1; END;
         CREATE TRIGGER IF NOT EXISTS ${table}_bytes_update AFTER UPDATE ON ${table} BEGIN

@@ -1,3 +1,4 @@
+import { CLOUD_VOTES } from "../../protocol.ts";
 import { fileStorageBytes, UPLOAD_LIMITS } from "./uploads.ts";
 // A Cloud file room: orders every action, checks it against its own rows with the shared apply, applies it whole or
 // not at all, and hands back what to send. Plain logic over a SqlStore and an ObjectStore, so the Worker's Durable
@@ -260,7 +261,7 @@ export class FileRoom {
       if (tail.some(action => insertsWhiteboard(action.ops))) return [WHITEBOARD_UPDATE];
       snapshot = { seq: s.seq, manifest: s.manifest };
     }
-    out.push({ type: "welcome", protocol: 2, capabilities: [WHITEBOARD], role, me: conn.author, epoch: m.epoch, seq: m.seq, ...(snapshot ? { snapshot } : {}), known, limits: { opsPerMessage: ROOM_LIMITS.opsPerMessage, actionBytes: ROOM_LIMITS.actionBytes } });
+    out.push({ type: "welcome", protocol: 2, capabilities: [WHITEBOARD, CLOUD_VOTES], serverTime: new Date(this.now()).toISOString(), role, me: conn.author, epoch: m.epoch, seq: m.seq, ...(snapshot ? { snapshot } : {}), known, limits: { opsPerMessage: ROOM_LIMITS.opsPerMessage, actionBytes: ROOM_LIMITS.actionBytes } });
     if (tail.length) out.push({ type: "applied", actions: tail });
     return out;
   }

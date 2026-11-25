@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from "vitest";
 import { listDurableObjectIds, reset, runInDurableObject } from "cloudflare:test";
 import { Team } from "../src/team";
-import { LIMITS, PROTOCOL_VERSION, roleFor } from "../../../protocol";
+import { CLOUD_VOTES, LIMITS, PROTOCOL_VERSION, roleFor } from "../../../protocol";
 import { bindings, call, envelope, member, owner, post, register, rules } from "./helpers";
 
 beforeEach(reset);
@@ -13,7 +13,7 @@ it("authenticates before touching any objects or trusting internal headers", asy
   expect(await listDurableObjectIds(bindings.ROOM)).toHaveLength(0);
 });
 it("returns version, identity, and bootstrap owner above deny rules", async () => {
-  expect(await (await call("/v1/info")).json()).toEqual({ protocol: PROTOCOL_VERSION, server: "0.1.0", capabilities: ["comments"] });
+  expect(await (await call("/v1/info")).json()).toEqual({ protocol: PROTOCOL_VERSION, server: "0.1.0", capabilities: ["comments", CLOUD_VOTES] });
   await rules([{ match: "@example.com", role: "deny" }]);
   expect(await (await call("/v1/me")).json()).toEqual({ email: owner, name: "owner", role: "owner" });
   expect((await call("/v1/me", member)).status).toBe(403);
@@ -72,11 +72,11 @@ it("registration is idempotent, editors may register, commenters may not", async
   expect(data.docs).toHaveLength(1);
   expect(data.docs[0].createdBy).toBe(member);
 });
-it("viewers can read but cannot post ops", async () => {
+it("viewers can read and post comments", async () => {
   await rules([{ match: member, role: "viewer" }]);
   const doc = await register();
   expect((await call(`/v1/docs/${doc}/threads?since=0`, member)).status).toBe(200);
-  expect((await post(doc, [envelope(doc)], member)).rejected[0].code).toBe("forbidden");
+  expect((await post(doc, [envelope(doc)], member)).acks).toHaveLength(1);
 });
 it("commenters cannot edit another author and editors may delete any comment", async () => {
   const doc = await register();
@@ -148,7 +148,7 @@ it("enforces rate limits including invalid ops", async () => {
 it("rechecks a delayed REST sender's role at the Room", async () => {
   await rules([{ match: member, role: "viewer" }]);
   const doc = await register();
-  const result = await bindings.ROOM.getByName(doc).submit(doc, [envelope(doc)], { email: member, name: "member" }, "editor");
+  const result = await bindings.ROOM.getByName(doc).submit(doc, [envelope(doc, { kind: "vote.end", vote: crypto.randomUUID() })], { email: member, name: "member" }, "editor", true);
   expect(result.rejected[0].code).toBe("forbidden");
 });
 it("rejects an envelope for another document", async () => {

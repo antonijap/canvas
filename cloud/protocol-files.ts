@@ -189,6 +189,7 @@ export interface Welcome {
   type: "welcome";
   protocol: 2;
   capabilities?: string[];
+  serverTime?: string;
   role: Role;
   me: Author;
   epoch: number;

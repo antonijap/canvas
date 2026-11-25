@@ -22,7 +22,7 @@ import { WHITEBOARD } from "../../protocol-files.ts";
 import type { AddressInfo, Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
-import { LIMITS, PROTOCOL_VERSION } from "../../protocol.ts";
+import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../protocol.ts";
 import type { Role, ServerInfo, ServerMessage } from "../../protocol.ts";
 import { Operations, type Identity } from "../../core/operations.ts";
 import { ranks } from "../../core/people.ts";
@@ -88,7 +88,7 @@ export class HostError extends Error {
 }
 
 export interface Me extends Identity { id: string; role: Role; device: string }
-interface Session { doc: string; me: Me; ready: boolean; opened: number; window: number; messages: number }
+interface Session { doc: string; me: Me; ready: boolean; voting?: boolean; opened: number; window: number; messages: number }
 interface RoomState { store: SqliteStore; ops: Operations; sockets: Map<ServerSocket, Session>; used: number }
 
 export interface HostOptions {
@@ -343,7 +343,7 @@ export class CloudHost {
       const old = process.umask(0o077);
       let store: SqliteStore;
       try { store = new SqliteStore(path.join(this.opts.dir, "rooms", `${doc}.sqlite`)); } finally { process.umask(old); }
-      const ops = new Operations(store);
+      const ops = new Operations(store, () => this.now());
       // The hosted Cloud records the person id with each op (the Worker has no ids).
       if (!store.sql.exec("SELECT 1 AS one FROM pragma_table_info('ops') WHERE name = 'by_id'").toArray().length) store.sql.exec("ALTER TABLE ops ADD COLUMN by_id TEXT");
       r = { store, ops, sockets: new Map(), used: Date.now() };
@@ -359,16 +359,16 @@ export class CloudHost {
   }
 
   /** Applies ops and sends the applied entries to every socket in the room that is still allowed in. */
-  private submit(doc: string, ops: unknown[], me: Me, allowance: number) {
+  private submit(doc: string, ops: unknown[], me: Me, allowance: number, voting: boolean) {
     const r = this.room(doc);
     const members = this.people().filter(person => person.devices.length).map(person => ({ id: person.id, name: person.label }));
-    const result = r.ops.submit(doc, ops, { email: me.email, name: me.name, id: me.id }, me.role, allowance, members);
+    const result = r.ops.submit(doc, ops, { email: me.email, name: me.name, id: me.id }, me.role, allowance, members, voting || undefined);
     if (result.entries.length) {
-      const text = JSON.stringify({ type: "applied", entries: result.entries } satisfies ServerMessage);
+      const changed = result.entries.some(entry => entry.op.kind === "vote.changed");
       for (const [socket, s] of r.sockets) {
         if (!s.ready) continue;
         if (!this.current(s.me)) { r.sockets.delete(socket); drop(socket, true); continue; }
-        socket.send(text);
+        socket.send(JSON.stringify({ type: "applied", entries: result.entries, ...(changed && s.voting && { votes: r.ops.voteView(s.me) }) } satisfies ServerMessage));
       }
     }
     return { acks: result.acks, rejected: result.rejected };
@@ -499,7 +499,7 @@ export class CloudHost {
     }
     if (!this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
     if (await this.files.route(req, res, url, me, () => this.body(req, 1024 * 1024, me.device))) return;
-    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", WHITEBOARD], hostId: this.hostId() } as ServerInfo);
+    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", WHITEBOARD, CLOUD_VOTES], hostId: this.hostId() } as ServerInfo);
     if (p === "/v1/members" && method === "GET") return json(200, this.people().filter(p => p.devices.length).map(p => ({ id: p.id, name: p.label, role: p.role })));
     if (p === "/v1/me" && method === "GET") return json(200, { id: me.id, email: me.email, name: me.name, role: me.role, hostId: this.hostId() });
     if (p === "/v1/docs" && method === "POST") {
@@ -514,6 +514,15 @@ export class CloudHost {
       if (!this.team.register(doc, now.id)) return json(409, { code: "quota", message: "This Cloud has too many documents" });
       return json(200, { doc });
     }
+    const design = /^\/v1\/docs\/([0-9a-f-]+)\/vote-design$/.exec(p);
+    if (design && method === "PUT" && uuid(design[1]) && this.team.hasDoc(design[1])) {
+      const body = await this.body(req, 1024 * 1024, me.device);
+      const now = this.still(me);
+      if (now?.role !== "owner" && now?.role !== "editor") return json(403, { code: "forbidden", message: "Owner or editor role required" });
+      if (!this.room(design[1]).ops.setVoteDesign(body)) return json(400, { code: "invalid", message: "Invalid vote design" });
+      return json(200, { ok: true });
+    }
+    const voting = supportsCloudVotes(String(req.headers[COMMENTS_CAPABILITIES_HEADER] ?? "").split(/\s*,\s*/));
     const result = await route({
       kind: "mac",
       team: () => this.team,
@@ -521,7 +530,7 @@ export class CloudHost {
         read: request => {
           const since = Number(request.query.get("since") ?? "0");
           if (!Number.isSafeInteger(since) || since < 0) return { status: 400, body: { code: "invalid", message: "since must be a nonnegative integer" } };
-          return { status: 200, body: this.room(doc).ops.read(since) };
+          return { status: 200, body: { ...this.room(doc).ops.read(since), ...(voting && { votes: this.room(doc).ops.voteView(me) }) } };
         },
         submit: async request => {
           const body = await request.body();
@@ -531,7 +540,7 @@ export class CloudHost {
           if (!Array.isArray(ops)) return { status: 400, body: { code: "invalid", message: "ops must be a list" } };
           const allowance = this.team.takeOps(now.id, ops.length);
           if (ops.length > LIMITS.opsPerMessage) return { status: 429, body: { code: "quota", message: "Too many ops in one message" } };
-          return { status: 200, body: this.submit(doc, ops, now, allowance) };
+          return { status: 200, body: this.submit(doc, ops, now, allowance, voting) };
         },
       }),
     }, { method, path: p, query: url.searchParams, headers: new Headers(), body: () => this.body(req, MAX_BODY_BYTES, me.device) });
@@ -611,9 +620,10 @@ export class CloudHost {
         if (message.doc !== s.doc) throw new HostError(400, "invalid", "Document does not match the room");
         const since = Number(message.since);
         if (!Number.isSafeInteger(since) || since < 0) throw new HostError(400, "invalid", "since must be a nonnegative integer");
+        s.voting = supportsCloudVotes(message.capabilities);
         const data = room.ops.read(since);
         const me = { id: s.me.id, email: s.me.email, name: s.me.name };
-        send({ type: "welcome", protocol: PROTOCOL_VERSION, server: SERVER_VERSION, role: s.me.role, me, seq: data.seq, ...("threads" in data ? { threads: data.threads } : {}) });
+        send({ type: "welcome", protocol: PROTOCOL_VERSION, server: SERVER_VERSION, role: s.me.role, me, seq: data.seq, serverTime: new Date(this.now()).toISOString(), capabilities: [CLOUD_VOTES], ...(s.voting && { votes: room.ops.voteView(me) }), ...("threads" in data ? { threads: data.threads } : {}) });
         if ("entries" in data && data.entries.length) send({ type: "applied", entries: data.entries });
         s.ready = true;
         return;
@@ -622,7 +632,7 @@ export class CloudHost {
       if (!Array.isArray(message.ops)) throw new HostError(400, "invalid", "ops must be a list");
       const allowance = this.team.takeOps(s.me.id, message.ops.length);
       if (message.ops.length > LIMITS.opsPerMessage) throw new HostError(429, "quota", "Too many ops in one message");
-      const result = this.submit(s.doc, message.ops, s.me, allowance);
+      const result = this.submit(s.doc, message.ops, s.me, allowance, !!s.voting);
       for (const ack of result.acks) send({ type: "ack", ...ack });
       if (result.rejected.length) send({ type: "reject", rejected: result.rejected });
     } catch (e) {

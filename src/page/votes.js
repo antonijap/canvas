@@ -1,3 +1,4 @@
+import { colorOf } from "./comments-logic.js";
 import { button, el, icon } from "./whiteboard.js";
 import { STICKY_COLORS, WHITEBOARD_PAINT } from "./whiteboard-model.js";
 
@@ -93,7 +94,8 @@ function start(host) {
   const anonymous = toggle("Anonymous results", "voteAnonymous");
   const startVote = control("Start", submitStart, "voteStart", true);
   const sheetActions = el("div", "vote-actions");
-  sheetActions.append(control("Cancel", closeSheet), startVote);
+  const sheetPeople = el("div", "vote-sheet-people");
+  sheetActions.append(sheetPeople, control("Cancel", closeSheet), startVote);
   sheet.append(optionRow("Vote on", things.group), scopeRow, optionRow("Votes each", stepper), hidden.row, anonymous.row, sheetActions);
   layer.append(sheet);
 
@@ -105,6 +107,8 @@ function start(host) {
   results.dataset.voteResults = "";
   layer.append(results);
 
+  let canVote = true, canStart = true, cloud = false, message, people = [], clockOffset, endTimer;
+  const shownErrors = new Set();
   let page = host.page, votes = [], showResults = null, lastActive = null, busy = false, loading = 0, anchored = [], hovered = null;
   const current = () => votes.find(v => v.scope.page === host.page);
   const active = () => current()?.state === "active";
@@ -130,10 +134,12 @@ function start(host) {
   }
 
   function activate() {
-    if (host.readOnly || !host.page || host.textEdit?.active) return;
+    if (!host.page || host.textEdit?.active) return;
     const v = current();
     if (v?.state === "active") return;
     if (v?.state === "ended") { showResults = v.id; paint(); return; }
+    if (!canVote) { host.toast(message); return; }
+    if (!canStart || host.readOnly) { host.toast("Owners and editors can start a vote."); return; }
     if (draft) { closeSheet(); return; }
     host.emit("draw-tool", "vote");
     const selected = host.selection();
@@ -146,6 +152,7 @@ function start(host) {
     anonymous.input.checked = false;
     step(0);
     sheet.hidden = false;
+    paintSheetPeople();
     reportTool();
     things.group.firstElementChild.focus({ preventScroll: true });
     host.requestFrame();
@@ -164,7 +171,26 @@ function start(host) {
 
   function update(data) {
     votes = data.votes;
+    cloud = data.canVote !== undefined;
+    canVote = data.canVote ?? true;
+    canStart = data.canStart ?? true;
+    people = data.people ?? [];
+    message = data.message;
+    clockOffset = data.clockOffset;
+    clearTimeout(endTimer);
     const v = current();
+    if (canVote && canStart && Number.isFinite(clockOffset) && v?.state === "active" && v.timer?.endsAt && !v.pendingEnd) {
+      const remaining = Date.parse(v.timer.endsAt) - (Date.now() + clockOffset);
+      endTimer = setTimeout(() => {
+        if (current()?.id === v.id && !busy) void send({ kind: "vote.end", vote: v.id, expired: true });
+      }, Math.max(0, remaining) + 200);
+    }
+    if (draft && !canStart) closeSheet();
+    for (const error of data.rejected ?? []) {
+      if (shownErrors.has(error.id)) continue;
+      shownErrors.add(error.id);
+      host.toast(error.message);
+    }
     if (v?.state === "ended" && v.id === lastActive) showResults = v.id;
     lastActive = v?.state === "active" ? v.id : null;
     paint();
@@ -209,6 +235,32 @@ function start(host) {
     }
   }
 
+  function avatars(people, progress = false) {
+    const list = el("span", "vote-people" + (progress ? " vote-progress" : ""));
+    for (const p of people) {
+      const avatar = el("span", "vote-avatar", Array.from(p.name)[0]?.toUpperCase() || "?");
+      const label = progress && p.done ? `${p.name}, done voting` : p.name;
+      avatar.style.background = colorOf(p.name);
+      avatar.title = label;
+      avatar.setAttribute("aria-label", label);
+      if (progress && p.done) {
+        const check = el("span", "vote-done-check");
+        check.dataset.voteProgressDone = "";
+        check.innerHTML = icon("m5 12 4 4L19 6");
+        avatar.append(check);
+      }
+      list.append(avatar);
+    }
+    return list;
+  }
+
+  function paintSheetPeople() {
+    const here = anonymous.input.checked ? [] : people;
+    sheetPeople.replaceChildren();
+    if (here.length) sheetPeople.append(avatars(here), el("span", "vote-muted", `${here.length} here`));
+  }
+  anonymous.input.addEventListener("change", paintSheetPeople);
+
   function paintBar(v) {
     bar.replaceChildren();
     bar.hidden = !v;
@@ -219,13 +271,21 @@ function start(host) {
       dots.setAttribute("aria-label", `${remaining} votes left`);
       for (let i = 0; i < v.perPerson; i++) dots.append(el("span", i < remaining ? "available" : ""));
       bar.append(heading("Voting"), el("span", "vote-muted", v.on === "stickies" ? "Click a sticky to vote" : "Click an object to vote"), dots);
-      if (v.host) bar.append(control("End vote", () => send({ kind: "vote.end", vote: v.id }), "voteEnd"));
+      if (v.people?.length) bar.append(avatars(v.people, true));
+      if (v.done > (v.people?.filter(p => p.done).length ?? 0)) bar.append(el("span", "vote-muted", `${v.done} done`));
+      if (!canVote) bar.append(el("span", "vote-muted", message));
+      if (v.host && canVote) {
+        const end = control(v.pendingEnd ? "Ending…" : "End vote", () => send({ kind: "vote.end", vote: v.id }), "voteEnd");
+        end.disabled = v.pendingEnd;
+        bar.append(end);
+      }
       return;
     }
     bar.append(heading("Vote ended"), el("span", "vote-muted", (v.anonymous ? "Anonymous, " : "") + voteTotal(v.total)));
     if (showResults !== v.id) bar.append(control("Results", () => { showResults = v.id; paint(); }));
-    if (!v.host) return;
-    if (v.pendingConclusion) bar.append(control("Place conclusion", () => send({ kind: "vote.end", vote: v.id }), "voteEnd"));
+    if (!canVote) bar.append(el("span", "vote-muted", message));
+    if (!v.host || !canVote) return;
+    if (v.pendingConclusion) bar.append(control("Place conclusion", () => cloud ? load() : send({ kind: "vote.end", vote: v.id }), "voteEnd"));
     else bar.append(control("Clear votes", () => send({ kind: "vote.clear", vote: v.id }), "voteClear"));
   }
 
@@ -246,7 +306,7 @@ function start(host) {
     results.replaceChildren();
     if (results.hidden) return;
     results.append(el("h2", "vote-title", "Results"),
-      el("p", "vote-muted", v.anonymous ? "Anonymous, counts only" : (v.scopeName || voteTotal(v.total))));
+      el("p", "vote-muted", v.anonymous ? "Anonymous, counts only" : (v.scopeName || (v.voters ? `${voteTotal(v.total)} from ${v.voters} ${v.voters === 1 ? "person" : "people"}` : voteTotal(v.total)))));
     const list = el("ol", "vote-result-list");
     for (const row of v.results) {
       const item = el("li", "vote-result-row" + (row.rank === 1 ? " vote-winner" : ""));
@@ -254,14 +314,8 @@ function start(host) {
       label.title = row.name;
       const swatch = el("span", "vote-result-swatch");
       if (Object.hasOwn(STICKY_COLORS, row.color)) swatch.style.setProperty("--vote-swatch", STICKY_COLORS[row.color]);
-      const people = el("span", "vote-people");
-      for (const name of row.names) {
-        const avatar = el("span", "vote-avatar", Array.from(name)[0].toUpperCase());
-        avatar.title = name;
-        avatar.setAttribute("aria-label", name);
-        people.append(avatar);
-      }
-      item.append(el("span", "vote-muted", String(row.rank)), swatch, label, people, el("strong", "", String(row.count)));
+      const voters = avatars(row.names.map(name => ({ name })));
+      item.append(el("span", "vote-muted", String(row.rank)), swatch, label, voters, el("strong", "", String(row.count)));
       list.append(item);
     }
     if (list.childElementCount) results.append(list);
@@ -297,6 +351,10 @@ function start(host) {
         group.append(document.createTextNode(String(row.count)));
       }
     } else {
+      for (const { layer, count } of v.peerTotals ?? []) {
+        const group = groupFor(layer);
+        for (let i = 0; i < Math.min(count, 10); i++) group.append(el("span", "vote-dot vote-peer"));
+      }
       for (const ballot of v.ballots) {
         const mark = ballot.own ? button("Remove your vote", "vote-dot", () => send({ kind: "vote.retract", vote: v.id, ballot: ballot.id })) : el("span", "vote-dot vote-peer");
         mark.dataset.voteMark = "";
@@ -311,7 +369,7 @@ function start(host) {
     if (!host.cam) return;
     const { x, y, z } = host.cam;
     const v = current();
-    const hover = !host.hand && v?.state === "active" && v.mine < v.perPerson && hovered && host.worldRectOf(hovered);
+    const hover = canVote && !host.hand && v?.state === "active" && v.mine < v.perPerson && hovered && host.worldRectOf(hovered);
     candidate.hidden = !hover;
     if (hover) candidate.style.transform = `translate(${x + (hover.x + hover.w) * z - 8}px,${y + hover.y * z}px)`;
     for (const badge of anchored) {
@@ -330,6 +388,7 @@ function start(host) {
     const v = current();
     if (showResults && showResults !== v?.id) showResults = null;
     paintBar(v);
+    if (draft) paintSheetPeople();
     paintResults(v);
     paintMarks(v);
     reportTool();
@@ -358,7 +417,7 @@ function start(host) {
 
   addEventListener("pointerdown", e => {
     const v = current();
-    if (v?.state !== "active" || host.hand || host.readOnly || e.button !== 0 || !view.contains(e.target)) return;
+    if (v?.state !== "active" || !canVote || host.hand || e.button !== 0 || !view.contains(e.target)) return;
     const id = targetAt(e, v);
     if (!id && e.target.closest?.(canvasChrome)) return;
     e.preventDefault();
@@ -393,6 +452,7 @@ function start(host) {
   });
   host.on("resync", load);
   host.es?.addEventListener("comments", load);
+  host.es?.addEventListener("cloudfile", load);
   host.beforeFrame(positionMarks);
   host.votes = { activate, active, capturing };
   void load();

@@ -675,7 +675,9 @@ function start(host) {
     // Inline, not a row: the meta row lines its baseline up with the name's, and the clock sits on the capitals' middle (cap units).
     const s = h("span", "cm-state wait");
     s.innerHTML = ICON.clock;
-    s.append(lbl(st.sync && st.sync.connected ? "Sending" : "Sends when you're back online"));
+    s.append(lbl(st.sync?.canComment === false && st.sync.connected
+      ? "Update Canvas on the host to send this comment"
+      : st.sync?.connected ? "Sending" : "Sends when you're back online"));
     return s;
   }
   /** "Not sent: reason" with Retry and Discard. */
@@ -683,14 +685,14 @@ function start(host) {
     const row = h("div", "cm-fail");
     const s = h("span", "cm-state");
     s.innerHTML = ICON.alert;
-    s.append(document.createTextNode(`Not sent: ${L.refusalReason(r, st.sync && st.sync.role)}`));
+    s.append(document.createTextNode(`Not sent: ${L.refusalReason(r, st.sync)}`));
     const retry = txtBtn("cm-btn txt", "Retry"), drop = txtBtn("cm-btn txt dim", "Discard");
     retry.onclick = () => syncCall("retry", r.opId);
     drop.onclick = () => syncCall("discard", r.opId);
     row.append(s, retry, drop);
     return row;
   }
-  const syncKey = () => (st.sync ? JSON.stringify([st.sync.connected, st.sync.role, st.sync.pending.map((o) => o.opId), st.sync.rejected.map((o) => [o.opId, o.kind, o.code, o.message])]) : "");
+  const syncKey = () => (st.sync ? JSON.stringify([st.sync.connected, st.sync.role, st.sync.canComment, st.sync.pending.map((o) => o.opId), st.sync.rejected.map((o) => [o.opId, o.kind, o.code, o.message])]) : "");
 
   // ---------- the thread card ----------
   const chip = (name, page) => { const c = h("span", "cm-chip"); c.innerHTML = ICON.layer; c.append(h("span", "", name)); c.title = page ? "On the canvas" : name; return c; };
@@ -840,7 +842,7 @@ function start(host) {
     const menu = h("div", "cm-menu cm-pin-menu cm-ui");
     menu.setAttribute("role", "menu");
     menu.setAttribute("aria-label", "Comment actions");
-    const canComment = st.sync?.role !== "viewer";
+    const canComment = st.sync?.canComment !== false;
     const focusPin = () => pins.get(t.id)?.el.focus();
     const item = (label, action, { danger = false, disabled = false } = {}) => {
       const b = h("button", danger ? "danger" : "", label);

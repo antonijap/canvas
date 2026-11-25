@@ -29,14 +29,14 @@ test("envelopes are checked for shape and limits", () => {
   assert.match(checkEnvelope({ opId: u(9), doc, at: "x", op: { kind: "drop.tables" } })!, /unknown/);
 });
 
-test("authors edit their own comments; viewers cannot comment; editors may delete any", () => {
+test("authors edit their own comments; viewers can comment; editors may delete any", () => {
   const ts: Thread[] = [];
   applyOp(ts, doc, { kind: "thread.create", thread: u(1), anchor: { x: 0, y: 0 }, comment: u(2), body: "Hi" }, anna, "t");
   assert.equal(mayApply({ kind: "comment.edit", comment: u(2), body: "x" }, "commenter", anna, ts), true);
   assert.equal(mayApply({ kind: "comment.edit", comment: u(2), body: "x" }, "owner", ben, ts), false, "not even an owner edits someone else's words");
   assert.equal(mayApply({ kind: "comment.delete", comment: u(2) }, "editor", ben, ts), true);
   assert.equal(mayApply({ kind: "comment.delete", comment: u(2) }, "commenter", ben, ts), false);
-  assert.equal(mayApply({ kind: "comment.add", thread: u(1), comment: u(3), body: "x" }, "viewer", ben, ts), false);
+  assert.equal(mayApply({ kind: "comment.add", thread: u(1), comment: u(3), body: "x" }, "viewer", ben, ts), true);
 });
 
 test("people rules: deny wins, then an exact email, then the domain", () => {
@@ -74,7 +74,7 @@ test("moving a thread: its author or the Cloud owner, nobody else", () => {
   assert.equal(mayApply(move, "owner", ben, ts), true, "the owner moves anyone's");
   assert.equal(mayApply(move, "editor", ben, ts), false, "an editor does not move someone else's thread");
   assert.equal(mayApply(move, "commenter", ben, ts), false, "a reply does not make Ben its author");
-  assert.equal(mayApply(move, "viewer", anna, ts), false, "viewers change nothing");
+  assert.equal(mayApply(move, "viewer", anna, ts), true, "viewers can move their own threads");
   assert.equal(mayApply(move, "commenter", { name: "Anna" }, ts), false, "no email, no claim to a thread");
   assert.equal(mayApply({ ...move, thread: u(9) }, "commenter", anna, ts), false, "a thread that is not there has no author");
   // The move itself: the anchor is replaced whole, the comments stay.

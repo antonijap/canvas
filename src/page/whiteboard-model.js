@@ -16,7 +16,7 @@ export const STICKERS = Object.freeze({
 });
 
 export const WHITEBOARD_PAINT = Object.freeze({
-  ink: "#18181B", authorInk: "#40384A", avatar: "#6554C0", white: "#FFFFFF", shadow: "#00000033",
+  ink: "#18181B", authorInk: "#40384A", avatar: "#6554C0", white: "#FFFFFF", shadow: "#00000033", "vote-done": STICKERS.agree.color,
 });
 export const STICKY_SIZE = 184;
 export const STICKY_PADDING = 16;

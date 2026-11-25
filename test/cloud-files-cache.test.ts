@@ -442,3 +442,25 @@ test('moving a whiteboard to a legacy host leaves the local file intact', async 
     assert.equal(request.mock.calls.length, 1);
     assert.equal(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), document);
 });
+
+test('a background vote conclusion does not reopen a closed Cloud cache', async t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-closed-vote-'));
+    t.mock.method(os, 'homedir', () => dir);
+    t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
+    const cloud = 'http://127.0.0.1:9196', id = crypto.randomUUID(), vote = crypto.randomUUID();
+    const pkg = path.join(dir, 'Library', 'Application Support', 'Canvas', 'cloud-files', cloudKey(cloud), id + '.canvas');
+    const store = new FileStateStore(pkg, { cloud, file: id, name: 'Board', role: 'editor', author: { id: 'anna', name: 'Anna' },
+        state: stateFromFiles({ children: [{ id: 'board', type: 'frame' }] }) });
+    store.materialize();
+    store.close();
+    const { emptyComments, writeCommentsFile } = await import('../src/comments-file.ts');
+    const { fileInfo } = await import('../src/cloud-files.ts');
+    const { syncVoteConclusions } = await import('../src/votes.ts');
+    writeCommentsFile(pkg, { ...emptyComments(), doc: id, voteConclusions: [vote], cloudVotes: [{
+        id: vote, state: 'ended', scope: { page: 'page-1' }, on: 'anything', hidden: true, anonymous: false, perPerson: 1, ballots: [],
+    }] });
+    setCloudConfig({ clouds: [{ url: cloud, devEmail: 'anna@example.test' }] });
+    t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); fs.rmSync(dir, { recursive: true, force: true }); });
+    await syncVoteConclusions(pkg, { changed: () => assert.fail('A closed file changed'), place: async () => assert.fail('A closed file was edited') });
+    assert.equal(fileInfo(pkg, false), null);
+});

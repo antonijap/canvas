@@ -434,7 +434,7 @@ final class CloudAccount: ObservableObject {
     func copyInvite(_ model: CanvasModel, _ e: CloudEntry) {
         let alert = NSAlert()
         alert.messageText = "Copy Invite"
-        alert.informativeText = "Enter the name or email of the person joining this Cloud."
+        alert.informativeText = "Enter the name or email of the person joining this Cloud. New members can edit, comment and vote."
         let field = NSTextField(string: "")
         field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
         field.setAccessibilityLabel("Name or email")
@@ -1101,6 +1101,7 @@ struct CloudPage: View {
 
     private func personDetail(_ p: HostState.Person) -> String {
         if p.role == "owner" { return "You, the host" }
+        if p.role == "viewer" { return "Viewer. Can comment and vote." }
         if !p.devices.isEmpty { return "Joined from " + p.devices.joined(separator: ", ") }
         return p.invited ? "Invite waiting" : (p.role.isEmpty ? "No Mac joined" : p.role.capitalized)
     }

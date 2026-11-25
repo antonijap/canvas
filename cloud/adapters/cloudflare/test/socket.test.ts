@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { evictDurableObject, reset } from "cloudflare:test";
-import { LIMITS, PROTOCOL_VERSION } from "../../../protocol";
+import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION } from "../../../protocol";
 import { bindings, call, connect, envelope, member, owner, post, register, rules } from "./helpers";
 
 const sockets: WebSocket[] = [];
 beforeEach(reset);
 afterEach(() => { for (const socket of sockets.splice(0)) socket.close(); });
-async function open(doc: string, email = owner, since = 0) {
+async function open(doc: string, email = owner, since = 0, capabilities?: string[]) {
   const connection = await connect(doc, email);
   sockets.push(connection.socket);
-  connection.socket.send(JSON.stringify({ type: "hello", protocol: PROTOCOL_VERSION, doc, since }));
+  connection.socket.send(JSON.stringify({ type: "hello", protocol: PROTOCOL_VERSION, doc, since, capabilities }));
   return connection;
 }
 it("hello since zero gets a snapshot, since n gets only newer entries", async () => {
@@ -68,16 +68,50 @@ it("lowering to deny closes a person's open socket", async () => {
   expect((await closed).code).toBe(1008);
   expect((await call(`/v1/docs/${doc}/threads`, member)).status).toBe(403);
 });
-it("enforces permissions at message arrival", async () => {
+it("enforces vote management permissions at message arrival", async () => {
   await rules([{ match: member, role: "viewer" }]);
   const doc = await register();
-  const a = await open(doc, member);
+  const a = await open(doc, member, 0, [CLOUD_VOTES]);
   await a.next();
-  a.socket.send(JSON.stringify({ type: "ops", ops: [envelope(doc)] }));
+  const vote = crypto.randomUUID();
+  a.socket.send(JSON.stringify({ type: "ops", ops: [envelope(doc, { kind: "vote.end", vote })] }));
   expect(await a.next()).toMatchObject({ type: "reject", rejected: [{ code: "forbidden" }] });
-  await rules([{ match: member, role: "commenter" }]);
   a.socket.send(JSON.stringify({ type: "ops", ops: [envelope(doc)] }));
   expect([await a.next(), await a.next()]).toContainEqual(expect.objectContaining({ type: "ack", seq: 1 }));
+});
+it("filters hidden ballots across legacy live, welcome, replay and export routes", async () => {
+  await rules([{ match: member, role: "viewer" }]);
+  const doc = await register(), vote = crypto.randomUUID(), ballot = crypto.randomUUID();
+  const headers = { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES };
+  const topology = { pages: ["page"], nodes: [["note", { page: "page", type: "sticky", chain: ["note"] }]] };
+  const route = `/v1/docs/${doc}`;
+  expect((await call(route + "/vote-design", member, "PUT", topology)).status).toBe(403);
+  expect((await call(route + "/vote-design", owner, "PUT", topology)).status).toBe(200);
+  const a = await open(doc, owner, 0, [CLOUD_VOTES]);
+  const b = await open(doc, member, 0, [CLOUD_VOTES]);
+  const old = await open(doc);
+  expect(await a.next()).toMatchObject({ serverTime: expect.any(String) });
+  await b.next(); await old.next();
+  const start = envelope(doc, { kind: "vote.start", vote, scope: { page: "page" }, on: "stickies", perPerson: 1, hidden: true, anonymous: true });
+  const cast = envelope(doc, { kind: "vote.cast", vote, ballot, layer: "note" });
+  const submit = (email: string, ops: unknown[]) => call(route + "/ops", email, "POST", { ops }, headers);
+  await submit(owner, [start]);
+  await a.next(); await b.next(); await old.next();
+  await submit(member, [cast]);
+  expect(await a.next()).toMatchObject({ type: "applied", votes: [{ ballots: [] }] });
+  expect(await b.next()).toMatchObject({ type: "applied", entries: [{ op: { kind: "vote.changed" } }], votes: [{ ballots: [{ id: ballot, layer: "note" }] }] });
+  const legacy = await old.next();
+  expect(legacy).toMatchObject({ type: "applied", entries: [{ seq: 2, op: { kind: "vote.changed" } }] });
+  expect(legacy).not.toHaveProperty("votes");
+  const replay = await open(doc, owner, 1, [CLOUD_VOTES]);
+  expect(await replay.next()).toMatchObject({ type: "welcome", votes: [{ ballots: [] }] });
+  expect(JSON.stringify(await replay.next())).not.toContain(ballot);
+  expect(JSON.stringify(await (await call(route + "/threads?since=1", owner, "GET", undefined, headers)).json())).not.toContain(ballot);
+  expect(JSON.stringify(await (await call("/v1/export")).json())).not.toContain(ballot);
+  const end = envelope(doc, { kind: "vote.end", vote });
+  await submit(owner, [end]);
+  expect(await b.next()).toMatchObject({ type: "applied", votes: [{ totals: [{ layer: "note", count: 1, names: [] }], ballots: [] }] });
+  expect(await a.next()).toMatchObject({ type: "applied", votes: [{ conclusionOp: end.opId }] });
 });
 it("closes the oldest socket above the per-person limit", async () => {
   const doc = await register();

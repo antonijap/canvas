@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { LIMITS, PROTOCOL_VERSION } from "../../../protocol";
+import { CLOUD_VOTES, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../../protocol";
 import type { PeopleRule, Role, ServerMessage } from "../../../protocol";
 import type { Identity } from "./auth";
 import type { SqlStore } from "../../../core/sql.ts";
@@ -9,7 +9,7 @@ import { Operations } from "./operations";
 import { effectiveRole, ranks } from "./people";
 
 interface Session {
-  doc: string; me: Identity; role: Role; ready: boolean; opened: number;
+  doc: string; me: Identity; role: Role; ready: boolean; voting?: boolean; opened: number;
   window?: number; messages?: number;
 }
 function session(socket: WebSocket): Session { return socket.deserializeAttachment() as Session; }
@@ -29,20 +29,33 @@ export class Room extends DurableObject<Env> {
     return uuid(doc) && this.env.ROOM.idFromName(doc).equals(this.ctx.id);
   }
   snapshot() { return this.operations.snapshot(); }
-  read(since: number) { return this.operations.read(since); }
-  async submit(doc: string, ops: unknown[], me: Identity, _role: Role) {
-    const { role, allowance } = await this.env.TEAM.getByName("team").admitOps(me.email, ops.length);
-    return this.applyAndBroadcast(doc, ops, me, role, allowance);
+  read(since: number, me?: Identity) {
+    return { ...this.operations.read(since), ...(me && { votes: this.operations.voteView(me) }) };
   }
-  private async applyAndBroadcast(doc: string, ops: unknown[], me: Identity, role: Role | null, allowance: number) {
+  async setVoteDesign(doc: string, email: string, value: unknown) {
+    if (!this.matches(doc)) return false;
+    const auth = await this.env.TEAM.getByName("team").authorization(-1, [email]);
+    const role = auth.roles?.[0]?.role;
+    if (auth.generation < this.generation || (role !== "owner" && role !== "editor")) return "forbidden";
+    return this.operations.setVoteDesign(value);
+  }
+  async submit(doc: string, ops: unknown[], me: Identity, _role: Role, voting = false) {
+    const { role, allowance } = await this.env.TEAM.getByName("team").admitOps(me.email, ops.length);
+    return this.applyAndBroadcast(doc, ops, me, role, allowance, voting);
+  }
+  private async applyAndBroadcast(doc: string, ops: unknown[], me: Identity, role: Role | null, allowance: number, voting: boolean) {
     if (!this.matches(doc)) throw new Error("Document does not match the room");
     if (!Array.isArray(ops) || ops.length > LIMITS.opsPerMessage) throw new Error("Too many ops");
     const members = await this.env.TEAM.getByName("team").members("recipients");
-    const result = this.operations.submit(doc, ops, me, role, allowance, members);
+    await this.refreshRules();
+    const auth = role && await this.env.TEAM.getByName("team").authorization(-1, [me.email]);
+    const current = auth && auth.generation >= this.generation ? auth.roles?.[0]?.role ?? null : null;
+    const result = this.operations.submit(doc, ops, me, current, allowance, members, voting || undefined);
     if (result.entries.length) {
-      await this.refreshRules();
+      const changed = result.entries.some(entry => entry.op.kind === "vote.changed");
       for (const socket of this.ctx.getWebSockets()) {
-        if (session(socket).ready) send(socket, { type: "applied", entries: result.entries });
+        const state = session(socket);
+        if (state.ready) send(socket, { type: "applied", entries: result.entries, ...(changed && state.voting && { votes: this.operations.voteView(state.me) }) });
       }
     }
     return { acks: result.acks, rejected: result.rejected };
@@ -119,10 +132,11 @@ export class Room extends DurableObject<Env> {
           socket.close(1008, "Unsupported protocol"); return;
         }
         if (message.doc !== state.doc) throw new HttpError(400, "invalid", "Document does not match the room");
+        state.voting = supportsCloudVotes(message.capabilities);
         const data = this.operations.read(sinceValue(message.since));
         send(socket, {
           type: "welcome", protocol: PROTOCOL_VERSION, server: this.env.SERVER_VERSION,
-          role: state.role, me: state.me, seq: data.seq, ...("threads" in data ? { threads: data.threads } : {}),
+          role: state.role, me: state.me, seq: data.seq, serverTime: new Date().toISOString(), capabilities: [CLOUD_VOTES], ...(state.voting && { votes: this.operations.voteView(state.me) }), ...("threads" in data ? { threads: data.threads } : {}),
         });
         if ("entries" in data && data.entries.length) send(socket, { type: "applied", entries: data.entries });
         state.ready = true;
@@ -135,7 +149,7 @@ export class Room extends DurableObject<Env> {
       if (message.ops.length > LIMITS.opsPerMessage) throw new HttpError(429, "quota", "Too many ops in one message");
       await this.refreshRules();
       if (socket.readyState !== WebSocket.OPEN) return;
-      const result = await this.applyAndBroadcast(state.doc, message.ops, state.me, session(socket).role, allowance);
+      const result = await this.applyAndBroadcast(state.doc, message.ops, state.me, session(socket).role, allowance, !!state.voting);
       for (const ack of result.acks) send(socket, { type: "ack", ...ack });
       if (result.rejected.length) send(socket, { type: "reject", rejected: result.rejected });
     } catch (error) {

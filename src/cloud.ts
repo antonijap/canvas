@@ -32,13 +32,15 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
-import { isVoteOp, PROTOCOL_VERSION, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread } from "../cloud/protocol.ts";
+import { CLOUD_VOTES, isVoteOp, PROTOCOL_VERSION, supportsCloudVotes, UPDATE_VOTE_HOST, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread, type CommentsFile, type Role } from "../cloud/protocol.ts";
 import { readBodyText } from "./body.ts";
 import { addCloud, bump, cleanServerUrl, cloudConfigs, devEmailFor, generation, hostedId, hostedUrl, hostOf, isConfigured, isLocalDev, onCloudsChanged, parseInvite, removeCloud } from "./cloud-config.ts";
 import { hostsHere, hostStatus, hostStatusAll, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
 import { deleteJoined, readJoined, writeJoined, type JoinedSecrets } from "./cloud-secrets.ts";
 import { forward, genkey, helperPath, hostIdFor, type Helper } from "./cloud-tunnel.ts";
 import { newSecret } from "../cloud/adapters/mac/host.ts";
+import { currentDoc } from "./docwriter.ts";
+import { receiveVoteViews, sendableCommentOps, voterId, voteOpsForShare, voteTopology } from "./vote-state.ts";
 import { acknowledge, confirm, discard, hooks, isShared, opsForShare, pendingStates, reject, retry, shareLocal, snapshot, viewOf, type SyncFile } from "./cloud-sync.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
 import { localName, packageOf } from "./comments.ts";
@@ -212,7 +214,7 @@ export function setToken(url: string, token: string | null): void {
 
 // ---------- the server ----------
 
-interface ServerState { status: Status; email?: string; name?: string; role?: string; server?: string; protocol?: number; at: number; devEmail: string }
+interface ServerState { status: Status; email?: string; name?: string; role?: string; server?: string; protocol?: number; voting?: boolean; at: number; devEmail: string }
 
 /**
  * How long a status answer is reused, so the team's server is not asked on every look. A connected server is asked
@@ -295,7 +297,7 @@ export async function checkServer(origin: string, force = false, fresh = false):
   const me = await request(origin, "/v1/me");
   if (me.fail) return set({ status: me.fail, protocol });
   if (!me.res.ok) return set({ status: "offline", protocol });
-  return set({ status: "connected", email: me.json?.email, name: me.json?.name, role: me.json?.role, protocol, server: info.json?.server });
+  return set({ status: "connected", email: me.json?.email, name: me.json?.name, role: me.json?.role, protocol, server: info.json?.server, voting: supportsCloudVotes(info.json?.capabilities) });
 }
 
 // ---------- one room per shared file ----------
@@ -310,7 +312,9 @@ interface Session {
   origin: string;
   doc: string;
   status: Status;
-  role?: string;
+  role?: Role;
+  publishing?: boolean;
+  voteClockOffset?: number;
   ws?: WebSocket;
   ready: boolean;
   attempt: number;
@@ -394,7 +398,7 @@ async function connect(s: Session): Promise<void> {
   }
   s.ws = ws;
   if (t.hosted) watch(s, ws);
-  ws.onopen = () => { if (s.ws === ws && !s.stopped) send(s, { type: "hello", protocol: PROTOCOL_VERSION, doc: s.doc, since: seqOf(s) }); };
+  ws.onopen = () => { if (s.ws === ws && !s.stopped) send(s, { type: "hello", protocol: PROTOCOL_VERSION, doc: s.doc, since: seqOf(s), capabilities: [CLOUD_VOTES] }); };
   ws.onmessage = (ev) => {
     if (s.ws !== ws || s.stopped) return; // a socket this session no longer owns (removed, signed out) says nothing
     try { onMessage(s, JSON.parse(String(ev.data)) as ServerMessage); } catch { /* a bad message is skipped */ }
@@ -443,20 +447,32 @@ function onMessage(s: Session, m: ServerMessage): void {
     case "welcome": {
       if (m.protocol !== PROTOCOL_VERSION) { setStatus(s, m.protocol < PROTOCOL_VERSION ? "tooOld" : "tooNew"); s.ws?.close(); return; }
       mutate(s, (f) => {
+        if (f.me && (f.me.id && m.me.id ? f.me.id !== m.me.id : f.me.email && f.me.email !== m.me.email)) {
+          reject(f, f.outbox.filter(e => isVoteOp(e.op)).map(e => ({ opId: e.opId, code: "forbidden", message: "This vote was queued by a different Cloud member" })));
+          delete f.cloudVotes;
+          delete f.voteConclusions;
+        }
         if (m.threads) snapshot(f, m.threads as Thread[], m.seq);
+        if (m.votes) receiveVoteViews(f, m.votes);
+        f.voteCapable = supportsCloudVotes(m.capabilities);
+        f.voteRole = m.role;
         f.me = m.me;
         return true;
       });
       s.ready = true;
       s.attempt = 0;
       s.role = m.role;
+      s.voteClockOffset = m.serverTime ? Date.parse(m.serverTime) - Date.now() : undefined;
       setStatus(s, "connected");
       flush(s);
       return;
     }
     case "applied": {
       for (const e of m.entries) s.inflight.delete(e.opId);
-      mutate(s, (f) => confirm(f, m.entries as Applied[]));
+      mutate(s, (f) => {
+        if (m.votes) receiveVoteViews(f, m.votes);
+        return confirm(f, m.entries as Applied[]) || !!m.votes;
+      });
       flush(s);
       return;
     }
@@ -497,21 +513,40 @@ function delayFlush(s: Session, ms: number): void {
 
 /** Sends what waits in the outbox: up to 50 ops at a time, no more than 100 in a minute, none twice before an answer. */
 export function flush(s: Session): void {
-  if (!s.ready || s.stopped) return;
+  if (!s.ready || s.stopped || s.publishing) return;
   let f: SyncFile | null;
   try { f = readCommentsFile(s.pkg) as SyncFile | null; } catch { return; }
   if (!f) return;
   const now = Date.now();
   s.sentAt = s.sentAt.filter((t) => now - t < 60_000);
   const room = OPS_PER_MINUTE - s.sentAt.length;
-  // Vote ops stay in the outbox until the room implements private ballots and vote snapshots.
-  const todo = f.outbox.filter((e) => !isVoteOp(e.op) && !s.inflight.has(e.opId));
+  const todo = sendableCommentOps(f.outbox, s.role, f.voteCapable).filter(e => !s.inflight.has(e.opId));
   if (!todo.length) return;
   if (room <= 0) { delayFlush(s, s.sentAt[0] + 60_000 - now + 50); return; }
   if (s.inflight.size) return; // one batch at a time; the answer sends the next
   const batch = todo.slice(0, Math.min(MAX_BATCH, room));
-  for (const e of batch) { s.inflight.add(e.opId); s.sentAt.push(now); }
-  send(s, { type: "ops", ops: batch });
+  const deliver = () => {
+    if (!s.ready || s.stopped) return;
+    for (const e of batch) { s.inflight.add(e.opId); s.sentAt.push(now); }
+    send(s, { type: "ops", ops: batch });
+  };
+  const starts = batch.filter(e => e.op.kind === "vote.start");
+  if (!starts.length || (s.role !== "owner" && s.role !== "editor")) { deliver(); return; }
+  s.publishing = true;
+  const ws = s.ws;
+  void Promise.resolve().then(() => {
+    const file = path.join(s.pkg, "document.json");
+    return request(s.origin, `/v1/docs/${s.doc}/vote-design`, { method: "PUT", body: voteTopology(file, currentDoc(file).doc) });
+  }).then(reply => {
+    if (s.ws !== ws || s.stopped) return;
+    if (reply.fail) { delayFlush(s, 5000); return; }
+    if (!reply.res.ok) {
+      mutate(s, f => reject(f, starts.map(e => ({ opId: e.opId, code: "invalid", message: String(reply.json?.message ?? "Could not publish the vote design") }))));
+      delayFlush(s, 0);
+      return;
+    }
+    deliver();
+  }).catch(() => { delayFlush(s, 5000); }).finally(() => { s.publishing = false; });
 }
 
 function stop(s: Session): void {
@@ -632,6 +667,17 @@ function touch(pkg: string, display: string | null): void {
   flush(s);
 }
 
+export const legacyVoteClockOffset = (pkg: string) => sessions.get(pkg)?.voteClockOffset;
+
+export function queueLegacyVote(pkg: string, display: string, file: CommentsFile, envelope: import("../cloud/protocol.ts").OpEnvelope) {
+  if (!file.voteCapable) throw new CloudError(426, "version", file.voteCapable === false ? UPDATE_VOTE_HOST : "Connect to the Cloud to check for voting support.");
+  if (vouch(pkg, file)) writeCommentsFile(pkg, file);
+  if (file.outbox.some(e => e.opId === envelope.opId) || file.rejected?.some(r => r.envelope.opId === envelope.opId)) return;
+  file.outbox.push({ ...envelope, doc: file.doc });
+  writeCommentsFile(pkg, file);
+  touch(pkg, display);
+}
+
 function info(pkg: string, f: SyncFile): unknown {
   const s = sessions.get(pkg);
   const view = viewOf(f, { name: localName() });
@@ -641,7 +687,8 @@ function info(pkg: string, f: SyncFile): unknown {
     host: hostOf(f.server!.url),
     status: s?.status ?? (isConfigured(f.server!.url) ? "offline" : "notAdded"),
     connected: !!s?.ready,
-    role: s?.role,
+    role: s?.role ?? f.voteRole,
+    canComment: (s?.role ?? f.voteRole) !== "viewer" || f.voteCapable === true,
     me: f.me ?? null,
     pending,
     rejected,
@@ -716,7 +763,9 @@ async function shareOnce(pkg: string, display: string | null, to?: string | null
   if (isShared(fresh)) { touch(pkg, display); return { doc: fresh.doc, url: fresh.server!.url, already: true, ops: 0 }; }
   if (fresh.doc !== file.doc) throw new CloudError(409, "conflict", "The file's comments changed while sharing. Try again.");
   const me: Author = { email: st.email, name: st.name ?? localName() };
-  const ops = opsForShare(fresh);
+  const voteOps = fresh.votes?.length ? voteOpsForShare(fresh, voterId()) : [];
+  if (voteOps.length && !st.voting) throw new CloudError(426, "version", UPDATE_VOTE_HOST);
+  const ops = [...opsForShare(fresh), ...voteOps];
   const shared = shareLocal(fresh, url, me, ops);
   markKnown(knownKey(pkg, shared)); // shared from this Mac: its ops are this person's
   writeCommentsFile(pkg, shared);

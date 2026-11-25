@@ -8,6 +8,7 @@ import { applyOp, checkEnvelope, LIMITS, type Op, type Vote } from "../cloud/pro
 import { applyEnvelopes, NIL_DOC, threadCreateEnvelope } from "../src/comments.ts";
 import { emptyComments, forkComments, readCommentsFile, writeCommentsFile } from "../src/comments-file.ts";
 import { opsForShare, shareLocal } from "../src/cloud-sync.ts";
+import { receiveVoteViews, sendableCommentOps, voteOpsForShare } from "../src/vote-state.ts";
 import { visibleVotes } from "../src/votes.ts";
 import type { CanvasDoc } from "../src/engine.ts";
 
@@ -103,4 +104,64 @@ test("vote ops on an unvouched file are held with its comments", async (t) => {
   assert.equal(vouch(dir, f), true);
   assert.deepEqual(f.outbox, []);
   assert.deepEqual(f.rejected?.map(r => r.envelope), [queued]);
+});
+
+test("sharing sends only the local voter's dots and never imports a Cloud view", () => {
+  const f = emptyComments(), vote = randomUUID(), mine = randomUUID(), peer = randomUUID();
+  const votes: Vote[] = f.votes = [];
+  const start: Op = { kind: "vote.start", vote, scope: { page: "page" }, on: "anything", hidden: true, anonymous: false, perPerson: 2 };
+  applyOp([], f.doc, start, anna, at, votes, true);
+  applyOp([], f.doc, { kind: "vote.cast", vote, ballot: mine, layer: "layer" }, anna, at, votes, true);
+  applyOp([], f.doc, { kind: "vote.cast", vote, ballot: peer, layer: "layer" }, ben, at, votes, true);
+  const ops = voteOpsForShare(f, anna.id);
+  assert.deepEqual(ops.map(e => e.op.kind), ["vote.start", "vote.cast"]);
+  assert.match(JSON.stringify(ops), new RegExp(mine));
+  assert.doesNotMatch(JSON.stringify(ops), new RegExp(peer));
+  assert.deepEqual(voteOpsForShare({ ...f, cloudVotes: [] }, anna.id), []);
+  assert.deepEqual(voteOpsForShare(shareLocal(f, "https://example.com", anna), anna.id), []);
+});
+
+test("Save As takes no Cloud ballots, pending conclusion or outbox", t => {
+  const from = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-cloud-vote-fork-"));
+  t.after(() => fs.rmSync(from, { recursive: true, force: true }));
+  const to = path.join(from, "copy");
+  fs.mkdirSync(to);
+  fs.mkdirSync(path.join(from, ".cloud"));
+  const f = emptyComments(), vote = randomUUID();
+  f.voteConclusions = [vote];
+  f.cloudVotes = [{ id: vote, scope: { page: "page" }, on: "anything", hidden: true, anonymous: true, perPerson: 1,
+    state: "active", ballots: [{ id: randomUUID(), layer: "layer" }] }];
+  f.outbox = [envelope({ kind: "vote.end", vote })];
+  writeCommentsFile(from, f);
+  forkComments(from, to);
+  const fork = readCommentsFile(to)!;
+  assert.equal(fork.cloudVotes, undefined);
+  assert.equal(fork.voteConclusions, undefined);
+  assert.deepEqual(fork.outbox, []);
+});
+
+test("an older host keeps queued votes and viewer comments for a later reconnect", () => {
+  const vote = randomUUID(), ballot = randomUUID();
+  const retract = envelope({ kind: "vote.retract", vote, ballot });
+  const clear = envelope({ kind: "vote.clear", vote });
+  const comment = threadCreateEnvelope({ x: 0, y: 0 }, "A comment");
+  const pending = [retract, comment, clear];
+  assert.deepEqual(sendableCommentOps(pending, "editor", false), [comment]);
+  assert.deepEqual(sendableCommentOps(pending, "viewer", false), []);
+  assert.deepEqual(sendableCommentOps(pending, "viewer", true), pending);
+  assert.deepEqual(pending.map(e => e.op.kind), ["vote.retract", "thread.create", "vote.clear"]);
+});
+
+test("one client keeps the conclusion only for its own winning end receipt", () => {
+  const a = emptyComments(), b = emptyComments(), vote = randomUUID();
+  const end = envelope({ kind: "vote.end", vote });
+  a.outbox.push(end);
+  b.outbox.push(envelope({ kind: "vote.end", vote }));
+  const cleared = { id: vote, scope: { page: "page" }, on: "anything", perPerson: 1, hidden: true, anonymous: true, state: "dismissed",
+    ballots: [], totals: [{ layer: "sticky", names: [], count: 1 }], conclusionOp: end.opId } as const;
+  const views = [{ ...cleared, ballots: [], totals: [{ ...cleared.totals[0], names: [] }] }];
+  assert.deepEqual(receiveVoteViews(a, views), [vote]);
+  assert.deepEqual(receiveVoteViews(b, views), []);
+  assert.equal(a.cloudVotes?.[0].totals?.[0].count, 1);
+  assert.deepEqual(b.cloudVotes, []);
 });

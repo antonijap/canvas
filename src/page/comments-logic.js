@@ -39,9 +39,9 @@ export const sameAnchor = (a, b) => !!a && !!b && (a.page || null) === (b.page |
  */
 export function mayMove(t, sync) {
   if (!sync) return true;
-  if (sync.role === "viewer") return false;
+  if (sync.canComment === false) return false;
   if (sync.role === "owner") return true;
-  const mine = sync.me && sync.me.email, by = t && t.createdBy && t.createdBy.email;
+  const mine = sync.me?.id || sync.me?.email, by = t?.createdBy?.id || t?.createdBy?.email;
   return !!mine && !!by && mine === by;
 }
 
@@ -52,10 +52,10 @@ export const visibleThreads = (threads, showResolved) => threads.filter((t) => !
 export const liveComments = (t) => t.comments.filter((c) => !c.deletedAt);
 
 /** A server refusal in words the person commenting can act on. Raw server details stay out of the page. */
-export function refusalReason(refusal, role) {
+export function refusalReason(refusal, sync) {
   const { code, message, kind } = refusal;
   if (code === "forbidden") {
-    if (role === "viewer") return "You can view this file but not comment on it";
+    if (sync?.role === "viewer" && sync.canComment === false) return "Update Canvas on the host to let viewers comment";
     if (["comment.edit", "comment.delete", "thread.delete"].includes(kind)) return "Only the person who wrote it can change it";
     if (kind === "thread.move") return "Only the person who wrote it or the Cloud owner can move it";
   }

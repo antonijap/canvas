@@ -78,6 +78,7 @@ export function forkComments(fromPkg: string, toDir: string): void {
   if (!f) return;
   const doc = randomUUID();
   const threads: Thread[] = f.threads.map((t) => ({ ...t, doc }));
-  const copy: CommentsFile = { format: 1, doc, seq: 0, threads, outbox: [], ...(f.votes && { votes: f.votes }), ...(f.voteConclusions && { voteConclusions: f.voteConclusions }) };
+  const local = !f.server && !f.cloudVotes && !fs.existsSync(path.join(fromPkg, ".cloud"));
+  const copy: CommentsFile = { format: 1, doc, seq: 0, threads, outbox: [], ...(local && f.votes && { votes: f.votes }), ...(local && f.voteConclusions && { voteConclusions: f.voteConclusions }) };
   fs.writeFileSync(path.join(toDir, COMMENTS_FILE), JSON.stringify(copy, null, 2) + "\n");
 }

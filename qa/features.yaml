@@ -48,10 +48,10 @@ features:
     cases: [place, stack, anchor, author, cloud, dom-anchor]
 
   - id: vote
-    name: Local whiteboard voting
+    name: Whiteboard voting
     area: canvas
     driven: [page, native, mcp]
-    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable, palette, compact-panels]
+    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable, palette, compact-panels, cloud, cloud-privacy, cloud-viewer]
 
   - id: draw
     name: Draw boards and layers

@@ -1,5 +1,5 @@
 import { route as routeComments } from "../../../core/router.ts";
-import { LIMITS, PROTOCOL_VERSION } from "../../../protocol";
+import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../../protocol";
 import type { ServerInfo } from "../../../protocol";
 import { authenticate } from "./auth";
 import type { Env } from "./env";
@@ -21,7 +21,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   const team = env.TEAM.getByName("team");
   if (!await team.allowMessage(me.email)) return failure(429, "quota", "Too many requests in one minute");
   if (path === "/v1/info" && method === "GET") {
-    return Response.json({ protocol: PROTOCOL_VERSION, server: env.SERVER_VERSION, capabilities: ["comments"] } satisfies ServerInfo);
+    return Response.json({ protocol: PROTOCOL_VERSION, server: env.SERVER_VERSION, capabilities: ["comments", CLOUD_VOTES] } satisfies ServerInfo);
   }
   const role = await team.role(me.email);
   if (!role) return failure(403, "forbidden", "No access to this team");
@@ -54,6 +54,15 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (!await team.register(doc, me.email)) return failure(409, "quota", "Team has too many documents");
     return Response.json({ doc });
   }
+  const design = /^\/v1\/docs\/([0-9a-f-]+)\/vote-design$/.exec(path);
+  if (design && method === "PUT" && uuid(design[1]) && await team.hasDoc(design[1])) {
+    if (role !== "owner" && role !== "editor") return failure(403, "forbidden", "Owner or editor role required");
+    const value = await readJson(request);
+    const result = await env.ROOM.getByName(design[1]).setVoteDesign(design[1], me.email, value);
+    if (result === "forbidden") return failure(403, "forbidden", "Owner or editor role required");
+    return result ? Response.json({ ok: true }) : failure(400, "invalid", "Invalid vote design");
+  }
+  const voting = supportsCloudVotes(request.headers.get(COMMENTS_CAPABILITIES_HEADER)?.split(/\s*,\s*/));
   const match = /^\/v1\/docs\/([^/]+)\/(threads|ops|socket)$/.exec(path);
   if (!match) return failure(404, "not_found", "No such route");
   const [, doc, action] = match;
@@ -75,7 +84,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     kind: "cloudflare",
     team: () => ({ hasDoc: () => true }), // Registration and role were checked above, before socket dispatch.
     room: id => ({
-      read: async req => ({ status: 200, body: await env.ROOM.getByName(id).read(sinceValue(req.query.get("since") ?? "0")) }),
+      read: async req => ({ status: 200, body: await env.ROOM.getByName(id).read(sinceValue(req.query.get("since") ?? "0"), voting ? me : undefined) }),
       submit: async req => {
         const body = await req.body();
         const ops = body && typeof body === "object" && "ops" in body ? body.ops : null;
@@ -84,7 +93,7 @@ async function route(request: Request, env: Env): Promise<Response> {
           await team.takeOps(me.email, ops.length);
           throw new HttpError(429, "quota", "Too many ops in one message");
         }
-        return { status: 200, body: await env.ROOM.getByName(id).submit(id, ops, me, role) };
+        return { status: 200, body: await env.ROOM.getByName(id).submit(id, ops, me, role, voting) };
       },
     }),
   }, { method, path, query: url.searchParams, headers: request.headers, body: () => readJson(request) });

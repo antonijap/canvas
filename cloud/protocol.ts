@@ -2,6 +2,12 @@
 // Plain types and pure helpers, no imports: it runs in Node, in the page and in a Worker. The rules are in
 // docs/cloud/protocol.md; change both together, and bump PROTOCOL_VERSION for any change an older side cannot read.
 
+export const CLOUD_VOTES = "cloud-votes";
+export const COMMENTS_CAPABILITIES_HEADER = "x-canvas-comments-capabilities";
+export const UPDATE_VOTE_HOST = "Update Canvas on the host to use Cloud voting.";
+export const UPDATE_COMMENT_HOST = "Update Canvas on the host to let viewers comment.";
+export const supportsCloudVotes = (capabilities: unknown) => Array.isArray(capabilities) && capabilities.includes(CLOUD_VOTES);
+
 export const PROTOCOL_VERSION = 1;
 
 /** A UUID (crypto.randomUUID()). Ids never change and are never reused. */
@@ -10,8 +16,8 @@ export type Uuid = string;
 export type Iso = string;
 
 export type Role = "owner" | "editor" | "commenter" | "viewer";
-/** What a role may do with comments. Viewers read only. */
-export const CAN_COMMENT: Record<Role, boolean> = { owner: true, editor: true, commenter: true, viewer: false };
+/** All Cloud members may comment. */
+export const CAN_COMMENT: Record<Role, boolean> = { owner: true, editor: true, commenter: true, viewer: true };
 
 export interface Author {
   /**
@@ -102,14 +108,36 @@ export interface Vote {
   state: "active" | "ended" | "dismissed";
   ballots: VoteBallot[];
   retracted?: Uuid[];
+  conclusion?: { by: string; opId: Uuid };
+  clearedTotals?: VoteTotal[];
+  timedOut?: boolean;
+}
+
+export interface VoteTotal { layer: string; count: number; names: string[] }
+export interface VoteProgress { id: string; name: string; done: boolean }
+/** Only this member's ballot IDs ever leave the room. Other people appear as totals and optional display names. */
+export interface VoteView extends Pick<Vote, "id" | "scope" | "on" | "perPerson" | "hidden" | "anonymous" | "state" | "timer"> {
+  ballots: Pick<VoteBallot, "id" | "layer">[];
+  totals?: VoteTotal[];
+  progress?: VoteProgress[];
+  done?: number;
+  voters?: number;
+  conclusionOp?: Uuid;
+  needsConclusion?: boolean;
+}
+export interface VoteTarget { page: string; chain: string[]; type: string; disabled?: boolean }
+export interface VoteDesign {
+  page(id: string): boolean;
+  node(id: string): VoteTarget | undefined;
 }
 
 export type VoteOp =
   | ({ kind: "vote.start"; vote: Uuid; showName?: boolean } & Pick<Vote, "scope" | "on" | "perPerson" | "hidden" | "anonymous">)
   | { kind: "vote.cast"; vote: Uuid; ballot: Uuid; layer: string; showName?: boolean }
   | { kind: "vote.retract"; vote: Uuid; ballot: Uuid }
-  | { kind: "vote.end"; vote: Uuid }
-  | { kind: "vote.clear"; vote: Uuid };
+  | { kind: "vote.end"; vote: Uuid; expired?: boolean }
+  | { kind: "vote.clear"; vote: Uuid }
+  | { kind: "timer.set"; vote: Uuid; ms: number };
 
 /** One change. Every change to comments is one of these, locally and on the server. */
 export type Op =
@@ -122,7 +150,7 @@ export type Op =
   | { kind: "thread.delete"; thread: Uuid }
   | VoteOp;
 
-export const isVoteOp = (op: Op): op is VoteOp => "vote" in op && op.kind.startsWith("vote.");
+export const isVoteOp = (op: Op): op is VoteOp => "vote" in op && typeof op.kind === "string" && (op.kind.startsWith("vote.") || op.kind === "timer.set");
 
 /** An op as a client sends it. The same opId sent twice is applied once (idempotent retries). */
 export interface OpEnvelope {
@@ -140,7 +168,7 @@ export interface Applied {
   by: Author;
   /** The server's clock. */
   at: Iso;
-  op: Op;
+  op: Op | { kind: "vote.changed" };
 }
 
 export type ErrorCode = "unauthenticated" | "forbidden" | "not_found" | "invalid" | "conflict" | "quota" | "version" | "server";
@@ -154,12 +182,12 @@ export interface Rejected {
 // ---------- the room socket: /v1/docs/:doc/socket ----------
 
 export type ClientMessage =
-  | { type: "hello"; protocol: number; doc: Uuid; since: number }
+  | { type: "hello"; protocol: number; doc: Uuid; since: number; capabilities?: string[] }
   | { type: "ops"; ops: OpEnvelope[] };
 
 export type ServerMessage =
-  | { type: "welcome"; protocol: number; server: string; role: Role; me: Author; seq: number; threads?: Thread[] }
-  | { type: "applied"; entries: Applied[] }
+  | { type: "welcome"; protocol: number; server: string; role: Role; me: Author; seq: number; threads?: Thread[]; capabilities?: string[]; serverTime?: Iso; votes?: VoteView[] }
+  | { type: "applied"; entries: Applied[]; votes?: VoteView[] }
   | { type: "ack"; opId: Uuid; seq: number }
   | { type: "reject"; rejected: Rejected[] }
   | { type: "error"; code: ErrorCode; message: string };
@@ -193,6 +221,9 @@ export interface CommentsFile {
   seq: number;
   threads: Thread[];
   votes?: Vote[];
+  cloudVotes?: VoteView[];
+  voteCapable?: boolean;
+  voteRole?: Role;
   /** Local vote conclusions still being placed in the design. */
   voteConclusions?: Uuid[];
   /** Ops made here and not yet acknowledged by the server, oldest first. Empty for a file never shared. */
@@ -219,6 +250,8 @@ export const LIMITS = {
   ballotsPerVote: 1_000,
   voteChangesPerVote: 5_000,
   votesPerDoc: 100,
+  openVotesPerDoc: 10,
+  voteTimerMs: 60 * 60 * 1000,
 } as const;
 
 // ---------- pure helpers (both sides use these, so they agree) ----------
@@ -285,7 +318,8 @@ export function checkEnvelope(e: unknown): string | null {
       return typeof op.hidden === "boolean" && typeof op.anonymous === "boolean" ? checkShowName(op.showName) : "vote preferences need booleans";
     case "vote.cast": return !isUuid(op.vote) || !isUuid(op.ballot) || !layerId(op.layer) ? "vote and ballot need uuids and a layer" : checkShowName(op.showName);
     case "vote.retract": return !isUuid(op.vote) || !isUuid(op.ballot) ? "vote and ballot need uuids" : null;
-    case "vote.end":
+    case "timer.set": return !isUuid(op.vote) || !Number.isInteger(op.ms) || op.ms < 0 || op.ms > LIMITS.voteTimerMs ? "invalid vote timer" : null;
+    case "vote.end": return !isUuid(op.vote) || (op.expired !== undefined && typeof op.expired !== "boolean") ? "invalid end vote" : null;
     case "vote.clear": return !isUuid(op.vote) ? "vote needs a uuid" : null;
     default: return "unknown op kind";
   }
@@ -296,8 +330,9 @@ export function checkEnvelope(e: unknown): string | null {
  * reason when the op cannot apply (its thread or comment is deleted or unknown). The local file uses it for its own
  * ops; the server for everyone's, in seq order.
  */
-export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Iso, votes?: Vote[], localVotes = false): string | null {
-  if (isVoteOp(op)) return votes ? applyVote(votes, op, by, localVotes) : "Voting is unavailable here";
+export function applyOp(threads: Thread[], doc: Uuid, op: Applied["op"], by: Author, at: Iso, votes?: Vote[], localVotes = false): string | null {
+  if (op.kind === "vote.changed") return null;
+  if (isVoteOp(op)) return votes ? applyVote(votes, op, by, at, localVotes) : "Voting is unavailable here";
   const thread = (id: Uuid) => threads.find((t) => t.id === id);
   const comment = (id: Uuid) => { for (const t of threads) { const c = t.comments.find((c) => c.id === id); if (c) return { t, c }; } return null; };
   switch (op.kind) {
@@ -353,13 +388,14 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
   }
 }
 
-function applyVote(votes: Vote[], op: VoteOp, by: Author, local: boolean): string | null {
+export function applyVote(votes: Vote[], op: VoteOp, by: Author, at: Iso, manage: boolean): string | null {
   const id = by.id || by.email;
   if (!id || by.agent) return "A person must cast the vote";
   const vote = votes.find(v => v.id === op.vote);
   if (op.kind === "vote.start") {
     if (vote) return vote.host.id === id ? null : "Vote already exists";
     if (votes.some(v => v.scope.page === op.scope.page && v.state !== "dismissed")) return "Clear the previous vote first";
+    if (votes.filter(v => v.state === "active").length >= LIMITS.openVotesPerDoc) return "Document has too many open votes";
     if (votes.length >= LIMITS.votesPerDoc) {
       const dismissed = votes.findIndex(v => v.state === "dismissed");
       if (dismissed === -1) return "Document has too many votes";
@@ -373,7 +409,7 @@ function applyVote(votes: Vote[], op: VoteOp, by: Author, local: boolean): strin
   }
   if (!vote) return "No such vote";
   if (op.kind === "vote.end" || op.kind === "vote.clear") {
-    if (!local && vote.host.id !== id) return "Only the host can end or clear the vote";
+    if (!manage && vote.host.id !== id) return "Only the host can end or clear the vote";
     if (op.kind === "vote.end" && vote.state === "active") vote.state = "ended";
     if (op.kind === "vote.clear") {
       if (vote.state === "active") return "End the vote before clearing it";
@@ -384,6 +420,12 @@ function applyVote(votes: Vote[], op: VoteOp, by: Author, local: boolean): strin
     return null;
   }
   if (vote.state !== "active") return "The vote has ended";
+  if (op.kind === "timer.set") {
+    if (!manage && vote.host.id !== id) return "Only the host can set the timer";
+    if (op.ms) vote.timer = { ms: op.ms, startedAt: at, endsAt: new Date(Date.parse(at) + op.ms).toISOString() };
+    else delete vote.timer;
+    return null;
+  }
   const ballotIndex = vote.ballots.findIndex(b => b.id === op.ballot);
   const ballot = vote.ballots[ballotIndex];
   if (op.kind === "vote.retract") {
@@ -412,6 +454,10 @@ export function mayApply(op: Op, role: Role, me: Author, threads: Thread[]): boo
   const ownThread = (id: Uuid) => threads.some((t) => t.id === id && same(t.createdBy));
   const admin = role === "owner" || role === "editor";
   switch (op.kind) {
+    case "vote.start":
+    case "vote.end":
+    case "vote.clear":
+    case "timer.set": return admin;
     case "comment.edit": return own(op.comment);
     case "comment.delete": return own(op.comment) || admin;
     case "thread.delete": return ownThread(op.thread) || admin;

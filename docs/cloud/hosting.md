@@ -19,6 +19,8 @@ Canvas never sends comments over plain, unencrypted network connections. The Clo
 
 ## What to know
 
+Everyone in the Cloud can read files, comment and cast votes. Owners and editors can edit files and manage votes. A new invite grants Editor by default, and re-inviting someone keeps their existing role.
+
 - Everyone in a Cloud can read the comments on every file shared to it.
 - Deleting a comment empties it, but its text stays in the Cloud's history, and each person keeps their own copy of the comments they already have.
 - Removing someone stops their access from then on. It cannot take back what they already have on their Mac.

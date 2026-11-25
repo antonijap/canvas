@@ -16,7 +16,9 @@ import { buildSnapshot, recoverSnapshots, compact, type Manifest } from "../../c
 import { collectGarbage } from "../../core/files/gc.ts";
 import { stateFromFiles, stateOf } from "../../core/files/state.ts";
 import { type ObjectStore, boardKey, versKey, blobKey } from "../../core/files/objects.ts";
-import { Operations } from "../../core/operations.ts";
+import { CLOUD_VOTES, LIMITS, supportsCloudVotes } from "../../protocol.ts";
+import { voteDesignForTree } from "../../core/votes.ts";
+import { Operations, type OpResult } from "../../core/operations.ts";
 import type { Me } from "./host.ts";
 import { FILE_CAPABILITIES_HEADER, insertsWhiteboard, supportsWhiteboard, WHITEBOARD_UPDATE, type AppliedAction, type FileClientMessage, type Role } from "../../protocol-files.ts";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -253,7 +255,7 @@ export class MacFiles {
                 } }, this.now);
             const core = new FileRoom({ store, file, objects: this.objects, roles, leases, now: this.now });
             recoverSnapshots(core);
-            const comments = new Operations(store);
+            const comments = new Operations(store, () => this.now());
             if (!store.sql.exec("SELECT 1 AS one FROM pragma_table_info('ops') WHERE name = 'by_id'").toArray().length)
                 store.sql.exec('ALTER TABLE ops ADD COLUMN by_id TEXT');
             r = { leases, store, core, roles, comments, sockets: new Map(), ready: new Map(), presence: new Map(), lastAction: 0, snapshotAt: this.now() };
@@ -289,8 +291,17 @@ export class MacFiles {
                 }
             }
     }
-    private broadcast(r: Room, msg: unknown) { this.recheck(); for (const ws of r.sockets.keys())
-        ws.send(JSON.stringify(msg)); }
+    private readonly votingSockets = new WeakSet<ServerSocket>();
+    private broadcastComments(r: Room, out: OpResult) {
+        const changed = out.entries.some(entry => entry.op.kind === 'vote.changed');
+        this.recheck();
+        for (const [ws, me] of r.sockets) {
+            if (!r.ready.has(ws)) continue;
+            ws.send(JSON.stringify({ type: 'comments.applied', entries: out.entries,
+                ...(changed && this.votingSockets.has(ws) && { votes: r.comments.voteView(me) }),
+            }));
+        }
+    }
     private broadcastActions(r: Room, actions: AppliedAction[]) {
         this.recheck();
         const whiteboard = [...r.ready.values()].includes(false) && (actions.some(a => insertsWhiteboard(a.ops)) || r.core.hasWhiteboard());
@@ -701,20 +712,20 @@ export class MacFiles {
                 headers['content-length']=String(end-start+1);res.writeHead(range?206:200,headers);
                 const stream=fs.createReadStream(object.file,{start,end});this.downloads.set(res,me);res.on('finish',()=>this.downloads.delete(res));res.on('close',()=>{this.downloads.delete(res);stream.destroy();});stream.on('error',()=>res.destroy());stream.pipe(res);return true;
             }
+            const voting = String(req.headers[FILE_CAPABILITIES_HEADER] ?? '').split(/\s*,\s*/).includes(CLOUD_VOTES);
             if (sub === 'comments' && method === 'POST') {
                 const b = await body(), fresh = this.current(me);
-                if (!fresh || fresh.role === 'viewer')
-                    return json(403, { code: 'read_only' });
-                if (!Array.isArray(b.ops) || b.ops.length > 100)
+                if (!fresh) return json(403, { code: 'forbidden' });
+                if (!Array.isArray(b.ops) || b.ops.length > LIMITS.opsPerMessage)
                     return json(400, { code: 'invalid' });
                 const allowance = this.bank.grant(fresh.id, 'ops', b.ops.length, this.now());
-                const out = this.bounded(r, () => r.comments.submit(file, b.ops, fresh, fresh.role, allowance));
+                const out = this.bounded(r, () => r.comments.submit(file, b.ops, fresh, fresh.role, allowance, [], voting ? voteDesignForTree(r.core.tree) : undefined));
                 if (out.entries.length)
-                    this.broadcast(r, { type: 'comments.applied', entries: out.entries });
-                return json(200, { ...out, ...r.comments.snapshot() });
+                    this.broadcastComments(r, out);
+                return json(200, { ...out, ...r.comments.snapshot(), ...(voting && { votes: r.comments.voteView(fresh) }) });
             }
             if (sub === 'comments' && method === 'GET')
-                return json(200, r.comments.read(Number(url.searchParams.get('since') ?? 0)));
+                return json(200, { ...r.comments.read(Number(url.searchParams.get('since') ?? 0)), ...(voting && { votes: r.comments.voteView(me) }) });
             return json(404, { code: 'not_found' });
         }
         catch (e) {
@@ -798,9 +809,12 @@ export class MacFiles {
                                 return;
                             }
                             r.ready.set(ws, supportsWhiteboard(msg.capabilities));
+                            this.votingSockets.delete(ws);
+                            const voting = supportsCloudVotes(msg.capabilities);
+                            if (voting) this.votingSockets.add(ws);
                             const peers = snapshotFor(presence.socket, r.presence.values());
                             if (peers.length) ws.send(JSON.stringify({ type: 'presence', peers }));
-                            ws.send(JSON.stringify({ type: 'comments.snapshot', ...r.comments.snapshot() }));
+                            ws.send(JSON.stringify({ type: 'comments.snapshot', ...r.comments.snapshot(), ...(voting && { votes: r.comments.voteView(fresh) }) }));
                         }
                         else if (msg.type === 'actions' && r.ready.has(ws)) {
                             const out = this.bounded(r, () => r.core.submit({ ...this.conn(fresh), whiteboard: r.ready.get(ws) }, msg, Buffer.byteLength(text)));
@@ -811,13 +825,13 @@ export class MacFiles {
                             for (const reply of out.replies)
                                 ws.send(JSON.stringify(reply));
                         }
-                        else if (msg.type === 'comments' && r.ready.has(ws) && Array.isArray(msg.ops)) {
+                        else if (msg.type === 'comments' && r.ready.has(ws) && Array.isArray(msg.ops) && msg.ops.length <= LIMITS.opsPerMessage) {
                             if (!this.bank.grant(fresh.id, 'messages', 1, this.now()))
                                 error(429, 'quota', 'Message quota');
                             const allowance = this.bank.grant(fresh.id, 'ops', msg.ops.length, this.now());
-                            const out = this.bounded(r, () => r.comments.submit(m[1], msg.ops, fresh, fresh.role, allowance));
+                            const out = this.bounded(r, () => r.comments.submit(m[1], msg.ops, fresh, fresh.role, allowance, [], this.votingSockets.has(ws) ? voteDesignForTree(r.core.tree) : undefined));
                             if (out.entries.length)
-                                this.broadcast(r, { type: 'comments.applied', entries: out.entries });
+                                this.broadcastComments(r, out);
                             ws.send(JSON.stringify({ type: 'comments.ack', acks: out.acks, rejected: out.rejected }));
                         }
                     }).catch((e) => ws.send(JSON.stringify({ type: 'error', code: e.code === 'quota' ? 'quota' : 'invalid', message: e.code === 'quota' ? 'Cloud storage cap reached' : 'Invalid file message' }))).finally(() => { queued--; });

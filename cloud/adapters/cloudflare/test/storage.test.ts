@@ -12,7 +12,7 @@ it("never snapshots during valid, invalid, duplicate, or forbidden ops", async (
     try {
       const op = envelope(doc);
       expect(operations.submit(doc, [op, op, null], { email: owner, name: "owner" }, "owner").acks).toHaveLength(2);
-      expect(operations.submit(doc, [envelope(doc)], { email: member, name: "member" }, "viewer").rejected[0].code).toBe("forbidden");
+      expect(operations.submit(doc, [envelope(doc, { kind: "vote.end", vote: crypto.randomUUID() })], { email: member, name: "member" }, "viewer", 100, [], true).rejected[0].code).toBe("forbidden");
     } finally { spy.mockRestore(); }
   });
 });

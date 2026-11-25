@@ -80,3 +80,11 @@
 .vote-result-row strong{text-align:right;font-variant-numeric:tabular-nums}
 .vote-people{display:flex;max-width:65px;overflow:hidden}
 .vote-avatar{display:grid;place-items:center;width:18px;height:18px;flex:0 0 18px;border-radius:50%;background:var(--wb-avatar);color:var(--wb-white);font-size:var(--c-size-2xs);font-weight:700}
+
+.vote-sheet-people{display:flex;align-items:center;gap:6px;margin-right:auto;min-width:0}
+.vote-sheet-people .vote-people{max-width:108px}
+.vote-sheet-people:empty{display:none}
+.vote-progress{max-width:none;overflow:visible;flex-wrap:wrap;gap:5px}
+.vote-progress .vote-avatar{position:relative;width:24px;height:24px;flex-basis:24px}
+.vote-done-check{position:absolute;right:-4px;bottom:-4px;display:grid;place-items:center;width:18px;height:18px;border:1px solid var(--c-island);border-radius:50%;background:var(--wb-vote-done);color:var(--wb-white)}
+.vote-done-check svg{width:16px;height:16px}

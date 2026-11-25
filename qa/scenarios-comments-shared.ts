@@ -26,7 +26,7 @@ sc("comments", "a shared file shows the bar (live people and plain connection wo
   await t.focus("lay_nest");
   const stub = (status: string, connected: boolean) => t.ev(`(() => {
     if (!window.__origFetch) { window.__origFetch = window.fetch; window.fetch = async (u, o) => { const r = await window.__origFetch(u, o); if (typeof u === "string" && u.startsWith("/api/comments?file=") && window.__sync) { const j = await r.json(); j.sync = { ...window.__sync, me:{name:"Anna"} }; return new Response(JSON.stringify(j), { headers: { "content-type": "application/json" } }); } return r; }; }
-    window.__sync = { url: "https://studio-canvas.workers.dev", host: "studio-canvas.workers.dev", role: "viewer", status: ${JSON.stringify(status)}, connected: ${connected}, pending: [{ opId: ${JSON.stringify(uid())}, kind: "comment.add", thread: ${JSON.stringify(th)}, comment: ${JSON.stringify(comments[2].id)} }], rejected: [{ opId: ${JSON.stringify(uid())}, kind: "comment.add", thread: ${JSON.stringify(th)}, comment: ${JSON.stringify(comments[3].id)}, code: "forbidden", message: "This role cannot apply the op" }] };
+    window.__sync = { url: "https://studio-canvas.workers.dev", host: "studio-canvas.workers.dev", role: "viewer", canComment: false, status: ${JSON.stringify(status)}, connected: ${connected}, pending: [{ opId: ${JSON.stringify(uid())}, kind: "comment.add", thread: ${JSON.stringify(th)}, comment: ${JSON.stringify(comments[2].id)} }], rejected: [{ opId: ${JSON.stringify(uid())}, kind: "comment.add", thread: ${JSON.stringify(th)}, comment: ${JSON.stringify(comments[3].id)}, code: "forbidden", message: "This role cannot apply the op" }] };
     return window.canvasHost.comments.reload();
   })()`);
   const openThread = async () => {
@@ -69,18 +69,18 @@ sc("comments", "a shared file shows the bar (live people and plain connection wo
     t.eq(card.hasTime, false, "the clock stands where the time would be");
     t.near(card.icon.cy, card.st.cy, 0.6, "the clock is centred on its text");
     t.near(card.st.cy, card.name.cy, 1, "the state is on the name's line");
-    t.ok(card.failText.startsWith("Not sent: You can view this file but not comment on it"), "a refused comment explains the viewer role");
+    t.ok(card.failText.startsWith("Not sent: Update Canvas on the host to let viewers comment"), "a refused comment explains the viewer role");
     t.eq(card.btns.map((b: any) => b[0]), ["Retry", "Discard"], "with Retry and Discard");
     t.eq(card.btns.map((b: any) => b[1]), [20, 20], "the two buttons share one height");
     await shot(t, `comments-pending-${theme}`);
     await t.ev(`window.__sync.role = "commenter"; window.__sync.rejected[0].kind = "comment.edit"; window.canvasHost.comments.reload()`);
     await t.waitFor(`document.querySelector(".cm-fail")?.innerText.includes("Only the person who wrote it can change it")`, "the edit refusal in plain words");
     await t.ev(`window.__sync.role = "viewer"; window.canvasHost.comments.reload()`);
-    await t.waitFor(`document.querySelector(".cm-fail")?.innerText.includes("You can view this file but not comment on it")`, "the refusal updates when the role changes");
+    await t.waitFor(`document.querySelector(".cm-fail")?.innerText.includes("Update Canvas on the host to let viewers comment")`, "the old host message returns when the role changes");
     await t.ev(`window.__sync.rejected[0].code = "invalid"; window.canvasHost.comments.reload()`);
     await t.waitFor(`document.querySelector(".cm-fail")?.innerText.includes("Canvas could not send this comment")`, "the refusal updates when its code changes");
     await stub("connected", true);
-    await t.waitFor(`/Sending/.test(document.querySelector(".cm-pop .cm-state")?.innerText || "")`, "Sending while connected");
+    await t.waitFor(`/Update Canvas on the host to send this comment/.test(document.querySelector(".cm-pop .cm-state")?.innerText || "")`, "the comment waits for the host to update");
     await t.io.key("Escape");
   }
   await t.ev(`delete window.__sync`);
