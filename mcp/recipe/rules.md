@@ -1,8 +1,8 @@
-# Design recipe for app screens and web pages (v4)
+# Design recipe for app screens and web pages (v5)
 
 Read this before drawing in Canvas. A checker runs section 7 after you draw. Sizes are points (pt) on a 393 x 852 board unless a rule says otherwise.
 
-Rule format: `R-<section>-<n>` [MUST or DEFAULT] **rule**. Why. Applies to. Check.
+Rule format: `R-<section>-<n>` [MUST or DEFAULT] **rule**. Why. Applies to. Check. Source.
 
 How to read the tags:
 - [MUST] breaks the design or the build when missed. The checker fails the board. Fix it.
@@ -22,7 +22,7 @@ What separates a top app from generic AI output. Read it first, check against it
 - Today's platform look. Bars and controls look like iOS now: a plain tab bar that runs to the bottom edge, ink for the active tab, no outlined or boxed bars.
 - Official over drawn. Use the real platform pieces: the iOS status bar (9:41, signal, Wi-Fi, battery at Apple's positions) and the official App Store and Google Play badges. A hand-drawn look-alike reads as fake at once.
 - Centred on small screens. On a phone-width marketing page, headlines, short copy, feature blocks and controls are centred or full width; left-aligned blocks with a side icon look lazy there.
-- System first. Read file variables with `get_document_summary` and create missing tokens with `set_variables`. Build components before the screens; screens only place instances.
+- System first. Build the tokens and components before the screens; screens only place instances. The design with a real system won round 2.
 - Show life. At least one post is in an interacted state, like a filled heart with its count.
 - Real voice. Names, captions and counts that sound like people ("Took the long way home"), not "Lorem", "User 1" or "Check out this amazing post!".
 - Short buttons. A verb and at most 2 more words, centred by layout with label line height 100 percent, never nudged by hand, no decorative icon.
@@ -91,6 +91,7 @@ What separates a top app from generic AI output. Read it first, check against it
 - `R-2-15` [DEFAULT] **Make the empty state calm: icon 40 to 64 (default 48) in $text-2 or on a soft circle, headline 17 to 22, primary in ink ($text fill, $bg label) or a calm accent.** Why: a loud saturated block on a quiet screen pulls the eye away. Applies to: empty states. Check: R-7-13.
 - `R-2-17` [MUST] **Keep the empty state short: icon, headline, one body line of at most 70 characters, one primary. Suggestions are optional and come as one compact block (a row of 3 to 5 avatars with names, or at most 3 list rows) with no title or description of their own.** Why: stacked titles, descriptions and lists crammed into one panel read as busy. Applies to: empty states. Check: R-7-26.
 - `R-2-18` [MUST] **Centre the empty state block optically in the free space between the last element above it (top bar or rail) and the tab bar, not in the board.** Why: a block that sits high or low in its space looks unfinished. Applies to: empty states. Check: R-7-26.
+- `R-2-19` [MUST] **An empty social feed shows one compact quick-add row of 3 to 5 people (photo, name, Follow) under the empty-state block, with no title or copy of its own.** Why: it keeps the screen calm and gives the person a one-tap way to fill the feed, which is the business goal. Applies to: empty feeds of social apps. Check: R-7-26.
 - `R-2-16` [MUST] **Use scarcity, urgency and social proof only when true and state the reason.** Why: fabricated pressure destroys trust. Applies to: commerce, paywall, feeds. Check: judgment.
 
 ## 3. Visual rules, measured
@@ -288,9 +289,32 @@ Checklist:
 - Hero: headline, one supporting line, one primary action. App downloads use the official App Store and Google Play badges (Apple's badge from its marketing tools, Google's from its badge page), black, never redrawn or restyled.
 - Sections: features (3), social proof, pricing (at most 3 plans), FAQ, footer. One accent; section rhythm from one spacing step.
 - Mobile: centre the hero, section headings, short copy and feature blocks (icon above title); segmented controls centred or full width; buttons full width. Long text (FAQ answers, legal) stays left aligned.
-- Rules: R-1-3, R-1-4, R-5-8, R-6-12.
+- Rules: R-1-3, R-1-4, R-5-8, R-6-12, R-6-13 to R-6-28.
 
 - `R-6-12` [MUST] **On marketing pages use the official store badges and centre short content on phone widths.** Why: a fake badge looks untrustworthy; left-aligned short blocks on a phone look lazy. Applies to: websites and landing pages. Check: R-7-51.
+
+#### Website hero
+From a study of 30 strong heroes (app sites, award winners, top-rated concepts). The hero is the first viewport: promise, one action, and the product shown doing its job.
+- Lead with the task in two lines, then one line on how, then the official store badge, then a verified rating if one exists.
+- Show the product: a cropped device, UI cards lifted out of the app, or a photo with a UI overlay. Never a tall bare phone alone.
+- Give the hero one focal colour (a colour field, tinted panel or saturated product art). All-grey heroes read as unfinished.
+- Mobile: copy, badge, then art, centred, art inside 16 px gutters.
+- `R-6-13` [MUST] **Fit the promise and conversion action in the first viewport.** Why: Both need to be available on arrival. Applies to: website hero. Check: At 1440×900, 390×844 and 320×568 CSS px, the H1 and primary action must have fully visible bounding boxes at scroll position zero.
+- `R-6-14` [MUST] **Give one action primary emphasis beside or immediately after the copy.** Why: The next step should be obvious even if the nav collapses. Applies to: website hero. Check: Use one primary action group in the hero body. Two platform badges for the same install goal count as one group.
+- `R-6-15` [MUST] **Use the official App Store badge when the primary action is iPhone installation.** Why: The badge identifies the store and the action at a glance. Applies to: website hero. Check: Use Apple's unmodified localized badge asset and link it to the live App Store listing.
+- `R-6-16` [DEFAULT] **Start with two headline lines.** Why: A short headline leaves room for context, action and art. Applies to: website hero. Check: Measure wrapped text lines at 1440 and 390 CSS px. Aim for one to three and inspect any four-line exception at the shortest viewport.
+- `R-6-17` [DEFAULT] **Use display-size type and constrain the headline's measure.** Why: A legible promise can share the frame with a meaningful visual. Applies to: website hero. Check: Start at 72–80 CSS px at 1440 and 32–50 CSS px at 390. Aim for the longest desktop line to span 25–60% of the viewport. Let mobile use the available width inside its gutters.
+- `R-6-18` [DEFAULT] **Give the visual enough room to read in the first viewport.** Why: The art should explain the product or put its benefit in context. Applies to: website hero. Check: For a split or stack, start with a visible artwork bounding area around 20–50% of the viewport. Evaluate a full-bleed scene by the visibility of its focal subject.
+- `R-6-19` [MUST] **Show a recognizable task or state when the app is the hero's subject.** Why: Visitors need to see what they can do. Applies to: website hero. Check: At 390 CSS px, identify one real app screen or UI state and its task without zooming.
+- `R-6-20` [MUST] **Never use a tall, bare phone as the sole art direction.** Why: A full device outline can dictate the height of the entire hero. Applies to: website hero. Check: If an upright phone is the only art, crop to the useful UI, extract a key interface part, or give it product-specific context. Check that the essential app state survives the crop.
+- `R-6-21` [DEFAULT] **Use color in the product, subject or background to establish a focal point.** Why: A clear palette helps the viewer find the art or action. Applies to: website hero. Check: Name the focal color and verify contrast for text and actions. For a muted palette, identify the subject through tone, scale or contrast.
+- `R-6-22` [DEFAULT] **Limit vertical gaps between the action and the art.** Why: Oversized gaps can push the first glimpse of the product past the fold. Applies to: website hero. Check: Keep the action center within 18% of viewport height of the art's visible vertical span unless a larger gap leaves both elements clear and visible.
+- `R-6-23` [DEFAULT] **Place one attributable proof signal near the action when available.** Why: A rating, press mention or result can answer hesitation in one line. Applies to: website hero. Check: Verify the source, place proof near the action or just beneath the hero composition, and remove any placeholder claim or logo.
+- `R-6-24` [MUST] **Keep the mobile product visual within the viewport minus its side margins.** Why: A desktop-width asset can cause horizontal scroll or hide the product. Applies to: website hero. Check: At 320, 390 and 430 CSS px, the art box width must fit the viewport minus both gutters. Start with 16 px per side for stacked art. Clip full-bleed decoration inside its container and check that document scroll width equals viewport width.
+- `R-6-25` [DEFAULT] **Stack mobile copy, primary action, then art.** Why: The action stays reachable while the visual can continue below the fold. Applies to: website hero. Check: At 390 CSS px, the CTA ends before the main art begins in a stack. For an overlay, verify text, action and contrast at 320 CSS px.
+- `R-6-26` [DEFAULT] **Center the mobile visual as a group and simplify its edges.** Why: Recomposition keeps the focal UI readable and in frame. Applies to: website hero. Check: Center the art box within its content area to within 8 px. Scale or crop decorative artwork independently of the focal UI.
+- `R-6-27` [DEFAULT] **Collapse mobile nav to the essential controls.** Why: A short header leaves room for the promise and action. Applies to: website hero. Check: At 390 CSS px keep the logo, menu and at most one conversion action in the header. Keep the primary hero action visible.
+- `R-6-28` [DEFAULT] **Choose a composition that suits the focal asset.** Why: A crop, a layered visual and a full scene need different space around the copy. Applies to: website hero. Check: Use a split for two independent content blocks, a stack for a wide art object, or an overlay with an explicit text-safe zone.
 
 ### 6.10 Web dashboard
 - 1440 x 900; sidebar 240 to 264; content padding 32; totals row, one chart, one table with status pills.
@@ -301,8 +325,6 @@ Checklist:
 ## 7. Checks
 
 Run on every top-level board and its descendants; expand `type: "ref"` instances with overrides; resolve `$name` through the file's variables. Name patterns are case-insensitive. A file's own variables extend the scales. [MUST] checks fail the board. [DEFAULT] checks warn: the agent fixes the value or keeps it with a one-line reason. A check never asks to remove or shrink content the task requested.
-
-Skip safe bands, tab bars, empty-state centring and status bars on boards named /design system|components|tokens/ and within reusable component definitions.
 
 - `R-7-1` [MUST] **Board size.** Why: R-3-1. Applies to: top-level boards. Check: width in {375, 393} and height in {812, 852}, or height >= 852 for a board named /full/.
 - `R-7-2` [MUST] **Safe bands.** Why: R-3-2. Applies to: iPhone boards. Check: no node named /button|tab|input|link|chip/ outside "Status bar" has absolute y < 59 (44 on 812); none has bottom edge > height - 34 unless inside "Tab bar".
@@ -321,7 +343,7 @@ Skip safe bands, tab bars, empty-state centring and status bars on boards named 
 - `R-7-15` [DEFAULT] **Spacing scale.** Why: R-4-1. Applies to: frames. Check: gap and padding values in the spacing list or a spacing variable.
 - `R-7-16` [DEFAULT] **Radius scale.** Why: R-3-13. Applies to: nodes with cornerRadius. Check: in the radius list or min(width, height)/2; media wider than 380 has radius 0.
 - `R-7-17` [DEFAULT] **Avatars.** Why: R-3-10. Applies to: nodes named /avatar/. Check: 24 to 96 and round; width = height and one size per list (both MUST).
-- `R-7-18` [MUST] **Icons.** Why: R-3-11, R-4-8, R-1-10. Applies to: icon nodes. Check: width = height; one library across the file; sibling icons in one row share size and fill; size 32 to 64 inside ancestor frames named /state|empty|error|illustration/ below the board, otherwise 16 to 28. Values inside those ranges pass; off the defaults is not a warning.
+- `R-7-18` [MUST] **Icons.** Why: R-3-11, R-4-8, R-1-10. Applies to: icon nodes. Check: width = height; one library across the file; sibling icons in one row share size and fill; size 16 to 28 in bars, rows and buttons, 32 to 64 in nodes named /state|empty|error|illustration/. Values inside those ranges pass; off the defaults is not a warning.
 - `R-7-19` [DEFAULT] **Separators.** Why: R-3-14. Applies to: nodes named /separator|divider|hairline/. Check: full parent inner width; height <= 1 or 4 to 8; all separators in one Feed list share height and fill.
 - `R-7-20` [DEFAULT] **Side margins.** Why: R-3-6. Applies to: text and control frames in content columns. Check: left inset 12 to 16; text beside a leading avatar may start after it; only /media|image|photo|video|rail|grid/ start at x 0. One inset value for every text column on a board (MUST).
 - `R-7-21` [DEFAULT] **Grouping distances.** Why: R-1-8. Applies to: vertical frames whose children are frames with a gap. Check: child gap * 2 <= parent gap when parent gap > 0.
@@ -329,7 +351,7 @@ Skip safe bands, tab bars, empty-state centring and status bars on boards named 
 - `R-7-23` [MUST] **Sizing modes.** Why: R-5-3. Applies to: frames and text. Check: text over 40 characters has width fill_container or a fixed width with fixed-width growth; Post and list rows have fit_content height; no fit_content frame with a fill_container child on the same axis; icons, avatars and targets have numeric sizes.
 - `R-7-24` [MUST] **Names.** Why: R-5-1. Applies to: all nodes. Check: no name matches /^(frame|group|rectangle|ellipse|text|vector|line|image|copy)( \d+)?$/ or an auto id like /_(text|rect|icon|frame)-\d+$/.
 - `R-7-25` [MUST] **Reuse.** Why: R-4-5, R-6-1. Applies to: each board. Check: a subtree with the same node types and child counts repeated 2 or more times is an instance of one component; all Post nodes in a Feed list reference one component.
-- `R-7-26` [MUST] **Requested boards and empty anatomy.** Why: R-5-5, R-2-14. Applies to: the file. Check: every board the task names exists; an Empty board has a title text 17 to 22, one body text of at most 70 characters, one primary, and no other text over 13 pt except names inside one optional suggestion block; the block's centre sits within 24 of the centre of the free space between the element above it and the Tab bar. Error, Caught up and Post / States are checked only when present or requested.
+- `R-7-26` [MUST] **Requested boards and empty anatomy.** Why: R-5-5, R-2-14. Applies to: the file. Check: every board the task names exists; an Empty board has a title text 17 to 22, one body text of at most 70 characters, one primary, and no other text over 13 pt except names inside one suggestion block (required on empty social feeds, R-2-19); the block's centre sits within 24 of the centre of the free space between the element above it and the Tab bar. Error, Caught up and Post / States are checked only when present or requested.
 - `R-7-27` [MUST] **Loading board shape.** Why: R-1-16. Applies to: boards named /loading/. Check: Top bar and Tab bar heights match the default board; >= 2 nodes named /skeleton/; no text with digits inside the Feed list.
 - `R-7-28` [MUST] **No fake progress.** Why: R-1-13, R-1-16. Applies to: nodes named /progress/. Check: "n of m" has 1 <= n <= m, with the same m on every board of the flow.
 - `R-7-29` [DEFAULT] **Error board shape.** Why: R-6-7. Applies to: boards named /error/. Check: a button with text /retry|try again/; Tab bar kept when the default board has one.
