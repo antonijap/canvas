@@ -470,9 +470,9 @@ struct ShellLogicTests {
 
     static func canvasInsets() {
         let a = CanvasInsets.compute(panel: 244, inspector: true, inset: 10, gap: 10, pill: 40, props: 284)
-        check(a.l == 10 + 244 + 10 && a.r == 10 + 284 + 10 && a.t == 60 && a.b == 60, "panel and inspector open: \(a)")
+        check(a.l == 244 + 10 && a.r == 10 + 284 + 10 && a.t == 60 && a.b == 60, "panel and inspector open: \(a)")
         let b = CanvasInsets.compute(panel: nil, inspector: false, inset: 10, gap: 10, pill: 40, props: 284)
-        check(b.l == 60 && b.r == 10 && b.t == 60 && b.b == 60, "panel and inspector closed: \(b)")
+        check(b.l == 0 && b.r == 10 && b.t == 60 && b.b == 60, "panel and inspector closed: \(b)")
     }
 
     // Sweep S1: the titlebar's own tooltips never show, so the toolbar draws its own; it must stay on screen.

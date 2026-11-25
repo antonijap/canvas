@@ -47,8 +47,8 @@ enum Metric {
     static let islandPad: CGFloat = 8
     static let radius: CGFloat = 10
     static let radiusRow: CGFloat = 10
-    static let sidebarWidth: CGFloat = 272
-    static let sidebarMin: CGFloat = 268
+    static let sidebarWidth: CGFloat = 248
+    static let sidebarMin: CGFloat = 224
     static let sidebarMax: CGFloat = 420
     static let resizeHit: CGFloat = 12
     static let propsWidth: CGFloat = 284

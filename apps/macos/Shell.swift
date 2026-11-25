@@ -109,8 +109,8 @@ final class ControlHostingController<Content: View>: NSHostingController<Content
     required init?(coder: NSCoder) { fatalError("Use init(rootView:)") }
 }
 
-private let barY: CGFloat = Metric.inset
 private let columnTop: CGFloat = Metric.inset + Metric.pill + Metric.islandGap
+private let sidebarTop: CGFloat = Metric.inset + Metric.pill
 
 struct RootView: View {
     @ObservedObject var model: CanvasModel
@@ -161,10 +161,10 @@ struct RootView: View {
             .animation(Motion.fast, value: model.pageEmpty)
             .ignoresSafeArea()
 
+            LeftColumn(model: model, panelWidth: panelOpen ? panelWidth : nil, panelMax: panelMax)
+
             GlassEffectContainer(spacing: Metric.islandGap) {
                 ZStack(alignment: .topLeading) {
-                    // View > Hide UI (Cmd+backslash): only the canvas and the tabs stay.
-                    LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth, panelMax: panelMax)
                     if inspectorShown { Inspector(model: model, fonts: model.fonts).disabled(model.cloudReadOnly) }
                     // Nothing to zoom on an empty page: the pill comes back with the first board.
                     if !model.uiHidden && !model.homeShown && !model.pageEmpty { ZoomCorner(model: model) }
@@ -180,7 +180,6 @@ struct RootView: View {
             .transaction { if model.resizingSidebar { $0.animation = nil } }
             .animation(Motion.island, value: inspectorShown)
             .animation(Motion.island, value: model.uiHidden)
-            .animation(Motion.island, value: panelOpen)
             .padding(Metric.inset)
             .ignoresSafeArea()
 
@@ -224,8 +223,10 @@ struct TopBar: View {
     @State private var actionsWidth: CGFloat = 0
     @State private var hoveredTab: String?
 
+    private var sidebarToggleWidth: CGFloat { model.homeShown || model.uiHidden ? 0 : Metric.control }
+
     private var tabRoom: CGFloat {
-        max(0, barWidth - actionsWidth - Metric.trafficLights - PinnedTab.compactWidth - Metric.control - Self.minimumDragWidth)
+        max(0, barWidth - actionsWidth - Metric.trafficLights - sidebarToggleWidth - PinnedTab.compactWidth - Metric.control - Self.minimumDragWidth)
     }
     private var fittedWidths: [CGFloat] {
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
@@ -354,6 +355,12 @@ struct TopBar: View {
 
     private var tabs: some View {
         HStack(spacing: 0) {
+            // The sidebar toggle: right after the window buttons, the same spot whether the sidebar shows or not.
+            // Home draws the separator after it while files are open.
+            if sidebarToggleWidth > 0 {
+                SidebarToggleButton(model: model)
+                    .overlay(alignment: .trailing) { if model.openFiles.isEmpty { separator } }
+            }
             PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
                       help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
                 .qaID("home-tab", label: "Home")
@@ -460,63 +467,235 @@ struct TopBar: View {
 
 // MARK: Left
 
-struct LeftColumn: View {
+private struct SidebarToggleButton: View {
     @ObservedObject var model: CanvasModel
-    @Binding var panelOpen: Bool
-    /// From RootView: the stored width clamped to the window; nil hides the panel (no room beside the inspector).
-    let panelWidth: CGFloat?
-    /// The widest a drag may make the panel in this window.
-    let panelMax: CGFloat
-    @State private var scrollOffsets: [SidebarSection: CGFloat] = [:]
-    @State private var tokenTab: TokenTab = .text
+    @State private var hovering = false
 
     var body: some View {
-        // Keep the section offsets and token tab when Hide UI removes the panel.
-        if !model.uiHidden && !model.homeShown { column }
+        let label = model.panelOpen ? "Hide panel" : "Show panel"
+        Button { model.panelOpen.toggle() } label: {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(model.panelOpen ? Palette.fg : Palette.mutedFg)
+                .frame(width: 28, height: 26)
+                .background(RoundedRectangle(cornerRadius: 5).fill(model.panelOpen || hovering ? SidebarStyle.selection : .clear))
+                .frame(width: Metric.control, height: Metric.control)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .chromeHelp(label)
+        .accessibilityLabel(label)
+        .qaID("sidebar-toggle", label: label)
+    }
+}
+
+enum SidebarStyle {
+    static let row: CGFloat = 24
+    static let radius: CGFloat = 5
+    static let selection = Color(light: 0x000000, 0.09, dark: 0xFFFFFF, 0.09)
+    static let text = Font.system(size: 12)
+}
+
+struct SidebarGroupLabel: View {
+    let title: String
+
+    var body: some View {
+        Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)
+            .frame(height: 20)
+            .qaText(title)
+    }
+}
+
+private struct SidebarGlass: View {
+    var body: some View {
+        Rectangle()
+            .fill(.regularMaterial)
+            .overlay {
+                Rectangle().fill(Color(light: 0xF9F9FA, 0.55, dark: 0x2A2A2E, 0.55))
+            }
+            .clipped()
+            .shadow(color: .white.opacity(0.08), radius: 0, x: 0.5)
+            .shadow(color: .black.opacity(0.6), radius: 0, x: 1)
+            .shadow(color: .black.opacity(0.25), radius: 12, x: 4)
+            .allowsHitTesting(false)
+    }
+}
+
+struct LeftColumn: View {
+    @ObservedObject var model: CanvasModel
+    /// From RootView: the stored width clamped to the window; nil hides the panel.
+    let panelWidth: CGFloat?
+    let panelMax: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private struct ScrollKey: Hashable {
+        let file: String?
+        let section: SidebarSection
     }
 
-    private var column: some View {
+    @State private var scrollOffsets: [ScrollKey: CGFloat] = [:]
+    @State private var tokenTab: TokenTab = .text
+    @State private var menuOpen = false
+    @State private var searchOpen = false
+    @State private var query = ""
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if menuOpen {
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { menuOpen = false }
+            }
+            if let width = panelWidth {
+                column(width: width)
+                    .transition(reduceMotion ? .identity : .offset(x: -width - 32))
+            }
+        }
+        .padding(.top, sidebarTop)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: panelWidth != nil)
+        .onChange(of: panelWidth != nil) { _, shown in
+            if !shown { menuOpen = false; closeSearch() }
+        }
+        .onChange(of: model.currentFile) { _, _ in menuOpen = false }
+        .onChange(of: model.section) { _, _ in closeSearch() }
+        .onChange(of: tokenTab) { _, _ in closeSearch() }
+    }
+
+    private var searchPrompt: String {
+        switch tokenTab {
+        case .text: "Search text styles"
+        case .variables: "Search variables"
+        case .fonts: "Search fonts"
+        }
+    }
+
+    private func closeSearch() {
+        searchOpen = false
+        query = ""
+        searchFocused = false
+    }
+
+    private func column(width: CGFloat) -> some View {
         let section = model.section
-        let shown = panelOpen ? panelWidth : nil
-        return GlassIsland(radius: shown == nil ? 999 : Metric.radiusIsland, padding: 0, dense: shown != nil) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: Metric.islandPad) {
-                    toggle(shown: shown != nil)
-                    if shown != nil {
-                        ForEach(SidebarSection.allCases) { item in
-                            IconButton(symbol: item.symbol, active: section == item, help: item.rawValue, filled: true) {
-                                model.section = item
-                            }
-                            .qaID("sidebar-section", label: item.rawValue)
-                        }
+        let scrollKey = ScrollKey(file: model.currentFile, section: section)
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Button { menuOpen.toggle() } label: {
+                    HStack(spacing: 6) {
+                        Text(section.rawValue).font(.system(size: 13, weight: .semibold))
+                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Palette.mutedFg)
                     }
+                    .padding(.horizontal, 4)
+                    .frame(height: 32)
+                    .contentShape(Rectangle())
                 }
-                .padding([.top, .leading], Metric.pillPad)
-                .padding(.trailing, shown == nil ? Metric.pillPad : Metric.islandPad)
-                if let width = shown {
-                    SidePanel(model: model, section: section, tokenTab: $tokenTab, offset: Binding(
-                        get: { scrollOffsets[section] }, set: { scrollOffsets[section] = $0 }
-                    ))
-                    .id(section)
-                    .padding([.horizontal, .bottom], Metric.islandPad)
-                    .overlay(alignment: .trailing) {
-                        SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
-                                            defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(section.rawValue)
+                .accessibilityHint("Choose a sidebar section")
+                .qaID("sidebar-section-menu", label: section.rawValue)
+                Spacer(minLength: 0)
+                if section == .tokens {
+                    IconButton(symbol: "magnifyingglass", help: searchPrompt) {
+                        menuOpen = false
+                        searchOpen = true
+                        searchFocused = true
                     }
+                    .qaID("sidebar-search")
                 }
             }
-            .padding(.bottom, shown == nil ? Metric.pillPad : 0)
+            .padding(.horizontal, 8)
+
+            VStack(spacing: 0) {
+                if section == .tokens && searchOpen {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass").font(.system(size: 12)).foregroundStyle(Palette.mutedFg)
+                        TextField(searchPrompt, text: $query).textFieldStyle(.plain)
+                            .font(SidebarStyle.text).focused($searchFocused).qaText(searchPrompt)
+                            .onAppear { searchFocused = true }
+                            .onExitCommand { closeSearch(); model.focusCanvas() }
+                    }
+                    .padding(.horizontal, 8)
+                    .frame(height: 24)
+                    .background(Palette.hover, in: RoundedRectangle(cornerRadius: 6))
+                    .padding(.horizontal, 8).padding(.bottom, 4)
+                }
+                SidePanel(model: model, section: section, tokenTab: $tokenTab, query: query, offset: Binding(
+                    get: { scrollOffsets[scrollKey] }, set: { scrollOffsets[scrollKey] = $0 }
+                ))
+                .id(scrollKey)
+            }
+            .overlay(alignment: .trailing) {
+                SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
+                                    defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
+            }
         }
-        .frame(width: shown ?? Metric.pill)
-        .padding(.top, columnTop - barY)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(width: width)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(SidebarGlass())
+        .overlay(alignment: .topLeading) {
+            if menuOpen {
+                Color.clear.contentShape(Rectangle())
+                    .padding(.top, 32)
+                    .onTapGesture { menuOpen = false }
+                SidebarSectionMenu(selection: section) {
+                    model.section = $0
+                    menuOpen = false
+                }
+                .padding(.leading, 8)
+                .padding(.top, 34)
+            }
+        }
+        .onExitCommand { menuOpen = false }
+        .qaID("sidebar-panel")
+    }
+}
+
+private struct SidebarSectionMenu: View {
+    let selection: SidebarSection
+    let select: (SidebarSection) -> Void
+    @State private var hovered: SidebarSection?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(SidebarSection.allCases) { item in
+                Button { select(item) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold))
+                            .frame(width: 12).opacity(selection == item ? 1 : 0).accessibilityHidden(true)
+                        Text(item.rawValue).font(SidebarStyle.text)
+                        Spacer(minLength: 12)
+                        keycap("\u{2325}")
+                        keycap(item.shortcut)
+                    }
+                    .padding(.horizontal, 6)
+                    .frame(height: 24)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(selection == item || hovered == item ? SidebarStyle.selection : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .onHover { hovered = $0 ? item : nil }
+                .accessibilityLabel(item.rawValue)
+                .accessibilityHint("Option " + item.shortcut)
+                .accessibilityAddTraits(selection == item ? .isSelected : [])
+                .qaID("sidebar-section", label: item.rawValue)
+            }
+        }
+        .padding(4)
+        .frame(width: 184)
+        .background(Palette.popover, in: RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.33), radius: 9, y: 4)
     }
 
-    private func toggle(shown: Bool) -> some View {
-        IconButton(symbol: "sidebar.left", help: shown ? "Hide panel" : "Show panel", filled: shown) {
-            panelOpen.toggle()
-        }
-        .qaID("sidebar-toggle", label: shown ? "Hide panel" : "Show panel")
+    private func keycap(_ key: String) -> some View {
+        Text(key).font(.system(size: 11, weight: .medium))
+            .frame(width: 16, height: 16)
+            .background(SidebarStyle.selection, in: RoundedRectangle(cornerRadius: 4))
+            .accessibilityHidden(true)
     }
 }
 
@@ -585,13 +764,15 @@ private struct SidePanel: View {
     @ObservedObject var model: CanvasModel
     let section: SidebarSection
     @Binding var tokenTab: TokenTab
+    let query: String
     @Binding var offset: CGFloat?
     @State private var scroll: ScrollPosition
 
-    init(model: CanvasModel, section: SidebarSection, tokenTab: Binding<TokenTab>, offset: Binding<CGFloat?>) {
+    init(model: CanvasModel, section: SidebarSection, tokenTab: Binding<TokenTab>, query: String, offset: Binding<CGFloat?>) {
         self.model = model
         self.section = section
         _tokenTab = tokenTab
+        self.query = query
         _offset = offset
         _scroll = State(initialValue: ScrollPosition(y: offset.wrappedValue ?? 0))
     }
@@ -599,15 +780,16 @@ private struct SidePanel: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: 0) {
                     switch section {
                     case .layers:
-                        PagesSection(model: model).padding(.bottom, 4)
+                        PagesSection(model: model).padding(.bottom, 10)
+                        SidebarGroupLabel(title: "Layers")
                         LayersRows(model: model, store: LayersStore.of(model))
                     case .assets:
                         ForEach(model.components) { c in
                             ListRow(title: (c.isText ? "T " : "") + c.name, detail: c.instances > 0 ? "\(c.instances) \u{00D7}" : c.type,
-                                    symbol: "diamond.fill", tint: Palette.component, active: c.id == model.selection?.id) { model.reveal(c.id, board: c.board) }
+                                    symbol: "diamond.fill", sidebar: true, active: c.id == model.selection?.id) { model.reveal(c.id, board: c.board) }
                             // Drag onto the canvas: an instance where it lands; with Option onto an instance, a swap.
                             .onDrag { model.beginComponentDrag(c) } preview: { ComponentDragPreview(name: c.name) }
                             .contextMenu {
@@ -621,16 +803,19 @@ private struct SidePanel: View {
                                      selection: tokenTab, showsTrack: false) { tokenTab = $0 }
                             .padding(.horizontal, 4).padding(.bottom, 6)
                         switch tokenTab {
-                        case .text: TokenLibrary(model: model, styles: true)
-                        case .variables: TokenLibrary(model: model, styles: false)
-                        case .fonts: FontList(model: model, fonts: model.fonts)
+                        case .text: TokenLibrary(model: model, styles: true, query: query)
+                        case .variables: TokenLibrary(model: model, styles: false, query: query)
+                        case .fonts: FontList(model: model, fonts: model.fonts, query: query)
                         }
                     case .widgets:
                         WidgetsPanel(model: model)
                     }
                 }
+                .padding(.horizontal, section == .widgets ? 0 : 6)
+                .padding(.bottom, 8)
             }
             .scrollIndicators(.never)
+            .task { if section == .widgets { model.fetchKinds() } }
             .scrollPosition($scroll)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)
@@ -683,13 +868,12 @@ struct SnapSettings: Equatable {
 struct FontList: View {
     @ObservedObject var model: CanvasModel
     @ObservedObject var fonts: FontCatalog
-    @State private var query = ""
+    let query: String
 
     var body: some View {
         let shown = query.isEmpty ? fonts.families : fonts.families.filter { $0.localizedCaseInsensitiveContains(query) }
-        SearchField(prompt: "Search \(fonts.families.count) fonts", text: $query).padding(.horizontal, 4).padding(.bottom, 4)
         ForEach(shown, id: \.self) { family in
-            ListRow(title: family, detail: "\(fonts.styleCount(of: family))", font: .custom(family, size: 14)) {
+            ListRow(title: family, detail: "\(fonts.styleCount(of: family))", font: .custom(family, size: 12), sidebar: true) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(family, forType: .string)
                 model.flash("Copied \(family)")

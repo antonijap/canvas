@@ -91,16 +91,21 @@ struct PagesSection: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                SectionHeader(title: "Pages")
-                IconButton(symbol: "plus", help: "Add page", bounce: model.pages.count) {
+                SidebarGroupLabel(title: "Pages")
+                Button {
                     model.addPage { id, name in startRename(PageInfo(id: id, name: name, count: 0)) }
-                }.qaID("page-add",label:"Add page").disabled(model.cloudReadOnly || model.revision.isEmpty)
+                } label: {
+                    Image(systemName: "plus").font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Palette.mutedFg).frame(width: 24, height: 24).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).chromeHelp("Add page").accessibilityLabel("Add page")
+                .qaID("page-add", label: "Add page").disabled(model.cloudReadOnly || model.revision.isEmpty)
             }
             if model.revision.isEmpty {
                 if let sidebar = model.openingSidebar {
                     VStack(spacing: PageDrag.spacing) {
                         ForEach(sidebar.pages) { page in
-                            ListRow(title: page.name, symbol: "rectangle.portrait", active: page.id == sidebar.activePage)
+                            ListRow(title: page.name, symbol: "rectangle.portrait", sidebar: true, active: page.id == sidebar.activePage)
                                 .disabled(true)
                                 .qaID("page-row", label: page.id)
                         }
@@ -144,18 +149,18 @@ struct PagesSection: View {
             if editing == p.id {
                 HStack(spacing: 8) {
                     Image(systemName: "rectangle.portrait").symbolRenderingMode(.hierarchical)
-                        .font(.system(size: GlyphSize.row, weight: .medium)).foregroundStyle(Palette.mutedFg).frame(width: 16)
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.mutedFg).frame(width: 16)
                     TextField("Page name", text: $draft)
-                        .textFieldStyle(.plain).font(Typography.body).foregroundStyle(Palette.fg)
+                        .textFieldStyle(.plain).font(SidebarStyle.text).foregroundStyle(Palette.fg)
                         .focused($focused)
                 }
-                .padding(.horizontal, 12).frame(height: Metric.row)
-                .background(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).fill(Palette.active))
+                .padding(.horizontal, 6).frame(height: SidebarStyle.row)
+                .background(RoundedRectangle(cornerRadius: SidebarStyle.radius).fill(SidebarStyle.selection))
                 .onSubmit { commit(p.id) }
                 .onExitCommand { editing = nil }
                 .onChange(of: focused) { _, f in if !f { commit(p.id) } }
             } else {
-                let row = ListRow(title: p.name, symbol: "rectangle.portrait", active: p.id == model.activePage) { model.selectPageRow(p.id) }
+                let row = ListRow(title: p.name, symbol: "rectangle.portrait", sidebar: true, active: p.id == model.activePage) { model.selectPageRow(p.id) }
                     .simultaneousGesture(TapGesture(count: 2).onEnded { startRename(p) })
                 if model.cloudReadOnly {
                     row
@@ -166,7 +171,7 @@ struct PagesSection: View {
                         watchDrop()
                         return NSItemProvider(object: PageDrag.payload(page: p.id) as NSString)
                     } preview: {
-                        ListRow(title: p.name, symbol: "rectangle.portrait", active: p.id == model.activePage)
+                        ListRow(title: p.name, symbol: "rectangle.portrait", sidebar: true, active: p.id == model.activePage)
                             .fixedSize(horizontal: true, vertical: false)
                             .background(Palette.popover, in: RoundedRectangle(cornerRadius: Metric.radiusRow))
                             .shadow(color: .black.opacity(0.25), radius: 5, y: 3)
@@ -210,7 +215,7 @@ struct PagesSection: View {
 
     private func rowOffset(_ i: Int) -> CGFloat {
         guard let dragging, let from = model.pages.firstIndex(where: { $0.id == dragging }), case let .reorder(to) = dropTarget else { return 0 }
-        let stride = Metric.row + PageDrag.spacing
+        let stride = SidebarStyle.row + PageDrag.spacing
         return CGFloat(PageDrag.shift(row: i, from: from, to: to)) * stride
     }
 
@@ -259,14 +264,14 @@ private struct PageDrop: DropDelegate {
     func validateDrop(info: DropInfo) -> Bool { !model.cloudReadOnly && info.hasItemsConforming(to: [.text]) }
 
     private func boardPage(at y: CGFloat) -> String? {
-        guard let index = PageDrag.row(at: y, height: Metric.row, count: model.pages.count) else { return nil }
+        guard let index = PageDrag.row(at: y, height: SidebarStyle.row, count: model.pages.count) else { return nil }
         let id = model.pages[index].id
         return id == model.activePage ? nil : id
     }
 
     private func destination(_ id: String, at y: CGFloat) -> Int? {
         guard let from = model.pages.firstIndex(where: { $0.id == id }) else { return nil }
-        return PageDrag.index(from: from, y: y, height: Metric.row, count: model.pages.count)
+        return PageDrag.index(from: from, y: y, height: SidebarStyle.row, count: model.pages.count)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {

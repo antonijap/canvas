@@ -68,9 +68,12 @@ export class T {
   /** Show a page (by clicking its row in the left rail) and wait for its boards. */
   async showPage(id: string) {
     if ((await this.ev("window.canvasHost.page")) === id) return;
-    await this.ev(`document.querySelector('#sidebar-layers[aria-selected="false"]')?.click()`);
+    await this.ev(`(() => {
+      document.querySelector('#sidebar-toggle[aria-expanded="false"]')?.click();
+      document.querySelector('#sidebar-layers[aria-checked="false"]')?.click();
+    })()`);
     const name = await this.ev<string>(`window.canvasHost.pages.find((p) => p.id === ${JSON.stringify(id)}).name`);
-    const at = await this.ev<{ x: number; y: number } | null>(`(() => { const r = [...document.querySelectorAll("#pages .row")].find((e) => e.firstChild && e.firstChild.textContent === ${JSON.stringify(name)}); if (!r) return null; r.scrollIntoView({ block: "nearest" }); const b = r.getBoundingClientRect(); return { x: b.left + 20, y: b.top + b.height / 2 }; })()`);
+    const at = await this.ev<{ x: number; y: number } | null>(`(() => { const r = [...document.querySelectorAll("#pages .row")].find((e) => e.textContent === ${JSON.stringify(name)}); if (!r) return null; r.scrollIntoView({ block: "nearest" }); const b = r.getBoundingClientRect(); return { x: b.left + 20, y: b.top + b.height / 2 }; })()`);
     if (!at) throw new Fail(`no row for page ${name} in the left rail`);
     await this.io.click(at.x, at.y);
     await this.waitFor(`window.canvasHost.page === ${JSON.stringify(id)}`, `page ${id}`);

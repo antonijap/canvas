@@ -129,6 +129,7 @@ private struct PaperTile: View {
                 .frame(height: 52).frame(maxWidth: .infinity).clipped()
                 .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(hovering ? Palette.sel : Palette.stroke, lineWidth: 1))
+                .qaID("shader-preset-preview", label: shader.id)
                 Text(shader.name).font(Typography.micro).foregroundStyle(Palette.fg).lineLimit(1).qaText(shader.name)
             }
             .contentShape(Rectangle())

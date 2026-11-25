@@ -197,15 +197,15 @@ sc("widgets", "widget picker shows drawn previews in a two-column grid", { cover
   fs.writeFileSync(path.join(folder, "renderer.js"), "export default (root) => { root.textContent = 'Hello'; };");
   const was = (await t.app.cmd({ op: "theme.get" })).mode;
   try {
+    await t.section("Layers");
     await t.section("Widgets");
-    await t.mark({ label: "Mine", exact: true });
-    await t.mark({ id: "widget-preview-hello" });
+    await t.waitState(s => s.widgetKinds.some((kind: { id: string }) => kind.id === "hello"), "the local widget to load");
     for (const theme of ["light", "dark"]) {
       await t.app.cmd({ op: "theme.set", args: { mode: theme } });
       await t.waitState((s) => s.theme === theme, theme + " theme");
       const page = await t.mark({ id: "widget-preview-note" });
       const todo = await t.mark({ id: "widget-preview-todo" });
-      const title = await t.mark({ label: "Page", region: { x: page.x, y: page.y, w: page.w, h: 94 } });
+      const title = await t.mark({ label: "Page", region: { x: page.x, y: page.y, w: page.w, h: 112 }, exact: true });
       t.near(page.y, todo.y, 1, "the first two previews share a row");
       t.ok(page.x > todo.x + todo.w, "the second preview has its own column");
       t.ok(page.h >= 40 && title.y >= page.y + page.h, "the preview is drawn above the title");
@@ -220,7 +220,11 @@ sc("widgets", "widget picker shows drawn previews in a two-column grid", { cover
       t.near(ciTile.h, gitTile.h, 1, "tiles have equal height");
       await t.shot(path.join(ROOT, "qa", "out", "native", "widget-picker-" + theme + ".png"));
     }
-    await t.click(center(await t.mark({ id: "widget-preview-hello" })));
+    const panel = await t.mark({ id: "sidebar-panel" });
+    const local = { id: "widget-preview-hello" };
+    if (!(await t.marks(local)).length) await t.scroll(center(panel), 0, -150);
+    await t.mark({ label: "Mine", exact: true });
+    await t.click(center(await t.mark(local)));
     const widget = await t.waitDisk(() => t.widgets().widgets.find((w: any) => w.kind === "hello"), "the local widget from the picker");
     const selector = JSON.stringify('.wd[data-id="widget:' + widget.id + '"]');
     await t.waitJs(`document.querySelector(${selector})?.querySelector("button[aria-label='Allow widget']")`, "the local approval button");
@@ -280,7 +284,7 @@ sc("widgets", "drag a widget from the library onto the canvas", { covers: ["card
   const kind = st.widgetKinds.find((k: any) => k.id === "note") ?? st.widgetKinds[0];
   t.ok(kind, "the Widgets panel lists no kinds");
   const before = t.widgets().widgets.length;
-  const from = await t.textAt(kind.title, { x: 60, y: 60, w: 250, h: 400 });
+  const from = center(await t.mark({ id: "widget-preview-" + kind.id }));
   const want = await dropWorld(t, CANVAS_SPOT);
   const r = await t.drag(from, CANVAS_SPOT, { steps: 20 });
   t.ok(r.systemDrag, `the row did not start a drag (${JSON.stringify(r)})`);
@@ -299,9 +303,7 @@ sc("widgets", "drag a shader tile onto empty canvas: a shader card", { covers: [
   const st = await t.waitState((s) => s.paperShaders.length > 0, "the shader tiles");
   const shader = st.paperShaders[0];
   const before = t.widgets().widgets.length;
-  const at = await t.textAt(shader.name, { x: 60, y: 60, w: 250, h: 900 });
-  // The tile's picture sits above its name: grab the picture.
-  const from = { x: at.x, y: at.y - 30 };
+  const from = center(await t.mark({ id: "shader-preset-preview", label: shader.id, exact: true }));
   const want = await dropWorld(t, CANVAS_SPOT);
   const r = await t.drag(from, CANVAS_SPOT, { steps: 20 });
   t.ok(r.systemDrag, `the tile did not start a drag (${JSON.stringify(r)})`);
@@ -376,11 +378,11 @@ sc("widgets", "drag a shader tile onto a frame, no keys held: the frame's fill, 
   await t.section("Widgets");
   const st = await t.waitState((s) => s.paperShaders.length > 0, "the shader tiles");
   const shader = st.paperShaders.find((s: any) => s.id === "mesh-gradient") ?? st.paperShaders[0];
-  const at = await t.textAt(shader.name, { x: 60, y: 60, w: 250, h: 900 });
+  const from = center(await t.mark({ id: "shader-preset-preview", label: shader.id, exact: true }));
   const fr = await t.rect("fr_outer");
   const to = { x: fr.x + 12, y: fr.y + fr.h - 12 };
   const cards = t.widgets().widgets.length;
-  const r = await t.drag({ x: at.x, y: at.y - 30 }, to, { steps: 20 });
+  const r = await t.drag(from, to, { steps: 20 });
   t.ok(r.systemDrag, `the tile did not start a drag (${JSON.stringify(r)})`);
   const fill = await t.waitDisk(() => { const f = t.node("fr_outer")?.fill; return Array.isArray(f) && f; }, "the frame's new fill");
   t.eq(fill.at(-1), { type: "shader", shader: shader.id, preset: "Default" }, "the shader fill on top");
@@ -403,12 +405,12 @@ sc("widgets", "Option-drag a shader tile onto a frame: a card, the frame keeps i
   await t.section("Widgets");
   const st = await t.waitState((s) => s.paperShaders.length > 0, "the shader tiles");
   const shader = st.paperShaders.find((s: any) => s.id === "mesh-gradient") ?? st.paperShaders[0];
-  const at = await t.textAt(shader.name, { x: 60, y: 60, w: 250, h: 900 });
+  const from = center(await t.mark({ id: "shader-preset-preview", label: shader.id, exact: true }));
   const fr = await t.rect("fr_outer");
   const to = { x: fr.x + 12, y: fr.y + fr.h - 12 };
   const fill0 = JSON.stringify(t.node("fr_outer")?.fill);
   const cards = t.widgets().widgets.length;
-  const r = await t.drag({ x: at.x, y: at.y - 30 }, to, { steps: 20, mods: ["alt"] });
+  const r = await t.drag(from, to, { steps: 20, mods: ["alt"] });
   t.ok(r.systemDrag, `the tile did not start a drag (${JSON.stringify(r)})`);
   await t.waitDisk(() => t.widgets().widgets.length > cards, "a new shader card");
   t.eq(JSON.stringify(t.node("fr_outer")?.fill), fill0, "the frame's fill is unchanged");
@@ -1152,20 +1154,21 @@ sc("settings", "Settings > Privacy: Share usage counts on, Help improve Canvas a
 
 sc("tokens", "the Tokens switch shows Text, Variables and Fonts", { covers: [] }, async (t: NT) => {
   await t.section("Tokens");
-  const panel = { x: 10, y: 105, w: 230, h: 700 };
-  const tab = async (label: string) => center(await t.mark({ id: "text", label, exact: true, region: { ...panel, h: 38 } }));
+  const tab = async (label: string) => center(await t.mark({ id: "text", label, exact: true, region: { x: 0, y: 82, w: 248, h: 72 } }));
+  const search = async (prompt: string) => {
+    await t.click(center(await t.mark({ id: "sidebar-search" })));
+    await t.mark({ label: prompt, exact: true });
+  };
   await t.click(await tab("Text"));
-  // Each tab's search field names what it lists.
-  await t.waitText("Search text styles", panel);
+  await search("Search text styles");
   await t.click(await tab("Variables"));
-  await t.waitText("Search variables", panel);
-  await t.waitText("brand", panel);
+  await search("Search variables");
+  await t.waitText("brand", { x: 0, y: 82, w: 248, h: 700 });
   await t.click(await tab("Fonts"));
-  await t.waitText("fonts", { ...panel, y: panel.y + 38, h: 70 });
-  t.ok(!(await t.marks({ label: "brand", region: panel })).length, "variables still listed on the Fonts tab");
+  await search("Search fonts");
+  t.ok(!(await t.marks({ label: "brand", region: { x: 0, y: 82, w: 248, h: 700 } })).length, "variables still listed on the Fonts tab");
   await t.click(await tab("Text"));
-  await t.waitText("Search text styles", panel);
-  t.ok(!(await t.marks({ label: "brand", region: panel })).length, "variables listed on the Text tab");
+  await search("Search text styles");
 });
 
 // ---------------------------------------------------------------- clipboard and the selected card

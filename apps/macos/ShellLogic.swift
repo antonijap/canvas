@@ -600,7 +600,7 @@ struct LeadTrailThrottle {
 /// The part of the window the shell's islands cover, as insets of the canvas view. The canvas fits into what is left.
 enum CanvasInsets {
     static func compute(panel: CGFloat?, inspector: Bool, inset: CGFloat, gap: CGFloat, pill: CGFloat, props: CGFloat) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
-        let left = inset + (panel ?? pill) + gap
+        let left = panel.map { $0 + gap } ?? 0
         let right = inset + (inspector ? props + gap : 0)
         let top = inset + pill + gap
         let bottom = inset + pill + gap

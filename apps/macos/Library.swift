@@ -662,7 +662,7 @@ final class MenuAction: NSObject, NSMenuItemValidation {
 struct TokenLibrary: View {
     @ObservedObject var model: CanvasModel
     let styles: Bool
-    @State private var query = ""
+    let query: String
     @State private var open: Set<String> = []
     @State private var closedSections: Set<String> = []
 
@@ -670,7 +670,6 @@ struct TokenLibrary: View {
 
     var body: some View {
         let q = query.trimmingCharacters(in: .whitespaces)
-        SearchField(prompt: styles ? "Search text styles" : "Search variables", text: $query).padding(.horizontal, 4).padding(.bottom, 4)
         if styles {
             let list = filter(model.styleEntries, q)
             if list.isEmpty { empty(q) }
@@ -683,9 +682,9 @@ struct TokenLibrary: View {
                 let folded = closedSections.contains(s.id) && q.isEmpty
                 Button { withAnimation(Motion.fast) { toggle(&closedSections, s.id) } } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).rotationEffect(.degrees(folded ? 0 : 90))
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).rotationEffect(.degrees(folded ? 0 : 90))
                             .foregroundStyle(Palette.mutedFg).frame(width: 10)
-                        Text(s.title.uppercased()).font(Typography.section).tracking(0.6).foregroundStyle(Palette.mutedFg).qaText(s.title)
+                        Text(s.title).font(Typography.section).foregroundStyle(Palette.mutedFg).qaText(s.title)
                         Spacer(minLength: 0)
                         Text("\(s.itemCount)").font(Typography.micro).monospacedDigit().foregroundStyle(Palette.mutedFg)
                     }
@@ -735,16 +734,16 @@ struct TokenLibrary: View {
             let isOpen = open.contains(e.id) || searching
             Button { withAnimation(Motion.fast) { toggle(&open, e.id) } } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).rotationEffect(.degrees(isOpen ? 90 : 0))
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).rotationEffect(.degrees(isOpen ? 90 : 0))
                         .foregroundStyle(Palette.mutedFg).frame(width: 10)
-                    Text(e.title).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1)
+                    Text(e.title).font(SidebarStyle.text).foregroundStyle(Palette.fg).lineLimit(1)
                     Spacer(minLength: 8)
                     Text("\(e.items.count)").font(Typography.micro).monospacedDigit().foregroundStyle(Palette.mutedFg)
                 }
-                .padding(.horizontal, 12).frame(height: Metric.row).contentShape(Rectangle())
+                .padding(.horizontal, 12).frame(height: SidebarStyle.row).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if isOpen { ForEach(e.items) { i in LibRow(model: model, item: i, indent: 16, themed: themed && !styles) } }
+            if isOpen { ForEach(e.items) { i in LibRow(model: model, item: i, indent: 12, themed: themed && !styles) } }
         } else {
             LibRow(model: model, item: e.items[0], indent: 0, themed: themed && !styles, top: true)
         }
@@ -778,17 +777,17 @@ struct LibRow: View {
             Button { model.toggleUsage(item) } label: {
                 HStack(spacing: 6) {
                     if item.kind == "style" {
-                        if let c = item.swatch.flatMap(parseColor) { ColorChip(color: c) } else { Image(systemName: "textformat").glyph(11).foregroundStyle(Palette.mutedFg).frame(width: 14) }
+                        if let c = item.swatch.flatMap(parseColor) { ColorChip(color: c) } else { Image(systemName: "textformat").glyph(12).foregroundStyle(Palette.mutedFg).frame(width: 14) }
                     }
-                    Text(top || item.kind == "style" && indent == 0 ? item.title : item.leaf).font(Typography.body).fontWeight(active ? .semibold : nil)
+                    Text(top || item.kind == "style" && indent == 0 ? item.title : item.leaf).font(SidebarStyle.text)
                         .foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.middle).qaText(top || item.kind == "style" && indent == 0 ? item.title : item.leaf)
                     Spacer(minLength: 6)
                     values
                     Text(ThemeColumns.compact(item.count)).lineLimit(1).font(Typography.micro).monospacedDigit().foregroundStyle(item.count == 0 ? Palette.mutedFg.opacity(0.5) : Palette.mutedFg)
                         .frame(width: ThemeColumns.countWidth, alignment: .trailing)
                 }
-                .padding(.leading, 12 + indent).padding(.trailing, 12).frame(height: Metric.row)
-                .background(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).fill(active ? Palette.active : hovering ? Palette.hover : .clear))
+                .padding(.leading, 12 + indent).padding(.trailing, 12).frame(height: SidebarStyle.row)
+                .background(RoundedRectangle(cornerRadius: SidebarStyle.radius, style: .continuous).fill(active ? SidebarStyle.selection : hovering ? Palette.hover : .clear))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

@@ -416,12 +416,15 @@ extension UTType {
 struct WidgetPickerTile: View {
     let kind: WidgetKindInfo
     var active = false
+    var sidebar = false
     let action: () -> Void
     @State private var hovering = false
 
+    private var fullPreview: Bool { sidebar && !kind.isLocal }
+
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: fullPreview ? 2 : 3) {
                 Group {
                     if let html = kind.previewHTML {
                         LocalWidgetPreview(html: html).allowsHitTesting(false)
@@ -429,18 +432,19 @@ struct WidgetPickerTile: View {
                         WidgetThumbnail(kind: kind.id)
                     }
                 }
-                    .frame(height: 40)
+                    .frame(height: fullPreview ? 72 : 40)
                     .qaID("widget-preview-" + kind.id)
                     .accessibilityHidden(true)
                 Text(kind.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.fg)
-                    .lineLimit(1).qaText(kind.title)
-                Text(kind.description).font(.system(size: 12)).foregroundStyle(Palette.mutedFg)
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1).padding(.top, fullPreview ? 2 : 0).qaText(kind.title)
+                Text(kind.description).font(.system(size: fullPreview ? 11 : 12)).foregroundStyle(Palette.mutedFg)
+                    .lineLimit(fullPreview ? 1 : 2).fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .frame(height: 90, alignment: .topLeading)
-            .padding(6)
-            .background(active ? Palette.active : hovering ? Palette.hover : Palette.field, in: RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: fullPreview ? 112 : .infinity, alignment: .topLeading)
+            .frame(height: fullPreview ? nil : 90, alignment: .topLeading)
+            .padding(fullPreview ? 0 : 6)
+            .background(fullPreview ? .clear : active ? Palette.active : hovering ? Palette.hover : Palette.field,
+                        in: RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -457,86 +461,242 @@ struct WidgetThumbnail: View {
     let kind: String
 
     var body: some View {
-        Canvas { ctx, size in
-            let scale = min(size.width / 100, size.height / 50)
-            let dx = (size.width - 100 * scale) / 2, dy = (size.height - 50 * scale) / 2
-            func box(_ x: Double, _ y: Double, _ w: Double, _ h: Double, _ color: Color, radius: Double = 2) {
-                let r = CGRect(x: dx + x * scale, y: dy + y * scale, width: w * scale, height: h * scale)
-                ctx.fill(Path(roundedRect: r, cornerRadius: radius * scale), with: .color(color))
-            }
-            func stroke(_ points: [CGPoint], _ color: Color) {
-                var path = Path()
-                guard let first = points.first else { return }
-                path.move(to: CGPoint(x: dx + first.x * scale, y: dy + first.y * scale))
-                for point in points.dropFirst() { path.addLine(to: CGPoint(x: dx + point.x * scale, y: dy + point.y * scale)) }
-                ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2 * scale, lineCap: .round, lineJoin: .round))
-            }
-            let ink = Palette.fg, faint = Palette.mutedFg.opacity(0.36)
-            let accent = Color.blue.opacity(0.8)
-            box(0, 0, 100, 50, Palette.popover, radius: 6)
-            switch kind {
-            case "note":
-                box(14, 10, 48, 6, ink)
-                for (row, width) in [68.0, 62, 43].enumerated() { box(14, 23 + Double(row) * 7, width, 3, faint) }
-            case "todo":
-                for row in 0..<3 {
-                    let y = 10 + Double(row) * 12
-                    box(13, y, 7, 7, row == 0 ? accent : faint)
-                    box(26, y + 2, 50 - Double(row) * 5, 3, row == 0 ? faint : ink.opacity(0.7))
-                }
-            case "shader":
-                box(0, 0, 100, 50, Color(red: 0.13, green: 0.13, blue: 0.29), radius: 6)
-                for i in 0..<7 {
-                    let y = Double(i) * 4
-                    stroke([CGPoint(x: 6, y: 16 + y), CGPoint(x: 34, y: 36 - y / 2), CGPoint(x: 66, y: 12 + y / 2), CGPoint(x: 94, y: 33 - y / 4)], i.isMultiple(of: 2) ? .cyan : .purple)
-                }
-            case "video":
-                box(0, 0, 100, 50, Color(red: 0.14, green: 0.23, blue: 0.3), radius: 6)
-                stroke([CGPoint(x: 9, y: 40), CGPoint(x: 36, y: 15), CGPoint(x: 57, y: 36), CGPoint(x: 72, y: 23), CGPoint(x: 90, y: 40)], Color.cyan.opacity(0.38))
-                var play = Path()
-                play.move(to: CGPoint(x: dx + 45 * scale, y: dy + 18 * scale))
-                play.addLine(to: CGPoint(x: dx + 58 * scale, y: dy + 25 * scale))
-                play.addLine(to: CGPoint(x: dx + 45 * scale, y: dy + 32 * scale))
-                play.closeSubpath()
-                ctx.fill(play, with: .color(.white))
-            case "git-status":
-                box(14, 8, 34, 6, ink)
-                stroke([CGPoint(x: 17, y: 21), CGPoint(x: 17, y: 43)], accent)
-                for row in 0..<3 {
-                    let y = 22 + Double(row) * 9
-                    box(14, y, 6, 6, accent, radius: 3)
-                    box(28, y + 1, 46 - Double(row) * 6, 3, faint)
-                }
-            case "ci":
-                for row in 0..<3 {
-                    let y = 10 + Double(row) * 12
-                    box(12, y, 7, 7, row == 1 ? .orange : .green, radius: 4)
-                    box(25, y + 2, 36 + Double(row) * 6, 3, faint)
-                }
-            case "claude-usage":
-                for (i, height) in [12.0, 24, 16, 30, 18, 35, 21].enumerated() {
-                    box(12 + Double(i) * 11, 43 - height, 7, height, accent)
-                }
-            case "metric":
-                box(12, 9, 21, 10, ink)
-                stroke([CGPoint(x: 13, y: 40), CGPoint(x: 30, y: 33), CGPoint(x: 48, y: 37), CGPoint(x: 67, y: 28), CGPoint(x: 87, y: 24)], accent)
-            case "page-preview":
-                box(9, 7, 82, 5, faint)
-                box(9, 17, 82, 23, accent.opacity(0.25), radius: 4)
-                box(16, 23, 28, 4, ink)
-                box(16, 31, 37, 3, faint)
-            case "disk-space":
-                box(12, 13, 42, 9, ink)
-                box(12, 32, 76, 7, faint, radius: 3)
-                box(12, 32, 30, 7, accent, radius: 3)
-            default:
-                box(13, 10, 30, 5, ink)
-                box(13, 23, 72, 16, faint, radius: 3)
+        Canvas { context, size in
+            let scale = min(size.width / 112, size.height / 72)
+            var context = context
+            context.translateBy(x: (size.width - 112 * scale) / 2, y: (size.height - 72 * scale) / 2)
+            context.scaleBy(x: scale, y: scale)
+            WidgetArtwork(context: context).draw(kind)
+        }
+        .background {
+            if kind != "shader" && kind != "video" {
+                LinearGradient(colors: [.white.opacity(0.07), .white.opacity(0.02)],
+                               startPoint: .top, endPoint: .bottom)
+                    .background(Color.black.opacity(0.18))
             }
         }
-        .background(Palette.popover, in: RoundedRectangle(cornerRadius: 6))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
-        .shadow(color: .black.opacity(0.10), radius: 3, y: 1)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.28), radius: 3, y: 2)
+    }
+}
+
+private struct WidgetArtwork {
+    let context: GraphicsContext
+
+    private let amber = Color(light: 0xF2B84B, dark: 0xF2B84B)
+    private let green = Color(light: 0x4CC38A, dark: 0x4CC38A)
+    private let red = Color(light: 0xF2555A, dark: 0xF2555A)
+    private let panel = Color(light: 0x2C2C31, dark: 0x2C2C31)
+    private let ink = Color.white.opacity(0.96)
+    private let muted = Color.white.opacity(0.55)
+    private let faint = Color.white.opacity(0.25)
+    private let paper = Color(light: 0xECECEE, dark: 0xECECEE)
+    private let blackInk = Color(light: 0x18181B, dark: 0x18181B)
+
+    func draw(_ kind: String) {
+        switch kind {
+        case "todo": todo()
+        case "note": note()
+        case "shader": shader()
+        case "video": video()
+        case "git-status": git()
+        case "ci": ci()
+        case "claude-usage": usage()
+        case "metric": metric()
+        case "page-preview": pagePreview()
+        case "disk-space": disk()
+        default:
+            box(16, 15, 80, 42, panel, radius: 5)
+            box(23, 23, 34, 4, muted, radius: 1)
+            box(23, 33, 64, 13, faint, radius: 2)
+        }
+    }
+
+    private func todo() {
+        miniPanel(10, 9, 92, 58)
+        for (index, title) in ["Ship the sidebar", "Review cards", "Call Ben at 4"].enumerated() {
+            let y = CGFloat(22 + 16 * index)
+            if index == 0 {
+                circle(22, y, 4, amber)
+                line([CGPoint(x: 20, y: y), CGPoint(x: 21.5, y: y + 1.5), CGPoint(x: 24, y: y - 1.5)], blackInk, width: 0.65)
+            } else {
+                context.stroke(Path(ellipseIn: CGRect(x: 17.5, y: y - 4.5, width: 9, height: 9)), with: .color(faint), lineWidth: 1)
+            }
+            text(title, 32, y, size: 7, color: index == 0 ? faint : ink, crossedOut: index == 0)
+        }
+    }
+
+    private func note() {
+        box(24, 10, 64, 68, paper, radius: 5, shadow: true)
+        text("Field notes", 31, 22, size: 8, color: blackInk, weight: .bold)
+        rules(31, 31, color: .black.opacity(0.2), widths: [48, 42, 46])
+        gradient(31, 48, 50, 20, [0xF7C475, 0xDB8057, 0x523056], radius: 2)
+    }
+
+    private func shader() {
+        box(0, 0, 112, 72, hex(0x171425))
+        for (x, y, radius, color) in [(31.0, 25.0, 41.0, amber), (69, 10, 30, hex(0xBA64B9)), (87, 54, 41, hex(0x378C92))] {
+            context.fill(Path(CGRect(x: 0, y: 0, width: 112, height: 72)),
+                         with: .radialGradient(Gradient(colors: [color.opacity(0.83), color.opacity(0)]),
+                                               center: CGPoint(x: x, y: y), startRadius: 0, endRadius: radius))
+        }
+        box(6, 52, 45, 14, .black.opacity(0.46), radius: 4)
+        text("fn shade", 11, 59, size: 7, color: ink, mono: true)
+    }
+
+    private func video() {
+        gradient(0, 0, 112, 72, [0x2E3A55, 0x734A5B, 0x473134])
+        circle(56, 34, 12, .white.opacity(0.23))
+        line([CGPoint(x: 54, y: 30), CGPoint(x: 61, y: 34), CGPoint(x: 54, y: 38), CGPoint(x: 54, y: 30)], ink, width: 0.8)
+        text("1:36", 88, 55, size: 6.5, color: .white.opacity(0.76))
+        box(8, 62, 96, 2, faint, radius: 1)
+        box(8, 62, 38, 2, .white, radius: 1)
+    }
+
+    private func git() {
+        miniPanel(8, 6, 96, 60)
+        text("main", 26, 18, size: 8, color: ink, weight: .bold)
+        branch(16, 18)
+        text("+12", 70, 18, size: 7, color: green, mono: true)
+        text("\u{2212}3", 86, 18, size: 7, color: red, mono: true)
+        for (index, entry) in [("M", "Sidebar.swift", amber), ("A", "cards.ts", green), ("D", "old-rail.ts", red)].enumerated() {
+            let y = CGFloat(34 + index * 12)
+            text(entry.0, 15, y, size: 7, color: entry.2, mono: true)
+            text(entry.1, 26, y, size: 7, color: index == 2 ? faint : ink)
+        }
+    }
+
+    private func ci() {
+        miniPanel(8, 8, 96, 56)
+        ring(11, 20, 3.4, from: 0, to: 360, color: green, width: 0.65)
+        line([CGPoint(x: 9.5, y: 20), CGPoint(x: 10.6, y: 21), CGPoint(x: 12.6, y: 18.8)], green, width: 0.65)
+        ring(11, 36, 3.4, from: 0, to: 280, color: amber, width: 0.65)
+        text("Build", 19, 21, size: 7, color: ink)
+        text("Tests", 19, 37, size: 7, color: ink)
+        text("2m", 80, 21, size: 7, color: faint)
+        text("run", 78, 37, size: 7, color: faint)
+        box(15, 46, 82, 0.5, faint)
+        branch(11, 56)
+        text("Slim sidebar", 19, 56, size: 7, color: ink)
+        text("#128", 76, 56, size: 7, color: faint)
+    }
+
+    private func usage() {
+        ring(34, 36, 20, from: 0, to: 360, color: .white.opacity(0.095), width: 4)
+        ring(34, 36, 20, from: -62, to: 90, color: amber, width: 4)
+        text("42%", 22, 37, size: 10, color: ink, weight: .bold)
+        text("Session", 66, 25, size: 7, color: muted)
+        text("Resets 3h", 66, 36, size: 7, color: ink)
+        box(66, 46, 36, 3, .white.opacity(0.10), radius: 1.5)
+        box(66, 46, 7, 3, muted, radius: 1.5)
+    }
+
+    private func metric() {
+        text("12.4k", 10, 17, size: 15, color: ink, weight: .bold)
+        text("+8.2%", 58, 17, size: 7, color: green, mono: true)
+        text("Visitors, 7 days", 10, 32, size: 6.5, color: muted)
+        let points = [66, 62, 64, 56, 58, 50, 53, 46, 48].enumerated().map {
+            CGPoint(x: $0.offset * 14, y: $0.element)
+        }
+        var area = trace(points)
+        area.addLine(to: CGPoint(x: 112, y: 72))
+        area.addLine(to: CGPoint(x: 0, y: 72))
+        area.closeSubpath()
+        context.fill(area, with: .color(amber.opacity(0.24)))
+        line(points, amber, width: 1.2)
+        circle(98, 46, 5, amber.opacity(0.26))
+        circle(98, 46, 3, amber)
+    }
+
+    private func pagePreview() {
+        let page = Path(roundedRect: CGRect(x: 10, y: 9, width: 92, height: 63), cornerRadius: 5)
+        box(10, 9, 92, 63, hex(0xF8F8F8), radius: 5, shadow: true)
+        var clipped = context
+        clipped.clip(to: page)
+        let detail = WidgetArtwork(context: clipped)
+        detail.box(10, 9, 92, 11, hex(0xE2E2E5))
+        detail.circle(16, 14.5, 1.4, red)
+        detail.circle(21, 14.5, 1.4, amber)
+        detail.circle(26, 14.5, 1.4, green)
+        detail.box(39, 11, 42, 7, .white, radius: 4)
+        detail.text("example.com", 38, 15, size: 6, color: .black.opacity(0.64), mono: true)
+        detail.text("Plans for studios", 18, 30, size: 7, color: blackInk, weight: .bold)
+        detail.rules(18, 37, color: .black.opacity(0.19), widths: [56, 44])
+        detail.box(18, 50, 26, 8, blackInk, radius: 4)
+        for x in [18.0, 44, 70] { detail.box(x, 63, 24, 15, x == 44 ? hex(0xFFF5E2) : .white, radius: 2, shadow: true) }
+    }
+
+    private func disk() {
+        text("214 GB", 10, 19, size: 14, color: ink, weight: .bold)
+        text("free of 1 TB", 10, 34, size: 7, color: muted)
+        let track = Path(roundedRect: CGRect(x: 10, y: 44, width: 92, height: 6), cornerRadius: 3)
+        context.fill(track, with: .color(.white.opacity(0.1)))
+        var clipped = context
+        clipped.clip(to: track)
+        let bars = WidgetArtwork(context: clipped)
+        bars.box(10, 44, 26, 6, amber)
+        bars.box(37, 44, 18, 6, .white.opacity(0.53))
+        bars.box(56, 44, 24, 6, .white.opacity(0.21))
+        text("Apps", 10, 59, size: 6, color: muted)
+        text("Docs", 34, 59, size: 6, color: muted)
+        text("System", 56, 59, size: 6, color: muted)
+    }
+
+    private func hex(_ value: UInt32) -> Color { Color(light: value, dark: value) }
+
+    private func text(_ value: String, _ x: CGFloat, _ y: CGFloat, size: CGFloat, color: Color,
+                      weight: Font.Weight = .semibold, mono: Bool = false, crossedOut: Bool = false) {
+        let glyphs = Text(value).font(.system(size: size, weight: weight, design: mono ? .monospaced : .default))
+            .tracking(0.35).foregroundColor(color).strikethrough(crossedOut)
+        context.draw(glyphs, at: CGPoint(x: x, y: y), anchor: .leading)
+    }
+
+    private func box(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ color: Color,
+                     radius: CGFloat = 0, shadow: Bool = false) {
+        let shape = Path(roundedRect: CGRect(x: x, y: y, width: w, height: h), cornerRadius: radius)
+        var ctx = context
+        if shadow { ctx.addFilter(.shadow(color: .black.opacity(0.28), radius: 3, y: 2)) }
+        ctx.fill(shape, with: .color(color))
+    }
+
+    private func miniPanel(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) {
+        box(x, y, w, h, panel, radius: 5, shadow: true)
+    }
+
+    private func gradient(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ colors: [UInt32], radius: CGFloat = 0) {
+        let shape = Path(roundedRect: CGRect(x: x, y: y, width: w, height: h), cornerRadius: radius)
+        context.fill(shape, with: .linearGradient(Gradient(colors: colors.map(hex)),
+                                                  startPoint: CGPoint(x: x, y: y), endPoint: CGPoint(x: x, y: y + h)))
+    }
+
+    private func circle(_ x: CGFloat, _ y: CGFloat, _ radius: CGFloat, _ color: Color) {
+        context.fill(Path(ellipseIn: CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)), with: .color(color))
+    }
+
+    private func ring(_ x: CGFloat, _ y: CGFloat, _ radius: CGFloat, from: Double, to: Double, color: Color, width: CGFloat) {
+        var path = Path()
+        path.addArc(center: CGPoint(x: x, y: y), radius: radius, startAngle: .degrees(from), endAngle: .degrees(to), clockwise: false)
+        context.stroke(path, with: .color(color), lineWidth: width)
+    }
+
+    private func trace(_ points: [CGPoint]) -> Path {
+        Path { path in
+            path.move(to: points[0])
+            path.addLines(Array(points.dropFirst()))
+        }
+    }
+
+    private func line(_ points: [CGPoint], _ color: Color, width: CGFloat) {
+        context.stroke(trace(points), with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round, lineJoin: .round))
+    }
+
+    private func rules(_ x: CGFloat, _ y: CGFloat, color: Color, widths: [CGFloat]) {
+        for (i, width) in widths.enumerated() { box(x, y + CGFloat(i * 5), width, 2, color, radius: 1) }
+    }
+
+    private func branch(_ x: CGFloat, _ y: CGFloat) {
+        line([CGPoint(x: x, y: y + 2), CGPoint(x: x, y: y - 2), CGPoint(x: x + 4, y: y - 3)], muted, width: 0.75)
+        for (dx, dy) in [(0.0, 2.0), (0, -2), (4, -3)] { circle(x + dx, y + dy, 1, muted) }
     }
 }
 
@@ -580,12 +740,14 @@ private struct LocalWidgetPreview: NSViewRepresentable {
 struct WidgetsPanel: View {
     @ObservedObject var model: CanvasModel
 
-    private func grid(_ kinds: [WidgetKindInfo]) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), alignment: .top)], alignment: .leading, spacing: 8) {
+    private func grid(_ kinds: [WidgetKindInfo], builtIn: Bool = false) -> some View {
+        let column: GridItem.Size = builtIn ? .flexible(minimum: 0, maximum: 112) : .flexible()
+        return LazyVGrid(columns: [GridItem(column, spacing: 8, alignment: .top), GridItem(column, alignment: .top)],
+                         alignment: .leading, spacing: builtIn ? 14 : 8) {
             ForEach(kinds) { kind in
-                WidgetPickerTile(kind: kind) { model.addWidget(kind.id) }
+                WidgetPickerTile(kind: kind, sidebar: builtIn) { model.addWidget(kind.id) }
                     .onDrag { model.beginWidgetDrag(WidgetDrag(kind: kind.id)) } preview: {
-                        WidgetThumbnail(kind: kind.id).frame(width: 110, height: 68)
+                        WidgetThumbnail(kind: kind.id).frame(width: builtIn ? 112 : 110, height: builtIn ? 72 : 68)
                     }
             }
         }
@@ -594,12 +756,12 @@ struct WidgetsPanel: View {
     }
 
     var body: some View {
-        SectionHeader(title: "Add").onAppear { model.fetchKinds() }
-        grid(model.widgetKinds.filter { $0.inPicker && !$0.isLocal })
+        SidebarGroupLabel(title: "Add").padding(.horizontal, 6)
+        grid(model.widgetKinds.filter { $0.inPicker && !$0.isLocal }, builtIn: true)
         let local = model.widgetKinds.filter { $0.inPicker && $0.isLocal }
         if !local.isEmpty {
-            SectionHeader(title: "Mine")
-            grid(local)
+            SectionHeader(title: "Mine").padding(.horizontal, 8)
+            grid(local).padding(.horizontal, 8)
         }
         if model.widgetKinds.isEmpty {
             Text("Open a canvas to add widgets.").font(Typography.micro).foregroundStyle(Palette.mutedFg)
@@ -609,7 +771,7 @@ struct WidgetsPanel: View {
         SectionHeader(title: "On this canvas")
         ForEach(model.widgets) { w in
             let kind = model.widgetKinds.first { $0.id == w.kind }
-            ListRow(title: w.name.isEmpty ? (kind?.title ?? w.kind) : w.name, detail: kind?.title ?? w.kind, symbol: kind?.symbol ?? "square", railGlyph: true) {
+            ListRow(title: w.name.isEmpty ? (kind?.title ?? w.kind) : w.name, detail: kind?.title ?? w.kind, symbol: kind?.symbol ?? "square", sidebar: true) {
                 model.revealWidget(w.id)
             }
         }

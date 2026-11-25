@@ -390,26 +390,25 @@ struct LayersRows: View {
 
     var body: some View {
         let selected = Set(store.selectedIds)
-        let purple = model.selection?.isComponent ?? false
         if model.revision.isEmpty {
             ForEach(model.openingSidebar?.boards ?? []) { board in
                 HStack(spacing: 6) {
                     Image(systemName: "number").symbolRenderingMode(.hierarchical)
-                        .font(.system(size: GlyphSize.row, weight: .medium)).foregroundStyle(Palette.mutedFg).frame(width: 16)
-                    Text(board.name).font(Typography.body).foregroundStyle(Palette.fg).lineLimit(1)
+                        .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.mutedFg).frame(width: 16)
+                    Text(board.name).font(SidebarStyle.text).foregroundStyle(Palette.fg).lineLimit(1)
                 }
                 .padding(.leading, 18).padding(.trailing, 6)
-                .frame(maxWidth: .infinity, alignment: .leading).frame(height: Metric.row)
+                .frame(maxWidth: .infinity, alignment: .leading).frame(height: SidebarStyle.row)
                 .qaID("layer-row", label: board.id)
                 .allowsHitTesting(false)
             }
         } else if model.boards.isEmpty {
             Text("No boards on this page").font(Typography.micro).foregroundStyle(Palette.mutedFg)
                 .qaText("No boards on this page")
-                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).frame(height: Metric.row)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).frame(height: SidebarStyle.row)
         } else {
             ForEach(store.rows) { row in
-                LayerRowView(model: model, store: store, row: row, selected: selected.contains(row.id), purpleSelection: purple,
+                LayerRowView(model: model, store: store, row: row, selected: selected.contains(row.id),
                              lockShown: store.lockPreview(row) ?? row.locked,
                              mark: store.dropMark?.id == row.id ? store.dropMark : nil,
                              editing: store.renaming == row.id || (row.isBoard && model.renamingBoard == row.id))
@@ -484,7 +483,6 @@ struct LayerRowView: View, Equatable {
     let store: LayersStore
     let row: LayerRow
     let selected: Bool
-    let purpleSelection: Bool
     /// The padlock shows closed: the row is locked, or a lock drag is about to lock it.
     let lockShown: Bool
     /// The drop indicator on this row, if any.
@@ -497,11 +495,10 @@ struct LayerRowView: View, Equatable {
     @FocusState private var focused: Bool
 
     static func == (a: LayerRowView, b: LayerRowView) -> Bool {
-        a.row == b.row && a.selected == b.selected && a.purpleSelection == b.purpleSelection && a.lockShown == b.lockShown && a.mark == b.mark && a.editing == b.editing
+        a.row == b.row && a.selected == b.selected && a.lockShown == b.lockShown && a.mark == b.mark && a.editing == b.editing
     }
 
-    private var purple: Bool { LayerIcon.purple(row.kind) }
-    private static let indent: CGFloat = 14
+    private static let indent: CGFloat = 12
 
     var body: some View {
         HStack(spacing: 0) {
@@ -510,7 +507,7 @@ struct LayerRowView: View, Equatable {
             icon.frame(width: 16).padding(.trailing, 6)
             if editing {
                 TextField("Layer name", text: $draft)
-                    .textFieldStyle(.plain).font(Typography.body).foregroundStyle(Palette.fg)
+                    .textFieldStyle(.plain).font(SidebarStyle.text).foregroundStyle(Palette.fg)
                     .focused($focused)
                     .onAppear { draft = row.name; DispatchQueue.main.async { focused = true } }
                     .onSubmit { finish(save: true) }
@@ -523,7 +520,7 @@ struct LayerRowView: View, Equatable {
                     }
                     .onChange(of: focused) { _, f in if !f && editing { finish(save: true) } }
             } else {
-                Text(row.name).font(Typography.body).foregroundStyle(purple ? Palette.component : Palette.fg).lineLimit(1).truncationMode(.tail)
+                Text(row.name).font(SidebarStyle.text).foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: 4)
             // The padlock's spot always takes a press (it shows on hover or while locked), so the press that locks
@@ -532,13 +529,13 @@ struct LayerRowView: View, Equatable {
             if !row.isBoard && !editing { if hovering || row.hidden { eye.allowsHitTesting(!model.cloudReadOnly) } else { Color.clear.frame(width: 22) } }
         }
         .padding(.leading, 2).padding(.trailing, 6)
-        .frame(height: Metric.row)
+        .frame(height: SidebarStyle.row)
         .opacity(row.dimmed ? 0.45 : 1)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).fill(fill))
+        .background(RoundedRectangle(cornerRadius: SidebarStyle.radius, style: .continuous).fill(fill))
         .overlay(alignment: .top) { mark(.above) }
         .overlay(alignment: .bottom) { mark(.below) }
         .overlay { if mark?.zone == .inside {
-            RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).stroke(Palette.sel, lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: SidebarStyle.radius, style: .continuous).stroke(Palette.sel, lineWidth: 1.5)
         } }
         .contentShape(Rectangle())
         .onTapGesture { if !editing { store.click(row) } }
@@ -602,16 +599,16 @@ struct LayerRowView: View, Equatable {
     }
 
     private var fill: Color {
-        if selected { return purpleSelection ? Palette.componentSoft : Palette.active }
+        if selected { return SidebarStyle.selection }
         return hovering ? Palette.hover : .clear
     }
 
     @ViewBuilder private var disclosure: some View {
         if row.hasChildren {
             Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold)).foregroundStyle(Palette.mutedFg)
+                .font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.mutedFg)
                 .rotationEffect(.degrees(row.expanded ? 90 : 0))
-                .frame(width: 16, height: Metric.row).contentShape(Rectangle())
+                .frame(width: 16, height: SidebarStyle.row).contentShape(Rectangle())
                 .highPriorityGesture(TapGesture().onEnded { store.toggle(row) })
                 .chromeHelp(row.expanded ? "Collapse (Option: all inside)" : "Expand (Option: all inside)")
         } else {
@@ -620,19 +617,19 @@ struct LayerRowView: View, Equatable {
     }
 
     @ViewBuilder private var icon: some View {
-        let tint = purple ? Palette.component : (selected ? Palette.fg : Palette.mutedFg)
+        let tint = Palette.mutedFg
         if let s = LayerIcon.symbol(row.kind) {
-            Image(systemName: s).symbolRenderingMode(.hierarchical)
-                .font(.system(size: GlyphSize.row, weight: .medium)).foregroundStyle(tint)
+            Image(systemName: s)
+                .font(.system(size: 12, weight: .medium)).foregroundStyle(tint)
         } else {
-            Text("T").font(.system(size: 13, weight: .semibold)).foregroundStyle(tint)
+            Text("T").font(.system(size: 12)).foregroundStyle(tint)
         }
     }
 
     private var eye: some View {
         Image(systemName: row.hidden ? "eye.slash" : "eye")
-            .font(.system(size: GlyphSize.row, weight: .medium)).foregroundStyle(Palette.mutedFg)
-            .frame(width: 22, height: Metric.row).contentShape(Rectangle())
+            .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.mutedFg)
+            .frame(width: 22, height: SidebarStyle.row).contentShape(Rectangle())
             .highPriorityGesture(TapGesture().onEnded { store.setHidden(row, !row.hidden) })
             .chromeHelp(row.hidden ? "Show" : "Hide")
             .accessibilityLabel(row.hidden ? "Show layer" : "Hide layer")
@@ -644,7 +641,7 @@ struct LayerRowView: View, Equatable {
         Image(systemName: lockShown || row.lockedAbove ? "lock.fill" : "lock.open")
             .font(.system(size: GlyphSize.row - 1, weight: .medium)).foregroundStyle(Palette.mutedFg)
             .opacity(row.lockedAbove && !row.locked ? 0.45 : 1)
-            .frame(width: 22, height: Metric.row).contentShape(Rectangle())
+            .frame(width: 22, height: SidebarStyle.row).contentShape(Rectangle())
             .highPriorityGesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { v in lockPressed = true; store.lockDragged(row, dy: v.translation.height) }
                 .onEnded { _ in lockPressed = false; store.lockDragEnded() })
@@ -682,7 +679,7 @@ struct LayerDrop: DropDelegate {
     let row: LayerRow
 
     private func zone(_ info: DropInfo) -> LayerDropZone {
-        LayersLogic.zone(y: info.location.y, height: Metric.row, container: row.container)
+        LayersLogic.zone(y: info.location.y, height: SidebarStyle.row, container: row.container)
     }
 
     func validateDrop(info: DropInfo) -> Bool { !store.dragging.isEmpty }

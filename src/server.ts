@@ -32,6 +32,7 @@ import { handleLayersRoute } from "./layers.ts";
 import { handleColorsRoute } from "./colors.ts";
 import { applyAutoTracking, prepareAutoTracking } from "./tracking.ts";
 import { cssVariables } from "./tokens.ts";
+import { sidebarWidgetTiles } from "./sidebar-widgets.ts";
 import { codeRootId, version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
@@ -1148,6 +1149,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 
 const sidebarIcon = (paths: string) => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
 
+const browserSidebarSections = ["Layers", "Assets", "Tokens", "Widgets"];
+const sidebarSectionItems = browserSidebarSections.map((title, i) => {
+  const id = "sidebar-" + title.toLowerCase();
+  return `<button type="button" id="${id}" role="menuitemradio" aria-checked="${i === 0}" aria-controls="${id}-panel"
+    aria-keyshortcuts="Alt+${i + 1}" data-title="${title}" tabindex="-1">
+    <span class="check" aria-hidden="true">✓</span><span class="name">${title}</span>
+    <kbd aria-hidden="true">⌥</kbd><kbd aria-hidden="true">${i + 1}</kbd>
+  </button>`;
+}).join("");
+
 const PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -1156,6 +1167,7 @@ const PAGE = `<!doctype html>
 <title>Canvas</title>
 <link rel="stylesheet" href="/page/widgets.css">
 <link rel="stylesheet" href="/page/charts.css">
+<link rel="stylesheet" href="/page/sidebar.css">
 <style>
 ${cssVariables()}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--c-canvas-bg);color:var(--c-fg);font:var(--c-size-sm)/1.45 var(--c-font-sans)}
@@ -1168,7 +1180,7 @@ input,textarea,[contenteditable=""],[contenteditable="true"],[contenteditable="p
 ::-webkit-scrollbar-thumb{background:var(--c-scrollbar-thumb);border-radius:calc(var(--c-scrollbar)/2);background-clip:content-box;padding:var(--c-inset)}
 ::-webkit-scrollbar-thumb:hover{background:var(--c-scrollbar-thumb-active);background-clip:content-box}
 ::-webkit-scrollbar-track:hover{background:var(--c-scrollbar-track-hover)}
-#bar{position:fixed;top:34px;left:calc(var(--c-inset) + var(--c-sidebar-width));right:calc(var(--c-inset) + var(--c-props-width));display:flex;align-items:flex-start;justify-content:space-between;gap:var(--c-gap);pointer-events:none;z-index:10}
+#bar{position:fixed;top:var(--c-inset);left:var(--c-inset);right:calc(var(--c-inset) + var(--c-props-width));display:flex;align-items:flex-start;justify-content:space-between;gap:var(--c-gap);pointer-events:none;z-index:10}
 .island{pointer-events:auto;display:flex;align-items:center;gap:8px;height:var(--c-island-height);padding:0 12px;background:var(--c-island);border:1px solid var(--c-island-rim);border-radius:var(--c-radius-island);box-shadow:0 3px 3px #0000001f;transition:box-shadow var(--c-island-ease)}
 .island:hover{box-shadow:0 4px 10px #0000001a}
 .island b{font-size:var(--c-size-sm);font-weight:600;letter-spacing:-.01em}
@@ -1180,22 +1192,12 @@ button{font:inherit;color:var(--c-fg);background:transparent;border:0;border-rad
 button:hover{background:var(--c-accent)}
 button:focus-visible{outline:2px solid var(--c-ring)}
 .spacer{flex:1}
-#left{position:fixed;left:0;top:0;bottom:0;width:var(--c-sidebar-width);box-sizing:border-box;display:flex;flex-direction:column;background:var(--c-sidebar);border-right:1px solid var(--c-sidebar-border);padding:40px 10px 0 var(--c-inset);z-index:5;color:var(--c-sidebar-fg)}
-#left [role=tablist]{display:flex;flex:none;gap:var(--c-island-pad)}
-#left [role=tab]{flex:none;display:grid;place-items:center;width:var(--c-control);height:var(--c-control);padding:0;border-radius:50%;color:var(--c-muted-fg);background:var(--c-hover)}
-#left [role=tab] svg{width:var(--c-icon);height:var(--c-icon)}
-#left [role=tab]:hover{background:var(--c-active)}
-#left [role=tab][aria-selected=true]{color:var(--c-fg);background:color-mix(in srgb,var(--c-fg) 18%,transparent)}
-#left [role=tabpanel]{flex:1;min-height:0;overflow:auto;padding:0 0 14px}
-#left [role=tabpanel]:focus-visible{outline:2px solid var(--c-ring);outline-offset:-2px}
-#left #sidebar-assets-panel{padding-top:8px}
-#left h3{margin:16px 0 6px;font-size:var(--c-size-2xs);text-transform:uppercase;letter-spacing:.8px;color:var(--c-muted-fg);font-weight:600}
 .row{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:var(--c-radiusRow);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--c-size-xs);transition:background var(--c-fast)}
 .row:hover{background:var(--c-accent)}
 .row.on{background:var(--c-accent);font-weight:600}
 .row .dim{color:var(--c-muted-fg);font-size:var(--c-size-2xs);font-variant-numeric:tabular-nums;margin-left:auto}
 .chip{width:12px;height:12px;border-radius:3px;border:1px solid var(--c-island-rim);flex:none}
-#view{position:fixed;left:var(--c-sidebar-width);top:0;right:var(--c-props-width);bottom:0;background:var(--c-canvas-bg);cursor:default;touch-action:none;overflow:hidden}
+#view{position:fixed;left:var(--sidebar-space);top:0;right:var(--c-props-width);bottom:0;background:var(--c-canvas-bg);cursor:default;touch-action:none;overflow:hidden}
 #view.panning{cursor:grabbing}
 #view.hand,#view.hand *{cursor:grab!important}
 #view.hand.panning,#view.hand.panning *{cursor:grabbing!important}
@@ -1250,7 +1252,7 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 #msg{line-height:100%;position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--c-island);border:0;border-radius:var(--c-radius-island);padding:9px 14px;font-size:var(--c-size-xs);display:none;z-index:20;box-shadow:0 3px 3px #0000001f}
 #wtoast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%);display:none;align-items:center;gap:10px;background:var(--c-island);border:1px solid var(--c-island-rim);border-radius:var(--c-radius-island);padding:5px 8px 5px 14px;font-size:var(--c-size-xs);z-index:30;box-shadow:0 3px 3px #0000001f}
 /* The browser page says what it is: the engine build missing, and that the Mac app is the main way (src/onboarding.ts). */
-#webhint{position:fixed;left:calc(var(--c-sidebar-width) + var(--c-inset));bottom:14px;display:flex;align-items:flex-start;gap:10px;max-width:min(560px,calc(100vw - var(--c-sidebar-width) - var(--c-props-width) - 48px));background:var(--c-island);border-radius:var(--c-radius-island);padding:9px 8px 9px 14px;font-size:var(--c-size-xs);line-height:100%;z-index:20;box-shadow:0 0 0 .5px #0000001a,0 1px 2px #00000014,0 6px 16px #0000001a}
+#webhint{position:fixed;left:calc(var(--sidebar-space) + var(--c-inset));bottom:14px;display:flex;align-items:flex-start;gap:10px;max-width:min(560px,calc(100vw - var(--c-sidebar-width) - var(--c-props-width) - 48px));background:var(--c-island);border-radius:var(--c-radius-island);padding:9px 8px 9px 14px;font-size:var(--c-size-xs);line-height:100%;z-index:20;box-shadow:0 0 0 .5px #0000001a,0 1px 2px #00000014,0 6px 16px #0000001a}
 #webhint[hidden]{display:none}
 #webhint .wh-lines{display:flex;flex-direction:column;gap:2px;padding-top:1px}
 #webhint .wh-lines>div[hidden]{display:none}
@@ -1263,25 +1265,28 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 </head>
 <body>
 <header id="bar">
-<div class="island"><b>Canvas</b><select id="files"></select></div>
+<div class="island"><button id="sidebar-toggle" type="button" aria-controls="left" aria-expanded="true" aria-label="Hide panel" title="Hide panel">
+  ${sidebarIcon('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M9 5v14"/>')}</button><b>Canvas</b><select id="files"></select></div>
 <div class="island"><span id="rev"></span><span class="spacer"></span><button id="fit" title="Zoom to selection, or the whole page  F">Fit</button><button id="z100" title="Zoom to 100%  0">100%</button><button id="snapBtn" title="Snapping and nudge settings">Snap</button></div>
 </header>
-<aside id="left">
-  <div role="tablist" aria-label="Sidebar">
-    <button id="sidebar-layers" role="tab" aria-controls="sidebar-layers-panel" aria-selected="true" title="Layers" aria-label="Layers">${sidebarIcon('<path d="m3 8 9-5 9 5-9 5zM3 12l9 5 9-5M3 16l9 5 9-5"/>')}</button>
-    <button id="sidebar-assets" role="tab" aria-controls="sidebar-assets-panel" aria-selected="false" tabindex="-1" title="Assets" aria-label="Assets">${sidebarIcon('<path d="M8 8V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-3"/><rect x="3" y="8" width="13" height="13" rx="2"/>')}</button>
-    <button id="sidebar-tokens" role="tab" aria-controls="sidebar-tokens-panel" aria-selected="false" tabindex="-1" title="Tokens" aria-label="Tokens">${sidebarIcon('<path d="m10 4.5 2.6-1.3a2 2 0 0 1 2.7.9l3.9 8a2 2 0 0 1-.9 2.7L10 19m6.3-12.9 3.7 2.5a2 2 0 0 1 .5 2.8l-1.1 1.7"/><rect x="3" y="3" width="7" height="18" rx="2"/><path d="M3 9h7m-7 6h7"/>')}</button>
-  </div>
-  <div id="sidebar-layers-panel" role="tabpanel" aria-labelledby="sidebar-layers" tabindex="0">
+<aside id="left" aria-label="Sidebar">
+  <button id="sidebar-section-menu" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="sidebar-menu">
+    <span>Layers</span>${sidebarIcon('<path d="m6 9 6 6 6-6"/>')}
+  </button>
+  <div id="sidebar-menu" role="menu" aria-label="Sidebar sections" hidden>${sidebarSectionItems}</div>
+  <div id="sidebar-layers-panel" role="region" aria-label="Layers" tabindex="0">
     <h3>Pages</h3><div id="pages"></div>
-    <h3>Boards</h3><div id="boards"></div>
+    <h3>Layers</h3><div id="boards"></div>
   </div>
-  <div id="sidebar-assets-panel" role="tabpanel" aria-labelledby="sidebar-assets" tabindex="0" hidden>
+  <div id="sidebar-assets-panel" role="region" aria-label="Assets" tabindex="0" hidden>
     <div id="comps"></div>
   </div>
-  <div id="sidebar-tokens-panel" role="tabpanel" aria-labelledby="sidebar-tokens" tabindex="0" hidden>
+  <div id="sidebar-tokens-panel" role="region" aria-label="Tokens" tabindex="0" hidden>
     <h3>Text styles</h3><div id="styles"></div>
     <h3>Variables</h3><div id="vars"></div>
+  </div>
+  <div id="sidebar-widgets-panel" role="region" aria-label="Widgets" tabindex="0" hidden>
+    <h3>Add</h3><div class="sidebar-widget-grid">${sidebarWidgetTiles}</div>
   </div>
 </aside>
 <main id="view"><div id="world"></div><div id="labels"></div><div id="hov"></div><div id="marquee"></div><div id="sel"><i></i><i></i><i></i><i></i><span id="seldim"></span></div><canvas id="guides"></canvas></main>
@@ -1303,39 +1308,69 @@ const SCENE_ENV = document.documentElement.dataset.env || "";
 const keyedQ = (key) => (key && SCENE_ENV ? "&key=" + encodeURIComponent(key) + "&v=" + SCENE_ENV : "");
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 const sidebarKey = "canvas:sidebar-section";
+const sidebarFileKey = sidebarKey + ":" + file;
 const sidebar = document.getElementById("left");
-const sidebarTabs = [...sidebar.querySelectorAll("[role=tab]")];
-function selectSidebarTab(selected) {
-  for (const tab of sidebarTabs) {
-    const active = tab === selected;
-    tab.setAttribute("aria-selected", String(active));
-    tab.tabIndex = active ? 0 : -1;
-    document.getElementById(tab.getAttribute("aria-controls")).hidden = !active;
+const sidebarToggle = document.getElementById("sidebar-toggle");
+const sidebarTrigger = document.getElementById("sidebar-section-menu");
+const sidebarMenu = document.getElementById("sidebar-menu");
+const sidebarItems = [...sidebarMenu.querySelectorAll("[role=menuitemradio]")];
+function selectSidebar(item) {
+  for (const option of sidebarItems) {
+    option.setAttribute("aria-checked", String(option === item));
+    document.getElementById(option.getAttribute("aria-controls")).hidden = option !== item;
   }
+  sidebarTrigger.firstElementChild.textContent = item.dataset.title;
 }
-const savedSidebarTab = store.get(sidebarKey);
-selectSidebarTab(sidebarTabs.find(tab => tab.id === savedSidebarTab) || sidebarTabs[0]);
+const savedSidebar = store.get(sidebarFileKey) || store.get(sidebarKey);
+selectSidebar(sidebarItems.find(item => item.id === savedSidebar) || sidebarItems[0]);
+function setSidebarMenu(open, focus = false) {
+  sidebarMenu.hidden = !open;
+  sidebarTrigger.setAttribute("aria-expanded", String(open));
+  if (open) sidebarMenu.querySelector('[aria-checked="true"]').focus();
+  else if (focus) sidebarTrigger.focus();
+}
+function setSidebarOpen(open) {
+  setSidebarMenu(false);
+  document.documentElement.classList.toggle("sidebar-closed", !open);
+  sidebar.inert = !open;
+  sidebarToggle.setAttribute("aria-expanded", String(open));
+  sidebarToggle.title = open ? "Hide panel" : "Show panel";
+  sidebarToggle.setAttribute("aria-label", sidebarToggle.title);
+}
+function commitSidebar(item) {
+  selectSidebar(item);
+  store.set(sidebarKey, item.id);
+  store.set(sidebarFileKey, item.id);
+  setSidebarMenu(false);
+  document.getElementById(item.getAttribute("aria-controls")).focus({ preventScroll: true });
+}
+sidebarToggle.onclick = () => setSidebarOpen(sidebar.inert);
+sidebarTrigger.onclick = () => setSidebarMenu(sidebarMenu.hidden, true);
+sidebarItems.forEach(item => { item.onclick = () => commitSidebar(item); });
+document.addEventListener("pointerdown", (e) => {
+  if (!sidebarMenu.hidden && !sidebarMenu.contains(e.target) && !sidebarTrigger.contains(e.target)) setSidebarMenu(false);
+});
 sidebar.addEventListener("keydown", (e) => {
-  // Keep sidebar navigation and scrolling out of the canvas key handlers.
   if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!sidebarMenu.hidden) {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setSidebarMenu(false, true); return; }
+    if (e.key === "Tab") { setSidebarMenu(false, true); }
+    const index = sidebarItems.indexOf(document.activeElement), last = sidebarItems.length - 1;
+    if (index >= 0 && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault(); e.stopPropagation(); commitSidebar(sidebarItems[index]); return;
+    }
+    const next = { ArrowUp: index <= 0 ? last : index - 1, ArrowDown: index >= last ? 0 : index + 1, Home: 0, End: last }[e.key];
+    if (next !== undefined) { e.preventDefault(); e.stopPropagation(); sidebarItems[next].focus(); return; }
+  }
+  // Unmodified list navigation must not edit the selection on the canvas.
   if (e.key === "Tab" || (!e.shiftKey && (e.key.startsWith("Arrow") || [" ", "Home", "End"].includes(e.key)))) e.stopPropagation();
 });
-sidebarTabs.forEach((tab, index) => {
-  tab.onclick = (e) => {
-    selectSidebarTab(tab);
-    store.set(sidebarKey, tab.id);
-    if (e.detail > 0) document.getElementById(tab.getAttribute("aria-controls")).focus({ preventScroll: true });
-  };
-  tab.onkeydown = (e) => {
-    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    const last = sidebarTabs.length - 1;
-    const next = { ArrowLeft: index === 0 ? last : index - 1, ArrowRight: index === last ? 0 : index + 1, Home: 0, End: last }[e.key];
-    if (next === undefined) return;
+sidebarTrigger.addEventListener("keydown", (e) => {
+  if (sidebarMenu.hidden && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ")) {
     e.preventDefault();
     e.stopPropagation();
-    sidebarTabs[next].focus();
-    sidebarTabs[next].click();
-  };
+    setSidebarMenu(true);
+  }
 });
 // Pure helpers, node-tested (src/pagelogic.ts).
 const zoomAt = ${zoomAt};
@@ -1407,6 +1442,26 @@ const readViewBox = () => { const r = view.getBoundingClientRect(); VL = r.left;
 // Inside Canvas.app the SwiftUI shell draws the chrome; this page is just the canvas, and
 // tells the shell what it shows. insets is the part of the view the shell's islands cover.
 const native = q.get("shell") === "native";
+if (!native) {
+  addEventListener("keydown", (e) => {
+    if (e.target.closest?.("input,textarea,select,[contenteditable=true]")) return;
+    const index = ["Digit1", "Digit2", "Digit3", "Digit4"].indexOf(e.code);
+    if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || index < 0) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    setSidebarOpen(true);
+    commitSidebar(sidebarItems[index]);
+  });
+  for (const tile of sidebar.querySelectorAll("[data-widget]")) {
+    tile.onclick = () => { if (file) window.canvasCmd({ cmd: "addWidget", kind: tile.dataset.widget }); };
+    tile.ondragstart = (e) => {
+      if (!file) { e.preventDefault(); return; }
+      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.setData("text/plain", tile.dataset.widget);
+      window.canvasCmd({ cmd: "widgetDrag", kind: tile.dataset.widget });
+    };
+  }
+}
 if (native) document.documentElement.classList.add("native");
 // In a browser: a missing engine build says so (the server checks engine/pkg), and the page points at the app. Automation
 // (headless Chrome) never sees the app line unless ?hint=1 asks; Hide keeps it away on this browser.
@@ -2611,12 +2666,16 @@ host.looksDone = () => {
 document.addEventListener("visibilitychange", () => { if (!document.hidden) perfMark("show"); });
 // ---------- left sidebar ----------
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+const sidebarRowIcons = {
+  page: ${JSON.stringify(sidebarIcon('<path d="M7 3h7l4 4v14H7zM14 3v5h4"/>'))},
+  board: ${JSON.stringify(sidebarIcon('<path d="M9 3 7 21M17 3l-2 18M4 9h17M3 15h17"/>'))},
+};
 function renderLeft(d) {
   const pagesEl = document.getElementById("pages");
   pagesEl.textContent = "";
   for (const p of pageList) {
     const r = el("div", "row" + (p.id === activePage ? " on" : ""), p.name);
-    r.append(el("span", "dim", String(p.boards.length)));
+    r.insertAdjacentHTML("afterbegin", sidebarRowIcons.page);
     r.onclick = () => switchPage(p.id, true);
     pagesEl.append(r);
   }
@@ -2624,7 +2683,7 @@ function renderLeft(d) {
   boardsEl.textContent = "";
   for (const b of pageMetas()) {
     const r = el("div", "row" + (selBoard && selBoard.meta.id === b.id ? " on" : ""), b.name || b.id);
-    r.append(el("span", "dim", (b.width || "?") + "×" + (b.height || "?")));
+    r.insertAdjacentHTML("afterbegin", sidebarRowIcons.board);
     r.onclick = () => flyToBoard(b.id);
     boardsEl.append(r);
   }
@@ -3740,7 +3799,13 @@ view.addEventListener("pointermove", (e) => { if (down && !down.moved && Math.hy
 const endDrag = () => { drag = null; view.classList.remove("panning"); };
 view.addEventListener("pointerup", endDrag);
 view.addEventListener("pointercancel", () => { down = null; endDrag(); endMove(true); });
-addEventListener("resize", () => { VW = view.clientWidth; VH = view.clientHeight; if (zeroFit && VW && VH) { zeroFit = false; fitAll({ instant: true }); } readViewBox(); sizeGuides(); requestFlush(); scheduleVisible(); });
+function resizeView() {
+  VW = view.clientWidth; VH = view.clientHeight;
+  if (zeroFit && VW && VH) { zeroFit = false; fitAll({ instant: true }); }
+  readViewBox(); sizeGuides(); requestFlush(); scheduleVisible();
+}
+addEventListener("resize", resizeView);
+if (!native) new ResizeObserver(resizeView).observe(view);
 addEventListener("keydown", (e) => {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable || (t.closest && t.closest("[contenteditable]")))) return;

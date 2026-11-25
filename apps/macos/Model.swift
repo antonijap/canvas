@@ -89,6 +89,7 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     static let defaultsKey = "canvas.sidebarSection"
 
     var id: String { rawValue }
+    var shortcut: String { String(Self.allCases.firstIndex(of: self)! + 1) }
     var symbol: String {
         switch self {
         case .layers: "square.3.layers.3d"

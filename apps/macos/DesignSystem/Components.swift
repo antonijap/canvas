@@ -333,12 +333,13 @@ struct ListRow: View {
     var symbol: String?
     /// The symbol's colour when it carries meaning (components are purple); muted otherwise.
     var tint: Color?
-    var font: Font = Typography.body
+    var font: Font? = nil
     /// Bounce the symbol when tapped (add actions).
     var bounces = false
     /// Draw the symbol like the rail's icons (railGlyph) instead of the smaller two-tone row glyph.
     var railGlyph = false
     /// The current item (the page shown, the board the selection is on): filled like a pressed row.
+    var sidebar = false
     var active = false
     var action: (() -> Void)?
     @State private var hovering = false
@@ -356,16 +357,17 @@ struct ListRow: View {
                 } else if let symbol {
                     Image(systemName: symbol).symbolRenderingMode(.hierarchical)
                         .symbolEffect(.bounce, value: bounces && !reduceMotion ? taps : 0)
-                        .font(.system(size: GlyphSize.row, weight: .medium)).foregroundStyle(tint ?? Palette.mutedFg).frame(width: 16)
+                        .font(.system(size: sidebar ? 12 : GlyphSize.row, weight: .medium)).foregroundStyle(tint ?? Palette.mutedFg).frame(width: 16)
                 }
-                Text(title).font(font).fontWeight(active ? .semibold : nil).foregroundStyle(Palette.fg).lineLimit(1).qaText(title)
+                Text(title).font(font ?? (sidebar ? SidebarStyle.text : Typography.body)).fontWeight(active && !sidebar ? .semibold : nil).foregroundStyle(Palette.fg).lineLimit(1).qaText(title)
                 Spacer(minLength: 8)
                 if let detail {
                     Text(detail).font(Typography.micro).monospacedDigit().foregroundStyle(Palette.mutedFg).lineLimit(1)
                 }
             }
-            .padding(.horizontal, 12).frame(height: Metric.row)
-            .background(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).fill(active ? Palette.active : hovering ? Palette.hover : .clear))
+            .padding(.horizontal, sidebar ? 6 : 12).frame(height: sidebar ? SidebarStyle.row : Metric.row)
+            .background(RoundedRectangle(cornerRadius: sidebar ? SidebarStyle.radius : Metric.radiusRow, style: .continuous)
+                .fill(active ? (sidebar ? SidebarStyle.selection : Palette.active) : hovering ? Palette.hover : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

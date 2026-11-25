@@ -726,6 +726,17 @@ final class StructureActions: NSObject, NSMenuItemValidation {
 let structureActions = StructureActions()
 model.editTarget = structureActions
 
+// Option+1…4 switches editor sections without intercepting text entry.
+NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+  guard e.window === window, window.attachedSheet == nil, !model.homeShown,
+        !(window.firstResponder is NSText), !model.textEditing,
+        e.modifierFlags.intersection([.command, .option, .control, .shift]) == .option,
+        let section = SidebarSection.allCases.first(where: { $0.shortcut == e.charactersIgnoringModifiers }) else { return e }
+  model.uiHidden = false
+  model.section = section
+  model.panelOpen = true
+  return nil
+}
 // Canvas keys (1/2/0/F/Esc/Delete/Space) belong to the canvas whenever no text field is being typed in: a click
 // in the rail, the inspector or the toolbar leaves SwiftUI holding keyboard focus, so the key would go nowhere.
 // The first key there hands focus back to the web view and is delivered to it. Command keys go through the menus
