@@ -15,7 +15,7 @@ import { cloudFileHooks } from './cloud-files-runtime.ts';
 import { asOneAction, adoptWriters, onAction, envelopeFileOps } from './cloud-files-ops.ts';
 import { loadManifest, type Manifest } from '../cloud/core/files/snapshots.ts';
 import { type ObjectStore, fromUtf8 } from '../cloud/core/files/objects.ts';
-import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, checkBlobPath } from '../cloud/protocol-files.ts';
+import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, checkBlobPath, FILE_CAPABILITIES_HEADER, hasWhiteboard, insertsWhiteboard, supportsWhiteboard, UPDATE_WHITEBOARD_HOST, WHITEBOARD } from '../cloud/protocol-files.ts';
 import { createPackage, targetPath } from './docpath.ts';
 import { type BlobRow } from '../cloud/core/files/seam.ts';
 import { readBodyText } from './body.ts';
@@ -71,6 +71,8 @@ interface Session {
     initialConnect?: Promise<'missing' | void>;
     importing?: boolean;
     status: string;
+    whiteboard?: boolean;
+    updateMessage?: string;
     timer?: NodeJS.Timeout;
     retryDelay?: number;
     chain: Promise<unknown>;
@@ -92,6 +94,7 @@ const checkpointSession=(s:Session)=>{
 const revoked = new Set<string>();
 export const fileEvents: {
     problem?: (message: string) => void;
+    update?: (file: string, message: string) => void;
     view?: (file: string) => void;
     removed?: (file: string) => void;
     presence?: (file: string, peers: PeerPresence[]) => void;
@@ -163,9 +166,16 @@ cloudFileHooks.undoConflict = (file, writers) => {
     }
     return changed ? [...names].slice(0,3).join(', ') || 'Someone' : undefined;
 };
-cloudFileHooks.assertEdit = f => { const s = fileSession(f); if (s && !CAN_EDIT[s.store.meta.role])
-    fail(403, 'read_only', 'This Cloud file is read only'); };
-export function fileInfo(file: string) { const s = fileSession(file); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
+cloudFileHooks.assertEdit = f => {
+    const s = fileSession(f);
+    if (s?.updateMessage) fail(426, 'update', s.updateMessage);
+    if (s && !CAN_EDIT[s.store.meta.role]) fail(403, 'read_only', 'This Cloud file is read only');
+};
+cloudFileHooks.whiteboardIssue = (file, nodes) => {
+    const s = fileSession(file);
+    return s && s.whiteboard !== true && hasWhiteboard(nodes) ? UPDATE_WHITEBOARD_HOST : undefined;
+};
+export function fileInfo(file: string) { const s = fileSession(file); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, whiteboard: s.whiteboard === true, updateMessage: s.updateMessage, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
 class CloudHttpError extends Error {
     readonly status: number;
     readonly code: string;
@@ -188,7 +198,7 @@ async function request(cloud: string, p: string, method = 'GET', body?: unknown)
         if (t.fail === 'removed') removeCaches(cloud);
         fail(503, t.fail, 'The Cloud is unavailable');
     }
-    const r = await fetch((t as any).base + p, { method, headers: { ...(t as any).headers, ...(body === undefined ? {} : { 'content-type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json' }) }, body: body === undefined ? undefined : body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body), signal: AbortSignal.timeout(30000), redirect: 'error' });
+    const r = await fetch((t as any).base + p, { method, headers: { ...(t as any).headers, [FILE_CAPABILITIES_HEADER]: WHITEBOARD, ...(body === undefined ? {} : { 'content-type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json' }) }, body: body === undefined ? undefined : body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body), signal: AbortSignal.timeout(30000), redirect: 'error' });
     checkGeneration(cloud, g);
     if (r.status === 403) {
         void r.body?.cancel().catch(() => {});
@@ -293,6 +303,15 @@ export async function receive(s: Session, m: any) {
         fileEvents.presence?.(path.join(s.store.pkg, 'document.json'), m.peers);
         return;
     }
+    if (m.type === 'error' && m.code === 'update') {
+        if (!s.updateMessage) fileEvents.update?.(path.join(s.store.pkg, 'document.json'), m.message);
+        s.updateMessage = m.message;
+        s.whiteboard = false;
+        s.store.replica.joined = false;
+        render(s);
+        s.ws?.close();
+        return;
+    }
     if ((m.type==='error'||m.type==='reject')&&m.code==='quota') {
       waitForQuota(s);
       return;
@@ -358,6 +377,10 @@ export async function receive(s: Session, m: any) {
     }
     if(m.type==='applied'&&Number(s.store.db.prepare('SELECT COUNT(*) AS n FROM confirmed').get()!.n)>=2000)checkpointSession(s);
     if (m.type === 'welcome') {
+        s.whiteboard = supportsWhiteboard(m.capabilities);
+        s.updateMessage = undefined;
+        if (!s.whiteboard && s.store.replica.pending.some(p => insertsWhiteboard(p.action.ops)))
+            fileEvents.update?.(path.join(s.store.pkg, 'document.json'), UPDATE_WHITEBOARD_HOST);
         s.status = 'connected';
         s.retryDelay = undefined;
     }
@@ -371,11 +394,12 @@ export async function receive(s: Session, m: any) {
 async function send(s: Session) {
     if (s.ws?.readyState !== WebSocket.OPEN || !s.store.replica.joined || s.stopped || s.status==='quota')
         return;
-    if (s.commentsPending.length && s.store.meta.role !== 'viewer')
-        s.ws.send(JSON.stringify({ type: 'comments', ops: s.commentsPending }));
+    const comments = s.commentsPending.filter(e => !isVoteOp(e.op));
+    if (comments.length && s.store.meta.role !== 'viewer')
+        s.ws.send(JSON.stringify({ type: 'comments', ops: comments }));
     if (!CAN_EDIT[s.store.meta.role])
         return;
-    const actions = s.store.replica.outgoing();
+    const actions = s.store.replica.outgoing(100, action => s.whiteboard === true || !insertsWhiteboard(action.ops));
     s.store.commit();
     for (const a of actions) {
         for (const op of a.ops)
@@ -400,8 +424,16 @@ function reconnect(s: Session) {
 }
 function closeSession(file: string, s: Session, missing = false) {
     const replica = s.store.replica;
-    if (replica.pending.length || replica.refused.length || s.commentsPending.length || s.commentsRejected?.length) {
+    let local;
+    try { local = readCommentsFile(s.store.pkg); } catch { /* the sidecar is unreadable */ }
+    if (replica.pending.length || replica.refused.length || s.commentsPending.length || s.commentsRejected?.length || local?.votes?.length) {
         recoverDrafts(s);
+        if (local?.votes?.length && s.recovery) {
+            const copy = readCommentsFile(s.recovery) ?? local;
+            copy.votes = local.votes;
+            copy.voteConclusions = local.voteConclusions;
+            writeCommentsFile(s.recovery, copy);
+        }
         if (missing) {
             replica.pending = [];
             replica.refused = [];
@@ -497,7 +529,10 @@ async function connect(s: Session): Promise<'missing' | void> {
     }
 }
 onAction((file, action) => { const s = fileSession(file); if (!s)
-    return; let a; try {
+    return;
+    let a; try {
+    if (s.updateMessage) fail(426, 'update', s.updateMessage);
+    if (s.whiteboard !== true && insertsWhiteboard(action.ops)) fail(426, 'update_host', UPDATE_WHITEBOARD_HOST);
     a = s.store.propose(action.ops, action);
 }
 catch (e) {
@@ -527,6 +562,7 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
             } finally { clearTimeout(timer); }
         }
         if (cached.stopped) fail(403, 'removed', 'Cloud membership was removed during open');
+        if (cached.updateMessage) fail(426, 'update', cached.updateMessage);
         return { id, file: pkg, name: cached.store.meta.name, cloud, role: cached.store.meta.role };
     }
     const listed = importingName === undefined ? await cloudFiles(cloud) as any : null;
@@ -698,6 +734,10 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             let importing: string | undefined;
             try {
             const moved = await prepareMove(url.searchParams.get('file')!, async (name, doc, env, blobs, comments) => {
+                if (hasWhiteboard(doc.children)) {
+                    const info = await cloudJson(await request(b.cloud, '/v1/info')) as { capabilities?: unknown };
+                    if (!supportsWhiteboard(info.capabilities)) fail(426, 'update_host', UPDATE_WHITEBOARD_HOST);
+                }
                 const created = { id: randomUUID() };
                 await request(b.cloud, '/v1/files', 'POST', { id: created.id, name: b.name || name, importing: true, version: doc.version });
                 importing=created.id;

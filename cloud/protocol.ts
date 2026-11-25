@@ -296,8 +296,8 @@ export function checkEnvelope(e: unknown): string | null {
  * reason when the op cannot apply (its thread or comment is deleted or unknown). The local file uses it for its own
  * ops; the server for everyone's, in seq order.
  */
-export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Iso, votes?: Vote[]): string | null {
-  if (isVoteOp(op)) return votes ? applyVote(votes, op, by) : "Voting is unavailable here";
+export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Iso, votes?: Vote[], localVotes = false): string | null {
+  if (isVoteOp(op)) return votes ? applyVote(votes, op, by, localVotes) : "Voting is unavailable here";
   const thread = (id: Uuid) => threads.find((t) => t.id === id);
   const comment = (id: Uuid) => { for (const t of threads) { const c = t.comments.find((c) => c.id === id); if (c) return { t, c }; } return null; };
   switch (op.kind) {
@@ -353,7 +353,7 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
   }
 }
 
-function applyVote(votes: Vote[], op: VoteOp, by: Author): string | null {
+function applyVote(votes: Vote[], op: VoteOp, by: Author, local: boolean): string | null {
   const id = by.id || by.email;
   if (!id || by.agent) return "A person must cast the vote";
   const vote = votes.find(v => v.id === op.vote);
@@ -373,7 +373,7 @@ function applyVote(votes: Vote[], op: VoteOp, by: Author): string | null {
   }
   if (!vote) return "No such vote";
   if (op.kind === "vote.end" || op.kind === "vote.clear") {
-    if (vote.host.id !== id) return "Only the host can end or clear the vote";
+    if (!local && vote.host.id !== id) return "Only the host can end or clear the vote";
     if (op.kind === "vote.end" && vote.state === "active") vote.state = "ended";
     if (op.kind === "vote.clear") {
       if (vote.state === "active") return "End the vote before clearing it";

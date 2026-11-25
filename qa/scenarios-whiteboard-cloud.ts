@@ -65,6 +65,21 @@ sc("sticky", "Sticky text presence and stickers replicate on a Cloud file", {
     const deadline = Date.now() + 8000;
     while (peer.node(id)?.content !== plain && Date.now() < deadline) await sleep(40);
     t.eq(peer.node(id)?.content, plain, "text committed to the peer's file");
+    await local.waitFor('document.querySelector(".sticky-author")?.getAttribute("aria-pressed") === "true"', "the author toggle");
+    const author = await local.ev<{ x: number; y: number }>(`(() => {
+      const r = document.querySelector(".sticky-author").getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+    await local.io.click(author.x, author.y);
+    await local.flush();
+    const waitForAuthor = async (name?: string) => {
+      const until = Date.now() + 8000;
+      while (peer.node(id)?.author?.name !== name && Date.now() < until) await sleep(40);
+      t.eq(peer.node(id)?.author?.name, name, "the shared sticky author on disk");
+    };
+    await waitForAuthor();
+    await local.undo();
+    await waitForAuthor("Anna");
     const center = await local.center(id);
     await local.io.key("s", { shift: true });
     await local.io.click(center.x + 65, center.y - 65);

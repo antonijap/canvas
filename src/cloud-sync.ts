@@ -14,7 +14,7 @@
 //   relayed  = agent authors, by comment id. The server knows people only, so a comment an agent wrote through this
 //              app is sent as this person's. On this machine it keeps showing as the agent's (Author.agent).
 
-import { applyOp, checkEnvelope, isVoteOp, LIMITS, type Applied, type Author, type CommentsFile, type ErrorCode, type Op, type OpEnvelope, type Rejected, type Thread, type Vote } from "../cloud/protocol.ts";
+import { applyOp, checkEnvelope, isVoteOp, LIMITS, type Applied, type Author, type CommentsFile, type ErrorCode, type Op, type OpEnvelope, type Rejected, type Thread } from "../cloud/protocol.ts";
 
 /** An envelope that says "the document of the file this request names" (the local server replaces it before storing or sending). */
 export const NIL_DOC = "00000000-0000-4000-8000-000000000000";
@@ -155,7 +155,7 @@ export function reject(f: SyncFile, list: Rejected[]): boolean {
 /** Retry: a refused op goes back to the end of the outbox. */
 export function retry(f: SyncFile, opId: string): boolean {
   const i = (f.rejected ?? []).findIndex((r) => r.envelope.opId === opId);
-  if (i < 0) return false;
+  if (i < 0 || isVoteOp(f.rejected![i].envelope.op)) return false;
   const [r] = f.rejected!.splice(i, 1);
   f.outbox.push(r.envelope);
   return true;
@@ -205,16 +205,7 @@ export function opsForShare(f: CommentsFile, now: Date = new Date(), id: () => s
     if (t.deletedAt) out.push(env({ kind: "thread.delete", thread: t.id }));
     else if (t.resolvedAt) out.push(env({ kind: "thread.resolve", thread: t.id, resolved: true }));
   }
-  return [...out, ...(f.votes ?? []).flatMap(vote => voteOpsForShare(vote).map(env))];
-}
-
-export function voteOpsForShare(vote: Vote): Op[] {
-  if (vote.state === "dismissed") return [];
-  const { id, scope, on, perPerson, hidden, anonymous } = vote;
-  const ops: Op[] = [{ kind: "vote.start", vote: id, scope, on, perPerson, hidden, anonymous, showName: !!vote.host.name }];
-  for (const { id: ballot, layer, voter } of vote.ballots) ops.push({ kind: "vote.cast", vote: id, ballot, layer, showName: !!voter.name });
-  if (vote.state === "ended") ops.push({ kind: "vote.end", vote: id });
-  return ops;
+  return out;
 }
 
 /**

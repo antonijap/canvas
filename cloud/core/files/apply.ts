@@ -10,6 +10,7 @@
 // A component that live instances use is never removed; an instance names a live component, and no component holds
 // an instance of itself. `if` preconditions name the action that must have written a key last (0: none since load).
 
+import { whiteboardPerson } from "../../../src/page/whiteboard-model.js";
 import { docKeyError, setKeyError, validateNode, validateVariable, DESCENDANTS_PREFIX, PROTO_KEYS, type DocNode, type Json } from "../schema.ts";
 import { shift as shiftSpans } from "../../../src/page/text-spans.js";
 import { shiftLists, type ListItem } from "../../../src/page/text-paras.js";
@@ -69,6 +70,8 @@ export interface TreeAccess {
 
 export type ApplyCtx = {
   by?: Author;
+  /** A previously accepted action can predate the current whiteboard write rules. */
+  replay?: boolean;
   /** The seq the action's first op takes (the room's next); 0 on the Mac before the server answers. */
   seq?: number;
   /** Per action and per insert bounds; null leaves them out (a local check that only counts them). */
@@ -324,11 +327,19 @@ class Run {
     }
     if (op.order) props = nextProps(props, {}, op.order);
     const changed = keys.filter((k) => !k.startsWith(DESCENDANTS_PREFIX) && whole[k] !== null);
-    if (changed.length) {
+    const sticker = n.type === "sticker" && !this.ctx.replay;
+    if (changed.length || sticker) {
       const probe = { ...props };
       delete probe.children;
-      const errs = validateNode(probe as DocNode, { keys: changed });
+      const errs = validateNode(probe as DocNode, { keys: changed, required: sticker });
       if (errs.length) this.fail("invalid", errs.slice(0, 3).join("; "));
+    }
+    const attribution = n.type === "sticky" ? "author" : n.type === "sticker" ? "by" : null;
+    if (this.ctx.by && !this.ctx.replay && attribution && whole[attribution]) {
+      const prior = n.props[attribution];
+      const next = props[attribution];
+      const allowed = prior === undefined ? whiteboardPerson(next)?.id === this.ctx.by.id : JSON.stringify(prior) === JSON.stringify(next);
+      if (!allowed) this.fail("forbidden", `set on "${n.id}": cannot change whiteboard attribution`);
     }
     if (Object.hasOwn(whole, "ref") || Object.hasOwn(whole, "descendants") || Object.keys(paths).length) {
       for (const r of refsOfNode(props)) this.uses.push({ user: n.id, ref: r });

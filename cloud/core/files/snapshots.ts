@@ -17,8 +17,10 @@ import { boardKey, versKey, manifestKey, gzipText, gunzipText, utf8, fromUtf8 } 
 import { keptVersions } from "./versions.ts";
 import type { BlobRow, DocNode, Json, PageRow } from "./seam.ts";
 import type { FileServerMessage } from "./messages.ts";
+import { WHITEBOARD } from "../../protocol-files.ts";
 
 export interface Manifest {
+  capabilities?: string[];
   format: 1;
   file: string;
   seq: number;
@@ -73,6 +75,7 @@ async function buildLocked(room: FileRoom, opts: { label?: string; by?: string; 
     writes.push({ key: versKey(file, versSha), text: versText });
     const manifest: Manifest = {
       format: 1, file, seq: m.seq, epoch: m.epoch, top: state.top, doc: state.doc, boards, widgets: state.widgets, pages: state.pages, meta: state.meta,
+      ...(room.hasWhiteboard() ? { capabilities: [WHITEBOARD] } : {}),
       blobs: Object.entries(state.blobs).map(([path, b]) => ({ path, ...b })), vers: { sha256: versSha },
     };
     const text = JSON.stringify(manifest);

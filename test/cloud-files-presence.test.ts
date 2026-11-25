@@ -42,3 +42,40 @@ test('file sockets stamp presence, filter viewers, cap traffic and remove closed
         b.ws.close(); await until(()=>a.messages.some(m=>m.type==='presence' && m.peers.some((p:any)=>p.gone)));
     } finally { for(const s of sockets)s.close(); await h.stop(); fs.rmSync(dir,{recursive:true,force:true}); }
 });
+
+test("a connected legacy file peer is told to update before the first sticky", async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-legacy-peer-'));
+    const host = new CloudHost({ dir, port: 0 });
+    t.after(async () => { await host.stop(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const base = 'http://127.0.0.1:' + await host.start();
+    const headers = { authorization: 'Bearer ' + host.ownerDevice('Anna'), 'content-type': 'application/json' };
+    const file = crypto.randomUUID();
+    const post = (route: string, body: unknown) => fetch(base + route, { method: 'POST', headers: { ...headers, 'x-canvas-files-capabilities': 'whiteboard' }, body: JSON.stringify(body) });
+    assert.equal((await post('/v1/files', { id: file, name: 'Board' })).status, 201);
+    const route = '/v1/files/' + file;
+    const ws = new WebSocket(base.replace('http:', 'ws:') + route + '/socket', { headers } as unknown as string[]);
+    t.after(() => ws.close());
+    const messages: any[] = [];
+    ws.addEventListener('message', e => messages.push(JSON.parse(String(e.data))));
+    const until = async (predicate: () => boolean) => {
+        const deadline = Date.now() + 2000;
+        while (!predicate()) { assert.ok(Date.now() < deadline, JSON.stringify(messages)); await sleep(10); }
+    };
+    await until(() => ws.readyState === WebSocket.OPEN);
+    ws.send(JSON.stringify({ type: 'hello', protocol: 2, file, since: 0, epoch: 1, pending: [] }));
+    await until(() => messages.some(m => m.type === 'welcome'));
+    const action = (baseSeq: number, node: object) => post(route + '/sync', {
+        type: 'actions', epoch: 1, actions: [{ id: crypto.randomUUID(), baseSeq, epoch: 1, ops: [{ k: 'insert', parent: null, after: null, node }] }],
+    });
+    assert.ok((await action(0, { type: 'frame', id: 'plain' })).ok);
+    await until(() => messages.some(m => m.type === 'applied'));
+    messages.length = 0;
+    assert.ok((await action(1, { type: 'sticky', id: 'note', color: 'yellow' })).ok);
+    await until(() => messages.some(m => m.code === 'update'));
+    assert.match(messages.find(m => m.code === 'update').message, /Update Canvas/);
+    assert.equal(messages.some(m => m.type === 'applied'), false);
+    const manifest = await fetch(base + route + '/manifest', { headers });
+    assert.equal(manifest.status, 426);
+    assert.match((await manifest.json() as { message: string }).message, /Update Canvas/);
+    assert.equal((await fetch(base + route + '/manifest', { headers: { ...headers, 'x-canvas-files-capabilities': 'whiteboard' } })).status, 200);
+});

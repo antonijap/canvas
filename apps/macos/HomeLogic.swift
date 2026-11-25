@@ -13,6 +13,8 @@ enum CloudFilesText {
         switch code {
         case "not_found": return "This file was moved to the Trash"
         case "read_only": return "You can view this file but not edit it"
+        case "update": return "Update Canvas to open this file. It contains stickies or stickers."
+        case "update_host": return "Update Canvas on the host to use stickies and stickers."
         case "quota": return "This Cloud is full"
         case "removed": return "You no longer have access to this Cloud"
         default: return fallback

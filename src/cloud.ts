@@ -604,10 +604,9 @@ export function vouch(pkg: string, f: SyncFile): boolean {
   const key = knownKey(pkg, f);
   if (readKnown().includes(key)) return false;
   markKnown(key);
-  const comments = f.outbox.filter(e => !isVoteOp(e.op));
-  if (!comments.length) return false;
-  f.rejected = [...(f.rejected ?? []), ...comments.map((envelope) => ({ envelope, code: "forbidden" as const, message: UNVOUCHED }))];
-  f.outbox = f.outbox.filter(e => isVoteOp(e.op));
+  if (!f.outbox.length) return false;
+  f.rejected = [...(f.rejected ?? []), ...f.outbox.map((envelope) => ({ envelope, code: "forbidden" as const, message: UNVOUCHED }))];
+  f.outbox = [];
   return true;
 }
 hooks.vouch = vouch;

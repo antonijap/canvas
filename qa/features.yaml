@@ -39,19 +39,19 @@ features:
     name: Sticky note placement, editing and quick add
     area: canvas
     driven: [page, native, mcp]
-    cases: [create, resize, edit, style, next, author, undo, cloud, handles]
+    cases: [create, resize, edit, style, next, author, undo, cloud, handles, author-removal]
 
   - id: sticker
     name: Anchored stickers and stacked seals
     area: canvas
     driven: [page, native, mcp]
-    cases: [place, stack, anchor, author, cloud]
+    cases: [place, stack, anchor, author, cloud, dom-anchor]
 
   - id: vote
     name: Local whiteboard voting
     area: canvas
     driven: [page, native, mcp]
-    cases: [start, scope, ballot, persistence, privacy, results, undo, clear]
+    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable]
 
   - id: draw
     name: Draw boards and layers

@@ -1,7 +1,7 @@
 import { drawRect } from "./draw-logic.js";
 import { BADGE, SPARK, sparkAt, visibleArea } from "./spark-logic.js";
 import { STICKY_COLORS, STICKY_SIZE, STICKY_GAP, STICKERS, STICKER_SIZE, stackStickers, stickerGlyph,
-  isStickyColor, isStickerKind, whiteboardPerson, WHITEBOARD_PAINT } from "./whiteboard-model.js";
+  isStickyColor, isStickerKind, stickyOwner, whiteboardPerson, WHITEBOARD_PAINT } from "./whiteboard-model.js";
 
 const field = "input,textarea,select,[contenteditable]";
 const insideChrome = "button,#rulerTop,#rulerLeft,#rulerCorner,[data-whiteboard-ui]," + field;
@@ -77,6 +77,7 @@ function start(host) {
   function author() {
     const name = host.prefs().whiteboardName?.trim();
     if (!name) return null;
+    if (window.canvasCloudFile?.author?.id) return whiteboardPerson({ name, id: window.canvasCloudFile.author.id });
     let id = get("person");
     if (!id) { id = crypto.randomUUID(); remember("person", id); }
     return whiteboardPerson({ name, id });
@@ -159,12 +160,12 @@ function start(host) {
     return scene?.root ? find(scene.root) : null;
   }
 
-  function updateSticky(props) {
+  function updateSticky(props, remove = []) {
     const id = host.sel;
     if (host.readOnly || !id || !sceneNode(id)) return;
     const op = host.live.nextOp();
-    host.live.override(id, props, op);
-    const writing = request("/api/update", { id, props }).then(() => {
+    host.live.override(id, props, op, remove);
+    const writing = request("/api/update", { id, props, remove }).then(() => {
       host.live.ack(id, op, true);
       syncSticky();
     }).catch((error) => {
@@ -185,9 +186,16 @@ function start(host) {
   const sizeOptions = [12, 15, 18, 24, 32];
   for (const size of sizeOptions) { const o = el("option", "", String(size)); o.value = String(size); sizes.append(o); }
   const showAuthor = button("Show author", "sticky-author", () => {
-    const show = showAuthor.getAttribute("aria-pressed") !== "true";
-    showAuthor.setAttribute("aria-pressed", String(show));
-    updateSticky({ showAuthor: show });
+    const note = sceneNode(host.sel);
+    if (!note) return;
+    if (note.author && note.showAuthor !== false) {
+      updateSticky({ showAuthor: false }, ["author"]);
+    } else if (note.author) {
+      updateSticky({ showAuthor: true });
+    } else {
+      const me = author();
+      if (me) updateSticky({ showAuthor: true, author: me });
+    }
   });
   showAuthor.innerHTML = icon("M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m12-13a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z");
   controls.append(...editSwatches, sizes, showAuthor);
@@ -256,7 +264,7 @@ function start(host) {
         sizes.append(option);
       }
       sizes.value = String(size);
-      showAuthor.disabled = !n.author;
+      showAuthor.disabled = !n.author && !author();
       showAuthor.setAttribute("aria-pressed", String(!!n.author && n.showAuthor !== false));
     }
     positionSticky();
@@ -311,6 +319,10 @@ function start(host) {
 
   function activate(type) {
     if (!host.doc || host.readOnly || host.textEdit?.active) return;
+    if (window.canvasCloudFile && !window.canvasCloudFile.whiteboard) {
+      host.toast("Update Canvas on the host to use stickies and stickers.");
+      return;
+    }
     reset();
     closePopover();
     host.emit("draw-tool", type);
@@ -324,7 +336,7 @@ function start(host) {
   }
 
   function anchorTarget(e) {
-    const id = host.pick(e.clientX, e.clientY);
+    const id = stickyOwner(host.pick(e.clientX, e.clientY));
     if (!id || byId.has(id) || id.startsWith("widget:")) return null;
     const rect = host.worldRectOf(id);
     if (!rect?.w || !rect.h) return null;

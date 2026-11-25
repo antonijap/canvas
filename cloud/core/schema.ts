@@ -129,7 +129,7 @@ function checkFill(v: Json, where: string, errs: string[]) {
 }
 
 /** Validate one node (and its children). `full` = check every key (new node); otherwise only `keys`. */
-export function validateNode(node: DocNode, opts: { keys?: string[]; path?: string } = {}): string[] {
+export function validateNode(node: DocNode, opts: { keys?: string[]; path?: string; required?: boolean } = {}): string[] {
   const errs: string[] = [];
   const where = opts.path ?? (node.id ? `node ${node.id}` : "node");
   if (!node || typeof node !== "object" || Array.isArray(node)) return [`${where}: must be an object`];
@@ -201,7 +201,7 @@ export function validateNode(node: DocNode, opts: { keys?: string[]; path?: stri
   }
   if (type === "ref" && keys.includes("ref") && (typeof node.ref !== "string" || !node.ref)) errs.push(`${where}: ref must be the id of a reusable component`);
   if (type === "ref" && !opts.keys && node.ref === undefined) errs.push(`${where}: an instance needs "ref" (the id of a reusable component)`);
-  if (type === "sticker" && !opts.keys && (node.kind === undefined || node.on === undefined)) errs.push(`${where}: a sticker needs "kind" and "on"`);
+  if (type === "sticker" && (!opts.keys || opts.required) && (!isStickerKind(node.kind) || !stickerAnchor(node.on))) errs.push(`${where}: a sticker needs "kind" and "on"`);
   if (type === "path" && !opts.keys && typeof node.geometry !== "string") errs.push(`${where}: a path needs "geometry" (an SVG path string)`);
   if (type === "icon" && !opts.keys && (typeof node.icon !== "string" || typeof node.library !== "string")) {
     errs.push(`${where}: an icon needs "library" (lucide, feather, Material Symbols Outlined/Rounded/Sharp, phosphor) and "icon"`);

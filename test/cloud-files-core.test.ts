@@ -485,3 +485,21 @@ test("empty variable containers and document key order match the local client", 
   refused(one(room, anna, [{ k: "doc", key: "variables", value: null }]), "invalid");
   refused(one(room, anna, [{ k: "doc", key: "variables", value: { v: {} } }]), "invalid");
 });
+
+test("legacy hello accepts plain files and rejects whiteboard contents or replay", async () => {
+  const room = seeded();
+  const hello = { type: "hello", protocol: 2, file: FILE, since: 0, epoch: 1, pending: [] } as const;
+  assert.equal(room.hello(anna, { ...hello, pending: [] })[0].type, "welcome");
+  ok(one(room, anna, [{ k: "insert", parent: null, after: null, node: { id: "whiteboard", type: "frame", children: [{ id: "note", type: "sticky", color: "yellow" }] } }]));
+  assert.match(JSON.stringify(room.hello(anna, { ...hello, pending: [] })[0]), /Update Canvas/);
+  const modern = { ...hello, pending: [], capabilities: ["whiteboard"] };
+  assert.equal(room.hello(anna, modern)[0].type, "welcome");
+  assert.match(JSON.stringify(room.hello(anna, modern)[0]), /"capabilities":\["whiteboard"\]/);
+  ok(one(room, anna, [{ k: "remove", id: "whiteboard" }]));
+  assert.match(JSON.stringify(room.hello(anna, { ...hello, pending: [] })[0]), /Update Canvas/);
+  assert.equal(room.hello(anna, { ...hello, since: room.meta().seq, pending: [] })[0].type, "welcome");
+  await buildSnapshot(room);
+  const afterRemoval = room.hello(anna, { ...hello, pending: [] })[0];
+  assert.equal(afterRemoval.type, "welcome");
+  if (afterRemoval.type === "welcome") assert.equal(afterRemoval.snapshot?.seq, room.meta().seq);
+});

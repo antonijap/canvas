@@ -131,6 +131,7 @@ function logLine(line: string): void {
     fs.appendFileSync(path.join(logs, "server.log"), `${new Date().toISOString()} ${scrubSecrets(line)}\n`);
   } catch {}
 }
+fileEvents.update = writerHooks.problem;
 fileEvents.problem = message => logLine(`[canvas] ${message}`);
 /**
  * Exit once every edit is on disk. New edits are refused from the start. Whatever could not be written in time is
@@ -3960,7 +3961,7 @@ es.addEventListener("doc", (e) => { docGen++; onDoc(JSON.parse(e.data)); });
 // Back on a stream with the document unchanged: the shell hears it again (it may have shown another tab meanwhile).
 let cloudReadOnly = false;
 es.addEventListener("cloudfile", (e) => {
-  const info = JSON.parse(e.data); window.canvasCloudFile = info; cloudReadOnly = !!info && info.role !== "owner" && info.role !== "editor";
+  const info = JSON.parse(e.data); window.canvasCloudFile = info; cloudReadOnly = !!info && (!!info.updateMessage || (info.role !== "owner" && info.role !== "editor"));
   if (native) post({ file, cloudFile: info });
   document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });
 });

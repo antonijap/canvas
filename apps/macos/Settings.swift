@@ -202,7 +202,7 @@ struct GeneralSettings: View {
                     .frame(width: 200)
                 }
                 SettingsDivider()
-                SettingsRow("Show my name on stickies and votes", detail: "Also applies to stickers you place") {
+                SettingsRow("Show my name on stickies and votes", detail: "Controls the name shown and stored on stickies, stickers and votes. Cloud history still records who edited.") {
                     SettingsSwitch(isOn: $model.prefs.showWhiteboardName).qaID("whiteboard-show-name")
                 }
             }

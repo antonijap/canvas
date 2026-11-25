@@ -18,7 +18,7 @@ import { stateFromFiles, stateOf } from "../../core/files/state.ts";
 import { type ObjectStore, boardKey, versKey, blobKey } from "../../core/files/objects.ts";
 import { Operations } from "../../core/operations.ts";
 import type { Me } from "./host.ts";
-import type { FileClientMessage, Role } from "../../protocol-files.ts";
+import { FILE_CAPABILITIES_HEADER, insertsWhiteboard, supportsWhiteboard, WHITEBOARD_UPDATE, type AppliedAction, type FileClientMessage, type Role } from "../../protocol-files.ts";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA = /^[0-9a-f]{64}$/;
 const GB = 1024 ** 3;
@@ -125,6 +125,7 @@ interface Room {
     comments: Operations;
     roles: RoleCache;
     sockets: Map<ServerSocket, Me>;
+    ready: Map<ServerSocket, boolean>;
     presence: Map<ServerSocket, { socket: PresenceSocket; kept: KeptPresence }>;
     lastAction: number;
     snapshotAt: number;
@@ -255,7 +256,7 @@ export class MacFiles {
             const comments = new Operations(store);
             if (!store.sql.exec("SELECT 1 AS one FROM pragma_table_info('ops') WHERE name = 'by_id'").toArray().length)
                 store.sql.exec('ALTER TABLE ops ADD COLUMN by_id TEXT');
-            r = { leases, store, core, roles, comments, sockets: new Map(), presence: new Map(), lastAction: 0, snapshotAt: this.now() };
+            r = { leases, store, core, roles, comments, sockets: new Map(), ready: new Map(), presence: new Map(), lastAction: 0, snapshotAt: this.now() };
             this.rooms.set(file, r);
             this.accountDatabase(path.join(this.root, 'files', file + '.sqlite'));
         }
@@ -290,6 +291,20 @@ export class MacFiles {
     }
     private broadcast(r: Room, msg: unknown) { this.recheck(); for (const ws of r.sockets.keys())
         ws.send(JSON.stringify(msg)); }
+    private broadcastActions(r: Room, actions: AppliedAction[]) {
+        this.recheck();
+        const whiteboard = [...r.ready.values()].includes(false) && (actions.some(a => insertsWhiteboard(a.ops)) || r.core.hasWhiteboard());
+        const message = JSON.stringify({ type: 'applied', actions });
+        for (const ws of r.sockets.keys()) {
+            const capable = r.ready.get(ws);
+            if (capable === undefined) continue;
+            if (whiteboard && !capable) {
+                r.ready.delete(ws);
+                ws.send(JSON.stringify(WHITEBOARD_UPDATE));
+                ws.close(1008, WHITEBOARD_UPDATE.message);
+            } else ws.send(message);
+        }
+    }
     private bounded<T>(r: Room, fn: () => T): T {
         this.capacity(0);
         try {
@@ -482,12 +497,16 @@ export class MacFiles {
                 r.leases.clear();
                 return json(200, { ok: true });
             }
+            const whiteboard = supportsWhiteboard(String(req.headers[FILE_CAPABILITIES_HEADER] ?? '').split(/\s*,\s*/));
             if (sub === 'manifest' && method === 'GET') {
+                if (!whiteboard && r.core.hasWhiteboard()) return json(426, WHITEBOARD_UPDATE);
                 await buildSnapshot(r.core);
+                if (!whiteboard && r.core.hasWhiteboard()) return json(426, WHITEBOARD_UPDATE);
                 const seq = url.searchParams.get('seq');
                 const s = r.store.sql.exec<{
                     manifest: string;
                 }>(seq ? 'SELECT manifest FROM snapshots WHERE seq=? AND state=\'done\'' : "SELECT manifest FROM snapshots WHERE state='done' ORDER BY seq DESC LIMIT 1", ...(seq ? [Number(seq)] : [])).toArray()[0];
+                if (s && !whiteboard && supportsWhiteboard(JSON.parse(s.manifest).capabilities)) return json(426, WHITEBOARD_UPDATE);
                 return json(s ? 200 : 404, s ? JSON.parse(s.manifest) : { code: 'not_found' });
             }
             if (sub === 'sync' && method === 'POST') {
@@ -503,9 +522,10 @@ export class MacFiles {
                     return json(200, { messages: r.core.hello(this.conn(fresh), b) });
                 }
                 this.edit(fresh);
-                const out = this.bounded(r, () => r.core.submit(this.conn(fresh), b));
+                if (!whiteboard && r.core.hasWhiteboard()) return json(426, WHITEBOARD_UPDATE);
+                const out = this.bounded(r, () => r.core.submit({ ...this.conn(fresh), whiteboard }, b));
                 if (out.applied.length) {
-                    this.broadcast(r, { type: 'applied', actions: out.applied });
+                    this.broadcastActions(r, out.applied);
                     this.changed(r);
                 }
                 return json(200, { messages: [...(out.applied.length ? [{ type: 'applied', actions: out.applied }] : []), ...out.replies] });
@@ -723,7 +743,7 @@ export class MacFiles {
                 const presence = { socket: { session: randomUUID(), person: me.id, author: { id: me.id, name: me.name }, role: me.role }, kept: {} as KeptPresence };
                 r.presence.set(ws, presence);
                 ws.on('close', () => {
-                    r.sockets.delete(ws); r.presence.delete(ws);
+                    r.sockets.delete(ws); r.ready.delete(ws); r.presence.delete(ws);
                     this.relayPresence(r, presence.socket, goneOf(presence.socket));
                 });
                 let chain = Promise.resolve(), window = this.now(), count = 0, queued = 0;
@@ -768,22 +788,30 @@ export class MacFiles {
                                 return;
                             }
                             await buildSnapshot(r.core);
-                            for (const out of r.core.hello(this.conn(fresh), msg))
-                                ws.send(JSON.stringify(out));
+                            if (!r.sockets.has(ws)) return;
+                            const replies = r.core.hello(this.conn(fresh), msg);
+                            for (const out of replies) ws.send(JSON.stringify(out));
+                            if (!replies.some(out => out.type === 'welcome')) {
+                                r.ready.delete(ws);
+                                const failure = replies.find(out => out.type === 'error');
+                                if (failure?.code === 'update') ws.close(1008, failure.message);
+                                return;
+                            }
+                            r.ready.set(ws, supportsWhiteboard(msg.capabilities));
                             const peers = snapshotFor(presence.socket, r.presence.values());
                             if (peers.length) ws.send(JSON.stringify({ type: 'presence', peers }));
                             ws.send(JSON.stringify({ type: 'comments.snapshot', ...r.comments.snapshot() }));
                         }
-                        else if (msg.type === 'actions') {
-                            const out = this.bounded(r, () => r.core.submit(this.conn(fresh), msg, Buffer.byteLength(text)));
+                        else if (msg.type === 'actions' && r.ready.has(ws)) {
+                            const out = this.bounded(r, () => r.core.submit({ ...this.conn(fresh), whiteboard: r.ready.get(ws) }, msg, Buffer.byteLength(text)));
                             if (out.applied.length) {
-                                this.broadcast(r, { type: 'applied', actions: out.applied });
+                                this.broadcastActions(r, out.applied);
                                 this.changed(r);
                             }
                             for (const reply of out.replies)
                                 ws.send(JSON.stringify(reply));
                         }
-                        else if (msg.type === 'comments' && Array.isArray(msg.ops)) {
+                        else if (msg.type === 'comments' && r.ready.has(ws) && Array.isArray(msg.ops)) {
                             if (!this.bank.grant(fresh.id, 'messages', 1, this.now()))
                                 error(429, 'quota', 'Message quota');
                             const allowance = this.bank.grant(fresh.id, 'ops', msg.ops.length, this.now());

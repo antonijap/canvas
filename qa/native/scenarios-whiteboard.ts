@@ -119,3 +119,24 @@ sc("sticker", "Sticker tool places an anchored seal in the Mac app", { covers: [
   await t.waitJs('window.canvasHost.prefs().whiteboardName === "Anna"', "the name setting restored");
   await t.click({ x: 14, y: 14 }, { window: "settings" });
 });
+
+sc("whiteboard-review", "Sticky author removal clears disk and undo restores it", { covers: ["sticky:author-removal"] }, async (t: NT) => {
+  await t.cmd("qa.cloud", { commentName: "Anna" });
+  await t.showPage("layout");
+  await t.look(0, 0);
+  const p = center(await t.rect("r_free"));
+  await t.key("s");
+  await t.click(p);
+  await t.waitJs("window.canvasHost.textEdit.active", "sticky text editor");
+  const [id] = await t.pageSel();
+  await t.key("Escape");
+  await t.waitDisk(() => t.node(id)?.author?.name === "Anna", "sticky author before removal");
+  const author = 'document.querySelector(".sticky-author")';
+  await t.waitJs(author + '?.getAttribute("aria-pressed") === "true"', "author toggle");
+  const rect = await t.js(`const r = ${author}.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };`);
+  const { webFrame } = await t.state();
+  await t.click({ x: rect.x + webFrame.x, y: rect.y + webFrame.y });
+  await t.waitDisk(() => !t.node(id)?.author, "author removed from disk");
+  await t.key("z", ["cmd"]);
+  await t.waitDisk(() => t.node(id)?.author?.name === "Anna", "undo restores the author");
+});

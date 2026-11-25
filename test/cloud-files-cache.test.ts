@@ -348,3 +348,97 @@ for (const scenario of ['sign-out during file listing', 'socket closes during im
     }
   });
 }
+
+test('a legacy host leaves ordinary edits enabled and refuses whiteboard inserts before queuing', async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-legacy-host-'));
+    t.mock.method(os, 'homedir', () => dir);
+    const cloud = 'http://127.0.0.1:9193', id = crypto.randomUUID();
+    const pkg = path.join(dir, 'Library', 'Application Support', 'Canvas', 'cloud-files', cloudKey(cloud), id + '.canvas');
+    const store = new FileStateStore(pkg, { cloud, file: id, name: 'Board', role: 'editor', author: { id: 'anna', name: 'Anna' },
+        state: stateFromFiles({ children: [{ id: 'board', type: 'frame', children: [] }] }) });
+    store.materialize();
+    store.close();
+    const { deliverOps } = await import('../src/cloud-files-ops.ts');
+    const { receive } = await import('../src/cloud-files.ts');
+    t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
+    setCloudConfig({ clouds: [{ url: cloud, devEmail: 'anna@example.test' }] });
+    t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const session = fileSession(pkg)!;
+    const welcome = { type: 'welcome', protocol: 2, role: 'editor', me: { id: 'anna', name: 'Anna' },
+        epoch: 1, seq: 0, known: [], limits: { opsPerMessage: 100, actionBytes: 1024 } };
+    await receive(session, welcome);
+    const file = path.join(pkg, 'document.json');
+    const ops = [{ k: 'insert', parent: 'board', after: null, node: { id: 'note', type: 'sticky', color: 'yellow' } }] as const;
+    assert.throws(() => deliverOps(file, [...ops]), /Update Canvas on the host/);
+    assert.equal(session.store.replica.pending.length, 0);
+    assert.equal(session.store.replica.view().node('note'), null);
+    const { runStructure, serverClipboard, setServerClipboard } = await import('../src/structure.ts');
+    const { topSeq } = await import('../src/history.ts');
+    const paste = { kind: 'canvas/nodes' as const, v: 1 as const, source: '/tmp/Another.canvas/document.json', at: Date.now(),
+        nodes: [ops[0].node], detached: [ops[0].node] };
+    const before = fs.readFileSync(file, 'utf8'), history = topSeq(file);
+    setServerClipboard(paste);
+    t.after(() => setServerClipboard(null));
+    await assert.rejects(runStructure(file, { op: 'paste', fromServer: true, place: { parent: 'board' } }, { source: 'user' }), /Update Canvas on the host/);
+    assert.equal(fs.readFileSync(file, 'utf8'), before);
+    assert.equal(topSeq(file), history);
+    assert.equal(serverClipboard(), paste);
+    deliverOps(file, [{ k: 'set', id: 'board', props: { name: { v: 'Updated' } } }]);
+    assert.equal(session.store.replica.pending.length, 1);
+    await receive(session, { ...welcome, capabilities: ['whiteboard'] });
+    deliverOps(file, [...ops]);
+    assert.equal(session.store.replica.view().node('note')?.type, 'sticky');
+});
+
+test('a comment snapshot and cache removal preserve the only copy of local votes', async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-recover-votes-'));
+    t.mock.method(os, 'homedir', () => dir);
+    const cloud = 'http://127.0.0.1:9194', id = crypto.randomUUID();
+    const pkg = path.join(dir, 'Library', 'Application Support', 'Canvas', 'cloud-files', cloudKey(cloud), id + '.canvas');
+    const store = new FileStateStore(pkg, { cloud, file: id, name: 'Board', role: 'editor', author: { id: 'anna', name: 'Anna' },
+        state: stateFromFiles({ children: [{ id: 'board', type: 'frame' }] }) });
+    store.materialize();
+    store.close();
+    const { emptyComments, readCommentsFile, writeCommentsFile } = await import('../src/comments-file.ts');
+    const { receive } = await import('../src/cloud-files.ts');
+    const votes = [{ id: crypto.randomUUID(), host: { id: 'another-mac', name: 'Anna' }, scope: { page: 'page' },
+        on: 'anything', perPerson: 3, hidden: true, anonymous: false, state: 'ended', ballots: [] }] as import('../cloud/protocol.ts').Vote[];
+    writeCommentsFile(pkg, { ...emptyComments(), doc: id, votes, voteConclusions: [votes[0].id] });
+    t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
+    setCloudConfig({ clouds: [{ url: cloud, devEmail: 'anna@example.test' }] });
+    t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); fs.rmSync(dir, { recursive: true, force: true }); });
+    await receive(fileSession(pkg)!, { type: 'comments.snapshot', threads: [], seq: 0 });
+    assert.deepEqual(readCommentsFile(pkg)?.votes, votes);
+    setCloudConfig({ clouds: [] });
+    assert.equal(fs.existsSync(pkg), false);
+    const recovered = path.join(dir, 'Documents', 'Canvas Recovered');
+    const copy = readCommentsFile(path.join(recovered, fs.readdirSync(recovered)[0]));
+    assert.deepEqual(copy?.votes, votes);
+    assert.deepEqual(copy?.voteConclusions, [votes[0].id]);
+});
+
+test('moving a whiteboard to a legacy host leaves the local file intact', async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-legacy-move-'));
+    const cloud = 'http://127.0.0.1:9195', source = path.join(dir, 'Board.canvas');
+    fs.mkdirSync(source);
+    const document = JSON.stringify({ version: '2.21', children: [{ id: 'note', type: 'sticky', color: 'yellow' }] });
+    fs.writeFileSync(path.join(source, 'document.json'), document);
+    const request = t.mock.method(globalThis, 'fetch', async (input: string) => {
+        assert.equal(new URL(input).pathname, '/v1/info');
+        return Response.json({ protocol: 1, capabilities: ['files'] });
+    });
+    t.mock.method(os, 'homedir', () => dir);
+    setCloudConfig({ clouds: [{ url: cloud, devEmail: 'anna@example.test' }] });
+    t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const { handleCloudFiles } = await import('../src/cloud-files.ts');
+    const { Readable } = await import('node:stream');
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({ cloud }))]), { method: 'POST', headers: { 'x-canvas': '1' } });
+    let status = 0, reply: any;
+    const res = { writeHead: (code: number) => { status = code; }, end: (body: string) => { reply = JSON.parse(body); } };
+    const url = new URL('http://127.0.0.1/api/cloud/files/move?file=' + encodeURIComponent(source));
+    await handleCloudFiles(req as unknown as import('node:http').IncomingMessage, res as unknown as import('node:http').ServerResponse, url);
+    assert.equal(status, 426, JSON.stringify(reply));
+    assert.match(reply.error, /Update Canvas on the host/);
+    assert.equal(request.mock.calls.length, 1);
+    assert.equal(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), document);
+});

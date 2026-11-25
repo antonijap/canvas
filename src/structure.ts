@@ -26,6 +26,7 @@
 
 import { stickerAnchor } from "./page/whiteboard-model.js";
 import { asOneAction } from "./cloud-files-ops.ts";
+import { cloudFileHooks } from "./cloud-files-runtime.ts";
 import { fitAround, groupsAround, turnedBox } from "./groupfit.ts";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
@@ -1306,10 +1307,12 @@ export async function runStructure(docFile: string, b: StructureBody, who: Who):
     if (!payload) throw invalid("nothing to paste: copy some layers first");
     if (!isPayload(payload) || !payload.nodes.length) throw invalid("nothing to paste: the clipboard holds no Canvas layers");
   }
+  if (op === "add") payload = addPayload(b.nodes, docFile);
+  const whiteboardIssue = payload && cloudFileHooks.whiteboardIssue?.(docFile, [...payload.nodes, ...payload.detached, ...Object.values(payload.mains ?? {})]);
+  if (whiteboardIssue) throw new StructureError(426, "update_host", whiteboardIssue);
   // Images from another document are copied into this package first (the edit itself never touches other files).
   const created: string[] = [];
   const assets = op === "paste" && payload && payload.source !== docFile ? planAssets(payload, docFile, created) : undefined;
-  if (op === "add") payload = addPayload(b.nodes, docFile);
   let out: OpResult | undefined;
   // New boards an agent adds land clear of the boards and cards on their page (src/placement.ts). The page's own adds
   // (an image dropped over a board with Space held) go where the person put them.

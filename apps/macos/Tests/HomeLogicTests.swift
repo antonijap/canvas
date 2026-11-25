@@ -49,6 +49,8 @@ struct HomeLogicTests {
         for (code, text) in [
             "not_found": "This file was moved to the Trash",
             "read_only": "You can view this file but not edit it",
+            "update": "Update Canvas to open this file. It contains stickies or stickers.",
+            "update_host": "Update Canvas on the host to use stickies and stickers.",
             "quota": "This Cloud is full",
             "removed": "You no longer have access to this Cloud"
         ] {

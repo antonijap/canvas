@@ -23,11 +23,11 @@ Every change is an op (`thread.create`, `comment.add`, `comment.edit`, `comment.
 
 ## Local votes
 
-`comments.json` can also hold `votes`. Each vote belongs to a page or a frame on that page. The app applies `vote.start`, `vote.cast`, `vote.retract`, `vote.end` and `vote.clear` through the same envelope validation and `applyOp` rules. Each dot has a ballot id so a retry cannot add a second dot. A person can remove their own dots. The host ends and clears the vote.
+`comments.json` can also hold `votes`. Each vote belongs to a page or a frame on that page. The app applies `vote.start`, `vote.cast`, `vote.retract`, `vote.end` and `vote.clear` through the same envelope validation and `applyOp` rules. Each dot has a ballot id so a retry cannot add a second dot. A person can remove their own dots. Anyone with a never-shared file can end and clear its votes. For shared files, the vote host keeps those controls.
 
 The app shows only a person's own dots during a hidden vote. Anonymous votes store no names. After ending, a conclusion card with counts is an ordinary design edit. Undoing it leaves the results in the sidecar. Clearing the vote removes the sidecar ballots and count badges.
 
-Voting runs on one Mac. Sharing queues the vote ops for a future room that supports voting. Current rooms refuse them. The optional timer field is reserved.
+Votes stay in the local comments file. Sharing and moving a file to Cloud leave ballots local. The optional timer field is reserved.
 
 ## Anchors
 
@@ -47,3 +47,9 @@ A thread pins to a layer id and a point on that layer as fractions of its box, s
 ## Limits
 
 `LIMITS` in `cloud/protocol.ts`: body length, ops per message and per minute, threads per document, comments per thread, sockets per person. Both sides enforce them; the server is the one that counts.
+
+## Whiteboard support in Cloud files
+
+Protocol 2 clients and hosts advertise `whiteboard` in the optional `capabilities` lists on `hello` and `welcome`. The Mac host also lists it at `GET /v1/info` so Canvas can check support before importing a local package. HTTP clients send `x-canvas-files-capabilities: whiteboard` when requesting a manifest or submitting file actions.
+
+A legacy client can still edit files without stickies or stickers. A file that needs whiteboard support returns `update` with an upgrade message. A connected legacy client receives that error before the first incompatible action can reach it.

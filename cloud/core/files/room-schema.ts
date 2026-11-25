@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS file_meta (id INTEGER PRIMARY KEY CHECK (id = 1), fil
   snapshot_seq INTEGER NOT NULL, node_bytes INTEGER NOT NULL DEFAULT 0, top_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS nodes (id TEXT PRIMARY KEY, parent TEXT NOT NULL, pos TEXT NOT NULL, type TEXT NOT NULL,
   props TEXT NOT NULL, deleted_seq INTEGER) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS nodes_whiteboard ON nodes(type) WHERE deleted_seq IS NULL AND type IN ('sticky', 'sticker');
 CREATE INDEX IF NOT EXISTS nodes_children ON nodes(parent, pos);
 CREATE INDEX IF NOT EXISTS nodes_deleted ON nodes(deleted_seq) WHERE deleted_seq IS NOT NULL;
 CREATE TABLE IF NOT EXISTS refs (ref TEXT NOT NULL, user TEXT NOT NULL, PRIMARY KEY (ref, user)) WITHOUT ROWID;

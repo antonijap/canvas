@@ -9,6 +9,28 @@
 import { sha256Hex } from "./core/files/sha256.ts";
 
 export const FILES_PROTOCOL = 2;
+export const WHITEBOARD = "whiteboard";
+export const FILE_CAPABILITIES_HEADER = "x-canvas-files-capabilities";
+export const UPDATE_WHITEBOARD_HOST = "Update Canvas on the host to use stickies and stickers.";
+export const WHITEBOARD_UPDATE = { type: "error", code: "update", message: "Update Canvas to open this file. It contains stickies or stickers." } as const;
+
+export function supportsWhiteboard(capabilities: unknown): boolean {
+  return Array.isArray(capabilities) && capabilities.includes(WHITEBOARD);
+}
+
+export function hasWhiteboard(nodes: unknown): boolean {
+  const pending = Array.isArray(nodes) ? [...nodes] : [];
+  while (pending.length) {
+    const node = pending.pop();
+    if (node?.type === "sticky" || node?.type === "sticker") return true;
+    if (Array.isArray(node?.children)) for (const child of node.children) pending.push(child);
+  }
+  return false;
+}
+
+export function insertsWhiteboard(ops: FileOp[]): boolean {
+  return ops.some(op => op?.k === "insert" && hasWhiteboard([op.node]));
+}
 
 export type Uuid = string;
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
@@ -150,6 +172,7 @@ export interface Hello {
   type: "hello";
   protocol: 2;
   file: Uuid;
+  capabilities?: string[];
   /** The last seq this Mac holds confirmed (0: none). */
   since: number;
   /** The epoch it holds (0: none yet). */
@@ -165,6 +188,7 @@ export interface ActionsMessage {
 export interface Welcome {
   type: "welcome";
   protocol: 2;
+  capabilities?: string[];
   role: Role;
   me: Author;
   epoch: number;
@@ -181,7 +205,7 @@ export type FileServerMessage =
   | { type: "reject"; id: Uuid; code: FileRejectCode; message: string }
   | { type: "reset"; epoch: number; reason: "restored" }
   | import('./core/presence.ts').PresenceServerMessage
-  | { type: "error"; code: RejectCode; message: string };
+  | { type: "error"; code: RejectCode | "update"; message: string };
 
 /**
  * The payload hash a receipt binds: the action exactly as sent (id, base, epoch, time, ops, label). A resend is byte

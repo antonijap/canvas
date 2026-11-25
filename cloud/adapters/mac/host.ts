@@ -18,6 +18,7 @@ import { route } from "../../core/router.ts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import { WHITEBOARD } from "../../protocol-files.ts";
 import type { AddressInfo, Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
@@ -498,7 +499,7 @@ export class CloudHost {
     }
     if (!this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
     if (await this.files.route(req, res, url, me, () => this.body(req, 1024 * 1024, me.device))) return;
-    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files"], hostId: this.hostId() } as ServerInfo);
+    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", WHITEBOARD], hostId: this.hostId() } as ServerInfo);
     if (p === "/v1/members" && method === "GET") return json(200, this.people().filter(p => p.devices.length).map(p => ({ id: p.id, name: p.label, role: p.role })));
     if (p === "/v1/me" && method === "GET") return json(200, { id: me.id, email: me.email, name: me.name, role: me.role, hostId: this.hostId() });
     if (p === "/v1/docs" && method === "POST") {

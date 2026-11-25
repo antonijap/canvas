@@ -6,6 +6,7 @@
 // sent is never changed and is resent byte for byte; a text op is made only on a layer whose text no pending action
 // of this Mac changes, so its splice is relative to the confirmed text at its baseSeq and the room can move it.
 
+import { WHITEBOARD } from "../../protocol-files.ts";
 import { MemoryTree } from "./tree-memory.ts";
 import { treeFromManifest } from "./snapshots.ts";
 import { textEditsOf, transformTextOps, type TextEdit } from "./text.ts";
@@ -123,16 +124,17 @@ export class Replica {
   hello(file: string): Hello {
     this.joined = false;
     this.needHello = false;
-    return { type: "hello", protocol: 2, file, since: this.seq, epoch: this.epoch, pending: this.pending.slice(0, this.helloWindow).map((p) => ({ id: p.action.id, sha: p.sha })) };
+    return { type: "hello", protocol: 2, capabilities: [WHITEBOARD], file, since: this.seq, epoch: this.epoch, pending: this.pending.slice(0, this.helloWindow).map((p) => ({ id: p.action.id, sha: p.sha })) };
   }
 
   /** Actions to send now, in order, at most `maxOps` ops in all; they are marked sent. */
-  outgoing(maxOps = 100): Action[] {
+  outgoing(maxOps = 100, canSend: (action: Action) => boolean = () => true): Action[] {
     if (!this.joined) return [];
     const out: Action[] = [];
     let n = 0;
     for (const p of this.pending) {
       if (p.sent) continue;
+      if (!canSend(p.action)) break;
       if (n + p.action.ops.length > maxOps && out.length) break;
       p.sent = true;
       out.push(p.action);
@@ -149,7 +151,7 @@ export class Replica {
         this.needHello = true;
         return "gap";
       }
-      const r = this.apply(this.tree, { id: a.id, ops: a.ops, at: a.at }, this.ctx(a.first, a.by));
+      const r = this.apply(this.tree, { id: a.id, ops: a.ops, at: a.at }, { ...this.ctx(a.first, a.by), replay: true });
       if (isReject(r)) throw new Divergence(`the room applied ${a.id} at ${a.first}, this Mac cannot: ${r.message}`);
       this.seq = a.last;
       this.textEdits.push(...textEditsOf(a));

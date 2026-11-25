@@ -7,6 +7,7 @@ import { fileStorageBytes, UPLOAD_LIMITS } from "./uploads.ts";
 // the dirty boards and the room's seq. A crash anywhere before the commit leaves no trace; a resend after the commit
 // is answered from the receipt and never applies twice.
 
+import { insertsWhiteboard, supportsWhiteboard, WHITEBOARD, WHITEBOARD_UPDATE } from "../../protocol-files.ts";
 import type { SqlStore } from "../sql.ts";
 import { initFileRoomSchema } from "./room-schema.ts";
 import { SqlTree, BOARD_BYTES_CAP } from "./tree-sql.ts";
@@ -28,6 +29,7 @@ export interface Conn {
   author: Author;
   /** The role the socket was opened with; a RoleCache (when the room has one) has the last word. */
   role: Role;
+  whiteboard?: boolean;
 }
 export interface FileRoomOptions {
   store: SqlStore;
@@ -208,12 +210,26 @@ export class FileRoom {
     }
   }
 
+  hasWhiteboard(): boolean {
+    // Removing a subtree tombstones its root. Only count whiteboard layers with a live path to the root.
+    return this.store.sql.exec(`
+      WITH RECURSIVE ancestors(parent) AS (
+        SELECT parent FROM nodes WHERE deleted_seq IS NULL AND type IN ('sticky', 'sticker')
+        UNION
+        SELECT n.parent FROM nodes n JOIN ancestors a ON n.id = a.parent WHERE n.deleted_seq IS NULL
+      )
+      SELECT 1 FROM ancestors WHERE parent = '' LIMIT 1
+    `).toArray().length > 0;
+  }
+
   /** A socket's hello: the welcome, then (in the same turn) the tail it is missing. */
   hello(conn: Conn, h: Hello): FileServerMessage[] {
     this.usage.messages++;
     const role = this.roleFor(conn);
     if (!role) return [{ type: "error", code: "forbidden", message: "you are not a member of this Cloud" }];
     if (!h || h.type !== "hello" || h.file !== this.file) return [{ type: "error", code: "invalid", message: "this socket is for another file" }];
+    const whiteboard = supportsWhiteboard(h.capabilities);
+    if (!whiteboard && this.hasWhiteboard()) return [WHITEBOARD_UPDATE];
     const m = this.meta();
     const out: FileServerMessage[] = [];
     const since = Number.isSafeInteger(h.since) && h.since >= 0 ? h.since : 0;
@@ -224,6 +240,7 @@ export class FileRoom {
     if (staleEpoch || since < m.logFloor || since > m.seq) {
       const s = this.store.sql.exec<{ seq: number; manifest: string }>("SELECT seq, manifest FROM snapshots WHERE state = 'done' AND seq >= ? ORDER BY seq DESC LIMIT 1", m.logFloor).toArray()[0];
       if (!s) return [{ type: "error", code: "invalid", message: "this file has no snapshot to start from yet" }];
+      if (!whiteboard && supportsWhiteboard(JSON.parse(s.manifest).capabilities)) return [WHITEBOARD_UPDATE];
       snapshot = { seq: s.seq, manifest: s.manifest };
       from = s.seq;
     }
@@ -234,8 +251,16 @@ export class FileRoom {
       const r = this.receipt(p.id);
       if (r && r.sha === p.sha && r.by_id === conn.author.id) known.push({ id: p.id, first: r.first, last: r.last });
     }
-    out.push({ type: "welcome", protocol: 2, role, me: conn.author, epoch: m.epoch, seq: m.seq, ...(snapshot ? { snapshot } : {}), known, limits: { opsPerMessage: ROOM_LIMITS.opsPerMessage, actionBytes: ROOM_LIMITS.actionBytes } });
-    const tail = this.tail(from);
+    let tail = this.tail(from);
+    if (!whiteboard && tail.some(action => insertsWhiteboard(action.ops))) {
+      // A fresh snapshot lets old peers catch up after the last whiteboard node was removed.
+      const s = this.store.sql.exec<{ seq: number; manifest: string }>("SELECT seq, manifest FROM snapshots WHERE state = 'done' AND seq > ? ORDER BY seq DESC LIMIT 1", from).toArray()[0];
+      if (!s || supportsWhiteboard(JSON.parse(s.manifest).capabilities)) return [WHITEBOARD_UPDATE];
+      tail = this.tail(s.seq);
+      if (tail.some(action => insertsWhiteboard(action.ops))) return [WHITEBOARD_UPDATE];
+      snapshot = { seq: s.seq, manifest: s.manifest };
+    }
+    out.push({ type: "welcome", protocol: 2, capabilities: [WHITEBOARD], role, me: conn.author, epoch: m.epoch, seq: m.seq, ...(snapshot ? { snapshot } : {}), known, limits: { opsPerMessage: ROOM_LIMITS.opsPerMessage, actionBytes: ROOM_LIMITS.actionBytes } });
     if (tail.length) out.push({ type: "applied", actions: tail });
     return out;
   }
@@ -300,6 +325,8 @@ export class FileRoom {
     if (a.ops.length > ROOM_LIMITS.opsPerAction) throw new Refusal("invalid", `an action holds at most ${ROOM_LIMITS.opsPerAction} ops`);
     const shape = jsonShapeError(a, ROOM_LIMITS.jsonDepth, ROOM_LIMITS.jsonValues);
     if (shape) throw new Refusal("invalid", shape);
+    if (conn.whiteboard === false && (this.hasWhiteboard() || insertsWhiteboard(a.ops)))
+      throw new Refusal("invalid", WHITEBOARD_UPDATE.message);
     const sha = actionSha(a);
     const rec = this.receipt(a.id);
     if (rec) {

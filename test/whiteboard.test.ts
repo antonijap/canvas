@@ -75,3 +75,20 @@ test("SVG exports the authored note and the stacked seal, including either stick
   assert.equal(second.rect.pageX, first.rect.pageX);
   assert.equal(second.svg, first.svg);
 });
+
+test("sticker updates preserve required fields and whiteboard attribution cannot be replaced", () => {
+  const tree = new DocTree({ children: [structuredClone(sticky), structuredClone(sticker)] });
+  for (const [node, key] of [[sticky, "author"], [sticker, "by"]] as const) {
+    const set = (value: import("../cloud/protocol-files.ts").Val, id = "person") =>
+      applyAction(tree, makeAction([{ k: "set", id: node.id!, props: { [key]: value } }]), { by: { id } });
+    assert.ok(isReject(set({ v: { id: "ben", name: "Ben" } })));
+    assert.ok(isReject(set({ v: { id: "person", name: "Other name" } })));
+    assert.ok(!isReject(set(null, "ben")));
+    assert.ok(isReject(set({ v: node[key]! }, "ben")));
+    assert.ok(!isReject(set({ v: node[key]! })));
+  }
+  for (const key of ["kind", "on"]) {
+    assert.ok(isReject(applyAction(tree, makeAction([{ k: "set", id: "seal", props: { [key]: null } }]))));
+    assert.deepEqual(tree.node("seal")!.props[key], sticker[key]);
+  }
+});

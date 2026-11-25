@@ -119,7 +119,7 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     const before = readCommentsFile(moved.file)!;
                     assert.equal(before.votes?.[0].id, vote);
                     assert.equal(before.votes?.[0].ballots[0].voter.name, 'Anna');
-                    assert.deepEqual(before.outbox.map(e => [e.doc, e.op.kind]), [[moved.id, 'vote.start'], [moved.id, 'vote.cast']]);
+                    assert.deepEqual(before.outbox, []);
                     const reply = await fetch(server.base + '/api/comments/ops?file=' + encodeURIComponent(moved.file), {
                         method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json', 'x-canvas-source': 'mcp' },
                         body: JSON.stringify({ ops: [envelopeFor({ kind: 'thread.create', thread: randomUUID(), comment: randomUUID(), body: 'Review this frame', anchor: { nodeId: 'lay_nest', x: 0.5, y: 0.5 } })] }),

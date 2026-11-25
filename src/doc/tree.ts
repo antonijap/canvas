@@ -191,7 +191,7 @@ export function updateNode(doc: CanvasDoc, id: string, props: Record<string, Jso
     if (k === "id" || k === "type" || k === "children") throw new ValidationError(`cannot remove "${k}"`);
     delete trial[k];
   }
-  assertValid(validateNode(trial, { keys: Object.keys(props) }));
+  assertValid(validateNode(trial, { keys: Object.keys(props), required: true }));
   if (trial.type === "ref" && "ref" in props) checkRefs(doc, trial);
   for (const k of remove) delete node[k];
   Object.assign(node, structuredClone(props));

@@ -165,7 +165,9 @@ sc("sticky", "Sticky drag sizes the note and long text grows it", { covers: ["st
   })()`);
   await t.io.click(author.x, author.y);
   await t.flush();
-  t.eq(t.node(id)?.showAuthor, false, "the author toggle hides the footer");
+  t.eq(t.node(id)?.author, undefined, "the author is removed from disk");
+  await t.undo();
+  t.eq(t.node(id)?.author?.name, "Anna", "undo restores the author");
   await t.select([id]);
   await t.io.key("c", { meta: true });
   await t.waitFor(`fetch("/api/structure/clipboard").then(r => r.json()).then(j => j.payload?.nodes[0]?.id === ${JSON.stringify(id)})`, "the sticky on the clipboard");
@@ -174,4 +176,62 @@ sc("sticky", "Sticky drag sizes the note and long text grows it", { covers: ["st
   await t.flush();
   const [copy] = await t.sel();
   t.eq([t.node(copy)?.type, t.node(copy)?.content, t.node(copy)?.color], ["sticky", long, "purple"], "copy and paste preserve the note");
+});
+
+sc("whiteboard-review", "Copied local votes can be ended and cleared", { covers: ["vote:portable"], skip: { visual: "Verifies the copied vote state and controls." } }, async (t: T) => {
+  const sidecar = path.join(t.file, "comments.json");
+  const vote = "22222222-2222-4222-8222-222222222222";
+  fs.writeFileSync(sidecar, JSON.stringify({
+    format: 1, doc: "11111111-1111-4111-8111-111111111111", seq: 0, threads: [], outbox: [], votes: [{
+      id: vote, host: { id: "another-mac", name: "Anna" }, scope: { page: "layout" }, on: "anything",
+      perPerson: 3, hidden: true, anonymous: false, state: "active", ballots: [],
+    }],
+  }));
+  await t.open();
+  await t.focus("lay_nest");
+  await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');
+  await t.waitFor('document.querySelector("[data-vote-end]")?.offsetWidth', "End vote on a copied file");
+  await t.ev('document.querySelector("[data-vote-end]").click()');
+  await t.waitFor('document.querySelector("[data-vote-clear]")?.offsetWidth', "Clear vote on a copied file");
+  await t.ev('document.querySelector("[data-vote-clear]").click()');
+  await t.waitFor('!(document.querySelector("[data-vote-clear]")?.offsetWidth)', "vote dismissed");
+  t.eq(JSON.parse(fs.readFileSync(sidecar, "utf8")).votes[0].state, "dismissed", "the copied vote is cleared on disk");
+});
+
+sc("whiteboard-review", "DOM sticker placement anchors to the sticky layer", {
+  covers: ["sticker:dom-anchor"],
+  skip: { visual: "Checks the DOM hit and the anchored seal after reopening in the engine." },
+}, async (t: T) => {
+  const note = "ReviewNote";
+  const result = await fetch(t.srv.base + "/api/structure?file=" + encodeURIComponent(t.file), {
+    method: "POST",
+    headers: { "x-canvas": "1", "content-type": "application/json" },
+    body: JSON.stringify({ file: t.file, page: "layout", op: "add", place: { parent: "lay_nest" }, allowOverlap: true,
+      nodes: [{ id: note, type: "sticky", x: 15, y: 15, width: 184, height: 184, color: "yellow", content: "Review the plan" }] }),
+  });
+  t.ok(result.ok, "created a sticky in the layout board");
+  await t.page.goto(t.srv.base + "/?renderer=dom&file=" + encodeURIComponent(t.file));
+  await t.waitFor("window.canvasHost?.doc", "the DOM canvas");
+  await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');
+  await t.ev('window.canvasHost.setPage("layout")');
+  await t.ev(`(() => {
+    const h = window.canvasHost, r = h.boxOf("lay_nest");
+    h.setCam({ x: 70 - r.x, y: 70 - r.y, z: 1 });
+  })()`);
+  const at = await t.waitFor<{ x: number; y: number }>(`(() => {
+    const part = document.querySelector('[data-id="${note}/:sticky-text"]');
+    if (!part) return null;
+    const r = part.getBoundingClientRect(), x = r.left + 10, y = r.top + 8;
+    const hit = document.elementFromPoint(x, y)?.closest("[data-id]");
+    return hit === part ? { x, y } : null;
+  })()`, "sticky text is the DOM hit");
+  await t.io.key("s", { shift: true });
+  await t.waitFor('document.querySelector("[data-sticker-tray]")?.offsetWidth', "the sticker tray");
+  await t.io.click(at.x, at.y);
+  await t.flush();
+  const [id] = await t.sel();
+  t.eq(t.node(id)?.on?.layer, note, "the sticker stores the real sticky id");
+  await t.open();
+  await t.focus("lay_nest");
+  await t.waitFor('document.querySelector("[data-sticker-seal]:not([hidden])")', "the seal drawn after reopening in the engine");
 });

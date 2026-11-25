@@ -7,7 +7,7 @@ import { readBodyText } from "./body.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
 import { packageOf } from "./comments.ts";
 import { fileInfo } from "./cloud-files.ts";
-import { isShared, NIL_DOC, voteOpsForShare } from "./cloud-sync.ts";
+import { isShared, NIL_DOC } from "./cloud-sync.ts";
 import { currentDoc } from "./docwriter.ts";
 import { findNode, type CanvasDoc, type DocNode } from "./engine.ts";
 import { turnedBox } from "./groupfit.ts";
@@ -77,7 +77,7 @@ export function voteResults(vote: Vote, doc: CanvasDoc) {
   });
 }
 
-export function visibleVotes(file: CommentsFile, id: string, doc: CanvasDoc) {
+export function visibleVotes(file: CommentsFile, id: string, doc: CanvasDoc, local = false) {
   return (file.votes ?? []).filter(v => v.state !== "dismissed").map(v => {
     const mine = v.ballots.filter(b => b.voter.id === id);
     const live = v.state === "active";
@@ -88,7 +88,7 @@ export function visibleVotes(file: CommentsFile, id: string, doc: CanvasDoc) {
     const { scope, on, perPerson, hidden, anonymous, state, timer } = v;
     return {
       id: v.id, scope, on, perPerson, hidden, anonymous, state, timer, ballots: visible,
-      mine: mine.length, host: v.host.id === id,
+      mine: mine.length, host: local || v.host.id === id,
       scopeName: (scope.frame && docNode(doc, scope.frame)?.node.name) || "",
       pendingConclusion: file.voteConclusions?.includes(v.id) ?? false,
       ...(live ? {} : { results: voteResults(v, doc), total: v.ballots.length }),
@@ -173,7 +173,7 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
     const pkg = packageOf(file), docFile = path.join(pkg, "document.json");
     if (req.method === "GET") {
       const sidecar = readCommentsFile(pkg);
-      return reply(200, { votes: sidecar?.votes?.length ? visibleVotes(sidecar, voterId(), currentDoc(docFile).doc) : [] });
+      return reply(200, { votes: sidecar?.votes?.length ? visibleVotes(sidecar, voterId(), currentDoc(docFile).doc, !shared && !isShared(sidecar)) : [] });
     }
     if (req.method !== "POST") return reply(405, { error: "Method not allowed" });
     if (req.headers["x-canvas"] !== "1" || req.headers["x-canvas-source"] === "mcp") return reply(403, { error: "Open the canvas to vote." });
@@ -187,6 +187,7 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
     const { op, doc: addressed } = body.envelope as OpEnvelope;
     if (!isVoteOp(op)) return reply(400, { error: "Expected a vote operation." });
     const sidecar = readCommentsFile(pkg) ?? emptyComments();
+    const local = !shared && !isShared(sidecar);
     const votes = sidecar.votes ??= [];
     const doc = currentDoc(docFile).doc, id = voterId();
     if (addressed !== NIL_DOC && addressed !== sidecar.doc) return reply(409, { error: "This vote is for a different file." });
@@ -195,14 +196,10 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
     const previous = votes.find(v => v.id === op.vote)?.state;
     if (op.kind === "vote.clear" && sidecar.voteConclusions?.includes(op.vote)) return reply(409, { error: "Place the conclusion before clearing the vote." });
     const at = new Date().toISOString();
-    const error = applyOp(sidecar.threads, sidecar.doc, op, { id, name: cleanName(body.name) }, at, votes);
+    const error = applyOp(sidecar.threads, sidecar.doc, op, { id, name: cleanName(body.name) }, at, votes, local);
     if (error) return reply(409, { error });
     const vote = votes.find(v => v.id === op.vote)!;
     if (op.kind === "vote.end" && previous === "active") (sidecar.voteConclusions ??= []).push(vote.id);
-    if (shared || isShared(sidecar)) {
-      sidecar.outbox = sidecar.outbox.filter(e => !isVoteOp(e.op) || e.op.vote !== vote.id);
-      sidecar.outbox.push(...voteOpsForShare(vote).map(op => ({ opId: randomUUID(), doc: sidecar.doc, at, op })));
-    }
     writeCommentsFile(pkg, sidecar);
     try {
       if (op.kind === "vote.end" && sidecar.voteConclusions?.includes(vote.id)) await placeConclusion(file, pkg, docFile, vote, deps);
@@ -210,7 +207,7 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
       deps.changed(file);
     }
     const latest = readCommentsFile(pkg) ?? sidecar;
-    return reply(200, { votes: visibleVotes(latest, id, currentDoc(docFile).doc) });
+    return reply(200, { votes: visibleVotes(latest, id, currentDoc(docFile).doc, local) });
   } catch (error) {
     if (error instanceof CommentsError) return reply(error.status, { error: error.message });
     return reply(500, { error: (error as Error).message });

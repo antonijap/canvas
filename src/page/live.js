@@ -156,11 +156,11 @@ function start(host) {
     }
   }
   /** An override the page writes itself (a committed text edit): drawn now, settled by ack(id, op, ok) like any write. */
-  function override(id, props, op) {
-    note(id, props, [], op);
+  function override(id, props, op, remove = []) {
+    note(id, props, remove, op);
     const board = boardOf(id);
     if (!board || !ev()) return false;
-    edits.set(board, id, props, [], op);
+    edits.set(board, id, props, remove, op);
     markDirty(board, id);
     host.requestFrame();
     armExpiry();

@@ -60,7 +60,7 @@ test("comment edits preserve votes and Save As keeps ballots with a fresh docume
   const written = readCommentsFile(pkg)!;
   assert.deepEqual(written.votes, votes);
   assert.equal(written.seq, 0);
-  assert.deepEqual(opsForShare(written).map(e => e.op.kind), ["thread.create", "vote.start", "vote.cast"]);
+  assert.deepEqual(opsForShare(written).map(e => e.op.kind), ["thread.create"]);
   assert.deepEqual(shareLocal(written, "https://example.com", anna).votes, votes);
   forkComments(pkg, copy);
   assert.notEqual(readCommentsFile(copy)!.doc, written.doc);
@@ -80,9 +80,27 @@ test("hidden votes reveal counts and only the names that people chose to show", 
   const [before] = visibleVotes(file, anna.id, doc);
   assert.deepEqual(before.ballots, [{ layer: "sticky", id: first, own: true }]);
   assert.equal(before.results, undefined);
-  assert.match(JSON.stringify(opsForShare(file).at(-1)?.op), /"showName":false/);
+  assert.deepEqual(opsForShare(file), []);
   apply({ kind: "vote.end", vote });
   const [after] = visibleVotes(file, anna.id, doc);
   assert.deepEqual(after.ballots, []);
   assert.deepEqual(after.results?.map(({ color, ...row }) => row), [{ layer: "sticky", name: "Review the plan", count: 2, rank: 1, names: ["Anna"] }]);
+});
+
+test("vote ops on an unvouched file are held with its comments", async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-vote-vouch-"));
+  const stateDir = process.env.CANVAS_STATE_DIR;
+  process.env.CANVAS_STATE_DIR = dir;
+  t.after(() => {
+    if (stateDir === undefined) delete process.env.CANVAS_STATE_DIR;
+    else process.env.CANVAS_STATE_DIR = stateDir;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const { vouch } = await import("../src/cloud.ts");
+  const f = shareLocal(emptyComments(), "https://example.com", anna);
+  const queued = { ...envelope({ kind: "vote.end", vote: randomUUID() }), doc: f.doc };
+  f.outbox.push(queued);
+  assert.equal(vouch(dir, f), true);
+  assert.deepEqual(f.outbox, []);
+  assert.deepEqual(f.rejected?.map(r => r.envelope), [queued]);
 });
