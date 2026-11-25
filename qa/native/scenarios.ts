@@ -33,6 +33,65 @@ const SEL_BLUE = ["#3B82F6", "#0766EB"];
 
 const WIDGET_GREY = { light: "#626267", dark: "#bcbcc4" };
 
+sc("tabs", "The plus creates a file and activates its new tab", { covers: ["tabs:new-file"] }, async (t: NT) => {
+  const file = path.join(t.app.docs, "Onboarding.canvas");
+  const before = (await t.state()).openFiles;
+  try {
+    await t.cmd("qa.savepath", { file });
+    await t.click(center(await t.mark({ id: "tab-new" })));
+    await t.waitState((s) => s.file === file && !s.homeShown, "the new file to become active");
+    t.eq((await t.state()).openFiles, [...before, file], "one tab was added");
+    await t.mark({ id: "file-tab", label: "Onboarding", exact: true });
+    t.ok(fs.existsSync(path.join(file, "document.json")), "the file was created on disk");
+  } finally {
+    await t.cmd("qa.savepath");
+    if ((await t.state()).openFiles.includes(file)) await t.cmd("close", { file });
+    fs.rmSync(file, { recursive: true, force: true });
+  }
+});
+
+sc("tabs", "Clicking either of two file tabs switches the active file", { covers: ["tabs:click-switch"] }, async (t: NT) => {
+  const file = path.join(t.app.docs, "Pricing.canvas");
+  const original = path.basename(t.file, ".canvas");
+  copyDir(PLAYGROUND, file);
+  try {
+    await t.app.openShown(file);
+    await t.waitState((s) => s.file === file && s.pages.length > 0, "Pricing to open");
+    for (const [label, expected] of [[original, t.file], ["Pricing", file]]) {
+      await t.systemClick(center(await t.mark({ id: "file-tab", label, exact: true })));
+      await t.waitState((s) => s.file === expected && !s.homeShown, `${label} to become active`);
+    }
+  } finally {
+    await t.cmd("close", { file });
+    fs.rmSync(file, { recursive: true, force: true });
+  }
+});
+
+sc("tabs", "The tab menu marks the active file and reopens a recently closed file", { covers: ["tabs:reopen-recent"] }, async (t: NT) => {
+  const file = path.join(t.app.docs, "Pricing.canvas");
+  const original = path.basename(t.file, ".canvas");
+  copyDir(PLAYGROUND, file);
+  try {
+    await t.app.openShown(file);
+    await t.waitState((s) => s.file === file && s.pages.length > 0, "Pricing to open");
+    await t.click(center(await t.mark({ id: "tab-close", label: "Pricing" })));
+    await t.waitState((s) => !s.openFiles.includes(file) && s.file === t.file, "Pricing to close");
+    await t.click(center(await t.mark({ id: "tab-list" })));
+    await t.waitState((s) => s.menu, "the tab menu to open");
+    const { items } = await t.cmd("qa.menu");
+    const titles = items.map((item: { title: string }) => item.title);
+    t.ok(titles.indexOf("Open tabs") < titles.indexOf(original) && titles.includes("Open tabs"), "the open file is under Open tabs");
+    t.ok(titles.indexOf("Pricing") > titles.indexOf("Recently closed") && titles.includes("Recently closed"), "Pricing is under Recently closed");
+    t.ok(items.some((item: { title: string; on: boolean }) => item.title === original && item.on), "the active file is checked");
+    await t.pickMenu("Pricing");
+    await t.waitState((s) => s.file === file && s.openFiles.includes(file) && !s.homeShown, "Pricing to reopen");
+  } finally {
+    if ((await t.state()).menu) await t.cmd("qa.menu", { cancel: true });
+    if ((await t.state()).openFiles.includes(file)) await t.cmd("close", { file });
+    fs.rmSync(file, { recursive: true, force: true });
+  }
+});
+
 /** A point on the canvas in world space: the card dropped there should be centred on it. */
 async function dropWorld(t: NT, p: Pt) { return t.world(p); }
 

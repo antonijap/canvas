@@ -55,10 +55,10 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   t.eq(st.homeShown, false, "a file is showing, not Home");
   const tab = await t.mark({ id: "home-tab" });
   const icon = await t.mark({ id: "pinned-tab-icon" });
-  t.near(tab.w, tab.h, 0.6, "with files open the Home tab shrinks to a circle");
-  t.near(tab.h, 32, 0.6, "one control height");
-  t.near(midX(icon), midX(tab), 0.6, "the house is centred across its circle");
-  t.near(midY(icon), midY(tab), 0.6, "the house is centred down its circle");
+  t.near(tab.w, 32, 0.6, "with files open Home uses one icon slot");
+  t.near(tab.h, 38, 0.6, "Home spans the strip height");
+  t.near(midX(icon), midX(tab), 0.6, "the house is centred across the tab");
+  t.near(midY(icon), midY(tab), 0.6, "the house is centred down the tab");
   t.ok(tab.x < 120, `Home is the first tab, right after the traffic lights (x ${tab.x})`);
   t.ok((await t.marks({ label: "Home", id: "text" })).length === 0, "the glyph alone, no name, while files are open");
   await t.click(center(tab));
@@ -91,7 +91,7 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   await sleep(500);
   const wide = await t.mark({ id: "home-tab" });
   t.ok(wide.w > 60, `with no file open the tab shows its name (${wide.w} wide)`);
-  t.near(wide.h, 32, 0.6, "the same control height");
+  t.near(wide.h, 38, 0.6, "the same strip height");
   await t.app.openShown(t.file);
   await t.waitState((s) => s.file === t.file && !s.homeShown, "the file to open again");
 });
@@ -407,11 +407,11 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   t.eq(tb.map((m) => m.label), [baseName(c), baseName(t.file), baseName(b)], "the tabs are drawn in the new order");
   const home1 = await t.mark({ id: "home-tab" });
   t.ok(Math.abs(home1.x - home0.x) < 0.5 && home1.x + home1.w <= tb[0].x, "Home did not move and is still before the first file tab");
-  t.near(tb[0].h, 32, 0.6, "tabs keep the control height");
+  t.near(tb[0].h, 38, 0.6, "tabs span the strip height");
 
   // The whole control row shares a hover lock, including the boundaries between Home, tabs and +.
   const controls = await t.mark({ id: "tab-controls" });
-  const open = await t.mark({ id: "tab-open" });
+  const open = await t.mark({ id: "tab-new" });
   t.ok(controls.x <= home1.x && controls.x + controls.w >= open.x + open.w,
     "one hover region covers Home, file tabs and +");
 
@@ -424,7 +424,7 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   t.eq(await order(), [c, t.file, b], "dragging Home reorders nothing");
   t.ok(Math.abs((await t.mark({ id: "home-tab" })).x - home0.x) < 0.5, "Home stays first");
 
-  for (const control of [await t.mark({ id: "tab-open" }), await t.mark({ id: "tab-close", label: baseName(c) })]) {
+  for (const control of [await t.mark({ id: "tab-new" }), await t.mark({ id: "tab-close", label: baseName(c) })]) {
     const from = center(control);
     await t.systemDrag(from, { x: from.x, y: from.y + 80 }, { steps: 4 });
     const frame = (await t.state()).window;
@@ -485,8 +485,8 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
     for (const file of files) await open(file);
     t.eq((await t.state()).openFiles, files, "overflow tabs start in file order");
     const home = await t.mark({ id: "home-tab" });
-    const plus = await t.mark({ id: "tab-open" });
-    t.ok([...single.values()].reduce((a, b) => a + b, 0) + (files.length - 1) * 2 > plus.x - home.x - home.w,
+    const plus = await t.mark({ id: "tab-new" });
+    t.ok([...single.values()].reduce((a, b) => a + b, 0) > plus.x - home.x - home.w,
       "natural widths exceed the strip");
     for (const file of files) {
       await open(file);

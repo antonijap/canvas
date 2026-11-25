@@ -1,4 +1,4 @@
-// Tooltips for the controls in the window's titlebar strip (the tab bar and the toolbar pill on the right).
+// Tooltips for the controls in the window's titlebar strip.
 //
 // The window has a full-size content view under a transparent titlebar, and the top bar is drawn in that strip.
 // AppKit's tooltip manager never shows a tooltip for a point inside the titlebar container (NSTitlebarContainerView

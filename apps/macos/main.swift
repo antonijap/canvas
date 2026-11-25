@@ -256,8 +256,7 @@ window.isReleasedWhenClosed = false
 window.titleVisibility = .hidden
 window.titlebarAppearsTransparent = true
 window.styleMask.insert(.fullSizeContentView)
-// A unified (empty) toolbar makes the titlebar strip 52 pt tall instead of 32: the traffic lights sit on the top
-// pill's midline, 30 pt down, which is below a 32 pt strip, so macOS kept them at its default spot over the pill.
+// The empty unified toolbar gives the standard window buttons room to align with the custom bar.
 window.toolbar = NSToolbar(identifier: "canvas.titlebar")
 window.toolbarStyle = .unified
 window.titleVisibility = .hidden
@@ -1049,7 +1048,7 @@ let windowTitleSync = model.$fileName.receive(on: DispatchQueue.main).sink { nam
 app.windowsMenu = windowMenu
 app.mainMenu = menubar
 
-// The traffic lights sit in the top pill: centered on its midline, inset like the pill's own padding.
+// Center the traffic lights vertically in the full-width bar.
 var placingTrafficLights = false
 func placeTrafficLights() {
   let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
@@ -1057,8 +1056,8 @@ func placeTrafficLights() {
   guard let first = buttons.first, let bar = first.superview, !placingTrafficLights else { return }
   placingTrafficLights = true
   defer { placingTrafficLights = false }
-  let midY = bar.convert(NSPoint(x: 0, y: window.frame.height - (Metric.inset + Metric.pill / 2)), from: nil).y
-  var x = Metric.inset + Metric.pillPad + 12
+  let midY = bar.convert(NSPoint(x: 0, y: window.frame.height - Metric.topBar / 2), from: nil).y
+  var x = 20.0
   for b in buttons {
     let want = NSPoint(x: x, y: (midY - b.frame.height / 2).rounded())
     if b.frame.origin != want { b.setFrameOrigin(want) }
@@ -1066,7 +1065,7 @@ func placeTrafficLights() {
   }
 }
 // AppKit lays the titlebar out again on its own (a new window title on a tab switch, key and main changes, an
-// appearance change) and puts the buttons back at its default spot, over the pill's corner. Watch their frames
+// appearance change) and puts the buttons back at their default spot. Watch their frames
 // and put them back whenever that happens, not only on the window events below.
 let trafficLightWatch: [NSKeyValueObservation] = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
   .compactMap { window.standardWindowButton($0) }

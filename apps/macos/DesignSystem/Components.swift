@@ -55,6 +55,28 @@ struct StatusDot: View {
 
 // MARK: Surfaces
 
+extension Metric {
+    static let topBar: CGFloat = 38
+}
+
+private struct GlassBar: ViewModifier {
+    @Environment(\.appearsActive) private var appearsActive
+
+    func body(content: Content) -> some View {
+        content.background {
+            Rectangle()
+                .fill(appearsActive ? .clear : Palette.sidebar.opacity(0.8))
+                .glassEffect(.regular, in: Rectangle())
+                .shadow(color: .black.opacity(0.10), radius: 14, y: 4)
+                .allowsHitTesting(false)
+        }
+    }
+}
+
+extension View {
+    func glassBar() -> some View { modifier(GlassBar()) }
+}
+
 /// A floating island: Liquid Glass over the canvas and a soft lift. No rim; the glass has its own edge.
 struct GlassIsland<Content: View>: View {
     var radius: CGFloat = Metric.radiusIsland
@@ -82,7 +104,7 @@ struct GlassIsland<Content: View>: View {
     }
 }
 
-/// A capsule island that wraps 32pt controls with 4pt around them: tab bar, rail, zoom.
+/// A capsule island that wraps 32pt controls with 4pt around them.
 struct GlassPill<Content: View>: View {
     var padding: CGFloat = Metric.pillPad
     @ViewBuilder var content: () -> Content
@@ -100,6 +122,7 @@ struct IconButton: View {
     /// Bump to bounce the glyph (an add action just landed). Ignored under Reduce Motion.
     var bounce = 0
     var filled = false
+    var inBar = false
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -120,9 +143,13 @@ struct IconButton: View {
                 .symbolEffect(.bounce, value: reduceMotion ? 0 : bounce)
                 .font(.system(size: Metric.icon, weight: .medium))
                 .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
-                .frame(width: Metric.control, height: Metric.control)
-                .background(Circle().fill(fill))
-                .contentShape(Circle())
+                .frame(width: Metric.control, height: inBar ? Metric.topBar : Metric.control)
+                .background {
+                    if inBar {
+                        RoundedRectangle(cornerRadius: 5).fill(fill).frame(width: 28, height: 28)
+                    } else { Circle().fill(fill) }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: inBar ? 0 : Metric.control / 2))
         }
         .buttonStyle(.plain)
         .chromeHelp(help, shortcut: shortcut)
@@ -158,53 +185,62 @@ struct PillButton: View {
 // MARK: Tabs
 
 struct TabChip: View {
+    static var closeSlot: CGFloat { Metric.control - 4 }
     let title: String
+    let symbol: String
     var active = false
     var width: CGFloat? = nil
+    var hovering = false
     /// The file is gone from disk: a warning glyph, a struck-through name, and "File not found" on hover.
     var missing = false
     let onClose: () -> Void
     let action: () -> Void
-    @State private var hovering = false
     @State private var hoveringClose = false
 
     var body: some View {
         HStack(spacing: 0) {
             Button(action: action) {
                 HStack(spacing: 6) {
-                    Image(systemName: missing ? "exclamationmark.triangle" : "doc").glyph(11)
-                        .foregroundStyle(missing ? Color.orange : Palette.mutedFg)
+                    Image(systemName: symbol).glyph(12)
+                        .frame(width: 13)
                     Text(title).font(Typography.label).lineLimit(1).truncationMode(.middle)
                         .strikethrough(missing)
-                        .foregroundStyle(active && !missing ? Palette.fg : Palette.mutedFg)
                 }
+                .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
                 .padding(.leading, 12).padding(.trailing, 4)
-                .frame(height: Metric.control)
-                .contentShape(Capsule())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: Metric.topBar)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .chromeHelp(missing ? "File not found. Click to locate it or close the tab." : title)
             .accessibilityAddTraits(active ? .isSelected : [])
-            Button(action: onClose) {
-                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(hoveringClose || active ? Palette.fg : Palette.mutedFg)
-                    .frame(width: Metric.control - 8, height: Metric.control - 8)
-                    .background(Circle().fill(hoveringClose ? Palette.active : .clear))
-                    .contentShape(Circle())
+            Group {
+                if active || hovering {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(hoveringClose || active ? Palette.fg : Palette.mutedFg)
+                            .frame(width: Metric.control - 8, height: Metric.control - 8)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(hoveringClose ? Palette.active : .clear))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).chromeHelp("Close tab").accessibilityLabel("Close \(title)")
+                    .qaID("tab-close", label: title)
+                    .onHover { hoveringClose = $0 }
+                    .onDisappear { hoveringClose = false }
+                } else {
+                    Color.clear.allowsHitTesting(false)
+                }
             }
-            .buttonStyle(.plain).chromeHelp("Close tab").accessibilityLabel("Close \(title)")
-            .qaID("tab-close", label: title)
-            .onHover { h in withAnimation(Motion.fast) { hoveringClose = h } }
+            .frame(width: Self.closeSlot - 4, height: Metric.control - 8)
             .padding(.trailing, 4)
         }
         .frame(width: width)
-        .background(Capsule().fill(active ? Palette.active : (hovering ? Palette.hover : .clear)))
-        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
+        .background(active ? Palette.active : (hovering ? Palette.hover : .clear))
     }
 }
 
-/// The pinned first tab (Home): it cannot be closed. With room it shows its glyph and name; `compact` shrinks it to
-/// the glyph in a circle, the width of any control. One glyph size in both, so nothing jumps when it shrinks.
+/// The pinned first tab (Home). With files open, it takes one icon slot.
 struct PinnedTab: View {
     let symbol: String
     let title: String
@@ -225,9 +261,9 @@ struct PinnedTab: View {
                 }
             }
             .padding(.horizontal, compact ? 0 : 12)
-            .frame(width: compact ? Metric.control : nil, height: Metric.control)
-            .background(Capsule().fill(active ? Palette.active : (hovering ? Palette.hover : .clear)))
-            .contentShape(Capsule())
+            .frame(width: compact ? Metric.control : nil, height: Metric.topBar)
+            .background(active ? Palette.active : (hovering ? Palette.hover : .clear))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .chromeHelp(help.isEmpty ? title : help)
@@ -250,7 +286,7 @@ struct FadingScroller<Content: View>: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2, content: content)
+                HStack(spacing: 0, content: content)
             }
             .scrollIndicators(.never)
             .onScrollGeometryChange(for: Metrics.self) { g in

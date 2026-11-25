@@ -20,9 +20,22 @@ struct ShellLogicTests {
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
-        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress(); tabRenameFocus()
+        updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress(); tabRenameFocus(); recentlyClosedTabs()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func recentlyClosedTabs() {
+        var history = RecentlyClosedTabs()
+        history.record("Onboarding")
+        history.record("Pricing")
+        check(history.files == ["Pricing", "Onboarding"], "the latest closure comes first")
+        history.record("Onboarding")
+        check(history.files == ["Onboarding", "Pricing"], "closing the same file puts it first without a duplicate")
+        history.remove("Onboarding")
+        check(history.files == ["Pricing"], "reopened files leave the list")
+        for n in 1...12 { history.record("File \(n)") }
+        check(history.files == (3...12).reversed().map { "File \($0)" }, "only the ten latest closures are kept")
     }
 
     static func tabRenameFocus() {

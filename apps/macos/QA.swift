@@ -105,7 +105,8 @@ enum QA {
         UserDefaults.standard.set(true, forKey: "NSAppSleepDisabled")
         keepPageAwake(model.webView)
         watchMenus()
-        virtualMenus()
+        // Evidence captures can show the real menu in a separate, isolated QA instance.
+        if ProcessInfo.processInfo.environment["CANVAS_QA_SHOW_MENUS"] != "1" { virtualMenus() }
     }
     private static var activity: NSObjectProtocol?
     /// Save and open panels asked for since the last qa.reset, by title (none is shown: NSSavePanel.qa_runModal).
@@ -116,6 +117,8 @@ enum QA {
     static var openMenu: NSMenu?
     /// The folder export-with-settings writes to in a QA run (qa.exportdir), instead of asking.
     static var exportFolder: String?
+    /// The destination picked by the next save panel in QA.
+    static var savePath: String?
 
     /// A shown menu takes the whole screen's mouse (a click anywhere, in any app, only closes it) and floats above
     /// every window. A QA instance must not do that to the person at the Mac, so its pop-up and context menus are
@@ -289,6 +292,9 @@ enum QA {
             // {files: [absolute paths]}: what the next open panel for Place Image picks (the panel is not shown).
             qaChosenFiles = (a["files"] as? [String]) ?? []
             return ["files": qaChosenFiles ?? []]
+        case "qa.savepath":
+            savePath = a["file"] as? String
+            return ["file": savePath ?? NSNull()]
         case "qa.pasteboard":
             // The text on this instance's pasteboard (Copy, Copy Link, Copy as); {set} puts text there first. types and
             // strings: every type on it and its text (a Canvas copy holds its JSON under cc.getcanvas.canvas.clipboard).
@@ -376,6 +382,7 @@ enum QA {
             AgentsQA.added = []
             UserDefaults.standard.set(false, forKey: BindQA.key)
             panels = []
+            savePath = nil
             hides = []
             heldMods = []
             QAPointer.buttons = 0

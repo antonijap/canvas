@@ -188,12 +188,16 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         didSet { UserDefaults.standard.set(section.rawValue, forKey: SidebarSection.defaultsKey) }
     }
     @Published var allFiles: [FileEntry] = []
+    @Published private(set) var recentlyClosedTabs = RecentlyClosedTabs()
     @Published var openFiles: [String] = UserDefaults.standard.stringArray(forKey: "canvas.openFiles") ?? [] {
         didSet {
             UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
-            if Set(openFiles) != Set(oldValue) {
+            let previous = Set(oldValue)
+            if Set(openFiles) != previous {
+                let added = openFiles.filter { !previous.contains($0) }
+                for file in added where recentlyClosedTabs.files.contains(file) { recentlyClosedTabs.remove(file) }
                 saveCloudFileNames()
-                if cloudNamesStarted { watchCloudFileNames(added: openFiles.filter { !oldValue.contains($0) }) }
+                if cloudNamesStarted { watchCloudFileNames(added: added) }
             }
         }
     }
@@ -954,6 +958,24 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
     }
 
+    func reopenTab(_ file: String) {
+        // A closed Cloud file may have been evicted from disk while its tab was closed.
+        guard isMissing(file), let location = CloudFilePath(file),
+              let cloud = prefs.clouds.first(where: { CloudFilePath.key(for: $0.url) == location.key }) else {
+            openTab(file)
+            return
+        }
+        Task { @MainActor in
+            let (status, result) = await CloudAccount.post(self, "api/cloud/files/open", ["cloud": cloud.url, "id": location.id])
+            if status == 200, let opened = result["file"] as? String {
+                setCloudFileName(result["name"] as? String, for: opened)
+                open(opened)
+            } else {
+                flash(CloudFilesText.problem(code: result["code"] as? String, fallback: "Could not open the Cloud file. Try again."))
+            }
+        }
+    }
+
     /// Points a missing tab at the file's new place and opens it there.
     func locate(_ file: String) {
         let panel = NSOpenPanel()
@@ -964,6 +986,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         openFiles = TabList.replacing(openFiles, file, with: url.path)
+        if recentlyClosedTabs.files.contains(file) { recentlyClosedTabs.remove(file) }
         MainActor.assumeIsolated { HomeStore.shared.replace(file, with: url.path) }
         open(url.path)
     }
@@ -986,6 +1009,13 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func savePanel(title: String, name: String) -> URL? {
+        #if CANVAS_QA
+        if let path = QA.savePath {
+            QA.savePath = nil
+            QA.panels.append(title)
+            return URL(fileURLWithPath: path)
+        }
+        #endif
         let panel = NSSavePanel()
         panel.title = title
         panel.allowedContentTypes = [Self.canvasType]
@@ -1095,6 +1125,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func close(_ file: String) {
         guard let i = openFiles.firstIndex(of: file) else { return }
         openFiles.remove(at: i)
+        recentlyClosedTabs.record(file)
         Task { _ = await CloudAccount.post(self, "api/cloud/files/close", ["file": file]) }
         drop(file) // a hidden tab's page goes with it (the shown one goes once another is shown)
         guard file == currentFile else { return }

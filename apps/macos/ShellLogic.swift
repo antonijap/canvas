@@ -153,6 +153,21 @@ enum TabList {
     }
 }
 
+/// Session history in reverse closure order, with each file listed once.
+struct RecentlyClosedTabs {
+    private(set) var files: [String] = []
+
+    mutating func record(_ file: String) {
+        remove(file)
+        files.insert(file, at: 0)
+        if files.count > 10 { files.removeLast() }
+    }
+
+    mutating func remove(_ file: String) {
+        files.removeAll { $0 == file }
+    }
+}
+
 /// A tab keeps its pointer view through both halves of a click before replacing it with an editor.
 struct TabPress {
     enum Action { case none, click, rename, drop }
