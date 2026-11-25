@@ -100,11 +100,12 @@ function start(host) {
 .cm-agent{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:7px;background:var(--cm-chip);color:var(--c-fg);flex:none;transition:scale .12s ease-out}
 .cm-ui{pointer-events:auto}
 .cm-pop,.cm-comp{position:absolute;left:0;top:0;border-radius:16px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:13px;line-height:18px;-webkit-user-select:text;user-select:text;cursor:default}
-.cm-pop{width:340px}.cm-comp{width:320px}
+.cm-pop{z-index:1;width:340px;display:flex;flex-direction:column}.cm-comp{width:320px}
 .cm-pop[hidden],.cm-comp[hidden]{display:none}
 .cm-sidebar :is(h3,p){margin:0;padding-inline:calc(var(--c-sidebar-label-inset) - var(--c-sidebar-inset));color:var(--c-muted-fg)}
 .cm-sidebar h3{margin-block-start:4px;font:600 var(--c-size-2xs)/20px var(--c-font-sans)}
 .cm-thread-row span{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--c-muted-fg)}
+.cm-thread-row[aria-current=true] span{color:var(--c-sidebar-fg)}
 .cm-thread-row strong{font-weight:600}
 .cm-thread-row.unread span::first-line{font-weight:600;color:var(--c-fg)}
 .cm-new{color:var(--cm-unread-text);font-weight:600}
@@ -121,7 +122,8 @@ function start(host) {
 .cm-btn.on{background:var(--c-fg);color:var(--c-popover)}
 .cm-btn.dim{color:var(--c-muted-fg)}
 .cm-sep{height:1px;background:var(--cm-line);width:100%}
-.cm-list{display:flex;flex-direction:column;gap:14px;padding:14px;max-height:340px;overflow-y:auto}
+.cm-list{display:flex;flex-direction:column;gap:14px;padding:14px;min-height:0;max-height:340px;overflow-y:auto}
+.cm-pop>:not(.cm-list){flex:none}
 .cm-item{display:flex;gap:10px;align-items:flex-start}
 .cm-item .cm-av,.cm-item .cm-agent{margin-top:1px}
 .cm-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;padding-top:3px}
@@ -175,7 +177,9 @@ function start(host) {
 .cm-gone .cm-btn:hover{background:#fed7aa}
 @media (prefers-color-scheme: dark){.cm-gone{background:#fb923c24;color:#fdba74}.cm-gone .cm-ghost{color:#fb923c}.cm-gone b{color:#fed7aa}.cm-gone .cm-btn{background:#fb923c2e;color:#fed7aa}.cm-gone .cm-btn:hover{background:#fb923c47}}
 .cm-bar,.cm-hint{position:absolute;left:50%;translate:-50% 0;display:none;align-items:center;gap:10px;white-space:nowrap;font-size:13px;line-height:100%;pointer-events:none}
-.cm-bar{min-height:36px;padding:8px 5px 8px 11px;border-radius:12px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:12px;font-weight:500;pointer-events:auto}
+.cm-bar{flex-wrap:wrap;justify-content:center;min-height:36px;padding:8px 5px 8px 11px;border-radius:12px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:12px;font-weight:500;pointer-events:auto}
+.cm-bar>*{flex:none;max-width:100%;overflow-wrap:anywhere}
+.cm-bar .cm-btn{height:auto;min-height:26px;white-space:normal}
 .cm-bar.on,.cm-hint.on{display:flex}
 .cm-bar svg{color:var(--c-muted-fg)}
 .cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
@@ -554,16 +558,26 @@ function start(host) {
     for (const t of list) put(t.id, spotOf(t, slots));
     if (st.draft) put("draft", st.draft.spot());
     const ins = host.insets || {};
-    const placePopover = (el, pin) => {
+    const placePopover = (el, pin, fitHeight = false) => {
       const left = ins.l || 0, width = vw - left - (ins.r || 0);
       const maxWidth = Math.max(0, width - 16) + "px";
-      if (el.style.maxWidth !== maxWidth) el.style.maxWidth = maxWidth;
-      const localPin = { x: pin.x - left, y: pin.y };
-      const { x, y } = L.popoverAt(localPin, { w: el.offsetWidth, h: el.offsetHeight }, width, vh);
-      el.style.transform = `translate(${left + x}px,${y}px)`;
+      if (el.style.maxWidth !== maxWidth) {
+        el.style.maxWidth = maxWidth;
+        const field = el.querySelector(".cm-field");
+        if (field) autoGrow(field);
+      }
+      const top = fitHeight ? ins.t || 0 : 0, bottom = fitHeight ? ins.b || 0 : 0;
+      const height = vh - top - bottom;
+      if (fitHeight) {
+        const maxHeight = Math.max(0, height - 16) + "px";
+        if (el.style.maxHeight !== maxHeight) el.style.maxHeight = maxHeight;
+      }
+      const localPin = { x: pin.x - left, y: pin.y - top };
+      const { x, y } = L.popoverAt(localPin, { w: el.offsetWidth, h: el.offsetHeight }, width, height);
+      el.style.transform = `translate(${left + x}px,${top + y}px)`;
     };
     if (st.open && !pop.hidden) {
-      if (at.has(st.open)) placePopover(pop, at.get(st.open));
+      if (at.has(st.open)) placePopover(pop, at.get(st.open), true);
       else pop.style.transform = "translate(-9999px,0)";
     }
     if (st.draft && at.has("draft") && !comp.hidden) placePopover(comp, at.get("draft"));
@@ -592,6 +606,7 @@ function start(host) {
     ta.style.height = "18px";
     ta.style.height = Math.min(120, ta.scrollHeight) + "px";
     ta.classList.toggle("scroll", ta.scrollHeight > 120);
+    schedule();
   }
   /** A field: Return posts, Shift+Return is a new line, Esc cancels. Keys never reach the canvas. */
   function field(placeholder, onPost, onCancel, onChange) {

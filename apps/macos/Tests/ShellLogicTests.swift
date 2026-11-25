@@ -685,10 +685,11 @@ struct ShellLogicTests {
 
     // QA item 10: pages reorder by drag, boards dragged from Layers move to a page.
     static func pageDrag() {
-        check(PageDrag.index(from: 2, y: 1, height: 32, count: 3) == 0, "gap above row one accepts page three")
-        check(PageDrag.index(from: 0, y: 103, height: 32, count: 3) == 2, "gap below the final row accepts page one")
-        check(PageDrag.index(from: 2, y: 35, height: 32, count: 3) == 1, "gap between rows accepts a page")
-        check(PageDrag.index(from: 2, y: -1, height: 32, count: 3) == nil, "outside the list does not move")
+        check(PageDrag.index(from: 2, y: 1, height: 24, count: 3) == 0, "gap above row one accepts page three")
+        check(PageDrag.index(from: 0, y: 75, height: 24, count: 3) == 2, "gap below the final row accepts page one")
+        check(PageDrag.index(from: 2, y: 26, height: 24, count: 3) == 1, "the second row starts one row height down")
+        check(PageDrag.index(from: 0, y: 77, height: 24, count: 3) == nil, "below the list does not move")
+        check(PageDrag.index(from: 2, y: -1, height: 24, count: 3) == nil, "above the list does not move")
         check(PageDrag.step(from: 1, by: -1, count: 3) == 0 && PageDrag.step(from: 1, by: 1, count: 3) == 2, "step from the middle")
         check(PageDrag.step(from: 0, by: -1, count: 3) == nil && PageDrag.step(from: 2, by: 1, count: 3) == nil, "step stays in bounds")
         check((0..<4).map { PageDrag.shift(row: $0, from: 2, to: 0) } == [1, 1, 0, 0], "rows shift down to make room")

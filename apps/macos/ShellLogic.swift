@@ -999,19 +999,17 @@ enum ZoomInput {
 /// Dragging in the Pages list (Pages.swift): a page row onto another reorders, boards dragged from the Layers panel
 /// onto a page move there. Payloads are plain text: "canvas-page:<id>" for a page, a board id for a board.
 enum PageDrag {
-    static let spacing: CGFloat = 2
+    static let edgeInset: CGFloat = 2
     static func payload(page id: String) -> String { "canvas-page:" + id }
 
-    /// The list has one gap above and below the rows, and one between each pair.
     static func row(at y: CGFloat, height: CGFloat, count: Int) -> Int? {
-        let stride = height + spacing
-        guard count > 0, height > 0, (0...(CGFloat(count) * stride + spacing)).contains(y) else { return nil }
-        return min(count - 1, Int(max(0, y - spacing / 2) / stride))
+        guard count > 0, height > 0, (0...(CGFloat(count) * height + 2 * edgeInset)).contains(y) else { return nil }
+        return min(count - 1, Int(max(0, y - edgeInset) / height))
     }
 
     static func index(from: Int, y: CGFloat, height: CGFloat, count: Int) -> Int? {
         guard let onto = row(at: y, height: height, count: count) else { return nil }
-        let middle = spacing + CGFloat(onto) * (height + spacing) + height / 2
+        let middle = edgeInset + (CGFloat(onto) + 0.5) * height
         return index(from: from, onto: onto, below: y > middle, count: count)
     }
 

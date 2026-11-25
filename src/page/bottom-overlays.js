@@ -1,5 +1,5 @@
 /** Geometry shared by every bottom notice, including the native toast. Coordinates are relative to the view. */
-export function bottomOverlayArea(width, height, insets = {}, zoom = null, pill = 36, inset = 10, gap = 10, bottomClearance = 0) {
+export function bottomOverlayArea(width, height, insets = {}, zoom = null, pill = 36, inset = 10, gap = 10, bottomClearance = 0, minimumWidth = 48) {
   const left = insets.l || 0, right = width - (insets.r || 0), x = (left + right) / 2;
   const widthBetweenPanels = Math.max(0, right - left - 2 * inset);
   if (bottomClearance) return { x, y: height - bottomClearance - pill / 2, width: widthBetweenPanels, aboveZoom: true };
@@ -7,7 +7,7 @@ export function bottomOverlayArea(width, height, insets = {}, zoom = null, pill 
   const zoomHeight = zoom.height || pill;
   const y = zoom.bottom - zoomHeight / 2;
   const widthBesideZoom = 2 * (zoom.left - gap - x);
-  if (widthBesideZoom >= Math.min(48, widthBetweenPanels)) {
+  if (widthBesideZoom >= Math.min(minimumWidth, widthBetweenPanels)) {
     return { x, y, width: Math.min(widthBetweenPanels, widthBesideZoom) };
   }
   return { x, y: zoom.bottom - zoomHeight - gap - pill / 2, width: widthBetweenPanels, aboveZoom: true };
@@ -25,7 +25,16 @@ export function installBottomOverlays(host) {
     const inset = parseFloat(style.getPropertyValue('--c-inset')) || 10;
     const gap = parseFloat(style.getPropertyValue('--c-island-gap')) || 10;
     const z = zoom && { left: zoom.left - vr.left, bottom: zoom.bottom - vr.top, height: zoom.height };
-    const area = bottomOverlayArea(vr.width, vr.height, host.insets, z, pill, inset, gap, bottomClearance);
+    const bar = view.querySelector('.cm-bar.on');
+    let minimumWidth = 48;
+    if (bar) {
+      const css = getComputedStyle(bar);
+      // Each control keeps its width when wrapped. Count the gaps and padding as well.
+      const controls = [...bar.children].reduce((w, child) => w + child.getBoundingClientRect().width, 0);
+      minimumWidth = Math.max(minimumWidth, controls + Math.max(0, bar.children.length - 1) * parseFloat(css.columnGap)
+        + parseFloat(css.paddingLeft) + parseFloat(css.paddingRight));
+    }
+    const area = bottomOverlayArea(vr.width, vr.height, host.insets, z, pill, inset, gap, bottomClearance, minimumWidth);
     let offset = nativeToast ? pill + 10 : 0;
     if (host.native) {
       const geometry = { x: vr.left + area.x, y: vr.top + area.y, width: area.width };

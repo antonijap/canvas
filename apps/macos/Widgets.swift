@@ -443,7 +443,7 @@ struct WidgetPickerTile: View {
                     .font(.system(size: fullPreview ? 11 : 12)).foregroundStyle(Palette.mutedFg)
                     .lineLimit(fullPreview ? 1 : 2).fixedSize(horizontal: false, vertical: true)
             }
-            .frame(maxWidth: fullPreview ? 112 : .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             .frame(height: fullPreview ? nil : 90, alignment: .topLeading)
             .padding(fullPreview ? 0 : 6)
             .background(fullPreview ? .clear : active ? Palette.active : hovering ? Palette.hover : Palette.field,
@@ -479,7 +479,7 @@ struct WidgetThumbnail: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: .black.opacity(0.28), radius: 3, y: 2)
+        .shadow(color: kind == "shader" ? .clear : .black.opacity(0.28), radius: 3, y: 2)
     }
 }
 
@@ -495,6 +495,9 @@ private struct WidgetArtwork {
     private let faint = Color.white.opacity(0.25)
     private let paper = Color(light: 0xECECEE, dark: 0xECECEE)
     private let blackInk = Color(light: 0x18181B, dark: 0x18181B)
+    private var dataInk: Color { context.environment.colorScheme == .dark ? ink : blackInk }
+    private var dataLabel: Color { context.environment.colorScheme == .dark ? muted : hex(0x52525B) }
+    private var dataTrack: Color { context.environment.colorScheme == .dark ? .white.opacity(0.10) : .black.opacity(0.10) }
 
     func draw(_ kind: String) {
         switch kind {
@@ -587,19 +590,19 @@ private struct WidgetArtwork {
     }
 
     private func usage() {
-        ring(34, 36, 20, from: 0, to: 360, color: .white.opacity(0.095), width: 4)
+        ring(34, 36, 20, from: 0, to: 360, color: dataTrack, width: 4)
         ring(34, 36, 20, from: -62, to: 90, color: amber, width: 4)
-        text("42%", 22, 37, size: 10, color: ink, weight: .bold)
-        text("Session", 66, 25, size: 7, color: muted)
-        text("Resets 3h", 66, 36, size: 7, color: ink)
-        box(66, 46, 36, 3, .white.opacity(0.10), radius: 1.5)
-        box(66, 46, 7, 3, muted, radius: 1.5)
+        text("42%", 22, 37, size: 10, color: dataInk, weight: .bold)
+        text("Session", 66, 25, size: 7, color: dataLabel)
+        text("Resets 3h", 66, 36, size: 7, color: dataInk)
+        box(66, 46, 36, 3, dataTrack, radius: 1.5)
+        box(66, 46, 7, 3, dataLabel, radius: 1.5)
     }
 
     private func metric() {
-        text("12.4k", 10, 17, size: 15, color: ink, weight: .bold)
-        text("+8.2%", 58, 17, size: 7, color: green, mono: true)
-        text("Visitors, 7 days", 10, 32, size: 6.5, color: muted)
+        text("12.4k", 10, 17, size: 15, color: dataInk, weight: .bold)
+        text("+8.2%", 58, 17, size: 7, color: Color(light: 0x166534, dark: 0x4CC38A), mono: true)
+        text("Visitors, 7 days", 10, 32, size: 6.5, color: dataLabel)
         let points = [66, 62, 64, 56, 58, 50, 53, 46, 48].enumerated().map {
             CGPoint(x: $0.offset * 14, y: $0.element)
         }
@@ -632,19 +635,19 @@ private struct WidgetArtwork {
     }
 
     private func disk() {
-        text("214 GB", 10, 19, size: 14, color: ink, weight: .bold)
-        text("free of 1 TB", 10, 34, size: 7, color: muted)
+        text("214 GB", 10, 19, size: 14, color: dataInk, weight: .bold)
+        text("free of 1 TB", 10, 34, size: 7, color: dataLabel)
         let track = Path(roundedRect: CGRect(x: 10, y: 44, width: 92, height: 6), cornerRadius: 3)
-        context.fill(track, with: .color(.white.opacity(0.1)))
+        context.fill(track, with: .color(dataTrack))
         var clipped = context
         clipped.clip(to: track)
         let bars = WidgetArtwork(context: clipped)
         bars.box(10, 44, 26, 6, amber)
-        bars.box(37, 44, 18, 6, .white.opacity(0.53))
-        bars.box(56, 44, 24, 6, .white.opacity(0.21))
-        text("Apps", 10, 59, size: 6, color: muted)
-        text("Docs", 34, 59, size: 6, color: muted)
-        text("System", 56, 59, size: 6, color: muted)
+        bars.box(37, 44, 18, 6, dataLabel)
+        bars.box(56, 44, 24, 6, dataLabel.opacity(0.45))
+        text("Apps", 10, 59, size: 6, color: dataLabel)
+        text("Docs", 34, 59, size: 6, color: dataLabel)
+        text("System", 56, 59, size: 6, color: dataLabel)
     }
 
     private func hex(_ value: UInt32) -> Color { Color(light: value, dark: value) }
@@ -745,10 +748,10 @@ private struct LocalWidgetPreview: NSViewRepresentable {
 struct WidgetsPanel: View {
     @ObservedObject var model: CanvasModel
 
+    static let columns = [GridItem(.flexible(), spacing: Metric.sidebarInset, alignment: .top), GridItem(.flexible(), alignment: .top)]
+
     private func grid(_ kinds: [WidgetKindInfo], builtIn: Bool = false) -> some View {
-        let column: GridItem.Size = builtIn ? .flexible(minimum: 0, maximum: 112) : .flexible()
-        return LazyVGrid(columns: [GridItem(column, spacing: 8, alignment: .top), GridItem(column, alignment: .top)],
-                         alignment: .leading, spacing: builtIn ? 14 : 8) {
+        LazyVGrid(columns: Self.columns, alignment: .leading, spacing: builtIn ? 14 : 8) {
             ForEach(kinds) { kind in
                 WidgetPickerTile(kind: kind, sidebar: builtIn) { model.addWidget(kind.id) }
                     .onDrag { model.beginWidgetDrag(WidgetDrag(kind: kind.id)) } preview: {
@@ -756,12 +759,12 @@ struct WidgetsPanel: View {
                     }
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, Metric.sidebarInset)
         .padding(.bottom, 8)
     }
 
     var body: some View {
-        SidebarGroupLabel(title: "Add").padding(.horizontal, 6)
+        SidebarGroupLabel(title: "Add", inset: Metric.sidebarInset)
         grid(model.widgetKinds.filter { $0.inPicker && !$0.isLocal }, builtIn: true)
         let local = model.widgetKinds.filter { $0.inPicker && $0.isLocal }
         if !local.isEmpty {

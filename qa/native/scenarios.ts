@@ -484,6 +484,8 @@ sc("pages", "page-row reorder and recovery", { covers: ["page-crud:board", "page
   await t.section("Layers");
   await t.showPage("style");
   const style = await t.pageRow("style"), layout = await t.pageRow("layout");
+  const components = await t.pageRow("components");
+  t.near(center(components.r).y - center(layout.r).y, layout.r.h, 0.5, "page rows have no gap in their pitch");
   const original = ["layout", "components", "style", "cards"];
   const first = ["style", "layout", "components", "cards"];
   const second = ["layout", "style", "components", "cards"];
@@ -745,11 +747,23 @@ async function inspectorShot(t: NT, name: string, extra = 0, h = 560) {
   return { file: `${process.cwd()}/qa/out/native/${name}.png`, crop: { x: st.window.width - 300 - extra, y: 50, w: 300 + extra, h } };
 }
 
+async function visibleSwapPicker(t: NT, title: string) {
+  const picker = await t.mark({ id: "swap-instance", label: title, exact: true });
+  const inspector = await t.mark({ id: "right-sidebar-panel" });
+  const row = { x: inspector.x, y: picker.y, w: inspector.w, h: picker.h };
+  const instance = (await t.ocr("Instance of", row))[0];
+  t.ok(instance, "Instance of is visible beside the component picker");
+  const names = await t.ocr(title, picker);
+  t.ok(names.some(name => name.text.includes(title) && name.x >= instance.x + instance.w - 1),
+    `${title} is visible in full to the right of Instance of`);
+  return picker;
+}
+
 sc("components", "swap an instance from the inspector's component picker; its text override carries over", { covers: ["swap-instance:instance", "swap-instance:mouse", "inspector:instance"] }, async (t: NT) => {
   await t.section("Layers");
   await t.showPage("components");
   await t.selectIds(["inst_text"]);
-  await t.click(center(await t.mark({ id: "swap-instance", label: "Button/Primary", exact: true })));
+  await t.click(center(await visibleSwapPicker(t, "Button/Primary")));
   const open = await t.waitState((s) => s.menu, "the swap menu to open");
   t.ok(open.menu.items.includes("Button/Secondary"), `the swap menu has no Button/Secondary (${open.menu.items.join(", ")})`);
   t.ok(!open.menu.items.includes("Button/Primary"), "the swap menu offers the instance's own component");
@@ -757,7 +771,7 @@ sc("components", "swap an instance from the inspector's component picker; its te
   const n = await t.waitDisk(() => t.node("inst_text")?.ref === "cmp_button_sec" && t.node("inst_text"), "inst_text to point at Button/Secondary");
   t.eq(n.descendants, { cmp_button_sec_label: { content: "Text override" } }, "the text override, moved to the new label");
   t.eq(n.name, undefined, "the name follows the new main");
-  await t.mark({ id: "swap-instance", label: "Button/Secondary", exact: true });
+  await visibleSwapPicker(t, "Button/Secondary");
   const s = await inspectorShot(t, "components-swap", 420, 260);
   t.note(JSON.stringify(s));
   // One undo step puts it back.
@@ -818,14 +832,14 @@ sc("components", "swap a nested instance from the inspector's component picker; 
   const before = fs.readFileSync(doc, "utf8");
   await t.selectIds(["qa_card_inst/qa_card_btn"]);
   const region = await inspectorRegion(t);
-  await t.click(center(await t.mark({ id: "swap-instance", label: "Button/Primary", exact: true })));
+  await t.click(center(await visibleSwapPicker(t, "Button/Primary")));
   const open = await t.waitState((s) => s.menu, "the swap menu to open");
   t.ok(open.menu.items.includes("Button/Secondary"), `the swap menu has no Button/Secondary (${open.menu.items.join(", ")})`);
   await t.pickMenu("Button/Secondary");
   const n = await t.waitDisk(() => t.node("qa_card_inst")?.descendants?.qa_card_btn?.ref === "cmp_button_sec" && t.node("qa_card_inst"), "the nested instance to draw Button/Secondary");
   t.eq(n.descendants, { qa_card_btn: { ref: "cmp_button_sec" } }, "an override that swaps it, in the outer instance");
   t.eq(t.node("qa_card_btn")!.ref, "cmp_button", "the Card component keeps its own button");
-  await t.mark({ id: "swap-instance", label: "Button/Secondary", exact: true });
+  await visibleSwapPicker(t, "Button/Secondary");
   const row = await t.waitText("Swapped component", { ...region, h: 300 }, 8000);
   // The canvas draws the swapped button (Button/Secondary's light grey) inside the Card instance.
   await waitDrawn(t, "qa_card_inst/qa_card_btn", "#111827", "the swapped nested instance");
@@ -1794,7 +1808,9 @@ sc("inspector", "letter spacing: the token button on hover sits beside the numbe
     if (!b) throw new Error(`${what}: no token button in the letter spacing field`);
     t.ok(b.x >= f.x + f.w - 0.5, `${what}: the token button (x ${b.x.toFixed(1)}) starts inside the number field (it ends at ${(f.x + f.w).toFixed(1)})`);
     // Auto sits beside the caption, above the field, whole.
-    await t.mark({ id: "tracking-auto", region: { x: f.x - 40, y: f.y - 30, w: 220, h: 30 } });
+    const auto = await t.mark({ id: "tracking-auto", region: { x: f.x - 40, y: f.y - 30, w: 220, h: 30 } });
+    const labels = await t.ocr("Auto", auto);
+    t.ok(labels.some(label => label.text.trim() === "Auto"), `${what}: the complete Auto caption is visible`);
     await t.cmd("qa.hoverbind", { on: false });
   };
   await check("Auto on");

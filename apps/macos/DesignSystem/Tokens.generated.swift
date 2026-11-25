@@ -5,7 +5,7 @@ import SwiftUI
 enum Palette {
     static let canvasBg = Color(light: 0xF6F6F6, dark: 0x18181B)
     static let sidebar = Color(light: 0xFAFAFA, dark: 0x18181B)
-    static let sidebarSurface = Color(light: 0xFAFAFA, 0.98, dark: 0x18181B, 0.98)
+    static let sidebarSurface = Color(light: 0xFAFAFA, dark: 0x18181B)
     static let sidebarHairline = Color(light: 0x000000, 0.08, dark: 0xFFFFFF, 0.08)
     static let sidebarField = Color(light: 0x000000, 0.07, dark: 0xFFFFFF, 0.07)
     static let sidebarBorder = Color(light: 0xE4E4E7, dark: 0x3F3F46)

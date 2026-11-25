@@ -59,6 +59,7 @@ extension InspectorBody {
             .frame(width: 76).disabled(!enabled).help("Format")
             MiniButton(symbol: "minus", help: "Remove export setting", enabled: enabled, inRow: true, action: remove)
         }
+        .inspectorActionColumn(controlWidth: Metric.field)
     }
 }
 

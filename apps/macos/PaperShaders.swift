@@ -95,16 +95,14 @@ extension CanvasModel {
 /// The Shaders grid in the widget rail: one tile per Paper shader (its Default preset as a still).
 struct PaperShadersGrid: View {
     @ObservedObject var model: CanvasModel
-    private let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
-
     var body: some View {
-        SectionHeader(title: "Shaders")
-        LazyVGrid(columns: columns, spacing: 8) {
+        SectionHeader(title: "Shaders", inset: Metric.sidebarInset)
+        LazyVGrid(columns: WidgetsPanel.columns, spacing: 8) {
             ForEach(model.paperShaders) { s in
                 PaperTile(model: model, shader: s)
             }
         }
-        .padding(.horizontal, 12).padding(.bottom, 6)
+        .padding(.horizontal, Metric.sidebarInset).padding(.bottom, 6)
         .task { model.fetchPaperShaders() }
         if !model.paperShaders.isEmpty {
             Text("Paper Shaders, Apache-2.0").font(Typography.micro).foregroundStyle(Palette.mutedFg)

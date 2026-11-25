@@ -82,13 +82,16 @@ extension View {
 
     func sidebarSurface(canvasEdge: HorizontalAlignment) -> some View {
         background {
-            Rectangle().fill(Palette.sidebarSurface)
-                .background(.ultraThinMaterial)
-                .allowsHitTesting(false)
+            Rectangle().fill(Palette.sidebarSurface).allowsHitTesting(false)
         }
         .overlay(alignment: Alignment(horizontal: canvasEdge, vertical: .center)) {
             Rectangle().fill(Palette.sidebarHairline).frame(width: 1).allowsHitTesting(false)
         }
+    }
+
+    /// Extends a section's content row so its last control shares the header action's center.
+    func inspectorActionColumn(controlWidth: CGFloat? = Metric.sidebarRow) -> some View {
+        padding(.trailing, controlWidth.map { Metric.sidebarInset + (Metric.sidebarRow - $0) / 2 - Metric.sidebarLabelInset } ?? 0)
     }
 
     func sidebarHeader() -> some View {
@@ -357,12 +360,13 @@ struct FadingScroller<Content: View>: View {
 
 struct SectionHeader: View {
     let title: String
+    var inset: CGFloat = 12
     var body: some View {
         Text(title.uppercased()).qaText(title)
             .font(Typography.section).tracking(0.6)
             .foregroundStyle(Palette.mutedFg)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 4)
+            .padding(.horizontal, inset).padding(.top, 12).padding(.bottom, 4)
     }
 }
 
@@ -687,7 +691,8 @@ struct FontFamilyRow: View {
 /// The orange tag on a font this Mac does not have.
 struct MissingTag: View {
     var body: some View {
-        Text("Missing").font(.system(size: 10, weight: .semibold)).foregroundStyle(Palette.warn)
+        Text("Missing").font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Color(light: 0x854D0E, dark: 0xF59E0B))
             .padding(.horizontal, 6).frame(height: 16)
             .background(Capsule().fill(Palette.warn.opacity(0.16)))
             .help("Not installed on this Mac. Canvas draws it with a fallback font.")

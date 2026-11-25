@@ -123,6 +123,7 @@ private struct PageInspector: View {
                 }
                 .disabled(pattern.lineColor == nil || model.isCloudFile)
             }
+            .inspectorActionColumn()
         }
     }
 
@@ -150,6 +151,7 @@ private struct PageInspector: View {
                     .disabled(page.background == nil || model.isCloudFile)
                     .qaID("page-background-reset")
                 }
+                .inspectorActionColumn()
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 2) {
                         modeButton("Color", blueprint: false)
@@ -456,6 +458,7 @@ struct InspectorBody: View {
                     .help(hidden ? "Show layer" : "Hide layer")
                 }
             }
+            .inspectorActionColumn(controlWidth: rounded ? Metric.field : nil)
             if rounded { cornerFields }
         }
     }

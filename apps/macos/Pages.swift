@@ -103,24 +103,23 @@ struct PagesSection: View {
             }
             if model.revision.isEmpty {
                 if let sidebar = model.openingSidebar {
-                    VStack(spacing: PageDrag.spacing) {
+                    VStack(spacing: 0) {
                         ForEach(sidebar.pages) { page in
                             ListRow(title: page.name, symbol: "rectangle.portrait", sidebar: true, active: page.id == sidebar.activePage)
                                 .disabled(true)
                                 .qaID("page-row", label: page.id)
                         }
                     }
-                    .padding(.vertical, PageDrag.spacing)
+                    .padding(.vertical, PageDrag.edgeInset)
                     .allowsHitTesting(false)
                 }
             } else {
-                VStack(spacing: PageDrag.spacing) {
+                VStack(spacing: 0) {
                     ForEach(Array(model.pages.enumerated()), id: \.element.id) { i, page in
                         pageRow(page, at: i)
                     }
                 }
-                // The list owns the hit area, including the gaps and the insertion boundary above the first row.
-                .padding(.vertical, PageDrag.spacing)
+                .padding(.vertical, PageDrag.edgeInset)
                 .contentShape(Rectangle())
                 .onDrop(of: [.text], delegate: PageDrop(model: model, dragging: $dragging, target: $dropTarget, watch: watchDrop))
             }
@@ -215,8 +214,7 @@ struct PagesSection: View {
 
     private func rowOffset(_ i: Int) -> CGFloat {
         guard let dragging, let from = model.pages.firstIndex(where: { $0.id == dragging }), case let .reorder(to) = dropTarget else { return 0 }
-        let stride = SidebarStyle.row + PageDrag.spacing
-        return CGFloat(PageDrag.shift(row: i, from: from, to: to)) * stride
+        return CGFloat(PageDrag.shift(row: i, from: from, to: to)) * SidebarStyle.row
     }
 
     private func watchDrop() {

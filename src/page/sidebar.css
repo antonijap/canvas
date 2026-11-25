@@ -170,8 +170,6 @@
   padding: 0 var(--c-sidebar-inset) var(--c-sidebar-inset) calc(var(--c-sidebar-inset) - 1px);
   overflow: auto;
   background: var(--c-sidebar-surface);
-  -webkit-backdrop-filter: blur(20px);
-  backdrop-filter: blur(20px);
   border-inline-start: 1px solid var(--c-sidebar-hairline);
   color: var(--c-fg);
   font: var(--c-size-xs)/1.35 var(--c-font-sans);

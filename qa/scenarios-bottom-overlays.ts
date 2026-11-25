@@ -91,3 +91,24 @@ for (const [name, panel, header, open] of [
     t.eq(r.shadow, 'none', 'flat panel edge');
   });
 }
+
+sc('sidebar', 'Browser Conversations shortcut switches away from Comments', {
+  covers: ['sidebar:menu'],
+  skip: { visual: 'The actual pointer click verifies the shortcut is exposed.' },
+}, async (t: T) => {
+  await t.waitFor("!!document.querySelector('.cv-btn') && !!document.querySelector('.cm-sidebar')", 'both panels are ready');
+  const point = await t.ev<{x: number; y: number}>(`(() => {
+    const r = document.querySelector('.cv-btn').getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  })()`);
+  await t.ev(`document.querySelector('[aria-label^="Open comments"]').click()`);
+  await t.waitFor("!document.querySelector('.cm-sidebar').hidden", 'Comments opens');
+  t.ok(await t.ev(`(() => {
+    const close = document.querySelector('.cm-sidebar-head [aria-label="Close"]');
+    const r = close.getBoundingClientRect();
+    return close.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+  })()`), 'the Comments close control is also reachable');
+  await t.io.click(point.x, point.y);
+  await t.waitFor("document.querySelector('.cm-sidebar').hidden && !document.querySelector('.cv-sidebar').hidden",
+    'the sparkle button switches from Comments to Conversations');
+});

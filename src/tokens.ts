@@ -10,7 +10,7 @@ export type Palette = Record<string, string>;
 const light: Palette = {
   canvasBg: "#f6f6f6",
   sidebar: "#fafafa",
-  sidebarSurface: "#fafafafa",
+  sidebarSurface: "#fafafa",
   sidebarHairline: "#00000014",
   sidebarField: "#00000012",
   sidebarBorder: "#e4e4e7",
@@ -56,7 +56,7 @@ const light: Palette = {
 const dark: Palette = {
   canvasBg: "#18181b",
   sidebar: "#18181b",
-  sidebarSurface: "#18181bfa",
+  sidebarSurface: "#18181b",
   sidebarHairline: "#ffffff14",
   sidebarField: "#ffffff12",
   sidebarBorder: "#3f3f46",

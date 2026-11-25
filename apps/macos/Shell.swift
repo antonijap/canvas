@@ -519,11 +519,12 @@ enum SidebarStyle {
 
 struct SidebarGroupLabel: View {
     let title: String
+    var inset: CGFloat = 6
 
     var body: some View {
         Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, inset)
             .frame(height: 20)
             .qaText(title)
     }

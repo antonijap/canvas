@@ -331,3 +331,70 @@ sc("sidebar", "Layers keeps its scroll position across a file loading gap", {
     await t.cmd("qa.window", { width, height });
   }
 });
+
+for (const width of [720, 900]) {
+  const narrow = width === 720;
+  sc("comments", narrow ? "Send reply stays reachable in a short window" : "Show resolved stays clear of Zoom", {
+    covers: ["comments:light"],
+  }, async (t: NT) => {
+    await t.showPage("layout");
+    await t.section("Layers");
+    const sidebar = center(await t.mark({ id: "sidebar-resize" }));
+    if ((await t.state()).sidebarWidth !== METRICS.sidebarWidth) await t.doubleClick(sidebar);
+    const original = await t.state();
+    if (!original.inspectorOpen) await t.click(center(await t.mark({ id: "properties-toggle" })));
+    if (narrow) {
+      await t.drag(sidebar, { x: sidebar.x + 200, y: sidebar.y });
+      await t.waitState(s => s.sidebarWidth === METRICS.sidebarMax, "Layers widened to its cap");
+    }
+    await t.cmd("qa.window", { width, height: 420 });
+    try {
+      const doc = crypto.randomUUID(), id = crypto.randomUUID(), at = new Date().toISOString();
+      const author = { name: "Anna" };
+      const comments = Array.from({ length: narrow ? 12 : 1 }, () => ({
+        id: crypto.randomUUID(), thread: id, author, body: "Review the spacing in this frame.", createdAt: at,
+      }));
+      fs.writeFileSync(path.join(t.file, "comments.json"), JSON.stringify({
+        format: 1, doc, seq: 0, outbox: [], threads: [{
+          id, doc, anchor: { nodeId: "r_free", x: 0.5, y: 0.5, board: "lay_nest" },
+          createdAt: at, createdBy: author, comments, ...(narrow ? {} : { resolvedAt: at }),
+        }],
+      }));
+      await t.js("return canvasHost.comments.reload();");
+      await t.waitJs("document.querySelector('.cm-bar.on')?.style.top", "the positioned comment pill");
+      if (narrow) {
+        await t.js(`document.querySelector('.cm-bar').click(); document.querySelector('.cm-thread-row').click();`);
+        await t.waitJs("!!document.querySelector('.cm-pop:not([hidden]) [aria-label=Reply]')", "the reply field");
+        await t.js(`
+          const field = document.querySelector('[aria-label=Reply]');
+          field.value = "The spacing in this frame needs a reply that wraps across several lines.";
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        `);
+        await t.settle();
+        const send = await t.js<{ x: number; y: number; bottom: number; height: number; hit: string | null }>(`
+          const r = document.querySelector('[aria-label="Send reply"]').getBoundingClientRect();
+          const x = r.x + r.width / 2, y = r.y + r.height / 2;
+          const target = document.elementFromPoint(x, y)?.closest('button,.cm-ui');
+          return { x, y, bottom: r.bottom, height: innerHeight, hit: target?.getAttribute('aria-label') ?? null };
+        `);
+        t.ok(send.bottom <= send.height, `Send reply bottom ${send.bottom} exceeds window height ${send.height}`);
+        t.eq(send.hit, "Send reply", "the reply button receives the click");
+        await t.click(send);
+        await t.waitJs(`canvasHost.comments.threads.find(t => t.id === "${id}").comments.length === ${comments.length + 1}`, "the reply to post");
+      } else {
+        const zoom = await t.mark({ id: "zoom-island" });
+        const resolved = await t.js<{ x: number; y: number; right: number; bottom: number }>(`
+          const r = document.querySelector('.cm-bar [aria-pressed]').getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, right: r.right, bottom: r.bottom };
+        `);
+        t.ok(resolved.right <= zoom.x || resolved.bottom <= zoom.y, "Show resolved overlaps Zoom");
+        await t.click(resolved);
+        await t.waitJs("document.querySelector('.cm-bar [aria-pressed]')?.getAttribute('aria-pressed') === 'true'", "resolved comments to show");
+      }
+    } finally {
+      await t.cmd("qa.window", { width: original.window.width, height: original.window.height });
+      if (narrow) await t.doubleClick(center(await t.mark({ id: "sidebar-resize" })));
+      if (!original.inspectorOpen) await t.click(center(await t.mark({ id: "properties-toggle" })));
+    }
+  });
+}

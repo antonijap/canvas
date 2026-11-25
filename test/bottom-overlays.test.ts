@@ -48,3 +48,10 @@ test('bottom overlays stay inside the docked panels when zoom fills the gap', ()
   assert.ok(area.x - area.width / 2 >= 306 && area.x + area.width / 2 <= 426);
   assert.ok(area.y + 20 < 750, 'the notices clear the zoom pill');
 });
+
+test('bottom overlays move above zoom when the comment controls need more width', () => {
+  const area = bottomOverlayArea(900, 420, { l: 248, r: 294 }, { left: 477, bottom: 410, height: 40 }, 40, 10, 10, 0, 210);
+  assert.equal(area.x, 427);
+  assert.equal(area.width, 338);
+  assert.ok(area.y + 20 < 370, 'the full comment pill clears zoom');
+});

@@ -188,6 +188,7 @@ extension InspectorBody {
                     }
                     MiniButton(symbol: "minus", help: "Remove \(noun)", enabled: editable, inRow: true) { write(PaintLogic.removed(list, row: row)) }
                 }
+                .inspectorActionColumn(controlWidth: Metric.field)
             }
         }
     }
@@ -280,6 +281,7 @@ extension InspectorBody {
                 }
                 MiniButton(symbol: "minus", help: "Remove effect", enabled: editable, inRow: true, action: remove)
             }
+            .inspectorActionColumn(controlWidth: Metric.field)
             // A hidden effect dims as a whole, its values too.
             effectFields(e, kind: kind, set: set).opacity(on ? 1 : 0.5)
         }
