@@ -864,7 +864,7 @@ enum QA {
         // SwiftUI builds its accessibility tree on demand. Enable it in this background QA instance.
         NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
         let screen = w.convertPoint(toScreen: base(w, x, y))
-        var elements: [[String: String]] = []
+        var elements: [[String: Any]] = []
         func walk(_ item: Any) {
             guard !(item is WKWebView) else { return }
             // SwiftUI nodes respond to AppKit's selectors without conforming to NSAccessibilityProtocol.
@@ -874,7 +874,8 @@ enum QA {
             if !frame.isEmpty, let role = element.accessibilityRole?() {
                 elements.append(["role": role.rawValue,
                                  "label": element.accessibilityLabel?() ?? "",
-                                 "help": element.accessibilityHelp?() ?? ""])
+                                 "help": element.accessibilityHelp?() ?? "",
+                                 "selected": element.isAccessibilitySelected?() ?? false])
             }
             element.accessibilityChildren?()?.forEach(walk)
         }

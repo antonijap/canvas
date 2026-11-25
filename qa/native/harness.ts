@@ -218,7 +218,7 @@ export class NT {
     const state = await this.state();
     if (!state.panelOpen) await this.click(await this.sidebarToggle());
     if (!state.panelOpen || state.section !== which) {
-      await this.click(center(await this.mark({ id: "sidebar-segment", label: which, exact: true })));
+      await this.click(center(await this.mark({ id: "sidebar-section", label: which, exact: true })));
     }
     await this.waitState((s) => s.section === which && s.panelOpen, `the ${which} section`);
   }

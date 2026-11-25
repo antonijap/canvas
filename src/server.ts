@@ -31,7 +31,7 @@ import { handleSearchRoute } from "./search.ts";
 import { handleLayersRoute } from "./layers.ts";
 import { handleColorsRoute } from "./colors.ts";
 import { applyAutoTracking, prepareAutoTracking } from "./tracking.ts";
-import { cssVariables, METRICS } from "./tokens.ts";
+import { cssVariables } from "./tokens.ts";
 import { codeRootId, version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
@@ -1181,11 +1181,11 @@ button:hover{background:var(--c-accent)}
 button:focus-visible{outline:2px solid var(--c-ring)}
 .spacer{flex:1}
 #left{position:fixed;left:0;top:0;bottom:0;width:var(--c-sidebar-width);box-sizing:border-box;display:flex;flex-direction:column;background:var(--c-sidebar);border-right:1px solid var(--c-sidebar-border);padding:40px 10px 0 var(--c-inset);z-index:5;color:var(--c-sidebar-fg)}
-#left [role=tablist]{display:flex;flex:none;gap:2px;box-sizing:border-box;height:${METRICS.field}px;padding:2px;border-radius:var(--c-radius);background:var(--c-hover)}
-#left [role=tab]{flex:1;display:grid;place-items:center;padding:0;color:var(--c-muted-fg)}
+#left [role=tablist]{display:flex;flex:none;gap:var(--c-island-pad)}
+#left [role=tab]{flex:none;display:grid;place-items:center;width:var(--c-control);height:var(--c-control);padding:0;border-radius:50%;color:var(--c-muted-fg);background:var(--c-hover)}
 #left [role=tab] svg{width:var(--c-icon);height:var(--c-icon)}
-#left [role=tab]:hover{background:var(--c-hover)}
-#left [role=tab][aria-selected=true]{color:var(--c-fg);background:var(--c-active);box-shadow:0 1px 2px #00000024}
+#left [role=tab]:hover{background:var(--c-active)}
+#left [role=tab][aria-selected=true]{color:var(--c-fg);background:color-mix(in srgb,var(--c-fg) 18%,transparent)}
 #left [role=tabpanel]{flex:1;min-height:0;overflow:auto;padding:0 0 14px}
 #left [role=tabpanel]:focus-visible{outline:2px solid var(--c-ring);outline-offset:-2px}
 #left #sidebar-assets-panel{padding-top:8px}

@@ -99,9 +99,18 @@ struct IconButton: View {
     var shortcut: String? = nil
     /// Bump to bounce the glyph (an add action just landed). Ignored under Reduce Motion.
     var bounce = 0
+    var filled = false
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var fill: Color {
+        if filled {
+            if active { return Palette.fg.opacity(0.18) }
+            return hovering ? Palette.active : Palette.hover
+        }
+        return active ? Palette.active : (hovering ? Palette.hover : .clear)
+    }
 
     var body: some View {
         Button(action: action) {
@@ -112,7 +121,7 @@ struct IconButton: View {
                 .font(.system(size: Metric.icon, weight: .medium))
                 .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
                 .frame(width: Metric.control, height: Metric.control)
-                .background(Circle().fill(active ? Palette.active : (hovering ? Palette.hover : .clear)))
+                .background(Circle().fill(fill))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

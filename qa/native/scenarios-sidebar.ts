@@ -35,49 +35,67 @@ function sameGlyph(a: boolean[], b: boolean[], size: number) {
   }));
 }
 
-sc("sidebar", "editor segments show their lists and the toggle restores the selection", {
+async function headerButtons(t: NT) {
+  const toggle = await t.mark({ id: "sidebar-toggle" });
+  const sections = (await t.marks({ id: "sidebar-section" })).sort((a, b) => a.x - b.x);
+  const buttons = [toggle, ...sections];
+  t.eq(buttons.map((button) => button.label), ["Hide panel", "Layers", "Assets", "Tokens", "Widgets"],
+    "the sidebar header has five buttons in order");
+  for (const [i, button] of buttons.entries()) {
+    t.near(button.w, METRICS.control, 0.5, `${button.label} is 32 pt wide`);
+    t.near(button.h, METRICS.control, 0.5, `${button.label} is 32 pt tall`);
+    t.near(center(button).y, center(toggle).y, 0.5, "all buttons share one centre line");
+    if (i > 0) {
+      const previous = buttons[i - 1];
+      t.near(button.x - previous.x - previous.w, METRICS.islandPad, 0.5, "buttons have equal gaps");
+    }
+  }
+  t.eq((await t.marks({ id: "sidebar-track" })).length, 0, "the buttons have no shared track");
+  return { toggle, sections };
+}
+
+sc("sidebar", "editor section buttons show their lists and the toggle restores the selection", {
   covers: ["sidebar:segments", "sidebar:toggle", "sidebar:scroll", "sidebar:restore", "sidebar:header"],
 }, async (t: NT) => {
-  const out = path.join(process.cwd(), "qa/out/sidebar");
+  const out = path.join(process.cwd(), "qa/out/sidebar-buttons");
   fs.mkdirSync(out, { recursive: true });
-  const segments = ["Layers", "Assets", "Tokens", "Widgets"];
+  const sections = ["Layers", "Assets", "Tokens", "Widgets"];
   const select = async (label: string) => {
-    await t.click(center(await t.mark({ id: "sidebar-segment", label, exact: true })));
+    await t.click(center(await t.mark({ id: "sidebar-section", label, exact: true })));
     await t.waitState((s) => s.section === label && s.panelOpen, `the ${label} sidebar`);
   };
 
   if (!(await t.state()).panelOpen) await t.click(await t.sidebarToggle());
-  const open = await t.mark({ id: "sidebar-toggle" });
-  const track = await t.mark({ id: "sidebar-track" });
-  const buttons = (await t.marks({ id: "sidebar-segment" })).sort((a, b) => a.x - b.x);
-  t.eq(buttons.length, segments.length, "all four sidebar buttons are present");
-  t.near(track.h, METRICS.field, 0.5, "the segment track is 28 pt tall");
-  t.near(open.h, METRICS.control, 0.5, "the toggle sets the 32 pt header row height");
-  for (const [i, button] of buttons.entries()) {
-    const name = segments[i];
-    t.near(center(button).y, center(open).y, 0.5, "toggle and segments share one centre line");
-    const previous = i > 0 ? buttons[i - 1] : open;
-    t.ok(button.x >= previous.x + previous.w, "header buttons do not overlap");
-    const { elements } = await t.cmd<{ elements: { role: string; label: string; help: string }[] }>(
-      "qa.accessibility", center(button));
-    const ax = elements.find((element) => element.role === "AXButton");
-    t.ok(ax, `${name} exposes an accessible button (found ${elements.map((element) => element.role).join(", ")})`);
-    t.eq(ax.label, name, `${name} has its section name as an accessibility label`);
-    t.eq(ax.help, name, `${name} has its section name as tooltip help`);
-  }
+  await t.cmd("qa.theme", { theme: "light" });
+  const { toggle: open, sections: buttons } = await headerButtons(t);
+  const checkAccessibility = async (selected: string) => {
+    for (const button of [open, ...buttons]) {
+      const { elements } = await t.cmd<{ elements: { role: string; label: string; help: string; selected?: boolean }[] }>(
+        "qa.accessibility", center(button));
+      const ax = elements.find((element) => element.role === "AXButton" && element.label === button.label);
+      t.ok(ax, `${button.label} exposes an accessible button with its name`);
+      t.eq(ax.help, button.label, `${button.label} has tooltip help`);
+      t.eq(ax.selected ?? false, button.label === selected, `${button.label} exposes its selection state`);
+    }
+  };
 
-  const saveHeader = async (name: string, right: number) => {
+  const captureHeader = async (name?: string) => {
+    await t.move({ x: open.x, y: open.y + open.h + 8 });
+    await t.cmd("qa.idle", { ms: 200 });
     const { data, width } = await t.cmd<{ data: string; width: number }>("qa.shot");
-    const scale = width / (await t.state()).window.width;
+    const state = await t.state();
+    const scale = width / state.window.width;
     const pixels = ({ x, y, w, h }: Rect) => ({ x: x * scale, y: y * scale, w: w * scale, h: h * scale });
     const img = decodePng(Buffer.from(data, "base64"));
     const pad = METRICS.pillPad;
-    const header = { x: open.x - pad, y: open.y - pad, w: right - open.x + pad, h: open.h + 2 * pad };
-    fs.writeFileSync(path.join(out, `header-${name}.png`), encodePng(crop(img, pixels(header), 1)));
+    const header = { x: open.x - pad, y: open.y - pad, w: state.panelOpen ? state.sidebarWidth : METRICS.pill,
+      h: open.h + 2 * pad };
+    if (name) fs.writeFileSync(path.join(out, `macos-${name}.png`), encodePng(crop(img, pixels(header), 1)));
     return { img, pixels, scale };
   };
 
-  for (const label of segments) {
+  let expanded: Awaited<ReturnType<typeof captureHeader>> | undefined;
+  for (const label of sections) {
     await select(label);
     switch (label) {
       case "Layers":
@@ -94,15 +112,25 @@ sc("sidebar", "editor segments show their lists and the toggle restores the sele
         await t.mark({ id: "widget-preview-note" });
         break;
     }
-    await t.shot(path.join(out, `${label.toLowerCase()}.png`));
+    await checkAccessibility(label);
+    expanded = await captureHeader(label.toLowerCase());
   }
 
-  const { img, pixels, scale } = await saveHeader("expanded", track.x + track.w + METRICS.islandPad);
+  t.ok(expanded, "captured the expanded header");
+  const { img, pixels, scale } = expanded;
+  for (const button of [open, ...buttons]) {
+    const read = (dx: number, dy: number) => {
+      const x = Math.round((center(button).x + dx) * scale);
+      const y = Math.round((center(button).y + dy) * scale);
+      return img.data[(y * img.width + x) * 4];
+    };
+    t.ok(read(13, 13) - read(0, 12) >= 5, `${button.label} has a fill with a clear corner`);
+  }
   const size = Math.round((METRICS.icon + 3) * scale);
   const glyphs: { name: string; mask: boolean[] }[] = [];
   for (const [i, button] of buttons.entries()) {
-    const name = segments[i];
-    const ink = inkBox(img, pixels(button), { inset: 4 * scale });
+    const name = sections[i];
+    const ink = inkBox(img, pixels(button), { inset: 7 * scale });
     t.ok(ink, `${name} draws an icon`);
     t.ok(ink.x1 - ink.x0 <= size && ink.y1 - ink.y0 <= size, `${name} draws only the icon`);
     t.near((ink.x0 + ink.x1) / 2 / scale, center(button).x, 1.5, `${name} icon is centred horizontally`);
@@ -116,8 +144,8 @@ sc("sidebar", "editor segments show their lists and the toggle restores the sele
   const closed = await t.mark({ id: "sidebar-toggle" });
   t.near(closed.x, open.x, 1, "toggle keeps its x position");
   t.near(closed.y, open.y, 1, "toggle keeps its y position");
-  t.eq((await t.marks({ id: "sidebar-segment" })).length, 0, "closed sidebar hides its segments");
-  await saveHeader("collapsed", closed.x + closed.w + METRICS.pillPad);
+  t.eq((await t.marks({ id: "sidebar-section" })).length, 0, "closed sidebar hides its section buttons");
+  await captureHeader("collapsed");
   await t.click(center(closed));
   await t.waitState((s) => s.panelOpen && s.section === "Widgets", "the Widgets sidebar to reopen");
   const tile = () => t.mark({ id: "widget-preview-note" });
@@ -138,7 +166,7 @@ sc("sidebar", "editor segments show their lists and the toggle restores the sele
     await select("Layers");
     await t.key("\\", ["cmd"]);
     await t.waitState((s) => s.uiHidden, "the editor controls to hide");
-    await t.waitFor(async () => (await t.marks({ id: "sidebar-segment" })).length === 0, "the sidebar to leave the window");
+    await t.waitFor(async () => (await t.marks({ id: "sidebar-section" })).length === 0, "the sidebar to leave the window");
     await t.cmd("qa.idle", { ms: 350 });
     await t.key("\\", ["cmd"]);
     await t.waitState((s) => !s.uiHidden, "the editor controls to return");
@@ -186,24 +214,20 @@ sc("sidebar", "the editor sidebar resize handle leaves the header clickable", {
   covers: ["sidebar:header", "sidebar-resize:editor"],
 }, async (t: NT) => {
   await t.section("Layers");
-  const widgets = await t.mark({ id: "sidebar-segment", label: "Widgets", exact: true });
+  const widgets = await t.mark({ id: "sidebar-section", label: "Widgets", exact: true });
   await t.click({ x: widgets.x + widgets.w - 1, y: center(widgets).y });
-  await t.waitState((s) => s.section === "Widgets", "the right edge of the Widgets segment to respond", 3000);
+  await t.waitState((s) => s.section === "Widgets", "the right edge of the Widgets button to respond", 3000);
   const handle = await t.mark({ id: "sidebar-resize" });
-  t.ok(handle.y >= widgets.y + widgets.h, "the resize handle starts below the segments");
+  t.ok(handle.y >= widgets.y + widgets.h, "the resize handle starts below the buttons");
 
   const from = center(handle);
   await t.drag(from, { x: from.x - 900, y: from.y });
   await t.waitState((s) => s.sidebarWidth === METRICS.sidebarMin, "the sidebar to reach its minimum width");
   await t.section("Layers");
-  const track = await t.mark({ id: "sidebar-track" });
-  const row = await t.mark({ id: "page-row", label: "layout", exact: true });
-  t.near(track.x + track.w, row.x + row.w, 0.5, "the track and the list share a right inset");
-  const segments = await t.marks({ id: "sidebar-segment" });
-  t.eq(segments.length, 4, "all four segments are visible at minimum width");
-  for (const segment of segments) {
-    t.near(segment.w, segments[0].w, 0.5, "the segments have equal widths");
-    t.ok(segment.w >= METRICS.control, `${segment.label} has a full-width hit target`);
-    t.near(segment.h, METRICS.field - 4, 0.5, `${segment.label} is 24 pt tall`);
-  }
+  const { toggle, sections } = await headerButtons(t);
+  const last = sections.at(-1)!;
+  t.ok(last.x + last.w <= toggle.x - METRICS.pillPad + METRICS.sidebarMin - METRICS.islandPad,
+    "all five buttons fit inside the sidebar at minimum width");
+  await t.click(center(last));
+  await t.waitState((s) => s.section === "Widgets", "Widgets to open at minimum width");
 });

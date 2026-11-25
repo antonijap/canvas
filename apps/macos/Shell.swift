@@ -440,10 +440,15 @@ struct LeftColumn: View {
         let shown = panelOpen ? panelWidth : nil
         return GlassIsland(radius: shown == nil ? 999 : Metric.radiusIsland, padding: 0, dense: shown != nil) {
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: Metric.pillPad) {
+                HStack(spacing: Metric.islandPad) {
                     toggle(shown: shown != nil)
                     if shown != nil {
-                        SidebarSegments(selection: section) { model.section = $0 }
+                        ForEach(SidebarSection.allCases) { item in
+                            IconButton(symbol: item.symbol, active: section == item, help: item.rawValue, filled: true) {
+                                model.section = item
+                            }
+                            .qaID("sidebar-section", label: item.rawValue)
+                        }
                     }
                 }
                 .padding([.top, .leading], Metric.pillPad)
@@ -468,46 +473,10 @@ struct LeftColumn: View {
     }
 
     private func toggle(shown: Bool) -> some View {
-        IconButton(symbol: "sidebar.left", help: shown ? "Hide panel" : "Show panel") { panelOpen.toggle() }
-            .qaID("sidebar-toggle", label: shown ? "Hide panel" : "Show panel")
-    }
-}
-
-private struct SidebarSegments: View {
-    let selection: SidebarSection
-    let onSelect: (SidebarSection) -> Void
-
-    var body: some View {
-        HStack(spacing: 2) {
-            ForEach(SidebarSection.allCases) { section in
-                let selected = selection == section
-                let name = section.rawValue
-                Button { onSelect(section) } label: {
-                    Image(systemName: section.symbol)
-                        .railGlyph()
-                        .foregroundStyle(selected ? Palette.fg : Palette.mutedFg)
-                        .frame(width: Metric.icon, height: Metric.icon)
-                        .frame(minWidth: 0, maxWidth: .infinity)
-                        .frame(height: Metric.field - 4)
-                        .background {
-                            if selected {
-                                RoundedRectangle(cornerRadius: Metric.radiusField - 2)
-                                    .fill(Palette.active)
-                                    .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .chromeHelp(name)
-                .accessibilityLabel(name)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-                .qaID("sidebar-segment", label: name)
-            }
+        IconButton(symbol: "sidebar.left", help: shown ? "Hide panel" : "Show panel", filled: shown) {
+            panelOpen.toggle()
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusField).fill(Palette.field))
-        .qaID("sidebar-track")
+        .qaID("sidebar-toggle", label: shown ? "Hide panel" : "Show panel")
     }
 }
 
