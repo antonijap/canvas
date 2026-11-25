@@ -13,28 +13,48 @@ const ACCOUNT = /^[A-Za-z0-9._@:-]{1,80}$/;
 const bin = () => process.env.CANVAS_SECURITY_BIN || "/usr/bin/security";
 
 function fileStore(): Record<string, string> {
-  try { return JSON.parse(fs.readFileSync(process.env.CANVAS_CLOUD_SECRETS_FILE!, "utf8")); } catch { return {}; }
+  let raw: string;
+  try { raw = fs.readFileSync(process.env.CANVAS_CLOUD_SECRETS_FILE!, "utf8"); }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return {}; throw e; }
+  const values = JSON.parse(raw);
+  if (!values || typeof values !== "object" || Array.isArray(values) || Object.values(values).some((v) => typeof v !== "string")) {
+    throw new Error("Invalid Cloud secrets file");
+  }
+  return values;
+}
+
+type SecretRead = { status: "found"; value: string } | { status: "missing" } | { status: "failed" };
+
+export async function readSecretStrict(account: string): Promise<SecretRead> {
+  if (!ACCOUNT.test(account)) return { status: "failed" };
+  if (process.env.CANVAS_CLOUD_SECRETS_FILE) {
+    try {
+      const values = fileStore();
+      return Object.hasOwn(values, account) ? { status: "found", value: values[account] } : { status: "missing" };
+    } catch { return { status: "failed" }; }
+  }
+  return new Promise((resolve) => {
+    execFile(bin(), ["find-generic-password", "-s", SERVICE(), "-a", account, "-w"], { timeout: 5000, maxBuffer: 64 * 1024 }, (err, out) => {
+      if (err) return resolve({ status: err.code === 44 && !err.killed && !err.signal ? "missing" : "failed" });
+      resolve({ status: "found", value: Buffer.from(String(out).trim(), "base64").toString("utf8") });
+    });
+  });
 }
 
 export async function readSecret(account: string): Promise<string | null> {
-  if (!ACCOUNT.test(account)) return null;
-  if (process.env.CANVAS_CLOUD_SECRETS_FILE) return fileStore()[account] ?? null;
-  return new Promise((resolve) => {
-    execFile(bin(), ["find-generic-password", "-s", SERVICE(), "-a", account, "-w"], { timeout: 5000, maxBuffer: 64 * 1024 }, (err, out) => {
-      if (err) return resolve(null);
-      try { resolve(Buffer.from(String(out).trim(), "base64").toString("utf8") || null); } catch { resolve(null); }
-    });
-  });
+  const result = await readSecretStrict(account);
+  return result.status === "found" ? result.value || null : null;
 }
 
 /** Writes (or replaces) a value. True when it is saved. */
 export async function writeSecret(account: string, value: string): Promise<boolean> {
   if (!ACCOUNT.test(account)) return false;
   if (process.env.CANVAS_CLOUD_SECRETS_FILE) {
-    const all = fileStore();
-    all[account] = value;
-    fs.writeFileSync(process.env.CANVAS_CLOUD_SECRETS_FILE, JSON.stringify(all), { mode: 0o600 });
-    return true;
+    try {
+      const all = { ...fileStore(), [account]: value };
+      fs.writeFileSync(process.env.CANVAS_CLOUD_SECRETS_FILE, JSON.stringify(all), { mode: 0o600 });
+      return true;
+    } catch { return false; }
   }
   const b64 = Buffer.from(value, "utf8").toString("base64");
   return new Promise((resolve) => {
@@ -50,9 +70,12 @@ export async function writeSecret(account: string, value: string): Promise<boole
 export async function deleteSecret(account: string): Promise<void> {
   if (!ACCOUNT.test(account)) return;
   if (process.env.CANVAS_CLOUD_SECRETS_FILE) {
-    const all = fileStore();
-    delete all[account];
-    fs.writeFileSync(process.env.CANVAS_CLOUD_SECRETS_FILE, JSON.stringify(all), { mode: 0o600 });
+    try {
+      const all = fileStore();
+      if (!Object.hasOwn(all, account)) return;
+      delete all[account];
+      fs.writeFileSync(process.env.CANVAS_CLOUD_SECRETS_FILE, JSON.stringify(all), { mode: 0o600 });
+    } catch { /* Leave an unreadable store alone. */ }
     return;
   }
   await new Promise<void>((resolve) => execFile(bin(), ["delete-generic-password", "-s", SERVICE(), "-a", account], { timeout: 5000 }, () => resolve()));

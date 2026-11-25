@@ -80,6 +80,7 @@ export class QaApp {
       CANVAS_FAKE_TUNNEL_ANY_PORT: "1",
       CANVAS_CLOUD_HOST_PORT: "0",
       CANVAS_CLOUD_SECRETS_FILE: path.join(this.dir, "cloud-secrets.json"),
+      CANVAS_SECURITY_BIN: path.join(this.dir, "no-keychain"),
       ...(process.env.CANVAS_ENGINE_PKG ? { CANVAS_ENGINE_PKG: process.env.CANVAS_ENGINE_PKG } : {}),
       // Debug switches for the QA build (CANVAS_QA_TRACE=1 logs the drag machinery).
       ...Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith("CANVAS_QA_"))),
@@ -88,6 +89,8 @@ export class QaApp {
 
   async start(builtApp: string, onLaunch?: () => void) {
     for (const d of [this.home, this.docs, this.logs, path.join(this.dir, "tunnels")]) fs.mkdirSync(d, { recursive: true });
+    // Server Cloud sign-in also looks for saved tokens. In QA those lookups are always empty.
+    fs.writeFileSync(path.join(this.dir, "no-keychain"), "#!/bin/sh\nexit 44\n", { mode: 0o700 });
     // Fonts the maintainer installed are read (never written) so text measures as it does in her app.
     const fonts = path.join(os.homedir(), "Library", "Fonts");
     fs.mkdirSync(path.join(this.home, "Library"), { recursive: true });
@@ -116,19 +119,20 @@ export class QaApp {
     await this.launch(onLaunch);
   }
 
-  private async startServer() {
+  private async startServer(extraEnv: Record<string, string> = {}) {
     const previewHelper = path.join(this.app, "Contents/Resources/canvas-image-previews");
     this.server = spawn(process.execPath, [path.join(ROOT, "src/server.ts")], { cwd: ROOT, env: {
       ...this.env(), HOME: this.home,
       ...(fs.existsSync(previewHelper) ? { CANVAS_IMAGE_PREVIEWS_BIN: previewHelper } : {}),
+      ...extraEnv,
     }, stdio: ["ignore", "pipe", "pipe"] });
     this.server.stdout!.on("data", (d) => this.serverLog.push(String(d)));
     this.server.stderr!.on("data", (d) => this.serverLog.push(String(d)));
     await this.waitHealth();
   }
 
-  async relaunch({ restartServer = false, env = {}, onLaunch }: {
-    restartServer?: boolean; env?: Record<string, string>; onLaunch?: () => void;
+  async relaunch({ restartServer = false, env = {}, serverEnv = {}, onLaunch }: {
+    restartServer?: boolean; env?: Record<string, string>; serverEnv?: Record<string, string>; onLaunch?: () => void;
   } = {}) {
     const pid = this.pid;
     await this.cmd({ op: "qa.quit" });
@@ -136,7 +140,7 @@ export class QaApp {
       try { process.kill(pid, 0); } catch {
         if (restartServer) {
           await this.stopServer();
-          await this.startServer();
+          await this.startServer(serverEnv);
         }
         await this.launch(onLaunch, env);
         return;

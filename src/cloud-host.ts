@@ -29,8 +29,8 @@ import fs from "node:fs";
 import net from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { deleteSecret, readSecret, writeSecret } from "./cloud-secrets.ts";
-import { fingerprint, genkey, helperPath, hostIdFor, ownsPort, serve, type Helper } from "./cloud-tunnel.ts";
+import { deleteSecret, readSecretStrict, writeSecret } from "./cloud-secrets.ts";
+import { fingerprint, genkey, helperPath, hostIdFor, isTunnelAddr, ownsPort, serve, type Helper } from "./cloud-tunnel.ts";
 import { stateDir } from "./usage-counts.ts";
 
 const MAIN = path.join(import.meta.dirname, "..", "cloud", "adapters", "mac", "main.ts");
@@ -40,6 +40,7 @@ const SLOT = /^(main|[0-9a-f]{8})$/;
 const dirOf = (slot: string) => (slot === "main" ? hostDir() : path.join(stateDir(), "cloud-hosts", slot));
 const keysAccount = (slot: string) => (slot === "main" ? "host:keys" : `host:keys:${slot}`);
 const indexFile = () => path.join(stateDir(), "cloud-hosts.json");
+const keychainReadError = "Couldn't read this Cloud's keys from the Keychain. Unlock the Keychain and try again.";
 /** The ports a hosted Cloud may take: the tunnel helper serves these and no other (cloud/tunnel/main.go). */
 export const HOST_PORTS = { first: 5190, last: 5197 };
 /** The most Clouds one Mac hosts (running or kept): one port each. */
@@ -48,6 +49,16 @@ export const MAX_HOSTED = 8;
 interface TunnelKey { key: unknown; addr: string; public: string }
 interface HostKeys { member: TunnelKey; enrol: TunnelKey }
 interface Person { id: string; label: string; role: string; devices: { id: string; name: string; joinedAt: string }[]; invite?: { expiresAt: string } }
+
+function parseKeys(raw: string): HostKeys {
+  try {
+    const keys = JSON.parse(raw);
+    const valid = (k: TunnelKey | undefined) =>
+      k?.key && isTunnelAddr(k.addr) && typeof k.public === "string" && /^nodekey:[0-9a-f]{64}$/.test(k.public);
+    if (valid(keys?.member) && valid(keys?.enrol)) return keys;
+  } catch { /* Report the invalid value without exposing it. */ }
+  throw new Error("This Cloud's keys are invalid.");
+}
 
 /** The slot -> host id index, read fresh each time (it is tiny). */
 function readIndex(): Record<string, string> {
@@ -99,11 +110,21 @@ class HostedCloud {
   }
 
   async loadKeys(bin: string): Promise<HostKeys> {
-    const raw = await readSecret(keysAccount(this.slot));
-    if (raw) { try { const k = JSON.parse(raw); if (k.member?.addr && k.enrol?.addr && k.member.public && k.enrol.public) return k; } catch { /* made again below */ } }
+    const account = keysAccount(this.slot);
+    const stored = await readSecretStrict(account);
+    if (stored.status === "failed") throw new Error(keychainReadError);
+    const ids = [this.hostId, readIndex()[this.slot], keptHostId(this.slot)].filter(Boolean);
+    if (stored.status === "found") {
+      const keys = parseKeys(stored.value);
+      const id = hostIdFor(keys.enrol.public);
+      if (ids.some((known) => known !== id)) throw new Error("The keys do not match this Cloud.");
+      return keys;
+    }
+    if (ids.length) throw new Error("This Cloud's keys are missing from the Keychain.");
     const m = await genkey(bin, "server"), e = await genkey(bin, "server");
-    const k: HostKeys = { member: { key: m.key, addr: m.addr!, public: m.public }, enrol: { key: e.key, addr: e.addr!, public: e.public } };
-    if (!(await writeSecret(keysAccount(this.slot), JSON.stringify(k)))) throw new Error("Could not save the tunnel keys to the Keychain");
+    const raw = JSON.stringify({ member: m, enrol: e });
+    const k = parseKeys(raw);
+    if (!(await writeSecret(account, raw))) throw new Error("Could not save the tunnel keys to the Keychain");
     return k;
   }
 
@@ -176,6 +197,12 @@ class HostedCloud {
     if (this.starting) return this.starting;
     this.starting = (async () => {
       const port = await freePort();
+      // Check the keys before the worker opens its database and can assign a host id.
+      const bin = helperPath();
+      if (bin) {
+        try { this.keys = await this.loadKeys(bin); }
+        catch (e) { this.tunnelError = (e as Error).message; throw e; }
+      }
       const env: Record<string, string> = { ...(process.env as Record<string, string>), CANVAS_CLOUD_HOST_DIR: dirOf(this.slot), CANVAS_CLOUD_HOST_PORT: String(port) };
       const c = fork(MAIN, [], { env, stdio: ["ignore", "ignore", "ignore", "ipc"], execArgv: [] });
       this.child = c;
@@ -194,14 +221,12 @@ class HostedCloud {
         c.once("message", () => { clearTimeout(t); resolve(); });
         c.once("exit", () => { clearTimeout(t); reject(new Error("The Cloud stopped while starting")); });
       });
-      // The tunnel keys first: the Cloud's id is derived from the enrolment tunnel's public key.
-      const bin = helperPath();
-      if (bin) { try { this.keys = await this.loadKeys(bin); } catch (e) { this.tunnelError = (e as Error).message; } }
       const r = await this.ask("start", { label: opts.label, ...(this.keys ? { hostId: hostIdFor(this.keys.enrol.public) } : {}) });
       if (!(await ownsPort(c.pid!, r.port))) { c.kill("SIGKILL"); throw new Error("Another program is using the Cloud's port"); }
       this.port = r.port; this.hostId = r.hostId; this.ownerToken = r.ownerToken;
       const ix = readIndex();
       if (ix[this.slot] !== r.hostId) { ix[this.slot] = r.hostId; writeIndex(ix); }
+      this.tunnelError = "";
       await this.follow();
     })();
     try { await this.starting; } catch (e) { this.stopChild(); throw e; } finally { this.starting = null; }
@@ -227,7 +252,7 @@ class HostedCloud {
       // The first slot, where the single hosted Cloud of older versions lives: the app adds it to its list if missing.
       legacy: this.slot === "main",
       fingerprint: this.keys ? await fingerprint(this.keys.enrol.addr) : null,
-      tunnel: !helperPath() ? "unavailable" : this.member?.helper.alive ? "up" : this.child ? (this.tunnelError ? "error" : "starting") : "off",
+      tunnel: !helperPath() ? "unavailable" : this.tunnelError ? "error" : this.member?.helper.alive ? "up" : this.child ? "starting" : "off",
       tunnelError: this.tunnelError || null,
       people: this.people.map((p) => ({ id: p.id, label: p.label, role: p.role, devices: p.devices, invite: p.invite ?? null })),
     };
@@ -254,14 +279,11 @@ async function freePort(): Promise<number> {
 const clouds = new Map<string, HostedCloud>();
 const cloudOf = (slot: string) => { let c = clouds.get(slot); if (!c) { c = new HostedCloud(slot); clouds.set(slot, c); } return c; };
 
-/** The first slot's host id from its tunnel keys, or its kept data when no keys are available. */
-async function legacyMainId(): Promise<string | null> {
-  const raw = await readSecret(keysAccount("main"));
-  if (raw) { try { return hostIdFor(JSON.parse(raw).enrol.public); } catch { /* try the kept data */ } }
-  // Even without tunnel keys, kept data must have a row with Delete. Reading it must not create a database.
+/** Read a kept identity without creating a database. */
+function keptHostId(slot: string): string | null {
   let db: DatabaseSync | undefined;
   try {
-    const file = path.join(hostDir(), "team.sqlite");
+    const file = path.join(dirOf(slot), "team.sqlite");
     if (!fs.existsSync(file)) return null;
     db = new DatabaseSync(file, { readOnly: true });
     const row = db.prepare("SELECT host_id FROM host WHERE id = 1").get();
@@ -269,19 +291,50 @@ async function legacyMainId(): Promise<string | null> {
   } catch { return null; } finally { db?.close(); }
 }
 
-/** The slot of a host id: one started in this run, else the index, else the first Cloud's keys (from before the index). */
+function keptIdentities(): Record<string, string> {
+  let dirs: string[] = [];
+  try { dirs = fs.readdirSync(path.join(stateDir(), "cloud-hosts")).filter((slot) => slot !== "main" && SLOT.test(slot)); }
+  catch { /* There may be no secondary slots. */ }
+  const ids: Record<string, string> = {};
+  for (const slot of ["main", ...dirs]) {
+    const id = keptHostId(slot);
+    if (id) ids[slot] = id;
+  }
+  return ids;
+}
+
+/** The first Cloud may have only keys, from before the index. */
+async function legacyMainId(): Promise<string | null> {
+  const stored = await readSecretStrict(keysAccount("main"));
+  if (stored.status === "failed") throw new Error(keychainReadError);
+  if (stored.status === "found") {
+    try { return hostIdFor(JSON.parse(stored.value).enrol.public); } catch { /* No usable identity. */ }
+  }
+  return null;
+}
+
+/** Find an identity in memory, the index, a kept database or the first Cloud's legacy keys. */
 async function slotOf(hostId: string): Promise<string | null> {
   const id = hostId.toLowerCase();
   for (const c of clouds.values()) if (c.hostId === id) return c.slot;
-  for (const [slot, h] of Object.entries(readIndex())) if (h === id) return slot;
+  const indexed = readIndex();
+  for (const [slot, h] of Object.entries(indexed)) if (h === id) return slot;
+  const kept = keptIdentities();
+  for (const [slot, h] of Object.entries(kept)) if (h === id) return slot;
+  if (indexed.main || kept.main || clouds.get("main")?.hostId) return null;
   return (await legacyMainId()) === id ? "main" : null;
 }
 
 /** Every slot this Mac keeps: the index, the ones started in this run, and the first one if its keys or folder exist. */
 async function knownSlots(): Promise<Set<string>> {
-  const out = new Set(Object.keys(readIndex()));
+  const out = new Set([...Object.keys(readIndex()), ...Object.keys(keptIdentities())]);
   for (const c of clouds.values()) if (c.hostId || c.child || c.starting) out.add(c.slot);
-  if (fs.existsSync(hostDir()) || (await readSecret(keysAccount("main")))) out.add("main");
+  if (fs.existsSync(hostDir())) out.add("main");
+  if (!out.has("main")) {
+    const stored = await readSecretStrict(keysAccount("main"));
+    if (stored.status === "failed") throw new Error(keychainReadError);
+    if (stored.status === "found") out.add("main");
+  }
   return out;
 }
 
@@ -291,7 +344,7 @@ async function newSlot(): Promise<string> {
   if (known.size >= MAX_HOSTED) throw new Error(`This Mac hosts ${MAX_HOSTED} Clouds at most. Delete one first.`);
   if (!known.has("main")) return "main";
   let slot: string;
-  do { slot = randomBytes(4).toString("hex"); } while (known.has(slot));
+  do { slot = randomBytes(4).toString("hex"); } while (known.has(slot) || fs.existsSync(dirOf(slot)));
   return slot;
 }
 
@@ -351,6 +404,7 @@ async function startOnce(opts: { name: string; label: string; hostId?: string | 
     slot = await newSlot();
   }
   const c = cloudOf(slot);
+  if (opts.hostId && !c.hostId) c.hostId = opts.hostId.toLowerCase();
   await c.start({ name: opts.name, label: opts.label });
   return c.hostId;
 }
@@ -358,10 +412,11 @@ async function startOnce(opts: { name: string; label: string; hostId?: string | 
 /** Stop hosting a Cloud: every device token is revoked (members need a new invite), its tunnels and process stop. */
 export function stopHosting(hostId?: string | null): Promise<void> {
   return serial(async () => {
-    const list = hostId ? [running(hostId)].filter(Boolean) as HostedCloud[] : [...clouds.values()].filter((c) => c.child);
+    const list = [...clouds.values()].filter((c) => !hostId || c.hostId === hostId.toLowerCase());
     for (const c of list) {
-      await c.ask("stop").catch(() => {});
+      if (c.child) await c.ask("stop").catch(() => {});
       c.stopChild();
+      c.tunnelError = "";
     }
   });
 }
@@ -409,7 +464,7 @@ export async function removePerson(personId: string, hostId?: string | null): Pr
 export async function hostStatus(hostId?: string | null): Promise<Record<string, unknown>> {
   const c = await serial(async () => {
     if (!hostId) return running(null);
-    const slot = await slotOf(hostId);
+    const slot = await slotOf(hostId).catch(() => null);
     const c = slot ? cloudOf(slot) : null;
     if (c && !c.hostId) c.hostId = hostId.toLowerCase();
     return c;
@@ -426,9 +481,10 @@ export async function hostStatus(hostId?: string | null): Promise<Record<string,
 export async function hostStatusAll(): Promise<{ available: boolean; hosting: boolean; max: number; clouds: Record<string, unknown>[] }> {
   const known = await serial(async () => {
     const ix = readIndex();
-    for (const [slot, id] of Object.entries(ix)) { const c = cloudOf(slot); if (!c.hostId) c.hostId = id; }
-    if (!ix.main) {
-      const id = await legacyMainId();
+    const knownIds = { ...keptIdentities(), ...ix };
+    for (const [slot, id] of Object.entries(knownIds)) { const c = cloudOf(slot); if (!c.hostId) c.hostId = id; }
+    if (!knownIds.main) {
+      const id = await legacyMainId().catch(() => null);
       if (id) { const c = cloudOf("main"); if (!c.hostId) c.hostId = id; ix.main = id; writeIndex(ix); }
     }
     return [...clouds.values()].filter((c) => c.hostId);

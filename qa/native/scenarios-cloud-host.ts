@@ -87,6 +87,83 @@ sc("settings", "cloud hosting resume after relaunch, and stays off after Stop", 
   }
 });
 
+sc("settings", "cloud hosting retry shows a Keychain error and keeps resume enabled", { covers: ["settings:cloud-host"] }, async (t: NT) => {
+  const start = await post(t.app.base, "/api/cloud/host/start", { name: "Studio", label: "Anna" });
+  t.eq(start.status, 200, "the server starts Studio");
+  const url: string = start.j.url;
+  const hostId = new URL(url).hostname;
+  const savedId = "11111111-2222-4333-8444-555555555555";
+  const dir = t.app.dir;
+  const security = path.join(dir, "blocked-security");
+  const reads = path.join(dir, "key-reads");
+  const hold = path.join(dir, "hold-key-read");
+  const index = JSON.parse(fs.readFileSync(path.join(dir, "state", "cloud-hosts.json"), "utf8"));
+  const slot = Object.keys(index).find((key) => index[key] === hostId);
+  t.ok(slot, "Studio has a slot");
+  const key = slot === "main" ? "host:keys" : `host:keys:${slot}`;
+  fs.writeFileSync(reads, "");
+  fs.writeFileSync(security, `#!${process.execPath}
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] !== "find-generic-password") process.exit(1);
+if (args[args.indexOf("-a") + 1] !== ${JSON.stringify(key)}) process.exit(44);
+fs.appendFileSync(${JSON.stringify(reads)}, "x");
+const hold = ${JSON.stringify(hold)};
+if (fs.existsSync(hold)) {
+  setInterval(() => { if (!fs.existsSync(hold)) process.exit(1); }, 20);
+  return;
+}
+process.exit(1);
+`, { mode: 0o700 });
+  const attempts = () => fs.readFileSync(reads, "utf8").length;
+  const serverEnv = { CANVAS_SECURITY_BIN: security, CANVAS_CLOUD_SECRETS_FILE: "" };
+  const error = "Couldn't read this Cloud's keys from the Keychain. Unlock the Keychain and try again.";
+  const endpoint = `${t.app.base}/api/cloud/host`;
+  const status = async () => (await fetch(`${endpoint}?hostId=${hostId}`)).json() as Promise<any>;
+  try {
+    await t.cmd("qa.cloud", { clouds: [{ id: savedId, url, name: "Studio", kind: "hosted", hosting: true }] });
+    await t.app.relaunch({ restartServer: true, serverEnv });
+    await t.waitFor(async () => attempts() >= 2, "the second Keychain read", 12_000);
+    await t.waitState((s) => s.toast === error, "the resume error toast", 5000);
+    const all = await (await fetch(endpoint)).json() as any;
+    const one = await status();
+    t.eq(all.clouds.find((c: any) => c.hostId === hostId)?.tunnelError, error, "the list reports Studio's error");
+    t.eq(one.tunnelError, error, "Studio's status reports the same error");
+    t.eq(one.hosting, false, "Studio is stopped");
+    await settingsCloud(t);
+    await t.click(center(await t.mark({ id: "cloud-row", label: "Studio", window: "settings" }, 4000)), { window: "settings" });
+    await t.mark({ id: "cloud-tunnel-error", label: error, window: "settings" }, 4000);
+    const saved = (await t.cmd("qa.cloud")).clouds.find((c: any) => c.id === savedId);
+    t.eq(saved?.hosting, true, "opening Settings keeps Studio set to resume next launch");
+    await sleep(3200);
+    t.eq(attempts(), 2, "launch reads the keys twice without another retry");
+
+    // Hold the first read long enough to open Stop, then confirm during the retry delay.
+    fs.writeFileSync(reads, "");
+    fs.writeFileSync(hold, "");
+    await t.app.relaunch({ restartServer: true, serverEnv });
+    await settingsCloud(t);
+    await t.click(center(await t.mark({ id: "cloud-row", label: "Studio", window: "settings" }, 4000)), { window: "settings" });
+    await t.click(center(await t.mark({ id: "cloud-stop-hosting", window: "settings" }, 4000)), { window: "settings" });
+    await t.waitState((s) => s.modal, "Stop asks first", 4000);
+    const stop = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Stop Hosting");
+    t.ok(stop, "Stop Hosting button");
+    fs.rmSync(hold);
+    t.eq((await status()).tunnelError, error, "the first start failed");
+    await t.click(center(stop), { window: "modal" });
+    await t.waitFor(async () => (await status()).tunnelError === null, "Stop clears the error", 5000);
+    await sleep(3200);
+    t.eq(attempts(), 1, "Stop canceled the retry");
+    t.eq((await t.cmd("qa.cloud")).clouds.find((c: any) => c.id === savedId)?.hosting, false, "Stop saves hosting off");
+  } finally {
+    fs.rmSync(hold, { force: true });
+    await t.cmd("qa.cloud", { clouds: [{ id: savedId, url, name: "Studio", kind: "hosted", hosting: false }] }).catch(() => {});
+    await t.app.relaunch({ restartServer: true }).catch(() => {});
+    await post(t.app.base, "/api/cloud/host/wipe", { hostId }).catch(() => {});
+    await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
+  }
+});
+
 /** Host on this Mac from the sheet, under a name. Returns the new Cloud's entry. */
 async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: string }> {
   const before = (await t.cmd("qa.cloud", {})).clouds.map((c: any) => c.id);

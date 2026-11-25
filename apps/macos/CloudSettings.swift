@@ -57,6 +57,7 @@ struct HostState: Equatable {
     var hostId: String?
     var fingerprint: String?
     var tunnel = "off"
+    var tunnelError: String?
     var people: [Person] = []
     var name = ""
     /// The first slot, where the single hosted Cloud of older versions lives.
@@ -71,6 +72,7 @@ struct HostState: Equatable {
         hostId = j["hostId"] as? String
         fingerprint = j["fingerprint"] as? String
         tunnel = j["tunnel"] as? String ?? "off"
+        tunnelError = j["tunnelError"] as? String
         people = (j["people"] as? [[String: Any]] ?? []).compactMap { p in
             guard let id = p["id"] as? String, let label = p["label"] as? String else { return nil }
             // "Ben's MacBook on 18 Nov": which Mac joined, and when.
@@ -108,7 +110,7 @@ final class CloudAccount: ObservableObject {
     private var signIns: [String: CloudSignInWindow] = [:]
     private var hostRefreshGeneration = 0
     private var stoppingOrDeleting: Set<String> = []
-    private var resumingHosts = false
+    private var resumeTasks: [String: Task<Void, Never>] = [:]
     /// While hosting: no idle sleep (a closed lid still sleeps).
     private var awake: IOPMAssertionID = 0
 
@@ -228,6 +230,7 @@ final class CloudAccount: ObservableObject {
     func host(_ e: CloudEntry) -> HostState { e.hostId.flatMap { hosts[$0] } ?? HostState() }
     /// Whether this Mac runs that hosted Cloud now.
     func isHosting(_ e: CloudEntry) -> Bool { e.kind == .hosted && host(e).hosting }
+    func isResuming(_ e: CloudEntry) -> Bool { e.hostId.map { resumeTasks[$0] != nil } ?? false }
     /// The ids of the Clouds this Mac hosts (running or not): an invite to one of them is not joined.
     func hostedIds(_ model: CanvasModel) -> Set<String> { Set(hosts.keys).union(CloudList.hosted(model.prefs.clouds).compactMap(\.hostId)) }
 
@@ -258,16 +261,13 @@ final class CloudAccount: ObservableObject {
     /// team). This Canvas is each one's first member (the owner, on loopback). Nil when it worked, else why not.
     func startHosting(_ model: CanvasModel, entry: CloudEntry? = nil, name: String) async -> String? {
         let key = entry?.hostId ?? "new"
+        guard !stoppingOrDeleting.contains(key) else { return "Stop or Delete is already in progress." }
         starting.insert(key)
         var body = names(model, name: name)
         if let id = entry?.hostId { body["hostId"] = id }
         let (status, j) = await CloudAccount.post(model, "api/cloud/host/start", body)
         starting.remove(key)
         guard status == 200, let url = j["url"] as? String else {
-            if let entry {
-                hostRefreshGeneration += 1
-                setHosting(model, entry.id, false)
-            }
             await refreshHost(model)
             return j["error"] as? String ?? "Could not start hosting"
         }
@@ -285,9 +285,8 @@ final class CloudAccount: ObservableObject {
     /// The entry the last Start hosting made or started (the sheet opens its page).
     private(set) var lastStarted: String?
 
-    /// Canvas started: every Cloud this Mac hosted when it quit starts again, quietly.
+    /// Resume the Clouds that were hosting at quit. The Keychain may still be locked at login.
     func resumeHosting(_ model: CanvasModel) {
-        guard !resumingHosts else { return }
         // Migration cannot identify the old hosted Cloud from its saved address. Discover it at launch first.
         if UserDefaults.standard.bool(forKey: AppSettings.prefix + CloudList.legacyHostingKey) {
             Task { await refreshHost(model) }
@@ -295,19 +294,32 @@ final class CloudAccount: ObservableObject {
         }
         let hosted = CloudList.hosted(model.prefs.clouds)
         guard !hosted.isEmpty else { return }
-        let list = hosted.filter(\.hosting)
-        if !list.isEmpty { resumingHosts = true }
-        Task {
-            for e in list {
-                guard let id = e.hostId, !stoppingOrDeleting.contains(id),
-                      model.prefs.clouds.contains(where: { $0.id == e.id && $0.kind == .hosted && $0.hosting }) else { continue }
+        for e in hosted where e.hosting {
+            guard let id = e.hostId, resumeTasks[id] == nil else { continue }
+            starting.insert(id)
+            resumeTasks[id] = Task {
+                defer {
+                    resumeTasks[id] = nil
+                    starting.remove(id)
+                }
                 var body = names(model, name: e.name)
                 body["hostId"] = id
-                _ = await CloudAccount.post(model, "api/cloud/host/start", body)
+                for attempt in 1...2 {
+                    guard !Task.isCancelled, !stoppingOrDeleting.contains(id),
+                          model.prefs.clouds.contains(where: { $0.id == e.id && $0.kind == .hosted && $0.hosting }) else { return }
+                    let (status, response) = await CloudAccount.post(model, "api/cloud/host/start", body)
+                    guard !Task.isCancelled else { return }
+                    if status == 200 { break }
+                    if attempt == 1 {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    } else {
+                        model.flash(response["error"] as? String ?? "Could not start hosting", level: "error")
+                    }
+                }
+                await refreshHost(model)
             }
-            if !list.isEmpty { resumingHosts = false }
-            await refreshHost(model)
         }
+        if resumeTasks.isEmpty { Task { await refreshHost(model) } }
     }
 
     /// Drop polls already in flight. The last Stop or Delete to finish refreshes the list again.
@@ -317,6 +329,7 @@ final class CloudAccount: ObservableObject {
             return false
         }
         hostRefreshGeneration += 1
+        resumeTasks[id]?.cancel()
         return true
     }
 
@@ -325,7 +338,9 @@ final class CloudAccount: ObservableObject {
         guard let id = e.hostId else { return }
         let a = NSAlert()
         a.messageText = "Stop hosting \(HomeLogic.cloudName(e))?"
-        a.informativeText = "Everyone in it loses access now, and needs a new invite if you host it again. The comments stay on this Mac until you delete the Cloud."
+        a.informativeText = isHosting(e)
+            ? "Everyone in it loses access now, and needs a new invite if you host it again. The comments stay on this Mac until you delete the Cloud."
+            : "This turns off automatic hosting for this Cloud."
         a.addButton(withTitle: "Stop Hosting")
         a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn, beginStoppingOrDeleting(model, id) else { return }
@@ -936,11 +951,16 @@ struct CloudPage: View {
                 }
             }
             if e.kind == .hosted && h.hosting { people(e, h) }
+            if e.kind == .hosted, !account.isResuming(e), let error = h.tunnelError {
+                Text(error).font(Typography.body).foregroundStyle(Palette.danger).fixedSize(horizontal: false, vertical: true)
+                    .qaID("cloud-tunnel-error", label: error)
+            }
             HStack(spacing: 8) {
                 if e.kind == .hosted {
-                    if h.hosting {
+                    if h.hosting || e.hosting {
                         FieldButton(title: "Stop hosting", symbol: nil) { account.stopHosting(model, e) }.qaID("cloud-stop-hosting", label: "Stop hosting")
-                    } else {
+                    }
+                    if !h.hosting {
                         let busy = account.starting.contains(e.hostId ?? "")
                         FieldButton(title: busy ? "Starting\u{2026}" : "Start hosting", symbol: nil) {
                             Task { if let why = await account.startHosting(model, entry: e, name: e.name) { model.flash(why) } }
