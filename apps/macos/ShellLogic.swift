@@ -95,21 +95,21 @@ enum JSONNumber {
     }
 }
 
-/// The left panel's width against the window: rail, gaps, the inspector and a sliver of canvas must still fit.
+/// The left panel's width against the window, with room for the inspector and canvas.
 /// nil means there is no room for the panel at all (it hides rather than overlapping the inspector).
 enum ShellLayout {
     static let minCanvas: CGFloat = 120
 
     /// The widest the panel can be in this window.
-    static func room(window: CGFloat, inspector: Bool, inset: CGFloat, rail: CGFloat, gap: CGFloat, props: CGFloat) -> CGFloat {
-        var room = window - inset * 2 - rail - gap * 2 - minCanvas
+    static func room(window: CGFloat, inspector: Bool, inset: CGFloat, gap: CGFloat, props: CGFloat) -> CGFloat {
+        var room = window - inset * 2 - gap - minCanvas
         if inspector { room -= props + gap }
         return room
     }
 
     static func sidebarWidth(window: CGFloat, stored: CGFloat, inspector: Bool,
-                             inset: CGFloat, rail: CGFloat, gap: CGFloat, props: CGFloat, minWidth: CGFloat) -> CGFloat? {
-        let room = room(window: window, inspector: inspector, inset: inset, rail: rail, gap: gap, props: props)
+                             inset: CGFloat, gap: CGFloat, props: CGFloat, minWidth: CGFloat) -> CGFloat? {
+        let room = room(window: window, inspector: inspector, inset: inset, gap: gap, props: props)
         if room < minWidth { return nil }
         return min(max(stored, minWidth), room)
     }
@@ -584,8 +584,8 @@ struct LeadTrailThrottle {
 
 /// The part of the window the shell's islands cover, as insets of the canvas view. The canvas fits into what is left.
 enum CanvasInsets {
-    static func compute(panel: CGFloat?, inspector: Bool, inset: CGFloat, rail: CGFloat, gap: CGFloat, pill: CGFloat, props: CGFloat) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
-        let left = inset + rail + gap + (panel.map { $0 + gap } ?? 0)
+    static func compute(panel: CGFloat?, inspector: Bool, inset: CGFloat, gap: CGFloat, pill: CGFloat, props: CGFloat) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
+        let left = inset + (panel ?? pill) + gap
         let right = inset + (inspector ? props + gap : 0)
         let top = inset + pill + gap
         let bottom = inset + pill + gap
@@ -1459,7 +1459,7 @@ enum MenuSpec {
     }
 }
 
-/// Which file each tab showed in the left panel (Layers, Components, Widgets): a tab keeps its own.
+/// The left panel segment each tab last showed.
 enum PanelMemory {
     static func next<S>(_ saved: [String: S], leaving old: String?, current: S, opening new: String) -> (saved: [String: S], section: S?) {
         var s = saved

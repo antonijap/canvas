@@ -391,9 +391,6 @@ struct LayersRows: View {
     var body: some View {
         let selected = Set(store.selectedIds)
         let purple = model.selection?.isComponent ?? false
-        HStack(spacing: 0) {
-            SectionHeader(title: "Layers")
-        }
         if model.revision.isEmpty {
             ForEach(model.openingSidebar?.boards ?? []) { board in
                 HStack(spacing: 6) {
@@ -429,11 +426,18 @@ struct LayersSync: ViewModifier {
     @ObservedObject var store: LayersStore
     let proxy: ScrollViewProxy
     let active: Bool
+    let restoring: Bool
 
     func body(content: Content) -> some View {
         content
-            .onAppear { if active { store.documentChanged(); store.selectionChanged(); revealNow() } }
-            .onChange(of: active) { _, a in if a { store.documentChanged(); revealNow() } }
+            .onAppear {
+                guard active else { return }
+                store.documentChanged()
+                store.selectionChanged()
+                if let id = model.renamingBoard ?? store.renaming ?? (restoring ? nil : store.selectedIds.last) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { proxy.scrollTo(id) }
+                }
+            }
             .onChange(of: model.revision) { _, _ in if active { store.documentChanged() } }
             .onChange(of: model.currentFile) { _, _ in if active { store.documentChanged() } }
             .onChange(of: model.boards.map(\.id)) { _, _ in if active { store.documentChanged() } }
@@ -443,17 +447,11 @@ struct LayersSync: ViewModifier {
                 withAnimation(Motion.fast) { proxy.scrollTo(id) }
             }
     }
-
-    /// The panel just opened on Layers: the selection's row comes into view.
-    private func revealNow() {
-        guard let id = store.selectedIds.last else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { proxy.scrollTo(id) }
-    }
 }
 
 extension View {
-    func layersSync(model: CanvasModel, proxy: ScrollViewProxy, active: Bool) -> some View {
-        modifier(LayersSync(model: model, store: LayersStore.of(model), proxy: proxy, active: active))
+    func layersSync(model: CanvasModel, proxy: ScrollViewProxy, active: Bool, restoring: Bool) -> some View {
+        modifier(LayersSync(model: model, store: LayersStore.of(model), proxy: proxy, active: active, restoring: restoring))
     }
 }
 

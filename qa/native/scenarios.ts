@@ -24,6 +24,7 @@ import "./scenarios-cloud-host.ts";
 import "./scenarios-home.ts";
 import "./scenarios-alignment.ts";
 import "./scenarios-arrange.ts";
+import "./scenarios-sidebar.ts";
 import { intoInspector } from "./scenarios-leftovers.ts";
 
 /** The canvas area well clear of the panels (window points). */
@@ -754,7 +755,7 @@ sc("components", "drag a component row onto a board: an instance where it lands;
   await t.section("Layers");
   await t.showPage("components");
   await t.look(600, 0);
-  await t.section("Components");
+  await t.section("Assets");
   const side = { x: 60, y: 60, w: 250, h: 500 };
   const pri = await t.textAt("Button/Primary", side);
   const b = await t.rect("cmp_inst");
@@ -1047,18 +1048,20 @@ sc("settings", "Settings > Privacy: Share usage counts on, Help improve Canvas a
   t.eq(off.body.install, undefined, "Help improve Canvas off: no install id");
 });
 
-sc("styles", "the Styles switch shows Text, Variables and Fonts", { covers: [] }, async (t: NT) => {
-  await t.section("Styles");
-  const panel = { x: 60, y: 60, w: 260, h: 700 };
+sc("tokens", "the Tokens switch shows Text, Variables and Fonts", { covers: [] }, async (t: NT) => {
+  await t.section("Tokens");
+  const panel = { x: 10, y: 105, w: 230, h: 700 };
+  const tab = async (label: string) => center(await t.mark({ id: "text", label, exact: true, region: { ...panel, h: 38 } }));
+  await t.click(await tab("Text"));
   // Each tab's search field names what it lists.
   await t.waitText("Search text styles", panel);
-  await t.click(await t.textAt("Variables", panel));
+  await t.click(await tab("Variables"));
   await t.waitText("Search variables", panel);
   await t.waitText("brand", panel);
-  await t.click(await t.textAt("Fonts", panel));
-  await t.waitText("fonts", { ...panel, y: 120, h: 60 });
+  await t.click(await tab("Fonts"));
+  await t.waitText("fonts", { ...panel, y: panel.y + 38, h: 70 });
   t.ok(!(await t.marks({ label: "brand", region: panel })).length, "variables still listed on the Fonts tab");
-  await t.click(await t.textAt("Text", { ...panel, h: 80 }));
+  await t.click(await tab("Text"));
   await t.waitText("Search text styles", panel);
   t.ok(!(await t.marks({ label: "brand", region: panel })).length, "variables listed on the Text tab");
 });
@@ -1077,7 +1080,7 @@ sc("clipboard", "copy cards and a board in one tab, paste them in another tab", 
     await t.app.cmd({ op: "open", args: { file: other }, timeoutMs: 15_000 });
     await o.waitState((s) => s.file === other && s.pages.length > 0, "the other tab", 15_000);
     await o.settle();
-    await o.section("Layers"); // the pages list (a scenario before may have left Styles open)
+    await o.section("Layers");
     await o.showPage("cards");
     const ws = o.widgets().widgets.filter((w: any) => w.kind === "todo" || w.name === "Note");
     t.eq(ws.length, 2, "a to-do and a note in the other file");
@@ -1125,7 +1128,7 @@ for (const theme of ["light", "dark"] as const) {
     try {
       await t.app.cmd({ op: "theme.set", args: { mode: theme } });
       await t.waitState((s) => s.theme === theme, `the ${theme} theme`);
-      await t.section("Layers"); // the pages list (a scenario before may have left Styles open)
+      await t.section("Layers");
       await t.showPage("cards");
       const w = t.widgets().widgets.find((x: any) => x.kind === "todo");
       await t.look(w.x - 40, w.y - 40, 1);

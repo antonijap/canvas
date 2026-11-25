@@ -211,14 +211,15 @@ export class NT {
     return { id, name: page.name as string, r };
   }
 
-  /** The rail's buttons: the panel toggle, then Layers, Components, Styles, Widgets (fixed layout, top left). */
-  rail(which: "panel" | "Layers" | "Components" | "Styles" | "Widgets"): Pt {
-    const i = ["panel", "Layers", "Components", "Styles", "Widgets"].indexOf(which);
-    return { x: 30, y: i === 0 ? 80 : 121 + (i - 1) * 32.3 };
+  async sidebarToggle(): Promise<Pt> {
+    return center(await this.mark({ id: "sidebar-toggle" }));
   }
-  async section(which: "Layers" | "Components" | "Styles" | "Widgets") {
-    if ((await this.state()).section === which && (await this.state()).panelOpen) return;
-    await this.click(this.rail(which));
+  async section(which: "Layers" | "Assets" | "Tokens" | "Widgets") {
+    const state = await this.state();
+    if (!state.panelOpen) await this.click(await this.sidebarToggle());
+    if (!state.panelOpen || state.section !== which) {
+      await this.click(center(await this.mark({ id: "sidebar-segment", label: which, exact: true })));
+    }
     await this.waitState((s) => s.section === which && s.panelOpen, `the ${which} section`);
   }
 

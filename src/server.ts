@@ -8,7 +8,7 @@ import { updateVariables, variableEditBody } from "./doc/variables.ts";
 // Canvas: a lightweight local design surface for .canvas documents.
 // Agents design through Canvas MCP (it edits the file through this server); Canvas watches the file and
 // redraws the changed boards in place. Pan by drag or scroll, zoom by pinch or Cmd+scroll,
-// click a node to see its properties, left rail lists boards, components, text styles and variables.
+// click a node to see its properties, left sidebar lists boards, components, text styles and variables.
 
 import { asOneAction, withActionAgent } from "./cloud-files-ops.ts";
 import fs from "node:fs";
@@ -1178,7 +1178,14 @@ button{font:inherit;color:var(--c-fg);background:transparent;border:0;border-rad
 button:hover{background:var(--c-accent)}
 button:focus-visible{outline:2px solid var(--c-ring)}
 .spacer{flex:1}
-#left{position:fixed;left:0;top:0;bottom:0;width:var(--c-sidebar-width);box-sizing:border-box;overflow:auto;background:var(--c-sidebar);border-right:1px solid var(--c-sidebar-border);padding:40px 10px 14px var(--c-inset);z-index:5;color:var(--c-sidebar-fg)}
+#left{position:fixed;left:0;top:0;bottom:0;width:var(--c-sidebar-width);box-sizing:border-box;display:flex;flex-direction:column;background:var(--c-sidebar);border-right:1px solid var(--c-sidebar-border);padding:40px 10px 0 var(--c-inset);z-index:5;color:var(--c-sidebar-fg)}
+#left [role=tablist]{display:flex;flex:none;gap:2px;padding:2px;border-radius:var(--c-radius);background:var(--c-field)}
+#left [role=tab]{flex:1;padding:6px 4px;font-size:var(--c-size-xs);line-height:1;color:var(--c-muted-fg)}
+#left [role=tab]:hover{background:var(--c-hover)}
+#left [role=tab][aria-selected=true]{color:var(--c-fg);background:var(--c-active)}
+#left [role=tabpanel]{flex:1;min-height:0;overflow:auto;padding:0 0 14px}
+#left [role=tabpanel]:focus-visible{outline:2px solid var(--c-ring);outline-offset:-2px}
+#left #sidebar-assets-panel{padding-top:8px}
 #left h3{margin:16px 0 6px;font-size:var(--c-size-2xs);text-transform:uppercase;letter-spacing:.8px;color:var(--c-muted-fg);font-weight:600}
 .row{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:var(--c-radiusRow);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--c-size-xs);transition:background var(--c-fast)}
 .row:hover{background:var(--c-accent)}
@@ -1257,11 +1264,22 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 <div class="island"><span id="rev"></span><span class="spacer"></span><button id="fit" title="Zoom to selection, or the whole page  F">Fit</button><button id="z100" title="Zoom to 100%  0">100%</button><button id="snapBtn" title="Snapping and nudge settings">Snap</button></div>
 </header>
 <aside id="left">
-  <h3>Pages</h3><div id="pages"></div>
-  <h3>Boards</h3><div id="boards"></div>
-  <h3>Components</h3><div id="comps"></div>
-  <h3>Text styles</h3><div id="styles"></div>
-  <h3>Variables</h3><div id="vars"></div>
+  <div role="tablist" aria-label="Sidebar">
+    <button id="sidebar-layers" role="tab" aria-controls="sidebar-layers-panel" aria-selected="true">Layers</button>
+    <button id="sidebar-assets" role="tab" aria-controls="sidebar-assets-panel" aria-selected="false" tabindex="-1">Assets</button>
+    <button id="sidebar-tokens" role="tab" aria-controls="sidebar-tokens-panel" aria-selected="false" tabindex="-1">Tokens</button>
+  </div>
+  <div id="sidebar-layers-panel" role="tabpanel" aria-labelledby="sidebar-layers" tabindex="0">
+    <h3>Pages</h3><div id="pages"></div>
+    <h3>Boards</h3><div id="boards"></div>
+  </div>
+  <div id="sidebar-assets-panel" role="tabpanel" aria-labelledby="sidebar-assets" tabindex="0" hidden>
+    <div id="comps"></div>
+  </div>
+  <div id="sidebar-tokens-panel" role="tabpanel" aria-labelledby="sidebar-tokens" tabindex="0" hidden>
+    <h3>Text styles</h3><div id="styles"></div>
+    <h3>Variables</h3><div id="vars"></div>
+  </div>
 </aside>
 <main id="view"><div id="world"></div><div id="labels"></div><div id="hov"></div><div id="marquee"></div><div id="sel"><i></i><i></i><i></i><i></i><span id="seldim"></span></div><canvas id="guides"></canvas></main>
 <div id="snapPop" role="dialog" aria-label="Snapping"><label><input type="checkbox" data-k="objects"> Snap to objects</label><label><input type="checkbox" data-k="pixel"> Snap to pixel grid</label><label><input type="checkbox" data-k="blueprint"> Snap to blueprint</label><label><input type="checkbox" data-k="guides"> Show smart guides</label><label>Big nudge <input type="number" min="1" max="1000" data-k="bigNudge"> px</label></div>
@@ -1281,6 +1299,41 @@ const api = (p) => p + "?file=" + encodeURIComponent(file);
 const SCENE_ENV = document.documentElement.dataset.env || "";
 const keyedQ = (key) => (key && SCENE_ENV ? "&key=" + encodeURIComponent(key) + "&v=" + SCENE_ENV : "");
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+const sidebarKey = "canvas:sidebar-section";
+const sidebar = document.getElementById("left");
+const sidebarTabs = [...sidebar.querySelectorAll("[role=tab]")];
+function selectSidebarTab(selected) {
+  for (const tab of sidebarTabs) {
+    const active = tab === selected;
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+    document.getElementById(tab.getAttribute("aria-controls")).hidden = !active;
+  }
+}
+const savedSidebarTab = store.get(sidebarKey);
+selectSidebarTab(sidebarTabs.find(tab => tab.id === savedSidebarTab) || sidebarTabs[0]);
+sidebar.addEventListener("keydown", (e) => {
+  // Keep sidebar navigation and scrolling out of the canvas key handlers.
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === "Tab" || (!e.shiftKey && (e.key.startsWith("Arrow") || [" ", "Home", "End"].includes(e.key)))) e.stopPropagation();
+});
+sidebarTabs.forEach((tab, index) => {
+  tab.onclick = (e) => {
+    selectSidebarTab(tab);
+    store.set(sidebarKey, tab.id);
+    if (e.detail > 0) document.getElementById(tab.getAttribute("aria-controls")).focus({ preventScroll: true });
+  };
+  tab.onkeydown = (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    const last = sidebarTabs.length - 1;
+    const next = { ArrowLeft: index === 0 ? last : index - 1, ArrowRight: index === last ? 0 : index + 1, Home: 0, End: last }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    e.stopPropagation();
+    sidebarTabs[next].focus();
+    sidebarTabs[next].click();
+  };
+});
 // Pure helpers, node-tested (src/pagelogic.ts).
 const zoomAt = ${zoomAt};
 const wheelAction = ${wheelAction};
@@ -2553,7 +2606,7 @@ host.looksDone = () => {
   return any;
 };
 document.addEventListener("visibilitychange", () => { if (!document.hidden) perfMark("show"); });
-// ---------- left rail ----------
+// ---------- left sidebar ----------
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function renderLeft(d) {
   const pagesEl = document.getElementById("pages");

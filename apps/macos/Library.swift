@@ -239,7 +239,7 @@ extension CanvasModel {
     }
 
     func revealInBoards(_ board: String) {
-        section = .boards
+        section = .layers
         revealBoardId = board
     }
 

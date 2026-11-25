@@ -742,7 +742,7 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
 // A page selected in the sidebar uses these keys to reorder. On the canvas they still rotate layers.
 NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
   guard e.window === window, window.attachedSheet == nil, !(window.firstResponder is NSText), !model.textEditing,
-        model.section == .boards, let page = model.pageShortcutTarget,
+        model.section == .layers, let page = model.pageShortcutTarget,
         page.file == model.currentFile, page.id == model.activePage,
         e.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command, .option] else { return e }
   switch e.keyCode {

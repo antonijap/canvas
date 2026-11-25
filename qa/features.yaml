@@ -527,6 +527,11 @@ features:
     cases: [instance, component, other-page]
 
   # ------------------------------------------------------------ pages and layers panel
+  - id: sidebar
+    name: Switch and remember editor sidebar segments
+    area: sidebar
+    driven: [page, native]
+    cases: [segments, scroll, restore, toggle, keyboard, header]
   - id: pages
     name: Switch pages, move boards between pages
     area: pages

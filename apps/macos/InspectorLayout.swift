@@ -106,6 +106,7 @@ struct TextSegments<Tag: Hashable>: View {
     let items: [(title: String, tag: Tag)]
     let selection: Tag?
     var enabled = true
+    var showsTrack = true
     let onSelect: (Tag) -> Void
 
     var body: some View {
@@ -125,7 +126,7 @@ struct TextSegments<Tag: Hashable>: View {
             }
         }
         .padding(2)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(showsTrack ? Palette.field : .clear))
         .opacity(enabled ? 1 : 0.5).disabled(!enabled)
     }
 }

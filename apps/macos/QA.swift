@@ -703,8 +703,11 @@ enum QA {
         cg.flags = CGEventFlags(rawValue: UInt64(flags(a).rawValue))
         if precise { cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1) }
         guard let e = NSEvent(cgEvent: cg) else { throw QAError(message: "no scroll event") }
-        // NSApp.postEvent drops scroll events without a window; the window takes them straight.
-        w.sendEvent(e)
+        // A scroll CGEvent has no window number. Hit-test in window points before handing it to the view.
+        if let content = w.contentView {
+            let point = content.superview?.convert(p, from: nil) ?? p
+            content.hitTest(point)?.scrollWheel(with: e)
+        }
         try await sleep((a["settleMs"] as? NSNumber)?.doubleValue ?? 80)
         return [:]
     }
@@ -823,7 +826,7 @@ enum QA {
         return [
             "file": m.currentFile ?? NSNull(), "openFiles": m.openFiles, "homeShown": m.homeShown, "recents": MainActor.assumeIsolated { HomeStore.shared.recents.map(\.path) }, "homeSection": MainActor.assumeIsolated { String(describing: HomeStore.shared.section) }, "homeCloud": MainActor.assumeIsolated { HomeStore.shared.section.cloudId ?? "" }, "addCloud": MainActor.assumeIsolated { AddCloudPanel.shared.isOpen }, "stateDir": StateFolder.path, "revision": m.revision, "zoom": m.zoom,
             "tabRename": ["file": tabRenameFile() as Any? ?? NSNull(), "events": tabRenameEvents],
-            "section": m.section?.rawValue ?? NSNull(), "panelOpen": m.panelOpen, "sidebarWidth": Double(m.sidebarWidth), "homeSidebarWidth": Double(m.homeSidebarWidth), "inspectorOpen": m.inspectorOpen, "uiHidden": m.uiHidden,
+            "section": m.section.rawValue, "panelOpen": m.panelOpen, "sidebarWidth": Double(m.sidebarWidth), "homeSidebarWidth": Double(m.homeSidebarWidth), "inspectorOpen": m.inspectorOpen, "uiHidden": m.uiHidden,
             "pages": m.pages.map { ["id": $0.id, "name": $0.name, "count": $0.count] }, "activePage": m.activePage ?? NSNull(),
             "cloudReadOnly": m.cloudReadOnly, "boards": m.boards.map(\.id), "selection": sel, "selectedWidget": m.selectedWidgetId ?? NSNull(),
             "widgets": m.widgets.map { ["id": $0.id, "kind": $0.kind] },

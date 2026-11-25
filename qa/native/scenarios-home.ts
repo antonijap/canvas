@@ -8,6 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { METRICS } from "../../src/tokens.ts";
 import { copyDir, sleep } from "../lib.ts";
 import { PLAYGROUND } from "../playground.ts";
 import { QaApp } from "./app.ts";
@@ -327,16 +328,16 @@ sc("home", "Both sidebars drag from their right edge, stop at a minimum and a ma
   // Editor panel.
   await leaveHome(t, baseName(t.file));
   await t.section("Layers");
-  t.eq(await dragEdge(t, "sidebarWidth", -900), 200, "the editor panel stops at its minimum");
+  t.eq(await dragEdge(t, "sidebarWidth", -900), METRICS.sidebarMin, "the editor panel stops at its minimum");
   await shot(t, "editor-sidebar-min");
   t.eq(await dragEdge(t, "sidebarWidth", 900) <= 420, true, "and at its maximum");
   await shot(t, "editor-sidebar-max");
   const e = await t.mark({ id: "sidebar-resize" });
   await t.doubleClick({ x: e.x + e.w / 2, y: e.y + e.h / 2 });
   await sleep(250);
-  t.eq((await t.state()).sidebarWidth, 244, "double-click puts the editor panel back to its default");
+  t.eq((await t.state()).sidebarWidth, METRICS.sidebarWidth, "double-click puts the editor panel back to its default");
   await dragEdge(t, "sidebarWidth", 30);
-  t.eq(stored("canvas.sidebarWidth"), 274, "the editor panel's width is kept in preferences");
+  t.eq(stored("canvas.sidebarWidth"), METRICS.sidebarWidth + 30, "the editor panel's width is kept in preferences");
 });
 
 sc("tabs", "Warm tab switching keeps the same document page", { covers: ["tabs:warm-switch"] }, async (t: NT) => {

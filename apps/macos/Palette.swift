@@ -530,7 +530,7 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
                                   applies: { _ in true }, run: { _ in MainActor.assumeIsolated { ResourceMeter.shared.popoverOpen = true } }))
         out.append(PaletteCommand(key: "panel", title: model.panelOpen ? "Hide Left Panel" : "Show Left Panel", symbol: "sidebar.left", keywords: "toggle sidebar layers", applies: { _ in true },
                                   run: { m in m.uiHidden = false; m.panelOpen.toggle() }))
-        for s in RailSection.allCases {
+        for s in SidebarSection.allCases {
             out.append(PaletteCommand(key: "section:" + s.rawValue, title: "Show \(s.rawValue)", symbol: s.symbol, keywords: "panel sidebar open", applies: { _ in true },
                                       run: { m in m.uiHidden = false; m.section = s; m.panelOpen = true }))
         }

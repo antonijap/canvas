@@ -125,13 +125,13 @@ struct RootView: View {
     private var panelWidth: CGFloat? {
         guard windowWidth > 0 else { return model.sidebarWidth }
         return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, inspector: rightSidebarShown,
-                                        inset: Metric.inset, rail: Metric.railWidth, gap: Metric.islandGap, props: Metric.propsWidth, minWidth: Metric.sidebarMin)
+                                        inset: Metric.inset, gap: Metric.islandGap, props: Metric.propsWidth, minWidth: Metric.sidebarMin)
     }
 
     /// The widest the panel may be dragged in this window: the maximum, or the room the window leaves.
     private var panelMax: CGFloat {
         guard windowWidth > 0 else { return Metric.sidebarMax }
-        let room = ShellLayout.room(window: windowWidth, inspector: rightSidebarShown, inset: Metric.inset, rail: Metric.railWidth,
+        let room = ShellLayout.room(window: windowWidth, inspector: rightSidebarShown, inset: Metric.inset,
                                     gap: Metric.islandGap, props: Metric.propsWidth)
         return min(Metric.sidebarMax, room)
     }
@@ -166,7 +166,7 @@ struct RootView: View {
                 ZStack(alignment: .topLeading) {
                     TopBar(model: model)
                     // View > Hide UI (Cmd+backslash): only the canvas and the tabs stay.
-                    if !model.uiHidden && !model.homeShown { LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth, panelMax: panelMax) }
+                    LeftColumn(model: model, panelOpen: $model.panelOpen, panelWidth: panelWidth, panelMax: panelMax)
                     if inspectorShown { Inspector(model: model, fonts: model.fonts).disabled(model.cloudReadOnly) }
                     // Nothing to zoom on an empty page: the pill comes back with the first board.
                     if !model.uiHidden && !model.homeShown && !model.pageEmpty { ZoomCorner(model: model) }
@@ -201,9 +201,9 @@ struct RootView: View {
 
     /// The free rectangle the canvas should fit into, so boards never hide under an island.
     private var insets: [CGFloat] {
-        let shown = panelOpen && model.section != nil ? panelWidth : nil
+        let shown = panelOpen ? panelWidth : nil
         let i = CanvasInsets.compute(panel: shown, inspector: rightSidebarShown, inset: Metric.inset,
-                                     rail: Metric.railWidth, gap: Metric.islandGap, pill: Metric.pill, props: Metric.propsWidth)
+                                     gap: Metric.islandGap, pill: Metric.pill, props: Metric.propsWidth)
         return [i.l, i.t, i.r, i.b]
     }
 }
@@ -427,37 +427,76 @@ struct LeftColumn: View {
     let panelWidth: CGFloat?
     /// The widest a drag may make the panel in this window.
     let panelMax: CGFloat
+    @State private var scrollOffsets: [SidebarSection: CGFloat] = [:]
+    @State private var tokenTab: TokenTab = .text
 
     var body: some View {
-        HStack(alignment: .top, spacing: Metric.islandGap) {
-            // One rail: the panel toggle, then the sections (a section's own button also closes the panel). Zoom
-            // lives in the zoom pill's menu, the shortcuts and the View menu.
-            GlassPill {
-                VStack(spacing: 0) {
-                    IconButton(symbol: "sidebar.left", active: panelOpen, help: panelOpen ? "Hide panel" : "Show panel") { panelOpen.toggle() }
-                    Capsule().fill(Palette.stroke).frame(width: 16, height: 1).padding(.vertical, 4)
-                    ForEach(RailSection.allCases) { s in
-                        IconButton(symbol: s.symbol, active: panelOpen && model.section == s, help: s.rawValue) {
-                            if model.section == s { panelOpen.toggle() } else { model.section = s; panelOpen = true }
-                        }
+        // Keep the section offsets and token tab when Hide UI removes the panel.
+        if !model.uiHidden && !model.homeShown { column }
+    }
+
+    private var column: some View {
+        let section = model.section
+        let shown = panelOpen ? panelWidth : nil
+        return GlassIsland(radius: shown == nil ? 999 : Metric.radiusIsland, padding: 0, dense: shown != nil) {
+            VStack(alignment: .leading, spacing: 4) {
+                toggle(shown: shown != nil)
+                    .padding([.top, .horizontal], Metric.pillPad)
+                if let width = shown {
+                    SidebarSegments(selection: section) { model.section = $0 }
+                        .padding(.horizontal, Metric.islandPad)
+                    SidePanel(model: model, section: section, tokenTab: $tokenTab, offset: Binding(
+                        get: { scrollOffsets[section] }, set: { scrollOffsets[section] = $0 }
+                    ))
+                    .id(section)
+                    .padding([.horizontal, .bottom], Metric.islandPad)
+                    .overlay(alignment: .trailing) {
+                        SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
+                                            defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
                     }
                 }
             }
-            .frame(width: Metric.railWidth)
+            .padding(.bottom, shown == nil ? Metric.pillPad : 0)
+        }
+        .frame(width: shown ?? Metric.pill)
+        .padding(.top, columnTop - barY)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
 
-            if panelOpen, let section = model.section, let width = panelWidth {
-                GlassIsland(padding: Metric.islandPad, dense: true) { SidePanel(model: model, section: section) }
-                    .frame(width: width)
-                    .overlay(alignment: .trailing) {
-                        SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax, defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
-                    }
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+    private func toggle(shown: Bool) -> some View {
+        IconButton(symbol: "sidebar.left", active: shown, help: shown ? "Hide panel" : "Show panel") { panelOpen.toggle() }
+            .qaID("sidebar-toggle", label: shown ? "Hide panel" : "Show panel")
+    }
+}
+
+private struct SidebarSegments: View {
+    let selection: SidebarSection
+    let onSelect: (SidebarSection) -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(SidebarSection.allCases) { section in
+                let selected = selection == section
+                Button { onSelect(section) } label: {
+                    Text(section.rawValue)
+                        .font(Typography.label)
+                        .fixedSize()
+                        .foregroundStyle(selected ? Palette.fg : Palette.mutedFg)
+                        .qaID("sidebar-segment-label", label: section.rawValue)
+                        .padding(.horizontal, 6)
+                        .frame(minWidth: 0, maxWidth: .infinity)
+                        .frame(height: Metric.field - 4)
+                        .background(RoundedRectangle(cornerRadius: Metric.radiusField - 2).fill(selected ? Palette.active : .clear))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .qaID("sidebar-segment", label: section.rawValue)
             }
         }
-        .padding(.top, columnTop - barY)
-        .padding(.bottom, 0)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField).fill(Palette.field))
+        .qaID("sidebar-track")
     }
 }
 
@@ -520,24 +559,32 @@ private struct EdgeHandle: NSViewRepresentable {
     }
 }
 
-enum StylesTab: Hashable { case text, variables, fonts }
+private enum TokenTab: Hashable { case text, variables, fonts }
 
-struct SidePanel: View {
+private struct SidePanel: View {
     @ObservedObject var model: CanvasModel
-    let section: RailSection
-    @State private var stylesTab: StylesTab = .text
+    let section: SidebarSection
+    @Binding var tokenTab: TokenTab
+    @Binding var offset: CGFloat?
+    @State private var scroll: ScrollPosition
+
+    init(model: CanvasModel, section: SidebarSection, tokenTab: Binding<TokenTab>, offset: Binding<CGFloat?>) {
+        self.model = model
+        self.section = section
+        _tokenTab = tokenTab
+        _offset = offset
+        _scroll = State(initialValue: ScrollPosition(y: offset.wrappedValue ?? 0))
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    if section == .boards { PagesSection(model: model) }
-                    // Layers draws its own header (Layers.swift).
-                    if section != .boards { SectionHeader(title: section.rawValue) }
                     switch section {
-                    case .boards:
+                    case .layers:
+                        PagesSection(model: model).padding(.bottom, 4)
                         LayersRows(model: model, store: LayersStore.of(model))
-                    case .components:
+                    case .assets:
                         ForEach(model.components) { c in
                             ListRow(title: (c.isText ? "T " : "") + c.name, detail: c.instances > 0 ? "\(c.instances) \u{00D7}" : c.type,
                                     symbol: "diamond.fill", tint: Palette.component, active: c.id == model.selection?.id) { model.reveal(c.id, board: c.board) }
@@ -549,10 +596,11 @@ struct SidePanel: View {
                                     .disabled(c.instances == 0)
                             }
                         }
-                    case .styles:
-                        TextSegments(items: [("Text", StylesTab.text), ("Variables", .variables), ("Fonts", .fonts)], selection: stylesTab) { stylesTab = $0 }
+                    case .tokens:
+                        TextSegments(items: [("Text", TokenTab.text), ("Variables", .variables), ("Fonts", .fonts)],
+                                     selection: tokenTab, showsTrack: false) { tokenTab = $0 }
                             .padding(.horizontal, 4).padding(.bottom, 6)
-                        switch stylesTab {
+                        switch tokenTab {
                         case .text: TokenLibrary(model: model, styles: true)
                         case .variables: TokenLibrary(model: model, styles: false)
                         case .fonts: FontList(model: model, fonts: model.fonts)
@@ -563,11 +611,18 @@ struct SidePanel: View {
                 }
             }
             .scrollIndicators(.never)
-            .layersSync(model: model, proxy: proxy, active: section == .boards)
+            .scrollPosition($scroll)
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                max(0, geometry.contentOffset.y + geometry.contentInsets.top)
+            } action: { _, y in
+                offset = y
+            }
+            .layersSync(model: model, proxy: proxy, active: section == .layers, restoring: offset != nil)
             // Also on appear: "Reveal in Boards list" may have just opened this section.
             .task(id: model.revealBoardId) {
-                guard let board = model.revealBoardId else { return }
+                guard section == .layers, let board = model.revealBoardId else { return }
                 try? await Task.sleep(nanoseconds: 80_000_000)
+                guard !Task.isCancelled, model.revealBoardId == board else { return }
                 withAnimation(Motion.island) { proxy.scrollTo(board, anchor: .center) }
                 model.revealBoardId = nil
             }

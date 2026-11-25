@@ -23,6 +23,7 @@ import "./scenarios-comments-shared.ts";
 import "./scenarios-comments-move.ts";
 import "./scenarios-alignment.ts";
 import "./scenarios-widgets.ts";
+import "./scenarios-sidebar.ts";
 
 import { buildLink } from "../src/page/link-logic.js";
 

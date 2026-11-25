@@ -98,8 +98,8 @@ export const METRICS = {
   islandPad: 8,
   radius: 10,
   radiusRow: 10,
-  sidebarWidth: 244,
-  sidebarMin: 200,
+  sidebarWidth: 272,
+  sidebarMin: 268,
   sidebarMax: 420,
   resizeHit: 12,
   propsWidth: 284,
@@ -111,7 +111,6 @@ export const METRICS = {
   row: 32,
   field: 28,
   radiusField: 8,
-  railWidth: 40,
   tabMin: 96,
   tabMax: 240,
   trafficLights: 78,
@@ -137,7 +136,8 @@ const kebab = (k: string) => k.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`);
 
 function block(palette: Palette): string {
   const lines = Object.entries(palette).map(([k, v]) => `  --c-${kebab(k)}: ${v};`);
-  const metrics = Object.entries(METRICS).map(([k, v]) => `  --c-${kebab(k)}: ${v}px;`);
+  // The browser has three sections, so its sidebar can stay narrower.
+  const metrics = Object.entries({ ...METRICS, sidebarWidth: 244 }).map(([k, v]) => `  --c-${kebab(k)}: ${v}px;`);
   const type = [
     `  --c-font-sans: ${TYPE.sans};`,
     `  --c-font-mono: ${TYPE.mono};`,

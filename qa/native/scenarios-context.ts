@@ -209,7 +209,7 @@ sc('context-actions', 'context instance detach and component sidebar actions', {
   await t.waitDisk(() => t.node('inst_text')?.type !== 'ref', 'detached instance');
   await t.key('z', ['cmd']);
   await t.waitDisk(() => t.node('inst_text')?.type === 'ref', 'undo detach');
-  await t.section('Components');
+  await t.section('Assets');
   await t.click(await t.textAt('Button/Primary', { x: 60, y: 60, w: 250, h: 500 }), { right: true });
   await t.pickMenu('Select All Instances');
   await t.waitState(s => s.selection?.ids?.includes('inst_text'), 'instances selected');

@@ -84,15 +84,16 @@ struct Selection {
     var free: Int? = nil
 }
 
-enum RailSection: String, CaseIterable, Identifiable {
-    // Text styles, variables and fonts share one Styles section (a switch at its top): fewer rail buttons, same lists.
-    case boards = "Layers", components = "Components", styles = "Styles", widgets = "Widgets"
+enum SidebarSection: String, CaseIterable, Identifiable {
+    case layers = "Layers", assets = "Assets", tokens = "Tokens", widgets = "Widgets"
+    static let defaultsKey = "canvas.sidebarSection"
+
     var id: String { rawValue }
     var symbol: String {
         switch self {
-        case .boards: "square.3.layers.3d"
-        case .components: "diamond"
-        case .styles: "textformat"
+        case .layers: "square.3.layers.3d"
+        case .assets: "diamond"
+        case .tokens: "textformat"
         case .widgets: "square.grid.2x2"
         }
     }
@@ -182,7 +183,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var paperShaders: [PaperShaderInfo] = []
     @Published var selectedWidgetId: String?
     @Published var widgetStatus: WidgetStatus?
-    @Published var section: RailSection? = .boards
+    @Published var section = UserDefaults.standard.string(forKey: SidebarSection.defaultsKey)
+        .flatMap(SidebarSection.init(rawValue:)) ?? .layers {
+        didSet { UserDefaults.standard.set(section.rawValue, forKey: SidebarSection.defaultsKey) }
+    }
     @Published var allFiles: [FileEntry] = []
     @Published var openFiles: [String] = UserDefaults.standard.stringArray(forKey: "canvas.openFiles") ?? [] {
         didSet {
@@ -227,12 +231,12 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var commentsSidebarOpen = false
     /// The conversations sidebar (src/page/conversations.js) is open: it takes the properties column's place, like comments.
     @Published var conversationsSidebarOpen = false
-    /// The left panel is open (the rail's sidebar button; Rename opens it).
+    /// The left panel is open (the sidebar toggle and Rename can open it).
     @Published var panelOpen = true
     /// View > Hide UI: only the canvas and the tabs show.
     @Published var uiHidden = false
     /// The left panel's section per file: a tab keeps the one it showed (PanelMemory).
-    private var sectionByFile: [String: RailSection?] = [:]
+    private var sectionByFile: [String: SidebarSection] = [:]
     /// The last drawn size of each layer, per file: a hidden Hug or Fill layer has no drawn box (KnownSize).
     private var knownSizes: [String: (Double?, Double?)] = [:]
     /// The document's next undo and redo steps ("Fill Change"), for the Edit menu. The page forwards the server's history.
@@ -1394,7 +1398,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         guard let s = selection, s.ids.count <= 1, !s.isPath, !s.inInstance else { return }
         uiHidden = false
         panelOpen = true
-        if section != .boards { section = .boards }
+        if section != .layers { section = .layers }
         if boards.contains(where: { $0.id == s.id }) { renamingBoard = s.id } else { LayersStore.of(self).startRename(s.id) }
     }
 

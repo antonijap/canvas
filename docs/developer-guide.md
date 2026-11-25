@@ -63,7 +63,7 @@ pnpm start                        # http://127.0.0.1:5189
 pnpm start "$PWD/demos/learn.canvas"
 ```
 
-The browser version has the web chrome (file menu, rail, properties). The app adds the native shell (Liquid Glass islands, native inspector, colour picker, menus). Query flags on the page: `?renderer=dom` forces the DOM renderer, `?shell=native` hides the web chrome (the app sets it).
+The browser version has the web chrome (file menu, left sidebar, properties). The app adds the native shell (Liquid Glass islands, native inspector, colour picker, menus). Query flags on the page: `?renderer=dom` forces the DOM renderer, `?shell=native` hides the web chrome (the app sets it).
 
 The file menu lists `.canvas` documents under `~/Desktop` and `~/Code`. Set `CANVAS_ROOTS` to change that.
 
@@ -276,7 +276,7 @@ A layer's fill can be a shader: `{type: "shader", shader: "mesh-gradient", prese
 ```mermaid
 flowchart LR
   subgraph App["Canvas.app (Swift, AppKit + SwiftUI)"]
-    Shell["Native shell<br/>rail, inspector, colour picker,<br/>menus, Keychain"]
+    Shell["Native shell<br/>sidebar, inspector, colour picker,<br/>menus, Keychain"]
     WK["WKWebView"]
   end
   subgraph Page["Page (JS, served by the server)"]
