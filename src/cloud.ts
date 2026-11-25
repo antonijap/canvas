@@ -40,9 +40,9 @@ import { deleteJoined, readJoined, writeJoined, type JoinedSecrets } from "./clo
 import { forward, genkey, helperPath, hostIdFor, type Helper } from "./cloud-tunnel.ts";
 import { newSecret } from "../cloud/adapters/mac/host.ts";
 import { currentDoc } from "./docwriter.ts";
-import { receiveVoteViews, sendableCommentOps, voterId, voteOpsForShare, voteTopology } from "./vote-state.ts";
+import { receiveVoteViews, savePrivateVotes, sendableCommentOps, voteAccount, voterId, voteOpsForShare, voteTopology, withPrivateVotes } from "./vote-state.ts";
 import { acknowledge, confirm, discard, hooks, isShared, opsForShare, pendingStates, reject, retry, shareLocal, snapshot, viewOf, type SyncFile } from "./cloud-sync.ts";
-import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
+import { CommentsError, emptyComments, readCommentsFile, withoutCloudVotes, writeCommentsFile } from "./comments-file.ts";
 import { localName, packageOf } from "./comments.ts";
 import { stateDir } from "./usage-counts.ts";
 import { clearSecret, getSecret } from "./widgets/keychain.ts";
@@ -198,6 +198,8 @@ export function setToken(url: string, token: string | null): void {
   const host = hostOf(url);
   clearSecret({ service: keychainService(), account: host });
   servers.delete(url);
+  bump(url);
+  verifiedVoteAccounts.delete(url);
   if (token) {
     tokens.set(host, token);
     signedOut.delete(host);
@@ -208,13 +210,12 @@ export function setToken(url: string, token: string | null): void {
   // cannot race a delete from here). A Keychain read still under way is dropped by the generation.
   tokens.delete(host);
   signedOut.add(host);
-  bump(url);
   for (const s of sessions.values()) if (s.origin === url) { setStatus(s, "signedOut"); reconnectNow(s); }
 }
 
 // ---------- the server ----------
 
-interface ServerState { status: Status; email?: string; name?: string; role?: string; server?: string; protocol?: number; voting?: boolean; at: number; devEmail: string }
+interface ServerState { status: Status; email?: string; name?: string; role?: string; id?: string; server?: string; protocol?: number; voting?: boolean; at: number; devEmail: string }
 
 /**
  * How long a status answer is reused, so the team's server is not asked on every look. A connected server is asked
@@ -297,7 +298,7 @@ export async function checkServer(origin: string, force = false, fresh = false):
   const me = await request(origin, "/v1/me");
   if (me.fail) return set({ status: me.fail, protocol });
   if (!me.res.ok) return set({ status: "offline", protocol });
-  return set({ status: "connected", email: me.json?.email, name: me.json?.name, role: me.json?.role, protocol, server: info.json?.server, voting: supportsCloudVotes(info.json?.capabilities) });
+  return set({ status: "connected", id: me.json?.id, email: me.json?.email, name: me.json?.name, role: me.json?.role, protocol, server: info.json?.server, voting: supportsCloudVotes(info.json?.capabilities) });
 }
 
 // ---------- one room per shared file ----------
@@ -314,6 +315,10 @@ interface Session {
   status: Status;
   role?: Role;
   publishing?: boolean;
+  designDirty?: boolean;
+  designTimer?: ReturnType<typeof setTimeout>;
+  designWatch?: fs.FSWatcher;
+  publishedDesign?: Map<string, string>;
   voteClockOffset?: number;
   ws?: WebSocket;
   ready: boolean;
@@ -325,6 +330,20 @@ interface Session {
   stopped: boolean;
 }
 const sessions = new Map<string, Session>();
+const verifiedVoteAccounts = new Map<string, string>();
+
+export function legacyVoteState(file: CommentsFile): CommentsFile {
+  if (!file.server) return file;
+  const account = isConfigured(file.server.url) && verifiedVoteAccounts.get(file.server.url);
+  const comments = withoutCloudVotes(file);
+  return account ? withPrivateVotes(comments, account) : comments;
+}
+
+export function writeLegacyVoteState(pkg: string, file: CommentsFile) {
+  const account = file.server && verifiedVoteAccounts.get(file.server.url);
+  if (account) savePrivateVotes(file, account);
+  writeCommentsFile(pkg, file);
+}
 
 let notifier: (display: string | null, pkg: string) => void = () => {};
 /** The server tells the pages of a file that its comments changed (src/server.ts: the "comments" event). */
@@ -342,13 +361,14 @@ function setStatus(s: Session, status: Status): void {
 function mutate(s: Session, fn: (f: SyncFile) => boolean): void {
   let f: SyncFile | null;
   try {
-    f = readCommentsFile(s.pkg) as SyncFile | null;
+    const disk = readCommentsFile(s.pkg);
+    f = disk && legacyVoteState(disk);
   } catch {
     return; // not readable comments: left as it is
   }
-  if (!f || !isShared(f) || f.doc !== s.doc) { stop(s); return; }
+  if (!f || f.server?.url !== s.origin || f.doc !== s.doc) { stop(s); return; }
   if (fn(f)) {
-    try { writeCommentsFile(s.pkg, f); } catch { return; }
+    try { writeLegacyVoteState(s.pkg, f); } catch { return; }
     notify(s);
   }
 }
@@ -373,6 +393,8 @@ function reconnectNow(s: Session): void {
   try { s.ws?.close(); } catch { /* already closed */ }
   s.ws = undefined;
   s.ready = false;
+  s.inflight.clear();
+  notify(s);
   void connect(s);
 }
 
@@ -446,12 +468,9 @@ function onMessage(s: Session, m: ServerMessage): void {
   switch (m.type) {
     case "welcome": {
       if (m.protocol !== PROTOCOL_VERSION) { setStatus(s, m.protocol < PROTOCOL_VERSION ? "tooOld" : "tooNew"); s.ws?.close(); return; }
+      const account = voteAccount(m.me);
+      if (account) verifiedVoteAccounts.set(s.origin, account);
       mutate(s, (f) => {
-        if (f.me && (f.me.id && m.me.id ? f.me.id !== m.me.id : f.me.email && f.me.email !== m.me.email)) {
-          reject(f, f.outbox.filter(e => isVoteOp(e.op)).map(e => ({ opId: e.opId, code: "forbidden", message: "This vote was queued by a different Cloud member" })));
-          delete f.cloudVotes;
-          delete f.voteConclusions;
-        }
         if (m.threads) snapshot(f, m.threads as Thread[], m.seq);
         if (m.votes) receiveVoteViews(f, m.votes);
         f.voteCapable = supportsCloudVotes(m.capabilities);
@@ -463,6 +482,9 @@ function onMessage(s: Session, m: ServerMessage): void {
       s.attempt = 0;
       s.role = m.role;
       s.voteClockOffset = m.serverTime ? Date.parse(m.serverTime) - Date.now() : undefined;
+      s.publishedDesign?.clear();
+      watchVoteDesign(s);
+      designChanged(s);
       setStatus(s, "connected");
       flush(s);
       return;
@@ -470,7 +492,11 @@ function onMessage(s: Session, m: ServerMessage): void {
     case "applied": {
       for (const e of m.entries) s.inflight.delete(e.opId);
       mutate(s, (f) => {
-        if (m.votes) receiveVoteViews(f, m.votes);
+        if (m.votes) {
+          receiveVoteViews(f, m.votes);
+          const active = new Set(m.votes.filter(v => v.state === "active").map(v => v.id));
+          for (const id of s.publishedDesign?.keys() ?? []) if (!active.has(id)) s.publishedDesign?.delete(id);
+        }
         return confirm(f, m.entries as Applied[]) || !!m.votes;
       });
       flush(s);
@@ -492,6 +518,8 @@ function onMessage(s: Session, m: ServerMessage): void {
       return;
     }
     case "error": {
+      s.inflight.clear();
+      if (m.code === "unauthenticated" || m.code === "forbidden") verifiedVoteAccounts.delete(s.origin);
       if (m.code === "version") setStatus(s, "tooOld");
       else if (m.code === "unauthenticated" && hostedId(s.origin)) {
         // A hosted Cloud says this Mac was removed, just before its tunnel shuts the Mac out: kept, so it never reads "down".
@@ -515,44 +543,85 @@ function delayFlush(s: Session, ms: number): void {
 export function flush(s: Session): void {
   if (!s.ready || s.stopped || s.publishing) return;
   let f: SyncFile | null;
-  try { f = readCommentsFile(s.pkg) as SyncFile | null; } catch { return; }
-  if (!f) return;
+  try { const disk = readCommentsFile(s.pkg); f = disk && legacyVoteState(disk); } catch { return; }
+  if (!f || f.server?.url !== s.origin || f.doc !== s.doc) { stop(s); return; }
   const now = Date.now();
   s.sentAt = s.sentAt.filter((t) => now - t < 60_000);
   const room = OPS_PER_MINUTE - s.sentAt.length;
   const todo = sendableCommentOps(f.outbox, s.role, f.voteCapable).filter(e => !s.inflight.has(e.opId));
-  if (!todo.length) return;
-  if (room <= 0) { delayFlush(s, s.sentAt[0] + 60_000 - now + 50); return; }
-  if (s.inflight.size) return; // one batch at a time; the answer sends the next
-  const batch = todo.slice(0, Math.min(MAX_BATCH, room));
+  const batch = !s.inflight.size && room > 0 ? todo.slice(0, Math.min(MAX_BATCH, room)) : [];
+  if (todo.length && room <= 0) delayFlush(s, s.sentAt[0] + 60_000 - now + 50);
   const deliver = () => {
-    if (!s.ready || s.stopped) return;
-    for (const e of batch) { s.inflight.add(e.opId); s.sentAt.push(now); }
+    if (!s.ready || s.stopped || !batch.length) return;
+    for (const e of batch) { s.inflight.add(e.opId); s.sentAt.push(Date.now()); }
     send(s, { type: "ops", ops: batch });
   };
-  const starts = batch.filter(e => e.op.kind === "vote.start");
-  if (!starts.length || (s.role !== "owner" && s.role !== "editor")) { deliver(); return; }
+  const starts = batch.flatMap(e => e.op.kind === "vote.start" ? [{ envelope: e, page: e.op.scope.page, id: e.op.vote }] : []);
+  const active = s.designDirty ? (f.cloudVotes ?? []).filter(v => v.state === "active")
+    .map(v => ({ id: v.id, page: v.scope.page, envelope: undefined })) : [];
+  const designs = [...new Map([...active, ...starts].map(v => [v.id, v])).values()];
+  if (!designs.length || (s.role !== "owner" && s.role !== "editor")) { deliver(); return; }
+  s.designDirty = false;
   s.publishing = true;
   const ws = s.ws;
-  void Promise.resolve().then(() => {
+  let backingOff = false;
+  const retry = () => {
+    backingOff = true;
+    s.designDirty = true;
+    delayFlush(s, 5000);
+  };
+  void Promise.resolve().then(async () => {
     const file = path.join(s.pkg, "document.json");
-    return request(s.origin, `/v1/docs/${s.doc}/vote-design`, { method: "PUT", body: voteTopology(file, currentDoc(file).doc) });
-  }).then(reply => {
-    if (s.ws !== ws || s.stopped) return;
-    if (reply.fail) { delayFlush(s, 5000); return; }
-    if (!reply.res.ok) {
-      mutate(s, f => reject(f, starts.map(e => ({ opId: e.opId, code: "invalid", message: String(reply.json?.message ?? "Could not publish the vote design") }))));
-      delayFlush(s, 0);
-      return;
+    const topology = voteTopology(file, currentDoc(file).doc);
+    const published = s.publishedDesign ??= new Map();
+    const invalid: Rejected[] = [];
+    for (const { id, page, envelope } of designs) {
+      const body = { vote: id, pages: topology.pages.filter(p => p === page), nodes: topology.nodes.filter(([, node]) => node.page === page) };
+      const signature = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+      if (published.get(id) === signature) continue;
+      const reply = await request(s.origin, `/v1/docs/${s.doc}/vote-design`, { method: "PUT", body });
+      if (s.ws !== ws || s.stopped) return;
+      if (reply.fail) { retry(); return; }
+      if (reply.res.ok) published.set(id, signature);
+      else if (envelope) invalid.push({ opId: envelope.opId, code: "invalid", message: String(reply.json?.message ?? "Could not publish the vote design") });
     }
-    deliver();
-  }).catch(() => { delayFlush(s, 5000); }).finally(() => { s.publishing = false; });
+    if (invalid.length) {
+      mutate(s, f => reject(f, invalid));
+      delayFlush(s, 0);
+    } else deliver();
+  }).catch(retry).finally(() => {
+    s.publishing = false;
+    if (s.ready && (s.ws !== ws || (s.designDirty && !backingOff))) flush(s);
+  });
+}
+
+function designChanged(s: Session) {
+  clearTimeout(s.designTimer);
+  s.designTimer = setTimeout(() => { s.designDirty = true; flush(s); }, 250);
+  s.designTimer.unref();
+}
+
+function watchVoteDesign(s: Session) {
+  if (s.designWatch || (s.role !== "owner" && s.role !== "editor")) return;
+  try {
+    s.designWatch = fs.watch(s.pkg, { persistent: false }, (_event, name) => {
+      if (!name || name === "document.json" || name === "widgets.json" || name === "pages.json" || name.includes("journal")) designChanged(s);
+    });
+    s.designWatch.on("error", () => { s.designWatch?.close(); s.designWatch = undefined; });
+  } catch { /* A later connection can watch a package whose folder moved. */ }
+}
+
+export function legacyVoteDesignChanged(docFile: string) {
+  const s = sessions.get(path.dirname(docFile));
+  if (s && (s.role === "owner" || s.role === "editor")) designChanged(s);
 }
 
 function stop(s: Session): void {
   s.stopped = true;
   clearTimeout(s.timer);
   clearTimeout(s.flushTimer);
+  clearTimeout(s.designTimer);
+  s.designWatch?.close();
   try { s.ws?.close(); } catch { /* already closed */ }
   s.ws = undefined;
   sessions.delete(s.pkg);
@@ -571,6 +640,7 @@ function park(s: Session): void {
 
 /** Everything that belonged to a Cloud that is gone: sockets, timers, tunnel, cached answers and secrets in memory. */
 function forget(url: string): void {
+  verifiedVoteAccounts.delete(url);
   servers.delete(url);
   for (const s of [...sessions.values()]) if (s.origin === url) park(s);
   const id = hostedId(url);
@@ -593,6 +663,7 @@ export function stopAll(): void {
   for (const s of [...sessions.values()]) stop(s);
   for (const id of [...forwards.keys()]) closeTunnel(id);
   servers.clear();
+  verifiedVoteAccounts.clear();
   parked.clear();
 }
 
@@ -651,7 +722,10 @@ function touch(pkg: string, display: string | null): void {
   try { f = readCommentsFile(pkg) as SyncFile | null; } catch { return; }
   const live = sessions.get(pkg);
   if (!f || !isShared(f)) { if (live) stop(live); parked.delete(pkg); return; }
-  if (vouch(pkg, f)) { try { writeCommentsFile(pkg, f); } catch { return; } notifier(display, pkg); }
+  const hadLegacyVotes = Boolean(f.cloudVotes || f.votes || f.voteConclusions || f.voteCapable !== undefined || f.voteRole ||
+    f.outbox.some(e => isVoteOp(e.op)) || f.rejected?.some(r => isVoteOp(r.envelope.op)));
+  if (hadLegacyVotes) f = withoutCloudVotes(f);
+  if (vouch(pkg, f) || hadLegacyVotes) { try { writeCommentsFile(pkg, f); } catch { return; } notifier(display, pkg); }
   if (live && (live.doc !== f.doc || live.origin !== f.server!.url)) stop(live);
   // A Cloud this Canvas does not have (removed, never added, or an address that is not safe): nothing connects.
   if (!isConfigured(f.server!.url)) { const l = sessions.get(pkg); if (l) stop(l); parked.set(pkg, display ?? parked.get(pkg) ?? null); return; }
@@ -670,16 +744,17 @@ function touch(pkg: string, display: string | null): void {
 export const legacyVoteClockOffset = (pkg: string) => sessions.get(pkg)?.voteClockOffset;
 
 export function queueLegacyVote(pkg: string, display: string, file: CommentsFile, envelope: import("../cloud/protocol.ts").OpEnvelope) {
-  if (!file.voteCapable) throw new CloudError(426, "version", file.voteCapable === false ? UPDATE_VOTE_HOST : "Connect to the Cloud to check for voting support.");
+  if (!file.server || !verifiedVoteAccounts.has(file.server.url) || !file.voteCapable) throw new CloudError(426, "version", file.voteCapable === false ? UPDATE_VOTE_HOST : "Connect to the Cloud to check for voting support.");
   if (vouch(pkg, file)) writeCommentsFile(pkg, file);
   if (file.outbox.some(e => e.opId === envelope.opId) || file.rejected?.some(r => r.envelope.opId === envelope.opId)) return;
   file.outbox.push({ ...envelope, doc: file.doc });
-  writeCommentsFile(pkg, file);
+  writeLegacyVoteState(pkg, file);
   touch(pkg, display);
 }
 
 function info(pkg: string, f: SyncFile): unknown {
   const s = sessions.get(pkg);
+  f = legacyVoteState(f);
   const view = viewOf(f, { name: localName() });
   const { pending, rejected } = pendingStates(f, view);
   return {
@@ -762,12 +837,17 @@ async function shareOnce(pkg: string, display: string | null, to?: string | null
   const fresh = (readCommentsFile(pkg) as SyncFile | null) ?? file;
   if (isShared(fresh)) { touch(pkg, display); return { doc: fresh.doc, url: fresh.server!.url, already: true, ops: 0 }; }
   if (fresh.doc !== file.doc) throw new CloudError(409, "conflict", "The file's comments changed while sharing. Try again.");
-  const me: Author = { email: st.email, name: st.name ?? localName() };
+  const me: Author = { id: st.id, email: st.email, name: st.name ?? localName() };
   const voteOps = fresh.votes?.length ? voteOpsForShare(fresh, voterId()) : [];
   if (voteOps.length && !st.voting) throw new CloudError(426, "version", UPDATE_VOTE_HOST);
   const ops = [...opsForShare(fresh), ...voteOps];
-  const shared = shareLocal(fresh, url, me, ops);
+  const shared = shareLocal({ ...fresh, outbox: fresh.outbox.filter(e => !isVoteOp(e.op)) }, url, me, ops);
   markKnown(knownKey(pkg, shared)); // shared from this Mac: its ops are this person's
+  const account = voteAccount(me);
+  if (account) {
+    verifiedVoteAccounts.set(url, account);
+    savePrivateVotes(shared, account);
+  }
   writeCommentsFile(pkg, shared);
   touch(pkg, display);
   return { doc: fresh.doc, url, already: false, ops: ops.length };

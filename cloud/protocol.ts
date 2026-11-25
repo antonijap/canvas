@@ -256,7 +256,7 @@ export const LIMITS = {
 
 // ---------- pure helpers (both sides use these, so they agree) ----------
 
-const isUuid = (s: unknown): s is string => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s);
+export const isUuid = (s: unknown): s is string => typeof s === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(s);
 const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
 
 const ANCHOR_KEYS = new Set(["page", "nodeId", "x", "y", "board", "revision", "preview"]);

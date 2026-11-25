@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import { checkBlobPath, blobTypeOf, type BlobPath, type FileOp, type Json } from '../cloud/protocol-files.ts';
 import { readCommentsFile } from './comments-file.ts';
 import { opsForShare } from './cloud-sync.ts';
-import { voterId, voteOpsForShare } from './vote-state.ts';
+import { voterId, voteOpsForMove, voteTopology } from './vote-state.ts';
+import { voteDesignForTopology } from '../cloud/core/votes.ts';
 import { openInPackage } from '../cloud/core/files/confine.ts';
 import { stripPageAppearance } from '../cloud/core/files/state.ts';
 import { trashPackage } from './cloud-files-trash.ts';
@@ -111,7 +112,10 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     walk(doc);
     walk(env);
     const comments = readCommentsFile(pkg);
-    const dest = await publish(path.basename(pkg, '.canvas'), doc, env, blobs, comments ? [...opsForShare(comments), ...(comments.votes?.length ? voteOpsForShare(comments, voterId()) : [])] : []);
+    const voting = comments?.votes?.length
+        ? voteOpsForMove(comments, voterId(), voteDesignForTopology(voteTopology(path.join(pkg, 'document.json'), doc)))
+        : { ops: [] };
+    const dest = await publish(path.basename(pkg, '.canvas'), doc, env, blobs, comments ? [...opsForShare(comments), ...voting.ops] : []);
     const actual = JSON.parse(fs.readFileSync(path.join(dest.file, 'document.json'), 'utf8'));
     if (JSON.stringify(actual) !== JSON.stringify(doc))
         throw new Error('Move verification failed: document differs');
@@ -136,5 +140,5 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     // No await between this final source check and the recoverable rename.
     if (fingerprint(pkg) !== sourceHash) throw new Error('Local file changed during the move; source kept');
     trashPackage(pkg);
-    return { ...dest, verified: true };
+    return { ...dest, verified: true, notice: voting.notice };
 }

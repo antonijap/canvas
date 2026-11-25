@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type http from 'node:http';
+import { setTimeout as delay } from 'node:timers/promises';
 import { target } from './cloud.ts';
 import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump, hostedId, waitForShellCloudList } from './cloud-config.ts';
 import { FileStateStore } from './cloud-files-store.ts';
@@ -19,7 +20,7 @@ import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, 
 import { createPackage, targetPath } from './docpath.ts';
 import { type BlobRow } from '../cloud/core/files/seam.ts';
 import { readBodyText } from './body.ts';
-import { applyOp, CLOUD_VOTES, isVoteOp, LIMITS, supportsCloudVotes, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type Thread, type VoteView } from '../cloud/protocol.ts';
+import { applyOp, CLOUD_VOTES, isVoteOp, LIMITS, supportsCloudVotes, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type Thread, type Vote, type VoteView } from '../cloud/protocol.ts';
 import { COMMENTS_FILE, forkComments, readCommentsFile, writeCommentsFile } from './comments-file.ts';
 import { ownLocalVotes, receiveVoteViews, sendableCommentOps } from './vote-state.ts';
 import { prepareMove } from './cloud-files-move.ts';
@@ -78,6 +79,8 @@ interface Session {
     voteClockOffset?: number;
     cloudVotes?: VoteView[];
     voteConclusions?: string[];
+    legacyVotes?: Vote[];
+    legacyVoteConclusions?: string[];
     commentsInFlight?: Set<string>;
     updateMessage?: string;
     timer?: NodeJS.Timeout;
@@ -152,8 +155,19 @@ export function fileSession(file: string, importing = false): Session | undefine
     s = { store, importing, status: 'offline', chain: Promise.resolve(), stopped: false, offline: false, comments: [], commentsSeq: 0, commentsPending: [] };
     store.db.exec('CREATE TABLE IF NOT EXISTS comments_state(id INTEGER PRIMARY KEY CHECK(id=1),json TEXT NOT NULL)');
     const c = store.db.prepare('SELECT json FROM comments_state WHERE id=1').get();
-    if (c)
-        Object.assign(s, JSON.parse(String(c.json)));
+    const saved = c && JSON.parse(String(c.json));
+    if (saved) Object.assign(s, saved);
+    if (saved?.voteQueueVersion !== 1) {
+        s.commentsPending = s.commentsPending.filter(e => !isVoteOp(e.op));
+        s.commentsRejected = s.commentsRejected?.filter(r => !isVoteOp(r.envelope.op));
+        const legacy = readCommentsFile(store.pkg);
+        s.legacyVotes = legacy?.votes?.filter(v => v.state !== 'dismissed').map(v =>
+            v.state === 'active' && (v.hidden || v.anonymous) ? ownLocalVotes([v])[0] : v);
+        s.legacyVoteConclusions = legacy?.voteConclusions?.filter(id => s.legacyVotes?.some(v => v.id === id));
+        s.voteConclusions = s.voteConclusions?.filter(id => !s.legacyVotes?.some(v => v.id === id));
+        // The old queue may have come from a copied package. Keep local history, never replay that queue.
+        if (legacy || saved) saveComments(s);
+    }
     sessions.set(f, s);
     store.restoreView();
     checkpointSession(s);
@@ -183,7 +197,11 @@ cloudFileHooks.whiteboardIssue = (file, nodes) => {
     const s = fileSession(file);
     return s && s.whiteboard !== true && hasWhiteboard(nodes) ? UPDATE_WHITEBOARD_HOST : undefined;
 };
-export function fileInfo(file: string, open = true) { const s = open ? fileSession(file) : sessions.get(docFile(file)); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, whiteboard: s.whiteboard === true, voting: s.voting, serverTime: s.serverTime, voteClockOffset: s.voteClockOffset, updateMessage: s.updateMessage, pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
+function waitingForHost(s: Session) {
+    return s.whiteboard === false && s.store.replica.pending.some(p => insertsWhiteboard(p.action.ops))
+        ? 'Edits are waiting for the Cloud host to update Canvas.' : undefined;
+}
+export function fileInfo(file: string, open = true) { const s = open ? fileSession(file) : sessions.get(docFile(file)); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, whiteboard: s.whiteboard === true, voting: s.voting, serverTime: s.serverTime, voteClockOffset: s.voteClockOffset, updateMessage: s.updateMessage, waitingForHost: waitingForHost(s), pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
 class CloudHttpError extends Error {
     readonly status: number;
     readonly code: string;
@@ -265,6 +283,18 @@ function commentState(s: Session): CommentsFile {
     return { format: 1, doc: s.store.meta.file, seq: s.commentsSeq, threads: s.comments, outbox: s.commentsPending,
         rejected: s.commentsRejected ?? [], cloudVotes: s.cloudVotes, voteConclusions: s.voteConclusions };
 }
+export function fileVoteState(file: string): CommentsFile | undefined {
+    const s = sessions.get(docFile(file));
+    return s && { ...commentState(s), votes: s.legacyVotes };
+}
+export function clearLegacyFileVote(file: string, vote: string) {
+    const s = sessions.get(docFile(file));
+    if (!s?.legacyVotes?.some(v => v.id === vote)) return false;
+    s.legacyVotes = s.legacyVotes.filter(v => v.id !== vote);
+    s.legacyVoteConclusions = s.legacyVoteConclusions?.filter(id => id !== vote);
+    saveComments(s);
+    return true;
+}
 function saveVoteViews(s: Session, votes: VoteView[]) {
     const state = commentState(s);
     receiveVoteViews(state, votes);
@@ -292,19 +322,13 @@ export function queueFileVote(file: string, envelope: OpEnvelope) {
     }
 }
 function saveComments(s: Session) {
-    s.store.db.prepare('INSERT OR REPLACE INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: s.comments, commentsSeq: s.commentsSeq, commentsPending: s.commentsPending, commentsRejected: s.commentsRejected ?? [], voting: s.voting, cloudVotes: s.cloudVotes, voteConclusions: s.voteConclusions }));
+    s.store.db.prepare('INSERT OR REPLACE INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: s.comments, commentsSeq: s.commentsSeq, commentsPending: s.commentsPending, commentsRejected: s.commentsRejected ?? [], voting: s.voting, cloudVotes: s.cloudVotes, voteConclusions: s.voteConclusions, legacyVotes: s.legacyVotes, legacyVoteConclusions: s.legacyVoteConclusions, voteQueueVersion: 1 }));
     const threads = structuredClone(s.comments);
     for (const e of [...s.commentsPending, ...(s.commentsRejected ?? []).map(r => r.envelope)])
-        applyOp(threads, s.store.meta.file, e.op, { name: s.store.meta.author.name ?? "Me", id: s.store.meta.author.id }, e.at);
-    const local = readCommentsFile(s.store.pkg);
-    const state = commentState(s);
-    const localConclusions = local?.voteConclusions?.filter(id => local.votes?.some(vote => vote.id === id)) ?? [];
-    const conclusions = [...new Set([...localConclusions, ...(state.voteConclusions ?? [])])];
-    writeCommentsFile(s.store.pkg, {
-        ...local, ...state, threads, outbox: state.outbox,
-        voteConclusions: conclusions.length ? conclusions : undefined,
-    });
+        if (!isVoteOp(e.op)) applyOp(threads, s.store.meta.file, e.op, { name: s.store.meta.author.name ?? "Me", id: s.store.meta.author.id }, e.at);
+    writeCommentsFile(s.store.pkg, { ...readCommentsFile(s.store.pkg), ...commentState(s), threads });
 }
+
 function waitForQuota(s: Session) {
     s.status = 'quota'; s.commentsInFlight?.clear(); for (const p of s.store.replica.pending) p.sent = false; s.store.commit();
     if (s.timer) clearTimeout(s.timer);
@@ -318,11 +342,10 @@ function recoverDrafts(s: Session) {
         // Legacy builds could leave votes local to the cache. Keep this Mac's ballots if that's the only copy.
         try {
             forkComments(s.store.pkg, local);
-            const old = readCommentsFile(s.store.pkg);
-            if (old?.votes?.length) {
+            if (s.legacyVotes?.length) {
                 const copy = readCommentsFile(local)!;
-                copy.votes = ownLocalVotes(old.votes);
-                copy.voteConclusions = old.voteConclusions?.filter(id => copy.votes!.some(v => v.id === id));
+                copy.votes = ownLocalVotes(s.legacyVotes);
+                copy.voteConclusions = s.legacyVoteConclusions;
                 writeCommentsFile(local, copy);
             }
         } catch { /* The design and outbox can still be recovered if the sidecar is unreadable. */ }
@@ -340,11 +363,12 @@ function recoverDrafts(s: Session) {
     const pending = new Map([...previous.pending, ...s.store.replica.pending].map(p => [p.action.id, p]));
     for (const id of refused.keys()) pending.delete(id);
     const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ pending: [...pending.values()], refused: [...refused.values()], comments: s.commentsPending, rejectedComments: s.commentsRejected ?? [] }), { mode: 0o600 }); fs.renameSync(tmp, file);
+    fs.writeFileSync(tmp, JSON.stringify({ pending: [...pending.values()], refused: [...refused.values()], comments: s.commentsPending.filter(e => !isVoteOp(e.op)), rejectedComments: s.commentsRejected?.filter(r => !isVoteOp(r.envelope.op)) ?? [] }), { mode: 0o600 }); fs.renameSync(tmp, file);
 }
 export async function receive(s: Session, m: any) {
     if (s.stopped)
         return;
+    if (m.type === 'error') s.commentsInFlight?.clear();
     if (m.type === 'presence') {
         s.peers ??= new Map();
         for (const p of m.peers as PeerPresence[]) {
@@ -439,8 +463,6 @@ export async function receive(s: Session, m: any) {
         s.serverTime = m.serverTime;
         s.voteClockOffset = m.serverTime ? Date.parse(m.serverTime) - Date.now() : undefined;
         s.updateMessage = undefined;
-        if (!s.whiteboard && s.store.replica.pending.some(p => insertsWhiteboard(p.action.ops)))
-            fileEvents.update?.(path.join(s.store.pkg, 'document.json'), UPDATE_WHITEBOARD_HOST);
         s.status = 'connected';
         s.retryDelay = undefined;
     }
@@ -493,7 +515,7 @@ function closeSession(file: string, s: Session, missing = false) {
     const replica = s.store.replica;
     let local;
     try { local = readCommentsFile(s.store.pkg); } catch { /* the sidecar is unreadable */ }
-    if (replica.pending.length || replica.refused.length || s.commentsPending.length || s.commentsRejected?.length || local?.votes?.length) {
+    if (replica.pending.length || replica.refused.length || s.commentsPending.length || s.commentsRejected?.length || s.legacyVotes?.length || local?.votes?.length) {
         recoverDrafts(s);
         if (missing) {
             replica.pending = [];
@@ -724,15 +746,21 @@ function removeCaches(cloud: string) {
             const store = new FileStateStore(pkg);
             let commentsPending: OpEnvelope[] = [];
             let commentsRejected: RefusedOp[] = [];
+            let legacyVotes: Vote[] | undefined, legacyVoteConclusions: string[] | undefined;
             try {
                 const c = store.db.prepare('SELECT json FROM comments_state WHERE id=1').get();
                 if (c) {
                     const saved = JSON.parse(String(c.json));
-                    commentsPending = saved.commentsPending ?? []; commentsRejected = saved.commentsRejected ?? [];
+                    commentsPending = (saved.commentsPending ?? []).filter((e: OpEnvelope) => !isVoteOp(e.op));
+                    commentsRejected = (saved.commentsRejected ?? []).filter((r: RefusedOp) => !isVoteOp(r.envelope.op));
+                    legacyVotes = saved.legacyVotes; legacyVoteConclusions = saved.legacyVoteConclusions;
                 }
+                const old = readCommentsFile(pkg);
+                legacyVotes ??= old?.votes;
+                legacyVoteConclusions ??= old?.voteConclusions?.filter(id => legacyVotes?.some(v => v.id === id));
             }
             catch { }
-            sessions.set(file, { store, status: 'removed', chain: Promise.resolve(), stopped: false, offline: true, comments: [], commentsSeq: 0, commentsPending, commentsRejected });
+            sessions.set(file, { store, status: 'removed', chain: Promise.resolve(), stopped: false, offline: true, comments: [], commentsSeq: 0, commentsPending, commentsRejected, legacyVotes, legacyVoteConclusions });
         }
     for (const [file, s] of sessions) {
         if (s.store.meta.cloud !== cloud)
@@ -821,12 +849,18 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                     actions.push(a);
                 }
                 let social: { seq: number; threads: Thread[]; votes?: VoteView[] } | undefined;
-                for (let i = 0; i < comments.length; i += 100) {
-                    const ops = comments.slice(i, i + 100).map(e => ({ ...e, doc: created.id }));
-                    const out = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/comments`, 'POST', { ops }));
-                    if (out.rejected.length)
-                        throw new Error(out.rejected[0].message ?? 'Cloud refused imported comments or votes');
-                    social = { seq: out.seq, threads: out.threads, votes: out.votes };
+                for (let i = 0; i < comments.length; i += LIMITS.opsPerMessage) {
+                    let ops = comments.slice(i, i + LIMITS.opsPerMessage).map(e => ({ ...e, doc: created.id }));
+                    while (ops.length) {
+                        const out = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/comments`, 'POST', { ops }));
+                        const hard = out.rejected.find((r: { code: string; message?: string }) =>
+                            r.code !== 'quota' || !/minute/i.test(r.message ?? ''));
+                        if (hard) throw new Error(hard.message ?? 'Cloud refused imported comments or votes');
+                        social = { seq: out.seq, threads: out.threads, votes: out.votes };
+                        const retry = new Set(out.rejected.map((r: { opId: string }) => r.opId));
+                        ops = ops.filter(e => retry.has(e.opId));
+                        if (ops.length) await delay(Math.min(60_100, Math.max(100, Number(out.retryAfterMs) || 60_100)));
+                    }
                 }
                 // Seed the cache from the confirmed import response. The room socket can welcome the file later.
                 const opened = await openCloudFile(b.cloud, created.id, b.name || name);

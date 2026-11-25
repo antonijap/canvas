@@ -215,7 +215,7 @@ sc("whiteboard-review", "Sticky author removal clears disk and undo restores it"
 });
 
 sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it", {
-  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer"],
+  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence"],
 }, async (t: NT) => {
   const peer = new QaApp(path.dirname(t.app.dir), 100 + t.app.shard);
   fs.mkdirSync(peer.dir, { recursive: true });
@@ -237,6 +237,9 @@ sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it", 
     await t.js(`document.querySelector('[data-vote-mode="anything"]').click(); document.querySelector("[data-vote-start]").click()`);
     await ben.waitJs('document.querySelector(".vote-bar:not([hidden])")', "viewer sees the vote");
     await ben.look(0, 0);
+    await ben.js('window.canvasHost.presence.update({cursor:{x:310,y:220},sel:["BallotTarget"]})');
+    await ben.waitJs('window.canvasHost.votes.privatePresence === true', "private voting disables presence");
+    t.eq(await t.js('return document.querySelectorAll(".cp-cursor,.cp-selection").length'), 0, "the owner sees no ballot pointers");
     await ben.click(center(await ben.rect("BallotTarget")));
     await ben.waitJs('document.querySelector("[data-vote-mark]")', "viewer sees their own vote");
     t.eq(await t.js('return document.querySelectorAll("[data-vote-mark]").length'), 0, "owner sees no hidden votes");

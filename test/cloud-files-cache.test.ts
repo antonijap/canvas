@@ -388,6 +388,17 @@ test('a legacy host leaves ordinary edits enabled and refuses whiteboard inserts
     await receive(session, { ...welcome, capabilities: ['whiteboard'] });
     deliverOps(file, [...ops]);
     assert.equal(session.store.replica.view().node('note')?.type, 'sticky');
+    deliverOps(file, [{ k: 'set', id: 'board', props: { name: { v: 'After sticky' } } }]);
+    const ids = session.store.replica.pending.map(p => p.action.id);
+    await receive(session, welcome);
+    const { fileInfo } = await import('../src/cloud-files.ts');
+    assert.match(fileInfo(file)?.waitingForHost ?? '', /waiting for the Cloud host to update/);
+    assert.equal(session.store.replica.outgoing(100, a => !a.ops.some(op => op.k === 'insert')).length, 1);
+    assert.deepEqual(session.store.replica.pending.map(p => p.action.id), ids);
+    await receive(session, { ...welcome, capabilities: ['whiteboard'] });
+    assert.equal(fileInfo(file)?.waitingForHost, undefined);
+    assert.deepEqual(session.store.replica.pending.map(p => p.action.id), ids);
+
 });
 
 test('a comment snapshot and cache removal preserve the only copy of local votes', async (t) => {
@@ -398,17 +409,26 @@ test('a comment snapshot and cache removal preserve the only copy of local votes
     const store = new FileStateStore(pkg, { cloud, file: id, name: 'Board', role: 'editor', author: { id: 'anna', name: 'Anna' },
         state: stateFromFiles({ children: [{ id: 'board', type: 'frame' }] }) });
     store.materialize();
+    store.db.exec('CREATE TABLE comments_state(id INTEGER PRIMARY KEY, json TEXT NOT NULL)');
+    const queued = { doc: id, opId: crypto.randomUUID(), at: new Date().toISOString(), op: { kind: 'vote.cast', vote: crypto.randomUUID(),
+        ballot: crypto.randomUUID(), layer: 'board' } };
+    store.db.prepare('INSERT INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: [], commentsSeq: 0, commentsPending: [queued] }));
     store.close();
-    const { emptyComments, readCommentsFile, writeCommentsFile } = await import('../src/comments-file.ts');
-    const { receive } = await import('../src/cloud-files.ts');
+    const { emptyComments, readCommentsFile } = await import('../src/comments-file.ts');
+    const { clearLegacyFileVote, fileVoteState, receive } = await import('../src/cloud-files.ts');
     const votes = [{ id: crypto.randomUUID(), host: { id: 'another-mac', name: 'Anna' }, scope: { page: 'page' },
         on: 'anything', perPerson: 3, hidden: true, anonymous: false, state: 'ended', ballots: [] }] as import('../cloud/protocol.ts').Vote[];
-    writeCommentsFile(pkg, { ...emptyComments(), doc: id, votes, voteConclusions: [votes[0].id] });
+    const clear = { ...votes[0], id: crypto.randomUUID() };
+    fs.writeFileSync(path.join(pkg, 'comments.json'), JSON.stringify({ ...emptyComments(), doc: id, votes: [...votes, clear], voteConclusions: [votes[0].id], outbox: [queued] }));
     t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
     setCloudConfig({ clouds: [{ url: cloud, devEmail: 'anna@example.test' }] });
     t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); fs.rmSync(dir, { recursive: true, force: true }); });
     await receive(fileSession(pkg)!, { type: 'comments.snapshot', threads: [], seq: 0 });
-    assert.deepEqual(readCommentsFile(pkg)?.votes, votes);
+    assert.equal(readCommentsFile(pkg)?.votes, undefined);
+    assert.deepEqual(fileVoteState(pkg)?.outbox, []);
+    assert.deepEqual(fileVoteState(pkg)?.votes, [...votes, clear]);
+    assert.equal(clearLegacyFileVote(pkg, clear.id), true);
+    assert.deepEqual(fileVoteState(pkg)?.votes, votes);
     setCloudConfig({ clouds: [] });
     assert.equal(fs.existsSync(pkg), false);
     const recovered = path.join(dir, 'Documents', 'Canvas Recovered');
@@ -463,4 +483,15 @@ test('a background vote conclusion does not reopen a closed Cloud cache', async 
     t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); fs.rmSync(dir, { recursive: true, force: true }); });
     await syncVoteConclusions(pkg, { changed: () => assert.fail('A closed file changed'), place: async () => assert.fail('A closed file was edited') });
     assert.equal(fileInfo(pkg, false), null);
+});
+
+test("an invalid Cloud message releases the comments batch for retry", async () => {
+  const { receive } = await import("../src/cloud-files.ts");
+  const pending = { doc: crypto.randomUUID(), opId: crypto.randomUUID(), at: new Date().toISOString(),
+    op: { kind: "vote.end" as const, vote: crypto.randomUUID() } };
+  const s = { stopped: false, commentsPending: [pending], commentsInFlight: new Set([pending.opId]),
+    store: { receive: () => "hello", meta: { role: "owner" } } };
+  await receive(s as unknown as Parameters<typeof receive>[0], { type: "error", code: "invalid", message: "Try again" }).catch(() => {});
+  assert.deepEqual([...s.commentsInFlight], []);
+  assert.deepEqual(s.commentsPending, [pending]);
 });

@@ -633,7 +633,10 @@ final class CloudAccount: ObservableObject {
                 model.close(file)
                 HomeStore.shared.remove(file)
                 model.open(destination)
-                model.flash("Moved to \(HomeLogic.cloudName(chosen))", level: "success")
+                if let notice = moved["notice"] as? String { model.flash(notice) }
+                else { model.flash("Moved to \(HomeLogic.cloudName(chosen))", level: "success") }
+            } else if moved["code"] as? String == "vote_history", let message = moved["error"] as? String {
+                model.flash(message)
             } else { model.flash(CloudFilesText.problem(code: moved["code"] as? String, fallback: "Could not move the file. Your local copy is kept.")) }
 
             } }

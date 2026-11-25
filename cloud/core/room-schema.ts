@@ -14,6 +14,7 @@ export function initializeRoom(storage: SqlStore): void {
       CREATE INDEX IF NOT EXISTS room_vote_timers ON room_votes(json_extract(json, '$.timer.endsAt')) WHERE json_extract(json, '$.state') = 'active';
       CREATE TABLE IF NOT EXISTS room_vote_key (id INTEGER PRIMARY KEY CHECK (id = 1), key TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS room_vote_design (id INTEGER PRIMARY KEY CHECK (id = 1), json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS vote_designs (id TEXT PRIMARY KEY, json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS room_usage (id INTEGER PRIMARY KEY CHECK (id = 1), bytes INTEGER NOT NULL)`);
     if (!sql.exec("SELECT 1 FROM room_usage WHERE id = 1").toArray().length) {
       sql.exec(`INSERT OR IGNORE INTO op_receipts SELECT op_id, seq FROM ops;

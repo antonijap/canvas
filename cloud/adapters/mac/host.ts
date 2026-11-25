@@ -23,7 +23,7 @@ import type { AddressInfo, Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
 import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../protocol.ts";
-import type { Role, ServerInfo, ServerMessage } from "../../protocol.ts";
+import type { Applied, Role, ServerInfo, ServerMessage } from "../../protocol.ts";
 import { Operations, type Identity } from "../../core/operations.ts";
 import { ranks } from "../../core/people.ts";
 import { TeamStore } from "../../core/team-store.ts";
@@ -89,7 +89,7 @@ export class HostError extends Error {
 
 export interface Me extends Identity { id: string; role: Role; device: string }
 interface Session { doc: string; me: Me; ready: boolean; voting?: boolean; opened: number; window: number; messages: number }
-interface RoomState { store: SqliteStore; ops: Operations; sockets: Map<ServerSocket, Session>; used: number }
+interface RoomState { store: SqliteStore; ops: Operations; sockets: Map<ServerSocket, Session>; used: number; voteTimer?: ReturnType<typeof setTimeout> }
 
 export interface HostOptions {
   /** Where the SQLite files live. Created 0700. */
@@ -348,9 +348,12 @@ export class CloudHost {
       if (!store.sql.exec("SELECT 1 AS one FROM pragma_table_info('ops') WHERE name = 'by_id'").toArray().length) store.sql.exec("ALTER TABLE ops ADD COLUMN by_id TEXT");
       r = { store, ops, sockets: new Map(), used: Date.now() };
       this.rooms.set(doc, r);
+      const room = r;
+      ops.onVotesExpired = entries => this.broadcastVotes(room, entries);
+      this.scheduleVoteExpiry(room);
       this.protect();
       if (this.rooms.size > 64) {
-        const idle = [...this.rooms.entries()].filter(([, x]) => !x.sockets.size).sort((a, b) => a[1].used - b[1].used)[0];
+        const idle = [...this.rooms.entries()].filter(([, x]) => !x.sockets.size && !x.voteTimer).sort((a, b) => a[1].used - b[1].used)[0];
         if (idle) { idle[1].store.close(); this.rooms.delete(idle[0]); }
       }
     }
@@ -363,15 +366,28 @@ export class CloudHost {
     const r = this.room(doc);
     const members = this.people().filter(person => person.devices.length).map(person => ({ id: person.id, name: person.label }));
     const result = r.ops.submit(doc, ops, { email: me.email, name: me.name, id: me.id }, me.role, allowance, members, voting || undefined);
-    if (result.entries.length) {
-      const changed = result.entries.some(entry => entry.op.kind === "vote.changed");
-      for (const [socket, s] of r.sockets) {
-        if (!s.ready) continue;
-        if (!this.current(s.me)) { r.sockets.delete(socket); drop(socket, true); continue; }
-        socket.send(JSON.stringify({ type: "applied", entries: result.entries, ...(changed && s.voting && { votes: r.ops.voteView(s.me) }) } satisfies ServerMessage));
-      }
-    }
+    this.scheduleVoteExpiry(r);
+    if (result.entries.length) this.broadcastVotes(r, result.entries);
     return { acks: result.acks, rejected: result.rejected };
+  }
+
+  private broadcastVotes(r: RoomState, entries: Applied[]) {
+    const changed = entries.some(entry => entry.op.kind === "vote.changed");
+    for (const [socket, s] of r.sockets) {
+      if (!s.ready) continue;
+      if (!this.current(s.me)) { r.sockets.delete(socket); drop(socket, true); continue; }
+      socket.send(JSON.stringify({ type: "applied", entries, ...(changed && s.voting && { votes: r.ops.voteView(s.me, false) }) } satisfies ServerMessage));
+    }
+  }
+
+  private scheduleVoteExpiry(r: RoomState) {
+    clearTimeout(r.voteTimer);
+    const next = r.ops.nextVoteExpiry();
+    r.voteTimer = next === undefined ? undefined : setTimeout(() => {
+      r.ops.expireDueVotes();
+      this.scheduleVoteExpiry(r);
+    }, Math.max(1, next - this.now()));
+    r.voteTimer?.unref();
   }
 
   // ---------- HTTP ----------
@@ -530,7 +546,7 @@ export class CloudHost {
         read: request => {
           const since = Number(request.query.get("since") ?? "0");
           if (!Number.isSafeInteger(since) || since < 0) return { status: 400, body: { code: "invalid", message: "since must be a nonnegative integer" } };
-          return { status: 200, body: { ...this.room(doc).ops.read(since), ...(voting && { votes: this.room(doc).ops.voteView(me) }) } };
+          return { status: 200, body: { ...this.room(doc).ops.read(since), ...(voting && { votes: this.room(doc).ops.voteView(me, false) }) } };
         },
         submit: async request => {
           const body = await request.body();
@@ -623,7 +639,7 @@ export class CloudHost {
         s.voting = supportsCloudVotes(message.capabilities);
         const data = room.ops.read(since);
         const me = { id: s.me.id, email: s.me.email, name: s.me.name };
-        send({ type: "welcome", protocol: PROTOCOL_VERSION, server: SERVER_VERSION, role: s.me.role, me, seq: data.seq, serverTime: new Date(this.now()).toISOString(), capabilities: [CLOUD_VOTES], ...(s.voting && { votes: room.ops.voteView(me) }), ...("threads" in data ? { threads: data.threads } : {}) });
+        send({ type: "welcome", protocol: PROTOCOL_VERSION, server: SERVER_VERSION, role: s.me.role, me, seq: data.seq, serverTime: new Date(this.now()).toISOString(), capabilities: [CLOUD_VOTES], ...(s.voting && { votes: room.ops.voteView(me, false) }), ...("threads" in data ? { threads: data.threads } : {}) });
         if ("entries" in data && data.entries.length) send({ type: "applied", entries: data.entries });
         s.ready = true;
         return;
@@ -684,7 +700,7 @@ export class CloudHost {
       await new Promise<void>((r) => server.close(() => r()));
     }
     this.files.close();
-    for (const room of this.rooms.values()) room.store.close();
+    for (const room of this.rooms.values()) { clearTimeout(room.voteTimer); room.store.close(); }
     this.rooms.clear();
     this.db.close();
   }

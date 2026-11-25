@@ -4,7 +4,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { CommentsFile, Thread } from "../cloud/protocol.ts";
+import { isVoteOp, type CommentsFile, type Thread } from "../cloud/protocol.ts";
 
 export const COMMENTS_FILE = "comments.json";
 /** The largest comments.json this server reads: well past LIMITS.threadsPerDoc threads of ordinary comments. */
@@ -47,8 +47,16 @@ export function readCommentsFile(pkg: string): CommentsFile | null {
   return f;
 }
 
+/** Portable Cloud packages carry comments. Vote queues and member-specific views stay in private state. */
+export function withoutCloudVotes(f: CommentsFile): CommentsFile {
+  const { votes, cloudVotes, voteConclusions, voteCapable, voteRole, ...comments } = f;
+  return { ...comments, outbox: comments.outbox.filter(e => !isVoteOp(e.op)),
+    rejected: comments.rejected?.filter(r => !isVoteOp(r.envelope.op)) };
+}
+
 /** Writes the file whole: a temp file in the same folder, flushed, then renamed over it. A crash leaves the old one or the new one. */
 export function writeCommentsFile(pkg: string, f: CommentsFile): void {
+  if (f.server || fs.existsSync(path.join(pkg, ".cloud"))) f = withoutCloudVotes(f);
   const p = path.join(pkg, COMMENTS_FILE);
   const tmp = path.join(pkg, `.${COMMENTS_FILE}.${process.pid}-${randomBytes(4).toString("hex")}.tmp`);
   const fd = fs.openSync(tmp, "w");

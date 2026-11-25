@@ -67,10 +67,20 @@ export function voteDesignForTopology(topology: VoteTopology): VoteDesign {
   return { page: id => pages.has(id), node: id => nodes.get(id) };
 }
 
+export type StoredVote = Vote & { anonymousKey?: string };
+
+export function forgetAnonymousBallots(vote: StoredVote) {
+  if (!vote.anonymous) return;
+  delete vote.anonymousKey;
+  delete vote.retracted;
+  vote.host = { id: crypto.randomUUID() };
+  vote.ballots = vote.ballots.map(({ layer }) => ({ id: crypto.randomUUID(), layer, voter: { id: crypto.randomUUID() } }));
+}
+
 const encoder = new TextEncoder();
 const fromHex = (hex: string) => Uint8Array.from(hex.match(/../g) ?? [], pair => Number.parseInt(pair, 16));
 function anonymousId(key: string, vote: string, id: string) {
-  // HMAC-SHA256 with a random room key. Including the vote ID keeps identities distinct between votes.
+  // HMAC-SHA256. A vote key exists only as long as its ballots can be changed.
   const data = encoder.encode(JSON.stringify([vote, id]));
   const secret = fromHex(key), inner = new Uint8Array(64 + data.length).fill(0x36), outer = new Uint8Array(96).fill(0x5c);
   for (let i = 0; i < secret.length; i++) { inner[i] ^= secret[i]; outer[i] ^= secret[i]; }
@@ -79,12 +89,12 @@ function anonymousId(key: string, vote: string, id: string) {
   return sha256Hex(outer);
 }
 
-function personKey(key: string, vote: Pick<Vote, "anonymous" | "id">, person: Author) {
+function personKey(key: string | undefined, vote: Pick<Vote, "anonymous" | "id">, person: Author) {
   const id = person.id || person.email || "";
-  return vote.anonymous && id ? anonymousId(key, vote.id, id) : id;
+  return vote.anonymous && id && key ? anonymousId(key, vote.id, id) : id;
 }
 
-export function updateRoomVote(votes: Vote[], key: string, op: VoteOp, opId: string, me: Author, at: string, design: VoteDesign) {
+export function updateRoomVote(votes: StoredVote[], key: string | undefined, op: VoteOp, opId: string, me: Author, at: string, design: VoteDesign) {
   const vote = votes.find(v => v.id === op.vote);
   const targetError = validateVoteTarget(design, vote, op);
   if (targetError) return targetError;
@@ -94,7 +104,10 @@ export function updateRoomVote(votes: Vote[], key: string, op: VoteOp, opId: str
   const active = vote?.state === "active";
   if (op.kind === "vote.clear" && vote?.state === "ended" && (vote.conclusion || vote.timedOut)) vote.clearedTotals = voteTotals(vote);
   const error = applyVote(votes, op, { id, name: me.name, agent: me.agent }, at, true);
-  if (!error && op.kind === "vote.end" && vote && (active || (vote.timedOut && !vote.conclusion))) vote.conclusion = { by: id, opId };
+  if (!error && op.kind === "vote.end" && vote && (active || (vote.timedOut && !vote.conclusion))) {
+    vote.conclusion = { by: me.id || me.email || "", opId };
+    if (active) forgetAnonymousBallots(vote);
+  }
   return error;
 }
 
@@ -109,11 +122,11 @@ export function voteTotals(vote: Vote, ballots = vote.ballots): VoteTotal[] {
   return [...totals].map(([layer, { count, names }]) => ({ layer, count, names: [...names] }));
 }
 
-export function projectVotes(votes: Vote[], key: string, person: Author): VoteView[] {
+export function projectVotes(votes: StoredVote[], legacyKey: string | undefined, person: Author): VoteView[] {
   return votes.flatMap(vote => {
     const { id, scope, on, perPerson, hidden, anonymous, state, timer, conclusion } = vote;
-    const mine = personKey(key, vote, person);
-    const conclusionOp = conclusion?.by === mine ? conclusion?.opId : undefined;
+    const mine = personKey(vote.anonymousKey ?? legacyKey, vote, person);
+    const conclusionOp = conclusion?.by === (person.id || person.email) ? conclusion?.opId : undefined;
     const needsConclusion = vote.timedOut && !conclusion;
     if (state === "dismissed" && !conclusionOp && !needsConclusion) return [];
     const live = state === "active";
@@ -127,11 +140,11 @@ export function projectVotes(votes: Vote[], key: string, person: Author): VoteVi
     }
     return [{
       id, scope, on, perPerson, hidden, anonymous, state, timer, ballots, conclusionOp, needsConclusion,
-      ...(live && !anonymous && { progress: [...people].flatMap(([id, p]) => p.name ? [{ id: id.includes("@") ? anonymousId(key, vote.id, id) : id, name: p.name, done: p.count >= perPerson }] : []) }),
+      ...(live && !anonymous && { progress: [...people].flatMap(([id, p], index) => p.name ? [{ id: id.includes("@") ? `${vote.id}:${index}` : id, name: p.name, done: p.count >= perPerson }] : []) }),
       ...(live && { done: [...people.values()].filter(p => p.count >= perPerson).length }),
       ...(!live && !anonymous && { voters: people.size }),
       ...(!live && { totals: vote.clearedTotals ?? voteTotals(vote) }),
-      ...(live && !hidden && { totals: voteTotals(vote, vote.ballots.filter(b => b.voter.id !== mine)) }),
+      ...(live && !hidden && !anonymous && { totals: voteTotals(vote, vote.ballots.filter(b => b.voter.id !== mine)) }),
     }];
   });
 }

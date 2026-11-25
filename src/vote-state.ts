@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { isVoteOp, type CommentsFile, type OpEnvelope, type Role, type Vote, type VoteOp, type VoteView } from "../cloud/protocol.ts";
-import type { VoteTopology } from "../cloud/core/votes.ts";
+import { isVoteOp, LIMITS, type Author, type CommentsFile, type OpEnvelope, type Role, type Vote, type VoteDesign, type VoteOp, type VoteView } from "../cloud/protocol.ts";
+import { validateVoteTarget, type VoteTopology } from "../cloud/core/votes.ts";
 import type { CanvasDoc } from "./engine.ts";
 import { listPages } from "./pages.ts";
 import { stateDir } from "./usage-counts.ts";
@@ -13,6 +13,32 @@ export function voterId() {
   try { fs.writeFileSync(file, randomUUID(), { flag: "wx", mode: 0o600 }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
   return fs.readFileSync(file, "utf8").trim();
+}
+
+export const voteAccount = (me?: Author) => me?.id || me?.email?.toLowerCase();
+const privateVotePath = (origin: string, doc: string, account: string) =>
+  path.join(stateDir(), "cloud-votes", createHash("sha256").update(JSON.stringify([origin, doc, account])).digest("hex") + ".json");
+
+type PrivateVotes = Pick<CommentsFile, "cloudVotes" | "voteConclusions" | "voteCapable" | "voteRole" | "outbox" | "rejected">;
+export function withPrivateVotes(file: CommentsFile, account: string): CommentsFile {
+  if (!file.server) return file;
+  const location = privateVotePath(file.server.url, file.doc, account);
+  if (!fs.existsSync(location)) return file;
+  const votes: PrivateVotes = JSON.parse(fs.readFileSync(location, "utf8"));
+  return { ...file, ...votes, outbox: [...file.outbox, ...votes.outbox],
+    rejected: [...(file.rejected ?? []), ...(votes.rejected ?? [])] };
+}
+export function savePrivateVotes(file: CommentsFile, account: string) {
+  if (!file.server) return;
+  const { cloudVotes, voteConclusions, voteCapable, voteRole } = file;
+  const votes: PrivateVotes = { cloudVotes, voteConclusions, voteCapable, voteRole,
+    outbox: file.outbox.filter(e => isVoteOp(e.op)), rejected: file.rejected?.filter(r => isVoteOp(r.envelope.op)) };
+  const location = privateVotePath(file.server.url, file.doc, account), tmp = location + "." + randomUUID();
+  fs.mkdirSync(path.dirname(location), { recursive: true, mode: 0o700 });
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(votes), { flag: "wx", mode: 0o600, flush: true });
+    fs.renameSync(tmp, location);
+  } finally { fs.rmSync(tmp, { force: true }); }
 }
 
 export function ownLocalVotes(votes: Vote[]): Vote[] {
@@ -35,6 +61,45 @@ export function voteOpsForShare(file: CommentsFile, own: string, now = new Date(
     if (v.state === "ended") add({ kind: "vote.end", vote: v.id });
   }
   return out;
+}
+
+export function voteOpsForMove(file: CommentsFile, own: string, design: VoteDesign) {
+  if (file.server || file.cloudVotes) return { ops: [] };
+  const votes = (file.votes ?? []).filter(v => v.state !== "dismissed");
+  if (votes.some(v => v.ballots.some(ballot => ballot.voter.id !== own))) {
+    throw Object.assign(new Error("This file contains ballots from other voters. The local file was kept so their votes are preserved."),
+      { status: 409, code: "vote_history" });
+  }
+  // An ended vote is briefly active during import. Import those before filling the active-vote slots.
+  const ops = voteOpsForShare({ ...file, votes: [...votes.filter(v => v.state === "ended"), ...votes.filter(v => v.state === "active")] }, own);
+  const accepted = new Set<string>(), pages = new Set<string>();
+  let active = 0, skippedBallots = 0, skippedVotes = 0;
+  const voteById = new Map(votes.map(v => [v.id, v]));
+  const filtered = ops.filter(({ op }) => {
+    if (!isVoteOp(op)) return true;
+    const vote = voteById.get(op.vote)!;
+    if (op.kind === "vote.start") {
+      if (pages.has(vote.scope.page) || (vote.state === "active" && active >= LIMITS.openVotesPerDoc) ||
+          accepted.size >= LIMITS.votesPerDoc || validateVoteTarget(design, vote, op)) {
+        skippedVotes++;
+        return false;
+      }
+      active += Number(vote.state === "active");
+      accepted.add(op.vote);
+      pages.add(vote.scope.page);
+      return true;
+    }
+    if (!accepted.has(op.vote) || validateVoteTarget(design, vote, op)) {
+      if (op.kind === "vote.cast") skippedBallots++;
+      return false;
+    }
+    return true;
+  });
+  const skipped = [
+    ...(skippedVotes ? [`${skippedVotes} ${skippedVotes === 1 ? "vote session" : "vote sessions"}`] : []),
+    ...(skippedBallots ? [`${skippedBallots} ${skippedBallots === 1 ? "ballot" : "ballots"}`] : []),
+  ];
+  return { ops: filtered, notice: skipped.length ? `Moved to Cloud. Skipped ${skipped.join(" and ")} because the target was unavailable or the Cloud vote limit was reached.` : undefined };
 }
 
 export function sendableCommentOps(outbox: OpEnvelope[], role: Role | undefined, voting: boolean | undefined) {

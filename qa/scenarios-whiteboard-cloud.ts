@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { launchChrome, type Chrome } from "../fidelity/cdp.ts";
 import { sc, T } from "./harness.ts";
 import { cloudVoteFiles, viewerComment, votePost } from "./cloud-vote-fixture.ts";
@@ -96,7 +97,7 @@ sc("sticky", "Sticky text presence and stickers replicate on a Cloud file", {
 });
 
 sc("vote", "Cloud vote lets a viewer vote and comment without revealing hidden ballots", {
-  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer"],
+  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence", "vote:cloud-cache", "vote:cloud-design"],
   skip: { visual: "Checks the two live canvases and the synchronized results." },
 }, async (t: T) => {
   const dir = fs.mkdtempSync(path.join(path.dirname(t.file), "vote-cloud-"));
@@ -132,6 +133,9 @@ sc("vote", "Cloud vote lets a viewer vote and comment without revealing hidden b
     await ben.page.send("Page.bringToFront");
     await ben.focus("Board");
     const point = await ben.center("BallotTarget");
+    await ben.ev('window.canvasHost.presence.update({cursor:{x:310,y:220},sel:["BallotTarget"]})');
+    await ben.waitFor('window.canvasHost.votes.privatePresence === true', "private voting disables presence");
+    t.eq(await anna.ev('document.querySelectorAll(".cp-cursor,.cp-selection").length'), 0, "the owner sees no ballot pointers");
     await ben.io.click(point.x, point.y);
     await ben.waitFor('document.querySelector("[data-vote-mark]")', "the viewer sees their dot");
     await anna.waitFor('document.querySelector("[data-vote-progress-done]")?.parentElement.title === "Ben, done voting"', "the owner sees who is done");
@@ -158,6 +162,43 @@ sc("vote", "Cloud vote lets a viewer vote and comment without revealing hidden b
     await ben.waitFor('!document.querySelector("[data-vote-count]")', "clear removes the viewer's counts");
     t.eq(await ben.ev('[...window.canvasHost.boards.keys()].filter(id => id.startsWith("vote-conclusion-")).length'), 1,
       "clearing leaves exactly one conclusion card");
+
+    // A comments-only room shares its design out of band, as a synced folder would.
+    const local = path.join(dir, "Anna", "Shared.canvas"), copy = path.join(dir, "Ben", "Shared.canvas");
+    fs.mkdirSync(local);
+    const design = { version: "2.21", children: [{ type: "frame", id: "SharedBoard", width: 300, height: 200, children: [] as object[] }] };
+    fs.writeFileSync(path.join(local, "document.json"), JSON.stringify(design));
+    const shared = await votePost(a.base, "/api/cloud/share?file=" + encodeURIComponent(local) + "&url=" + encodeURIComponent(files.cloud), {});
+    fs.cpSync(local, copy, { recursive: true });
+    const api = (route: string, file: string) => route + "?file=" + encodeURIComponent(file);
+    await fetch(b.base + api("/api/comments", copy));
+    async function waitVote(server: Scratch, file: string, ready: (value: any) => boolean, label: string) {
+      const until = Date.now() + 8000;
+      while (Date.now() < until) {
+        const response = await fetch(server.base + api("/api/votes", file));
+        if (response.ok && ready(await response.json())) return;
+        await sleep(125);
+      }
+      throw new Error(label);
+    }
+    await waitVote(a, local, data => data.canVote === true, "Owner did not connect to the comments room");
+    const vote = randomUUID();
+    const send = (server: Scratch, file: string, op: object) => votePost(server.base, api("/api/votes", file), {
+      name: file === local ? "Anna" : "Ben", envelope: { doc: shared.doc, opId: randomUUID(), at: new Date().toISOString(), op },
+    });
+    await send(a, local, { kind: "vote.start", vote, scope: { page: "page-1" }, on: "anything", perPerson: 1, hidden: true, anonymous: true });
+    await waitVote(b, copy, data => data.votes.some((v: any) => v.id === vote), "Viewer did not receive the comments-only vote");
+    const newLayer = "AddedWhileVoting";
+    design.children[0].children.push({ type: "rectangle", id: newLayer, width: 40, height: 40 });
+    for (const file of [local, copy]) fs.writeFileSync(path.join(file, "document.json"), JSON.stringify(design));
+    await sleep(700);
+    const ballot = randomUUID();
+    await send(b, copy, { kind: "vote.cast", vote, ballot, layer: newLayer });
+    await waitVote(a, local, data => data.votes.some((v: any) => v.id === vote && v.done === 1), "Host did not accept the cast on the added object");
+    t.ok(!fs.readFileSync(path.join(copy, "comments.json"), "utf8").includes(newLayer), "the synced package contains no hidden target");
+    t.ok(!fs.readFileSync(path.join(copy, "comments.json"), "utf8").includes(ballot), "the synced package contains no personal ballot ID");
+    await waitVote(b, copy, data => data.votes.some((v: any) => v.ballots.some((b: any) => b.id === ballot)), "Viewer lost their private ballot");
+
   } finally {
     await Promise.allSettled([tab?.close(), chrome?.stop()]);
     await Promise.allSettled(servers.map(server => server.stop()));

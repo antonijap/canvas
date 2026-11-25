@@ -132,6 +132,8 @@ interface Room {
     lastAction: number;
     snapshotAt: number;
     timer?: ReturnType<typeof setTimeout>;
+    voteTimer?: ReturnType<typeof setTimeout>;
+    privateVoting?: boolean;
 }
 export class MacFiles {
     readonly objects: DiskObjects;
@@ -191,6 +193,7 @@ export class MacFiles {
         const r = this.rooms.get(file);
         if (r) {
             if (r.timer) clearTimeout(r.timer);
+            clearTimeout(r.voteTimer);
             for (const ws of r.sockets.keys()) ws.close(1008, 'Import cancelled');
             r.presence.clear(); r.sockets.clear(); r.store.close(); this.rooms.delete(file);
         }
@@ -260,6 +263,10 @@ export class MacFiles {
                 store.sql.exec('ALTER TABLE ops ADD COLUMN by_id TEXT');
             r = { leases, store, core, roles, comments, sockets: new Map(), ready: new Map(), presence: new Map(), lastAction: 0, snapshotAt: this.now() };
             this.rooms.set(file, r);
+            const room = r;
+            comments.onVotesExpired = entries => this.broadcastComments(room, entries);
+            room.privateVoting = comments.privateVoting();
+            this.scheduleVoteExpiry(room);
             this.accountDatabase(path.join(this.root, 'files', file + '.sqlite'));
         }
         return r;
@@ -292,13 +299,32 @@ export class MacFiles {
             }
     }
     private readonly votingSockets = new WeakSet<ServerSocket>();
-    private broadcastComments(r: Room, out: OpResult) {
-        const changed = out.entries.some(entry => entry.op.kind === 'vote.changed');
+    private scheduleVoteExpiry(r: Room) {
+        clearTimeout(r.voteTimer);
+        const next = r.comments.nextVoteExpiry();
+        r.voteTimer = next === undefined ? undefined : setTimeout(() => {
+            r.comments.expireDueVotes();
+            this.scheduleVoteExpiry(r);
+        }, Math.max(1, next - this.now()));
+        r.voteTimer?.unref();
+    }
+    private broadcastComments(r: Room, entries: OpResult['entries']) {
+        const changed = entries.some(entry => entry.op.kind === 'vote.changed');
         this.recheck();
+        if (changed) {
+            const privateVoting = r.comments.privateVoting();
+            if (privateVoting && !r.privateVoting) {
+                for (const { socket } of r.presence.values()) {
+                    this.relayPresence(r, socket, { ...goneOf(socket), gone: undefined, page: null, cursor: null, sel: [], preview: null, editing: null });
+                }
+                for (const peer of r.presence.values()) peer.kept = {};
+            }
+            r.privateVoting = privateVoting;
+        }
         for (const [ws, me] of r.sockets) {
             if (!r.ready.has(ws)) continue;
-            ws.send(JSON.stringify({ type: 'comments.applied', entries: out.entries,
-                ...(changed && this.votingSockets.has(ws) && { votes: r.comments.voteView(me) }),
+            ws.send(JSON.stringify({ type: 'comments.applied', entries,
+                ...(changed && this.votingSockets.has(ws) && { votes: r.comments.voteView(me, false) }),
             }));
         }
     }
@@ -718,14 +744,18 @@ export class MacFiles {
                 if (!fresh) return json(403, { code: 'forbidden' });
                 if (!Array.isArray(b.ops) || b.ops.length > LIMITS.opsPerMessage)
                     return json(400, { code: 'invalid' });
-                const allowance = this.bank.grant(fresh.id, 'ops', b.ops.length, this.now());
+                const importing = this.row(file, fresh).state === 'importing';
+                const now = this.now();
+                const allowance = importing ? this.importBank.grant('import:' + fresh.id, 'ops', b.ops.length, now)
+                    : this.bank.grant(fresh.id, 'ops', b.ops.length, now);
                 const out = this.bounded(r, () => r.comments.submit(file, b.ops, fresh, fresh.role, allowance, [], voting ? voteDesignForTree(r.core.tree) : undefined));
+                this.scheduleVoteExpiry(r);
                 if (out.entries.length)
-                    this.broadcastComments(r, out);
-                return json(200, { ...out, ...r.comments.snapshot(), ...(voting && { votes: r.comments.voteView(fresh) }) });
+                    this.broadcastComments(r, out.entries);
+                return json(200, { ...out, ...(allowance < b.ops.length && { retryAfterMs: 60_000 - now % 60_000 + 50 }), ...r.comments.snapshot(), ...(voting && { votes: r.comments.voteView(fresh, false) }) });
             }
             if (sub === 'comments' && method === 'GET')
-                return json(200, { ...r.comments.read(Number(url.searchParams.get('since') ?? 0)), ...(voting && { votes: r.comments.voteView(me) }) });
+                return json(200, { ...r.comments.read(Number(url.searchParams.get('since') ?? 0)), ...(voting && { votes: r.comments.voteView(me, false) }) });
             return json(404, { code: 'not_found' });
         }
         catch (e) {
@@ -764,6 +794,7 @@ export class MacFiles {
                     try { parsed = JSON.parse(text); } catch { ws.close(1008, 'Invalid JSON'); return; }
                     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { ws.close(1008, 'Invalid message'); return; }
                     if (parsed.type === 'presence') {
+                        if (r.privateVoting) return;
                         const fresh = this.current(me);
                         if (!fresh) { ws.send(JSON.stringify({ type: 'removed' })); ws.close(1008, 'removed'); return; }
                         presence.socket.role = fresh.role;
@@ -808,13 +839,15 @@ export class MacFiles {
                                 if (failure?.code === 'update') ws.close(1008, failure.message);
                                 return;
                             }
+                            r.ready.delete(ws);
+                            const social = r.comments.snapshot();
                             r.ready.set(ws, supportsWhiteboard(msg.capabilities));
                             this.votingSockets.delete(ws);
                             const voting = supportsCloudVotes(msg.capabilities);
                             if (voting) this.votingSockets.add(ws);
-                            const peers = snapshotFor(presence.socket, r.presence.values());
+                            const peers = r.privateVoting ? [] : snapshotFor(presence.socket, r.presence.values());
                             if (peers.length) ws.send(JSON.stringify({ type: 'presence', peers }));
-                            ws.send(JSON.stringify({ type: 'comments.snapshot', ...r.comments.snapshot(), ...(voting && { votes: r.comments.voteView(fresh) }) }));
+                            ws.send(JSON.stringify({ type: 'comments.snapshot', ...social, ...(voting && { votes: r.comments.voteView(fresh, false) }) }));
                         }
                         else if (msg.type === 'actions' && r.ready.has(ws)) {
                             const out = this.bounded(r, () => r.core.submit({ ...this.conn(fresh), whiteboard: r.ready.get(ws) }, msg, Buffer.byteLength(text)));
@@ -830,8 +863,9 @@ export class MacFiles {
                                 error(429, 'quota', 'Message quota');
                             const allowance = this.bank.grant(fresh.id, 'ops', msg.ops.length, this.now());
                             const out = this.bounded(r, () => r.comments.submit(m[1], msg.ops, fresh, fresh.role, allowance, [], this.votingSockets.has(ws) ? voteDesignForTree(r.core.tree) : undefined));
+                            this.scheduleVoteExpiry(r);
                             if (out.entries.length)
-                                this.broadcastComments(r, out);
+                                this.broadcastComments(r, out.entries);
                             ws.send(JSON.stringify({ type: 'comments.ack', acks: out.acks, rejected: out.rejected }));
                         }
                     }).catch((e) => ws.send(JSON.stringify({ type: 'error', code: e.code === 'quota' ? 'quota' : 'invalid', message: e.code === 'quota' ? 'Cloud storage cap reached' : 'Invalid file message' }))).finally(() => { queued--; });
@@ -850,6 +884,7 @@ export class MacFiles {
             clearTimeout(r.timer);
         for (const ws of r.sockets.keys())
             ws.terminate();
+        clearTimeout(r.voteTimer);
         r.store.close();
     } this.rooms.clear(); }
 }

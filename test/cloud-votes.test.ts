@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import assert from "node:assert/strict";
 import { createHmac, randomUUID } from "node:crypto";
 import test, { type TestContext } from "node:test";
@@ -45,7 +48,7 @@ test("room filters anonymous hidden ballots from peers, history and exports", t 
   const privateData = store.sql.exec<{ json: string }>("SELECT json FROM room_votes").one().json;
   assert.match(privateData, /sticky/);
   assert.doesNotMatch(privateData, /anna-person|ben-person|Anna|Ben/);
-  const key = store.sql.exec<{ key: string }>("SELECT key FROM room_vote_key").one().key;
+  const key = JSON.parse(privateData).anonymousKey;
   const voter = createHmac("sha256", Buffer.from(key, "hex")).update(JSON.stringify([vote, ben.id])).digest("hex");
   assert.equal(JSON.parse(privateData).ballots[0].voter.id, voter);
   assert.equal(submit({ kind: "vote.end", vote }, anna, "editor").acks.length, 1);
@@ -113,4 +116,87 @@ test("a timer closes against the room clock and one editor can claim its conclus
   assert.equal(apply({ kind: "vote.end", vote }, anna).acks.length, 1);
   assert.ok(ops.voteView(ben)[0].conclusionOp);
   assert.equal(ops.voteView(anna)[0].conclusionOp, undefined);
+});
+
+test("anonymous open voting shows progress only and erases live linkage at end", t => {
+  const { store, ops, submit } = room(t);
+  const second = randomUUID();
+  submit({ ...start, hidden: false });
+  submit({ ...start, vote: second, scope: { page: "page-2" } });
+  submit(cast, ben, "viewer");
+  assert.equal(ops.voteView(anna)[0].totals, undefined);
+  assert.equal(ops.voteView(anna)[0].done, 1);
+  const raw = (id: string) => JSON.parse(store.sql.exec<{ json: string }>("SELECT json FROM room_votes WHERE id = ?", id).one().json);
+  const live = raw(vote);
+  assert.ok(live.anonymousKey);
+  assert.notEqual(live.anonymousKey, raw(second).anonymousKey);
+  submit({ kind: "vote.end", vote });
+  const ended = raw(vote);
+  assert.equal(ended.anonymousKey, undefined);
+  assert.notEqual(ended.ballots[0].voter.id, live.ballots[0].voter.id);
+  assert.notEqual(ended.ballots[0].id, ballot);
+  assert.deepEqual(ops.voteView(anna)[0].totals, [{ layer: "sticky", count: 1, names: [] }]);
+});
+
+test("reading an idle room expires its timer without a submitted op", t => {
+  const store = new SqliteStore(":memory:");
+  t.after(() => store.close());
+  let now = Date.parse(at);
+  const ops = new Operations(store, () => now);
+  ops.submit(doc, [envelope(start), envelope({ kind: "timer.set", vote, ms: 3000 })], anna, "owner", 100, [], design);
+  now += 3000;
+  assert.equal(ops.read(2).seq, 3);
+  assert.equal(ops.voteView(anna)[0].state, "ended");
+});
+
+test("publishing one vote design leaves another page's vote intact", t => {
+  const { ops } = room(t);
+  const second = randomUUID();
+  const submit = (op: Op) => ops.submit(doc, [envelope(op)], anna, "owner", 100, [], true);
+  const topology = (id: string, page: string, layer: string) => ({ vote: id, pages: [page], nodes: [[layer, { page, chain: [layer], type: "sticky" }]] });
+  assert.ok(ops.setVoteDesign(topology(vote, "page", "sticky")));
+  assert.equal(submit({ ...start, scope: { page: "page" } }).acks.length, 1);
+  assert.ok(ops.setVoteDesign(topology(second, "page-2", "other")));
+  assert.equal(submit({ ...start, vote: second, scope: { page: "page-2" } }).acks.length, 1);
+  assert.equal(submit(cast).acks.length, 1);
+});
+
+test("a shared package never writes personal vote views or waiting ballots", async t => {
+  const { randomUUID } = await import("node:crypto");
+  const { emptyComments, readCommentsFile, writeCommentsFile } = await import("../src/comments-file.ts");
+  const pkg = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-vote-sidecar-"));
+  t.after(() => fs.rmSync(pkg, { recursive: true, force: true }));
+  const file = emptyComments(), id = randomUUID(), ballot = randomUUID();
+  const view = { id, scope: { page: "page-1" }, on: "anything", perPerson: 1, hidden: true, anonymous: false,
+    state: "active", ballots: [{ id: ballot, layer: "private-target" }] } as const;
+  writeCommentsFile(pkg, { ...file, server: { url: "https://studio.test" },
+    cloudVotes: [{ ...view, ballots: [...view.ballots] }], voteConclusions: [id],
+    outbox: [{ doc: file.doc, opId: randomUUID(), at: new Date().toISOString(), op: { kind: "vote.cast", vote: id, ballot, layer: "private-target" } }] });
+  const stored = readCommentsFile(pkg)!;
+  assert.equal(stored.cloudVotes, undefined);
+  assert.equal(stored.voteConclusions, undefined);
+  assert.deepEqual(stored.outbox, []);
+  assert.doesNotMatch(fs.readFileSync(path.join(pkg, "comments.json"), "utf8"), /private-target/);
+});
+
+
+test("a comments-only account reloads its own vote queue from private storage", async t => {
+  const { emptyComments } = await import("../src/comments-file.ts");
+  const { savePrivateVotes, withPrivateVotes } = await import("../src/vote-state.ts");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-private-votes-"));
+  const oldDir = process.env.CANVAS_STATE_DIR;
+  process.env.CANVAS_STATE_DIR = dir;
+  t.after(() => {
+    if (oldDir === undefined) delete process.env.CANVAS_STATE_DIR;
+    else process.env.CANVAS_STATE_DIR = oldDir;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const file = { ...emptyComments(), server: { url: "https://studio.test" } };
+  const queued = { ...envelope(cast), doc: file.doc };
+  savePrivateVotes({ ...file, outbox: [queued] }, anna.id);
+  assert.deepEqual(withPrivateVotes(file, anna.id).outbox, [queued]);
+  assert.deepEqual(withPrivateVotes(file, ben.id).outbox, []);
+  assert.deepEqual(withPrivateVotes({ ...file, doc: randomUUID() }, anna.id).outbox, []);
+  const cache = path.join(dir, "cloud-votes");
+  assert.equal(fs.statSync(path.join(cache, fs.readdirSync(cache)[0])).mode & 0o777, 0o600);
 });

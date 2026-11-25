@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { CLOUD_VOTES, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../../protocol";
-import type { PeopleRule, Role, ServerMessage } from "../../../protocol";
+import type { Applied, PeopleRule, Role, ServerMessage } from "../../../protocol";
 import type { Identity } from "./auth";
 import type { SqlStore } from "../../../core/sql.ts";
 import type { Env } from "./env";
@@ -24,13 +24,17 @@ export class Room extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.operations = new Operations(ctx.storage as unknown as SqlStore);
+    this.operations.onVotesExpired = entries => this.broadcast(entries);
   }
   private matches(doc: string): boolean {
     return uuid(doc) && this.env.ROOM.idFromName(doc).equals(this.ctx.id);
   }
   snapshot() { return this.operations.snapshot(); }
-  read(since: number, me?: Identity) {
-    return { ...this.operations.read(since), ...(me && { votes: this.operations.voteView(me) }) };
+  exportSnapshot() { return { ...this.operations.snapshot(), votes: this.operations.endedVoteTotals() }; }
+  async read(since: number, me?: Identity) {
+    const data = this.operations.read(since);
+    await this.scheduleVoteExpiry();
+    return { ...data, ...(me && { votes: this.operations.voteView(me, false) }) };
   }
   async setVoteDesign(doc: string, email: string, value: unknown) {
     if (!this.matches(doc)) return false;
@@ -51,14 +55,27 @@ export class Room extends DurableObject<Env> {
     const auth = role && await this.env.TEAM.getByName("team").authorization(-1, [me.email]);
     const current = auth && auth.generation >= this.generation ? auth.roles?.[0]?.role ?? null : null;
     const result = this.operations.submit(doc, ops, me, current, allowance, members, voting || undefined);
-    if (result.entries.length) {
-      const changed = result.entries.some(entry => entry.op.kind === "vote.changed");
-      for (const socket of this.ctx.getWebSockets()) {
-        const state = session(socket);
-        if (state.ready) send(socket, { type: "applied", entries: result.entries, ...(changed && state.voting && { votes: this.operations.voteView(state.me) }) });
-      }
-    }
+    if (result.entries.length) this.broadcast(result.entries);
+    await this.scheduleVoteExpiry();
     return { acks: result.acks, rejected: result.rejected };
+  }
+  private broadcast(entries: Applied[]) {
+    const changed = entries.some(entry => entry.op.kind === "vote.changed");
+    for (const socket of this.ctx.getWebSockets()) {
+      const state = session(socket);
+      if (state.ready) send(socket, { type: "applied", entries, ...(changed && state.voting && { votes: this.operations.voteView(state.me, false) }) });
+    }
+  }
+  private async scheduleVoteExpiry() {
+    const current = await this.ctx.storage.getAlarm();
+    const next = this.operations.nextVoteExpiry();
+    if (next !== undefined && current !== next) await this.ctx.storage.setAlarm(Math.max(Date.now(), next));
+    else if (next === undefined && current !== null) await this.ctx.storage.deleteAlarm();
+  }
+  async alarm() {
+    await this.refreshRules();
+    this.operations.expireDueVotes();
+    await this.scheduleVoteExpiry();
   }
   private updateRole(socket: WebSocket, role: Role | null) {
     const previous = session(socket);
@@ -136,11 +153,12 @@ export class Room extends DurableObject<Env> {
         const data = this.operations.read(sinceValue(message.since));
         send(socket, {
           type: "welcome", protocol: PROTOCOL_VERSION, server: this.env.SERVER_VERSION,
-          role: state.role, me: state.me, seq: data.seq, serverTime: new Date().toISOString(), capabilities: [CLOUD_VOTES], ...(state.voting && { votes: this.operations.voteView(state.me) }), ...("threads" in data ? { threads: data.threads } : {}),
+          role: state.role, me: state.me, seq: data.seq, serverTime: new Date().toISOString(), capabilities: [CLOUD_VOTES], ...(state.voting && { votes: this.operations.voteView(state.me, false) }), ...("threads" in data ? { threads: data.threads } : {}),
         });
         if ("entries" in data && data.entries.length) send(socket, { type: "applied", entries: data.entries });
         state.ready = true;
         socket.serializeAttachment(state);
+        await this.scheduleVoteExpiry();
         return;
       }
       if (message.type !== "ops" || !state.ready) throw new HttpError(400, "invalid", "Send hello before ops");

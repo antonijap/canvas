@@ -51,7 +51,7 @@ features:
     name: Whiteboard voting
     area: canvas
     driven: [page, native, mcp]
-    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable, palette, compact-panels, cloud, cloud-privacy, cloud-viewer]
+    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable, palette, compact-panels, cloud, cloud-privacy, cloud-viewer, cloud-private-presence, cloud-cache, cloud-design]
 
   - id: draw
     name: Draw boards and layers
@@ -824,7 +824,7 @@ features:
     name: Live files on a Mac hosted Cloud
     area: chrome
     driven: [native, mcp]
-    cases: [new, open, remote, offline, viewer, removed, confinement, usage, undo, presence]
+    cases: [new, open, remote, offline, viewer, removed, confinement, usage, undo, presence, move-vote-notice]
   - id: home
     name: Home, the pinned first tab (recents, files on this Mac, a team server, first launch)
     area: chrome

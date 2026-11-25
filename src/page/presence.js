@@ -5,12 +5,12 @@ if (host?.file && host.es) start(host);
 
 function start(host) {
   const peers = createPeers(), { view } = host;
-  let enabled = !!window.canvasCloudFile, raf = 0, hidden = document.hidden;
+  let enabled = !!window.canvasCloudFile, raf = 0, hidden = document.hidden, privateVote = !!host.votes?.privatePresence;
   const sender = createPresenceSender({ send: p => {
     if (!enabled) return;
     fetch('/api/cloud/files/presence', { method:'POST', headers:{'x-canvas':'1','content-type':'application/json'}, body:JSON.stringify({file:host.file,p}), keepalive:true }).catch(()=>{});
   } });
-  const update = p => { if (enabled) sender.update({ page:host.page, ...p }); };
+  const update = p => { if (enabled && !privateVote) sender.update({ page:host.page, ...p }); };
   const layer = document.createElement('div'); layer.className = 'cp-layer'; layer.setAttribute('aria-label','People in this file'); view.appendChild(layer);
   const style = document.createElement('style');
   style.textContent = `.cp-layer{position:absolute;inset:0;pointer-events:none;z-index:12;overflow:hidden;font:11px var(--c-font-sans)}.cp-layer *{pointer-events:none;box-sizing:border-box}.cp-cursor,.cp-selection,.cp-preview,.cp-editing{position:absolute}.cp-cursor{white-space:nowrap}.cp-cursor span,.cp-editing{padding:4px 6px;border-radius:5px;white-space:pre-wrap;max-width:260px}.cp-cursor span{position:absolute;left:13px;top:18px;white-space:nowrap}.cp-selection,.cp-preview{border:1.5px solid currentColor}.cp-preview{border-style:dashed;background:color-mix(in srgb,currentColor 8%,transparent)}.cp-editing{font-weight:500}`;
@@ -22,7 +22,7 @@ function start(host) {
   }
   function draw(now) {
     raf=0; layer.replaceChildren();
-    const list=hidden ? [] : peers.view(now,host.page);
+    const list=hidden || privateVote ? [] : peers.view(now,host.page);
     host.live?.setPeerPreviews?.(list);
     if (host.cam) for (const p of list) {
       for(const r of selectionBoxes(p.sel,host.worldRectOf)) box('cp-selection',r,p);
@@ -42,11 +42,25 @@ function start(host) {
       }
     }
     host.emit('presencechange');
-    if(peers.busy(now) && !hidden) raf=requestAnimationFrame(draw);
+    if(peers.busy(now) && !hidden && !privateVote) raf=requestAnimationFrame(draw);
   }
   function frame() { if(!raf) raf=requestAnimationFrame(draw); }
-  function receive(list) { peers.receive(list,performance.now());frame(); }
-  host.presence={ update, end:() => { if(enabled)sender.end({page:host.page}); }, receive, get peers(){return peers.view(performance.now(),host.page);}, get people(){return peers.view(performance.now(),null);} };
+  function receive(list) {
+    peers.receive(privateVote ? list.map(({ session, by, role, gone }) =>
+      ({ session, by, role, gone, page:null, cursor:null, sel:[], preview:null, editing:null })) : list,performance.now());
+    frame();
+  }
+  host.presence={ update, end:() => { if(enabled && !privateVote)sender.end({page:host.page}); }, receive, get peers(){return peers.view(performance.now(),host.page);}, get people(){return peers.view(performance.now(),null);} };
+  host.on('vote-privacy', blocked => {
+    privateVote = blocked;
+    if (blocked) {
+      sender.dispose();
+      sender.update({page:null,cursor:null,sel:[],preview:null,editing:null});
+      peers.clear();
+      draw(performance.now());
+    }
+    frame();
+  });
   for(const p of host.presenceEarly || []) receive(p);
   host.presenceEarly=null;
   host.es.addEventListener('cloudfile',()=>{ enabled=!!window.canvasCloudFile; if(enabled) update({sel:host.selection().slice(0,20)}); frame(); });

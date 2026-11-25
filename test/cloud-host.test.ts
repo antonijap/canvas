@@ -717,4 +717,10 @@ test("comments rooms give vote views to capable members and keep old sockets in 
   assert.equal((await submit({ kind: "thread.create", thread: crypto.randomUUID(), comment: crypto.randomUUID(),
     body: "A viewer comment", anchor: { x: 0, y: 0 } }, ben)).acks.length, 1);
   await until(() => old.some(m => m.type === "applied" && m.entries[0]?.seq === 4));
+  assert.equal((await submit({ kind: "vote.clear", vote }, anna)).acks.length, 1);
+  const timed = crypto.randomUUID();
+  assert.equal((await submit({ ...start, vote: timed }, anna)).acks.length, 1);
+  assert.equal((await submit({ kind: "timer.set", vote: timed, ms: 250 }, anna)).acks.length, 1);
+  await until(() => a.some(m => m.type === "applied" && m.votes?.some(v => v.id === timed && v.state === "ended")));
+
 });

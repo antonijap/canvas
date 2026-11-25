@@ -11,7 +11,8 @@ import { PLAYGROUND } from '../qa/playground.ts';
 import { ROOT, startServer } from '../qa/lib.ts';
 import { expectedMove } from '../qa/cloud-files-fixture.ts';
 import { NIL_DOC } from '../src/cloud-sync.ts';
-import { readCommentsFile } from '../src/comments-file.ts';
+import { applyOp, type Vote } from '../cloud/protocol.ts';
+import { emptyComments, readCommentsFile, writeCommentsFile } from '../src/comments-file.ts';
 
 test('Cloud moves preserve complete packages byte for byte after JSON serialization', async t => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-roundtrip-')));
@@ -116,9 +117,11 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 };
                 check(moved.file);
                 if (fixture === 'playground') {
+                    const privateState = await (await fetch(server.base + '/api/votes?file=' + encodeURIComponent(moved.file))).json() as any;
+                    assert.equal(privateState.votes[0].id, vote);
+                    assert.equal(privateState.votes[0].ballots[0].layer, 'r_free');
                     const before = readCommentsFile(moved.file)!;
-                    assert.equal(before.cloudVotes?.[0].id, vote);
-                    assert.equal(before.cloudVotes?.[0].ballots[0].layer, 'r_free');
+                    assert.equal(before.cloudVotes, undefined);
                     assert.equal(before.votes, undefined);
                     assert.deepEqual(before.outbox, []);
                     const reply = await fetch(server.base + '/api/comments/ops?file=' + encodeURIComponent(moved.file), {
@@ -126,7 +129,7 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                         body: JSON.stringify({ ops: [envelopeFor({ kind: 'thread.create', thread: randomUUID(), comment: randomUUID(), body: 'Review this frame', anchor: { nodeId: 'lay_nest', x: 0.5, y: 0.5 } })] }),
                     });
                     assert.equal(reply.status, 200);
-                    assert.deepEqual(readCommentsFile(moved.file)?.cloudVotes, before.cloudVotes);
+                    assert.equal(readCommentsFile(moved.file)?.cloudVotes, undefined);
                 }
                 if (fixture === 'children first') {
                     const health = await (await fetch(server.base + '/health')).json() as { version: string };
@@ -191,6 +194,30 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
             });
         }
         const rejectionHost = await call('/api/cloud/host/start', { name: 'Studio', label: 'Editor' });
+        await t.test('move skips missing ballots and keeps a source with other voters', async () => {
+            const source = path.join(dir, 'Local votes.canvas');
+            fs.mkdirSync(source);
+            fs.writeFileSync(path.join(source, 'document.json'), JSON.stringify({ version: '2.21',
+                children: [{ id: 'Board', type: 'frame', width: 300, height: 200, children: [] }] }));
+            const state = emptyComments(), own = fs.readFileSync(path.join(dir, 'state', 'whiteboard-voter'), 'utf8').trim();
+            const vote: Vote = { id: randomUUID(), host: { id: own }, scope: { page: 'page-1' }, on: 'anything',
+                perPerson: 2, hidden: true, anonymous: true, state: 'ended',
+                ballots: [{ id: randomUUID(), voter: { id: own }, layer: 'Deleted' },
+                    { id: randomUUID(), voter: { id: 'other-voter' }, layer: 'Board' }] };
+            state.votes = [vote];
+            writeCommentsFile(source, state);
+            const move = (status: number) => call('/api/cloud/files/move?file=' + encodeURIComponent(source), { cloud: rejectionHost.url }, status);
+            assert.match((await move(409)).error, /local file was kept/i);
+            assert.ok(fs.existsSync(source));
+            vote.ballots.pop();
+            for (let i = 0; i < 125; i++) applyOp(state.threads, state.doc, { kind: 'thread.create',
+                thread: randomUUID(), comment: randomUUID(), body: 'A note', anchor: { x: i, y: 0 } }, { name: 'Anna' }, new Date().toISOString());
+            writeCommentsFile(source, state);
+            const moved = await move(200);
+            assert.match(moved.notice, /1 ballot/);
+            assert.equal(readCommentsFile(moved.file)?.threads.length, 125);
+            assert.equal(fs.existsSync(source), false);
+        });
         for (const code of ['invalid', 'forbidden']) await t.test(`move returns the host ${code} reason and keeps the source`, async () => {
             const source = path.join(dir, `Rejected-${code}.canvas`);
             fs.mkdirSync(source);

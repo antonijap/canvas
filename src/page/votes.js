@@ -283,8 +283,8 @@ function start(host) {
     }
     bar.append(heading("Vote ended"), el("span", "vote-muted", (v.anonymous ? "Anonymous, " : "") + voteTotal(v.total)));
     if (showResults !== v.id) bar.append(control("Results", () => { showResults = v.id; paint(); }));
-    if (!canVote) bar.append(el("span", "vote-muted", message));
-    if (!v.host || !canVote) return;
+    if (!canVote && !v.archived) bar.append(el("span", "vote-muted", message));
+    if (!v.host || (!canVote && !v.archived)) return;
     if (v.pendingConclusion) bar.append(control("Place conclusion", () => cloud ? load() : send({ kind: "vote.end", vote: v.id }), "voteEnd"));
     else bar.append(control("Clear votes", () => send({ kind: "vote.clear", vote: v.id }), "voteClear"));
   }
@@ -384,7 +384,14 @@ function start(host) {
     }
   }
 
+  const privatePresence = () => votes.some(v => v.state === "active" && (v.hidden || v.anonymous));
+  let lastPrivatePresence = false;
   function paint() {
+    const privacy = privatePresence();
+    if (privacy !== lastPrivatePresence) {
+      lastPrivatePresence = privacy;
+      host.emit("vote-privacy", privacy);
+    }
     const v = current();
     if (showResults && showResults !== v?.id) showResults = null;
     paintBar(v);
@@ -454,7 +461,7 @@ function start(host) {
   host.es?.addEventListener("comments", load);
   host.es?.addEventListener("cloudfile", load);
   host.beforeFrame(positionMarks);
-  host.votes = { activate, active, capturing };
+  host.votes = { activate, active, capturing, get privatePresence() { return privatePresence(); } };
   void load();
 }
 

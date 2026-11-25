@@ -42,7 +42,7 @@ async function route(request: Request, env: Env): Promise<Response> {
       if (cursor && !uuid(cursor)) return failure(400, "invalid", "cursor must be a document uuid");
       const page = await team.documents(cursor, 51);
       const docs = [];
-      for (const doc of page.slice(0, 50)) docs.push({ ...doc, ...await env.ROOM.getByName(doc.doc).snapshot() });
+      for (const doc of page.slice(0, 50)) docs.push({ ...doc, ...await env.ROOM.getByName(doc.doc).exportSnapshot() });
       return Response.json({ rules, docs, cursor: page.length > 50 ? docs.at(-1)!.doc : null });
     }
   }

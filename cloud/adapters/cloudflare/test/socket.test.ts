@@ -112,6 +112,24 @@ it("filters hidden ballots across legacy live, welcome, replay and export routes
   await submit(owner, [end]);
   expect(await b.next()).toMatchObject({ type: "applied", votes: [{ totals: [{ layer: "note", count: 1, names: [] }], ballots: [] }] });
   expect(await a.next()).toMatchObject({ type: "applied", votes: [{ conclusionOp: end.opId }] });
+  const exported = await (await call("/v1/export")).json();
+  expect(exported).toMatchObject({ docs: [{ doc, votes: [{ id: vote, totals: [{ layer: "note", count: 1 }] }] }] });
+  expect(JSON.stringify(exported)).not.toContain(ballot);
+
+});
+it("broadcasts when an idle room's vote timer ends", async () => {
+  const doc = await register(), vote = crypto.randomUUID(), route = `/v1/docs/${doc}`;
+  expect((await call(route + "/vote-design", owner, "PUT", { vote, pages: ["page"], nodes: [] })).status).toBe(200);
+  const a = await open(doc, owner, 0, [CLOUD_VOTES]);
+  await a.next();
+  const headers = { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES };
+  const response = await call(route + "/ops", owner, "POST", { ops: [
+    envelope(doc, { kind: "vote.start", vote, scope: { page: "page" }, on: "anything", perPerson: 1, hidden: true, anonymous: true }),
+    envelope(doc, { kind: "timer.set", vote, ms: 250 }),
+  ] }, headers);
+  expect(await response.json()).toMatchObject({ rejected: [] });
+  expect(await a.next()).toMatchObject({ votes: [{ id: vote, state: "active" }] });
+  expect(await a.next()).toMatchObject({ type: "applied", entries: [{ seq: 3 }], votes: [{ id: vote, state: "ended", needsConclusion: true }] });
 });
 it("closes the oldest socket above the per-person limit", async () => {
   const doc = await register();

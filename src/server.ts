@@ -39,7 +39,7 @@ import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts
 import { handleCommentsRoute } from "./comments.ts";
 import { handleVotesRoute, syncVoteConclusions } from "./votes.ts";
 import { commentReads } from "./comment-reads.ts";
-import { handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
+import { legacyVoteDesignChanged, handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
 import { scrubSecrets } from "./cloud-secrets.ts";
 import { handlePagesRoute, readPagePattern, resolvePages } from "./pages.ts";
 import { handleShaderRoute, settleShaderSources } from "./shaders.ts";
@@ -234,6 +234,7 @@ export const BROADCAST_MS = 40;
 const lastBroadcast = new Map<string, number>();
 const heldBroadcast = new Map<string, { s: Snapshot; prev?: Snapshot }>();
 function announce(s: Snapshot, prev?: Snapshot) {
+  legacyVoteDesignChanged(s.path);
   docChanged(s.path, s.revision);
   const held = heldBroadcast.get(s.path);
   if (held) { held.s = s; return; } // the diff goes from what pages have (held.prev) to the newest
@@ -1261,6 +1262,8 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 #props summary{color:var(--c-muted-fg);cursor:pointer;font-size:var(--c-size-2xs)}
 #props pre{font:10px/1.55 var(--c-font-mono);background:var(--c-muted);border-radius:var(--c-radius);padding:8px;overflow:auto;max-height:260px;white-space:pre-wrap;word-break:break-all}
 .opening-capture :is(#hov,#sel,#marquee,#guides){visibility:hidden}
+#cloud-wait{position:fixed;z-index:20;top:46px;left:12px;max-width:min(325px,calc(100% - 24px));padding:8px 12px;border-radius:var(--c-radius-island);background:var(--c-island);color:var(--c-fg);font-size:var(--c-size-xs);text-align:center}
+.native #cloud-wait{top:12px}
 #msg{line-height:100%;position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--c-island);border:0;border-radius:var(--c-radius-island);padding:9px 14px;font-size:var(--c-size-xs);display:none;z-index:20;box-shadow:0 3px 3px #0000001f}
 #wtoast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%);display:none;align-items:center;gap:10px;background:var(--c-island);border:1px solid var(--c-island-rim);border-radius:var(--c-radius-island);padding:5px 8px 5px 14px;font-size:var(--c-size-xs);z-index:30;box-shadow:0 3px 3px #0000001f}
 /* The browser page says what it is: the engine build missing, and that the Mac app is the main way (src/onboarding.ts). */
@@ -3967,12 +3970,20 @@ let docGen = 0; // bumped by every document the stream installs, so a recovery f
 es.addEventListener("doc", (e) => { docGen++; onDoc(JSON.parse(e.data)); });
 // Back on a stream with the document unchanged: the shell hears it again (it may have shown another tab meanwhile).
 let cloudReadOnly = false;
+const cloudWait = document.createElement("div");
+cloudWait.id = "cloud-wait";
+cloudWait.setAttribute("role", "status");
+cloudWait.hidden = true;
+document.body.append(cloudWait);
 es.addEventListener("cloudfile", (e) => {
   const info = JSON.parse(e.data); window.canvasCloudFile = info; cloudReadOnly = !!info && (!!info.updateMessage || (info.role !== "owner" && info.role !== "editor"));
+  cloudWait.textContent = info?.waitingForHost || info?.updateMessage || "";
+  cloudWait.hidden = !cloudWait.textContent;
   if (native) post({ file, cloudFile: info });
   document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });
 });
 es.addEventListener("cloudremoved", () => {
+  cloudWait.hidden = true;
   world.replaceChildren(); doc = null; es.close();
   if (native) post({ cloudRemoved: true });
 });
