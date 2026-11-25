@@ -55,6 +55,7 @@ sc("sidebar", "section menu switches panels and remembers the selection", {
   await t.layerRow("lay_nest");
   const shown = await t.mark({ id: "sidebar-panel" });
   t.near(shown.x, 0, 0.5, "sidebar is flush with the left edge");
+  t.near(shown.y, 38, 0.5, "sidebar starts below the top bar");
   t.near(shown.w, METRICS.sidebarWidth, 0.5, "sidebar opens at its default width");
   t.near(shown.y + shown.h, (await t.state()).window.height, 1, "sidebar reaches the bottom of the window");
   t.near((await header(t)).h, 32, 0.5, "header is 32 pt tall");
@@ -124,6 +125,29 @@ sc("sidebar", "keyboard shortcuts open sections and toggle editor UI", {
     await t.key(String(i + 1), ["alt"]);
     await t.waitState(s => s.section === section && s.panelOpen, "Option shortcut opens " + section);
   }
+  await t.click(center(await t.mark({ id: "widget-tile-todo" })));
+  const input = "document.querySelector('.td-add input')";
+  await t.waitJs(input, "the To-do input");
+  const field = await t.js<{x: number; y: number}>(`const r = ${input}.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }`);
+  await t.click(field);
+  await t.waitJs(`document.activeElement === ${input}`, "the To-do input to focus");
+  await t.key("1", ["alt"]);
+  await t.waitJs(`${input}.value.length > 0`, "Option+1 to type in the To-do input");
+  t.eq((await t.state()).section, "Widgets", "typing in the widget leaves the section alone");
+
+  await t.js("canvasHost.setSelection(['r_free'])");
+  await t.waitJs("canvasHost.sel === 'r_free'", "a selected layer");
+  await t.click(center(await header(t)));
+  await t.mark({ id: "sidebar-section", label: "Widgets", exact: true });
+  await t.key("Escape");
+  await t.waitFor(async () => !(await t.marks({ id: "sidebar-section" })).length, "Escape to close the popup");
+  t.eq(await t.js("return canvasHost.sel"), "r_free", "Escape leaves the canvas selection alone");
+  await t.click(center(await header(t)));
+  await t.key("Up");
+  await t.key("Return");
+  await t.waitState(s => s.section === "Tokens", "the popup to handle Up and Return");
+  await t.section("Widgets");
   const command = async (title: string) => {
     await t.key("k", ["cmd"]);
     await t.waitState(s => s.palette.open, "the command palette to open");
@@ -143,7 +167,7 @@ sc("sidebar", "keyboard shortcuts open sections and toggle editor UI", {
   await t.waitState(s => !s.uiHidden && s.section === "Widgets", "the View menu shortcut to restore the editor controls");
 });
 
-sc("sidebar", "the editor sidebar menu and resize handle stay usable at minimum width", {
+sc("sidebar", "the editor sidebar resize handle clamps and saves its width", {
   covers: ["sidebar-resize:editor"],
 }, async (t: NT) => {
   await t.section("Layers");
@@ -154,6 +178,13 @@ sc("sidebar", "the editor sidebar menu and resize handle stay usable at minimum 
   await t.drag(from, { x: from.x - 900, y: from.y });
   await t.waitState(s => s.sidebarWidth === METRICS.sidebarMin, "the sidebar to reach its minimum width");
   await t.section("Widgets");
+  const narrow = center(await t.mark({ id: "sidebar-resize" }));
+  await t.drag(narrow, { x: narrow.x + 650, y: narrow.y });
+  await t.waitState(s => s.sidebarWidth === METRICS.sidebarMax, "the sidebar to reach its maximum width");
+  t.near((await t.mark({ id: "sidebar-panel" })).w, METRICS.sidebarMax, 0.5, "the maximum width is visible");
+  await t.app.relaunch();
+  await t.waitState(s => s.sidebarWidth === METRICS.sidebarMax, "the maximum width to survive relaunch");
+  t.near((await t.mark({ id: "sidebar-panel" })).w, METRICS.sidebarMax, 0.5, "the saved width is visible after relaunch");
   await t.doubleClick(center(await t.mark({ id: "sidebar-resize" })));
   await t.waitState(s => s.sidebarWidth === METRICS.sidebarWidth, "the default width to return");
 });
@@ -181,6 +212,57 @@ sc("sidebar", "the editor sidebar remembers its scroll position", {
     await t.waitState(s => !s.uiHidden, "the editor controls to return");
     t.near((await tile()).y, scrolled.y, 2, "Widgets retains its scroll position after Hide UI");
   } finally {
+    await t.cmd("qa.window", { width, height });
+  }
+});
+
+sc("sidebar", "Layers keeps its scroll position across a file loading gap", {
+  covers: ["sidebar:scroll"],
+}, async (t: NT) => {
+  const makeFile = (name: string, prefix: string) => {
+    const file = path.join(t.app.docs, name + ".canvas");
+    copyDir(t.file, file);
+    const sidecar = path.join(file, "widgets.json");
+    const data = JSON.parse(fs.readFileSync(sidecar, "utf8"));
+    data.pages.push(...Array.from({ length: 32 }, (_, i) => ({
+      id: prefix + i, name: "Sample page " + (i + 1), boards: [],
+    })));
+    fs.writeFileSync(sidecar, JSON.stringify(data));
+    return file;
+  };
+  const first = makeFile("Sidebar first", "first-");
+  const second = makeFile("Sidebar second", "second-");
+  const { width, height } = (await t.state()).window;
+  try {
+    await t.cmd("qa.window", { width, height: 500 });
+    await t.app.openShown(first);
+    await t.section("Layers");
+    const row = () => t.mark({ id: "page-row", label: "first-4", exact: true });
+    const before = await row();
+    await t.scroll(center(before), 0, -100);
+    await t.waitFor(async () => (await row()).y < before.y - 20, "the first file to scroll");
+    await t.cmd("qa.idle", { ms: 250 });
+    const scrolled = await row();
+    await t.js(`
+      const cmd = window.canvasCmd, held = [];
+      window.canvasCmd = c => {
+        if (c.cmd === "resync" || (c.cmd === "tab" && c.active)) held.push(c);
+        else cmd(c);
+      };
+      window.resumeSidebarQA = () => { window.canvasCmd = cmd; held.forEach(cmd); };
+    `);
+    await t.app.openShown(second);
+    await t.mark({ id: "page-row", label: "second-4", exact: true });
+    await t.app.openShown(first);
+    await t.waitState(s => s.file === first && !s.revision, "the first file to be selected before its list arrives");
+    await t.cmd("qa.idle", { ms: 250 });
+    await t.js("window.resumeSidebarQA()");
+    await t.waitFor(async () => Math.abs((await row()).y - scrolled.y) <= 2, "the first file's offset to return");
+  } finally {
+    await t.app.openShown(t.file);
+    for (const file of [first, second]) {
+      if ((await t.state()).openFiles.includes(file)) await t.cmd("close", { file });
+    }
     await t.cmd("qa.window", { width, height });
   }
 });

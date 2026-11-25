@@ -1197,6 +1197,7 @@ export function attach(host) {
     enter(id, { at: { x: e.clientX, y: e.clientY }, word: true });
   });
   addEventListener("keydown", (e) => {
+    if (e.target.closest?.("#left, #sidebar-toggle")) return;
     if (te) {
       // Focus left the editor (a click in the app's inspector, say): canvas keys stay off until the edit ends.
       // The key itself goes on to the editor, which takes focus now (it is not swallowed).

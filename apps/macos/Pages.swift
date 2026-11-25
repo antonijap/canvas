@@ -148,7 +148,7 @@ struct PagesSection: View {
         Group {
             if editing == p.id {
                 HStack(spacing: 8) {
-                    Image(systemName: "rectangle.portrait").symbolRenderingMode(.hierarchical)
+                    Image(systemName: "doc").symbolRenderingMode(.hierarchical)
                         .font(.system(size: 12, weight: .medium)).foregroundStyle(Palette.mutedFg).frame(width: 16)
                     TextField("Page name", text: $draft)
                         .textFieldStyle(.plain).font(SidebarStyle.text).foregroundStyle(Palette.fg)
@@ -160,7 +160,7 @@ struct PagesSection: View {
                 .onExitCommand { editing = nil }
                 .onChange(of: focused) { _, f in if !f { commit(p.id) } }
             } else {
-                let row = ListRow(title: p.name, symbol: "rectangle.portrait", sidebar: true, active: p.id == model.activePage) { model.selectPageRow(p.id) }
+                let row = ListRow(title: p.name, symbol: "doc", sidebar: true, active: p.id == model.activePage) { model.selectPageRow(p.id) }
                     .simultaneousGesture(TapGesture(count: 2).onEnded { startRename(p) })
                 if model.cloudReadOnly {
                     row

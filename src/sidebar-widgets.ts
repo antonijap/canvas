@@ -4,12 +4,12 @@ const rule = '<span class="widget-sample-rule"></span>';
 const panel = (content: string) => `<span class="widget-sample-panel">${content}</span>`;
 const paper = (content: string) => `<span class="widget-sample-panel widget-sample-paper">${content}</span>`;
 
-// Sample previews use the same fixture content as the native picker. Labels and descriptions come from the kinds.
+// Sample previews use the same fixture content as the native picker.
 const previews = {
-  todo: panel('<del><i class="amber">✓</i> Ship the sidebar</del><span>○ Review cards</span><span>○ Call Ben at 4</span>'),
+  todo: panel('<del><i class="amber">✓</i> Ship the sidebar</del><span>○ Review cards</span><span>○ Plan next steps</span>'),
   note: paper(`<b>Field notes</b>${rule.repeat(3)}<span class="widget-sample-photo"></span>`),
   shader: '<code>fn shade</code>',
-  video: `<span class="widget-sample-play">▷</span><small>1:36</small>${rule}`,
+  video: `<span class="widget-sample-play"><svg width="9" height="9" viewBox="0 0 9 9"><path fill="currentColor" d="M1 0 8 4.5 1 9Z"/></svg></span><small>1:36</small>${rule}`,
   "git-status": panel('<b>main　<code class="positive">+12</code> <code class="negative">−3</code></b>' +
     '<span><code class="amber">M</code> Sidebar.swift</span><span><code class="positive">A</code> cards.ts</span>' +
     '<span><code class="negative">D</code> old-rail.ts</span>'),
@@ -28,6 +28,6 @@ export const sidebarWidgetTiles = Object.entries(previews).map(([id, preview]) =
   const kind = kindOf(id)!;
   return `<button class="sidebar-widget" type="button" draggable="true" data-widget="${id}" data-qa-id="widget-tile-${id}">
     <span class="sidebar-widget-art" data-qa-id="widget-preview-${id}" aria-hidden="true">${preview}</span>
-    <strong>${escapeText(kind.title)}</strong><small>${escapeText(kind.description ?? "")}</small>
+    <strong>${escapeText(kind.title)}</strong><small>${escapeText(kind.cardSubtitle ?? kind.description ?? "")}</small>
   </button>`;
 }).join("");

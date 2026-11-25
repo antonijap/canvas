@@ -1322,7 +1322,9 @@ function selectSidebar(item) {
   sidebarTrigger.firstElementChild.textContent = item.dataset.title;
 }
 const savedSidebar = store.get(sidebarFileKey) || store.get(sidebarKey);
-selectSidebar(sidebarItems.find(item => item.id === savedSidebar) || sidebarItems[0]);
+const initialSidebar = sidebarItems.find(item => item.id === savedSidebar) || sidebarItems[0];
+selectSidebar(initialSidebar);
+if (file && q.get("shell") !== "native") store.set(sidebarFileKey, initialSidebar.id);
 function setSidebarMenu(open, focus = false) {
   sidebarMenu.hidden = !open;
   sidebarTrigger.setAttribute("aria-expanded", String(open));
@@ -1443,21 +1445,12 @@ const readViewBox = () => { const r = view.getBoundingClientRect(); VL = r.left;
 // tells the shell what it shows. insets is the part of the view the shell's islands cover.
 const native = q.get("shell") === "native";
 if (!native) {
-  addEventListener("keydown", (e) => {
-    if (e.target.closest?.("input,textarea,select,[contenteditable=true]")) return;
-    const index = ["Digit1", "Digit2", "Digit3", "Digit4"].indexOf(e.code);
-    if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || index < 0) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    setSidebarOpen(true);
-    commitSidebar(sidebarItems[index]);
-  });
   for (const tile of sidebar.querySelectorAll("[data-widget]")) {
     tile.onclick = () => { if (file) window.canvasCmd({ cmd: "addWidget", kind: tile.dataset.widget }); };
     tile.ondragstart = (e) => {
       if (!file) { e.preventDefault(); return; }
       e.dataTransfer.effectAllowed = "copy";
-      e.dataTransfer.setData("text/plain", tile.dataset.widget);
+      e.dataTransfer.setData("application/x-canvas-widget", tile.dataset.widget);
       window.canvasCmd({ cmd: "widgetDrag", kind: tile.dataset.widget });
     };
   }
@@ -1479,6 +1472,18 @@ if (!native) {
 let insets = { l: 0, t: 0, r: 0, b: 0 };
 let initialInsets = !native;
 const post = (m) => { try { window.webkit.messageHandlers.canvasState.postMessage(JSON.stringify(m)); } catch {} };
+addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.isComposing || e.target.isContentEditable || e.target.closest?.("input,textarea,select")) return;
+  const index = ["Digit1", "Digit2", "Digit3", "Digit4"].indexOf(e.code);
+  if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey || index < 0) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (native) post({ sidebarSection: sidebarItems[index].dataset.title });
+  else {
+    setSidebarOpen(true);
+    commitSidebar(sidebarItems[index]);
+  }
+});
 // Settings the app owns (Canvas > Settings, apps/macos/SettingsLogic.swift): the shell sends them as {cmd: "prefs"}
 // (with the snapping ones, whenever the page says snapHello) and the page keeps a copy, so the next load starts with
 // them. A browser has the defaults.

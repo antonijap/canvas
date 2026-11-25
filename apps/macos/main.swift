@@ -729,12 +729,10 @@ model.editTarget = structureActions
 // Option+1…4 switches editor sections without intercepting text entry.
 NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
   guard e.window === window, window.attachedSheet == nil, !model.homeShown,
-        !(window.firstResponder is NSText), !model.textEditing,
+        !webHasFocus, !(window.firstResponder is NSText), !model.textEditing,
         e.modifierFlags.intersection([.command, .option, .control, .shift]) == .option,
         let section = SidebarSection.allCases.first(where: { $0.shortcut == e.charactersIgnoringModifiers }) else { return e }
-  model.uiHidden = false
-  model.section = section
-  model.panelOpen = true
+  model.showSidebarSection(section)
   return nil
 }
 // Canvas keys (1/2/0/F/Esc/Delete/Space) belong to the canvas whenever no text field is being typed in: a click
@@ -743,6 +741,10 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
 // (and the web view's own key equivalents) wherever focus is; Tab keeps moving between fields.
 NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
   guard e.window === window, window.attachedSheet == nil else { return e }
+  if model.sidebarMenuOpen {
+    if e.keyCode == 53 { model.sidebarMenuOpen = false; model.focusCanvas(); return nil }
+    return e
+  }
   let r = window.firstResponder
   if r is NSText || ((r as? NSView)?.isDescendant(of: model.webView) ?? false) { return e }
   if e.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) || e.keyCode == 48 { return e }
@@ -752,7 +754,7 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
 // A page selected in the sidebar uses these keys to reorder. On the canvas they still rotate layers.
 NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
   guard e.window === window, window.attachedSheet == nil, !(window.firstResponder is NSText), !model.textEditing,
-        model.section == .layers, let page = model.pageShortcutTarget,
+        !model.sidebarMenuOpen, model.section == .layers, let page = model.pageShortcutTarget,
         page.file == model.currentFile, page.id == model.activePage,
         e.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command, .option] else { return e }
   switch e.keyCode {
@@ -765,7 +767,7 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
 // of the canvas deselecting or deleting the layer. Any click in the window lets it go; a click on a row's left area
 // picks that row again once the click ends.
 NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
-  guard e.window === window, model.paintRowNow != nil, !model.textEditing, !(window.firstResponder is NSText) else { return e }
+  guard e.window === window, !model.sidebarMenuOpen, model.paintRowNow != nil, !model.textEditing, !(window.firstResponder is NSText) else { return e }
   if !e.modifierFlags.intersection([.command, .control, .option]).isEmpty { return e }
   switch e.keyCode {
   case 53: model.paintRow = nil; return nil

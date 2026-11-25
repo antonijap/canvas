@@ -76,7 +76,9 @@ const repoFolder = (c: Config) => typeof c.repo === "string" && c.repo.trim() ? 
 const repoField = { key: "repo", label: "Repository folder", type: "text" } as const;
 
 const gitStatus = live({
-  id: "git-status", title: "Git status", description: "Branch and commits", symbol: "point.3.connected.trianglepath.dotted",
+  id: "git-status", title: "Git status", description: "Branch and commits",
+  cardSubtitle: "Branch and changes",
+  symbol: "point.3.connected.trianglepath.dotted",
   defaultSize: { w: 330, h: 252 }, defaults: { repo: "" }, fields: [repoField],
   validate: (c) => ({ ...c, repo: str(c.repo, "Repository folder", "", 2048).trim() }),
 }, 60, async ({ widget }) => {
@@ -97,7 +99,9 @@ export function repoFromRemote(remote: string) {
 }
 
 const ci = live({
-  id: "ci", title: "CI and PRs", description: "Runs and open PRs", symbol: "arrow.triangle.branch",
+  id: "ci", title: "CI and PRs", description: "Runs and open PRs",
+  cardSubtitle: "Builds and reviews",
+  symbol: "arrow.triangle.branch",
   defaultSize: { w: 380, h: 310 }, defaults: { repo: "" },
   fields: [{ ...repoField, label: "Repository", help: "Owner/name or a local repository folder with an origin remote." }],
   validate: (c) => ({ ...c, repo: str(c.repo, "Repository", "", 2048).trim() }),
@@ -145,7 +149,9 @@ async function readUsage(root: string, usage: ReturnType<typeof usageCollector>)
 }
 
 const usage = live({
-  id: "claude-usage", title: "Claude usage", description: "Weekly token totals", symbol: "chart.bar.xaxis",
+  id: "claude-usage", title: "Claude usage", description: "Weekly token totals",
+  cardSubtitle: "Plan limits left",
+  symbol: "chart.bar.xaxis",
   defaultSize: { w: 350, h: 310 }, defaults: { weeklyLimit: 0 },
   fields: [{ key: "weeklyLimit", label: "Weekly token limit", type: "number", help: "Optional. Use 0 to hide the limit bar." }],
   validate: (c) => ({ ...c, weeklyLimit: int(c.weeklyLimit, "Weekly token limit", 0, 0, Number.MAX_SAFE_INTEGER) }),
@@ -161,7 +167,9 @@ const urlField = { key: "url", label: "URL", type: "url" } as const;
 const webApproval = { field: "url", verb: "load", target: (c: Config) => webOrigin(c.url) } as const;
 
 const metric = live({
-  id: "metric", title: "Metric", description: "Number and trend", symbol: "chart.xyaxis.line",
+  id: "metric", title: "Metric", description: "Number and trend",
+  cardSubtitle: "One number, trend",
+  symbol: "chart.xyaxis.line",
   defaultSize: { w: 300, h: 176 }, defaults: { url: "", path: "$", sparkPath: "", refreshSec: 60 },
   fields: [urlField, { key: "path", label: "Value path", type: "text", help: "For example $.total" },
     { key: "sparkPath", label: "Sparkline path", type: "text", help: "Optional. For example $.history[*].value" },
@@ -183,7 +191,9 @@ const metric = live({
 }, webApproval);
 
 const preview = live({
-  id: "page-preview", title: "Page preview", description: "Website snapshot", symbol: "rectangle.inset.filled.and.person.filled",
+  id: "page-preview", title: "Page preview", description: "Website snapshot",
+  cardSubtitle: "Live site snapshot",
+  symbol: "rectangle.inset.filled.and.person.filled",
   defaultSize: { w: 400, h: 332 }, defaults: { url: "" }, fields: [urlField],
   validate: (c) => ({ ...c, url: urlConfig(c.url) }),
 }, 300, async ({ widget }) => {
@@ -209,7 +219,9 @@ const preview = live({
 }, webApproval);
 
 const disk = live({
-  id: "disk-space", title: "Disk space", description: "Available storage", symbol: "internaldrive",
+  id: "disk-space", title: "Disk space", description: "Available storage",
+  cardSubtitle: "Free space left",
+  symbol: "internaldrive",
   defaultSize: { w: 300, h: 150 }, defaults: {}, fields: [],
   validate: (c) => c,
 }, 120, async () => ({ content: { disk: diskData(await statfs("/")) } }));

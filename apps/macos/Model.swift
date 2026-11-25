@@ -179,6 +179,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// (x) and down (y); nil where it has none. The inspector's Spacing fields show it.
     @Published var smartSpacing: SmartSpacing?
     @Published var widgets: [WidgetInfo] = []
+    @Published private(set) var sidebarWidgetsLoaded = false
     @Published var widgetKinds: [WidgetKindInfo] = []
     /// The Paper Shaders library (PaperShaders.swift), fetched when the rail or a preset card first needs it.
     @Published var paperShaders: [PaperShaderInfo] = []
@@ -187,6 +188,14 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var section = UserDefaults.standard.string(forKey: SidebarSection.defaultsKey)
         .flatMap(SidebarSection.init(rawValue:)) ?? .layers {
         didSet { UserDefaults.standard.set(section.rawValue, forKey: SidebarSection.defaultsKey) }
+    }
+    @Published var sidebarMenuOpen = false
+
+    func showSidebarSection(_ section: SidebarSection) {
+        sidebarMenuOpen = false
+        uiHidden = false
+        self.section = section
+        panelOpen = true
     }
     @Published var allFiles: [FileEntry] = []
     @Published private(set) var recentlyClosedTabs = RecentlyClosedTabs()
@@ -445,6 +454,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         if let n = m["snapshotBytes"] as? NSNumber { snapshotBytes = n.intValue }
         if let h = m["history"] as? [String: Any] { undoLabel = h["undo"] as? String; redoLabel = h["redo"] as? String; repeatLabel = h["repeat"] as? String }
         if let t = m["textEditing"] as? Bool { textEditing = t; if !t { textRange = nil } }
+        if let name = m["sidebarSection"] as? String, let section = SidebarSection(rawValue: name), !homeShown, !textEditing {
+            showSidebarSection(section)
+        }
         if m.keys.contains("textRange") { textRange = (m["textRange"] as? [String: Any]).flatMap(TextRangeState.init) }
         if m.keys.contains("context"), let c = m["context"] as? [String: Any] {
             let at = CGPoint(x: (c["x"] as? NSNumber)?.doubleValue ?? 0, y: (c["y"] as? NSNumber)?.doubleValue ?? 0)
@@ -461,6 +473,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
         if let list = m["widgets"] as? [[String: Any]] {
             widgets = list.compactMap(WidgetInfo.init)
+            if m["sidebarWidgetsLoaded"] as? Bool == true { sidebarWidgetsLoaded = true }
             if let id = selectedWidgetId, !widgets.contains(where: { $0.id == id }) { selectedWidgetId = nil; widgetStatus = nil }
         }
         if m.keys.contains("smart") { smartSpacing = (m["smart"] as? [String: Any]).map(SmartSpacing.init) }
@@ -885,6 +898,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func clearSidebarState() {
         commentsSidebarOpen = false
         conversationsSidebarOpen = false
+        sidebarWidgetsLoaded = false
         boards = []; pages = []; activePage = nil; components = []; styles = []; variables = []; tokenSections = []; styleEntries = []; widgets = []; revision = ""
         selectedBoard = nil
     }

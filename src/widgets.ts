@@ -111,6 +111,7 @@ export function kinds(picker = false) {
     id: k.id, title: k.title, description: k.description, picker: k.picker, live: !!k.source, symbol: k.symbol,
     defaultSize: k.defaultSize, minSize: k.minSize, fields: k.fields, defaults: k.defaults(),
     actions: Object.keys(k.actions ?? {}),
+    ...(picker && k.cardSubtitle ? { cardSubtitle: k.cardSubtitle } : {}),
     ...(k.local ? { local: true } : {}),
     ...(picker && k.local ? { bundle: k.local.hash, previewHTML: k.local.previewHTML, approved: isLocalWidgetApproved(k.id, k.local.hash) } : {}),
   }));

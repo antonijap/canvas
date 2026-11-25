@@ -605,7 +605,7 @@ function start(host) {
     host.selectId(PREFIX + e.id);
   }
   host.on("page", () => { render(); host.post({ widgets: shellWidgets() }); scheduleVis(); });
-  host.on("resync", () => host.post({ widgets: shellWidgets() }));
+  host.on("resync", () => host.post({ widgets: shellWidgets(), sidebarWidgetsLoaded: widgetsLoaded }));
   // The widget list can arrive before the page list decides which page shows (nothing matched yet): draw
   // again once boards are placed, when what this page shows differs from the cards on screen.
   host.on("visible", () => { const here = shown(); if (here.length !== entries.size || here.some((w) => !entries.has(w.id))) { render(); host.post({ widgets: shellWidgets(here) }); } });
@@ -717,17 +717,23 @@ function start(host) {
     else if (c.cmd === "revealWidget") reveal(c.id);
   });
 
-  // A Widgets panel row or shader tile dragged from the shell: WebKit shows the page the drag as "Files" with no
-  // data, so the shell says which card it is when the drag starts (cmd widgetDrag) and the page drops it where the
-  // pointer lets go. A drag that ends elsewhere is forgotten at the next press or after a minute.
+  // WebKit exposes native tile drags as promised files, so the shell tells the page which tile started the drag.
   let pendingDrag = null;
-  const dragLive = () => pendingDrag && Date.now() - pendingDrag.t < 60000;
-  addEventListener("pointerdown", () => { pendingDrag = null; }, true);
+  const dragLive = (e) => pendingDrag && Date.now() - pendingDrag.t < 60000 &&
+    e.dataTransfer?.types.includes(host.native ? "Files" : "application/x-canvas-widget");
+  const clearDrag = () => { pendingDrag = null; };
+  addEventListener("pointerdown", clearDrag, true);
+  addEventListener("dragend", clearDrag);
   // Cmd held over a layer: a shader tile becomes that layer's fill instead of a card (/page/drops.js).
   host.tileDragLive = dragLive;
-  addEventListener("dragover", (e) => { if (dragLive()) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "copy"; if (host.drops && pendingDrag.preset) host.drops.overTile(e); } });
+  addEventListener("dragover", (e) => {
+    if (!dragLive(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (host.drops && pendingDrag.preset) host.drops.overTile(e);
+  });
   addEventListener("drop", (e) => {
-    if (!dragLive()) return;
+    if (!dragLive(e) || (!host.native && e.dataTransfer.getData("application/x-canvas-widget") !== pendingDrag.kind)) return;
     e.preventDefault();
     const d = pendingDrag; pendingDrag = null;
     if (host.drops && host.drops.dropTile(e, d)) return;
@@ -760,6 +766,7 @@ function start(host) {
 
   // ---------- server events ----------
   let lastWarning = "";
+  let widgetsLoaded = false;
   function onEvent(name, data) {
     let d;
     try { d = JSON.parse(data); } catch { return; }
@@ -768,12 +775,13 @@ function start(host) {
       lastIds = null;
       postVis(true);
     } else if (name === "widgets") {
+      widgetsLoaded = true;
       list = Array.isArray(d.widgets) ? d.widgets.slice() : [];
       if (list.some((w) => !Object.hasOwn(KINDS, w.kind) && !kinds.has(w.kind))) void loadKinds();
       // A nudge still being written: the card stays where the arrow keys put it.
       list = list.map((w) => { const at = nudges.held(w.id); return at ? { ...w, x: at.x, y: at.y } : w; });
       render();
-      host.post({ widgets: shellWidgets() });
+      host.post({ widgets: shellWidgets(), sidebarWidgetsLoaded: true });
       if (d.warning && d.warning !== lastWarning) toast(d.warning, null, 8000);
       lastWarning = d.warning || "";
     } else if (name === "wdata") {

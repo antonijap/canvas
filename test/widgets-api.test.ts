@@ -58,6 +58,13 @@ describe("widgets API", () => {
     assert.deepEqual(Object.keys(todo).sort(), ["actions", "defaultSize", "defaults", "description", "fields", "id", "live", "minSize", "symbol", "title"]);
     assert.deepEqual(todo.actions, ["addItem", "toggleItem", "updateItem", "removeItem", "moveItem"]);
     assert.ok(k.body[2].fields.some((f: any) => f.type === "secret"));
+    const picker = await jcall("GET", "/api/widgets/kinds?view=picker");
+    assert.equal(picker.body[0].description, todo.description);
+    assert.deepEqual(picker.body.flatMap((kind: { cardSubtitle?: string }) => kind.cardSubtitle ?? []), [
+      "Tasks you tick off", "A doc on the board", "Animated GPU art", "Plays a local clip",
+      "Branch and changes", "Builds and reviews", "Plan limits left", "One number, trend",
+      "Live site snapshot", "Free space left",
+    ]);
   });
 
   test("local kind approval pins the bundle and gates polling and rendering", async (t) => {

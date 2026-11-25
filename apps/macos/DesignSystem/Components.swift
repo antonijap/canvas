@@ -61,20 +61,22 @@ extension Metric {
 
 private struct GlassBar: ViewModifier {
     @Environment(\.appearsActive) private var appearsActive
+    let sidebar: Bool
 
     func body(content: Content) -> some View {
         content.background {
             Rectangle()
-                .fill(appearsActive ? .clear : Palette.sidebar.opacity(0.8))
+                .fill(appearsActive || sidebar ? .clear : Palette.sidebar.opacity(0.8))
                 .glassEffect(.regular, in: Rectangle())
-                .shadow(color: .black.opacity(0.10), radius: 14, y: 4)
+                .shadow(color: .black.opacity(sidebar ? 0.25 : 0.10), radius: sidebar ? 12 : 14,
+                        x: sidebar ? 4 : 0, y: sidebar ? 0 : 4)
                 .allowsHitTesting(false)
         }
     }
 }
 
 extension View {
-    func glassBar() -> some View { modifier(GlassBar()) }
+    func glassBar(sidebar: Bool = false) -> some View { modifier(GlassBar(sidebar: sidebar)) }
 }
 
 /// A floating island: Liquid Glass over the canvas and a soft lift. No rim; the glass has its own edge.

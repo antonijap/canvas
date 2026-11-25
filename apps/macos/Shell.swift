@@ -110,7 +110,6 @@ final class ControlHostingController<Content: View>: NSHostingController<Content
 }
 
 private let columnTop: CGFloat = Metric.inset + Metric.pill + Metric.islandGap
-private let sidebarTop: CGFloat = Metric.inset + Metric.pill
 
 struct RootView: View {
     @ObservedObject var model: CanvasModel
@@ -356,15 +355,13 @@ struct TopBar: View {
     private var tabs: some View {
         HStack(spacing: 0) {
             // The sidebar toggle: right after the window buttons, the same spot whether the sidebar shows or not.
-            // Home draws the separator after it while files are open.
             if sidebarToggleWidth > 0 {
                 SidebarToggleButton(model: model)
-                    .overlay(alignment: .trailing) { if model.openFiles.isEmpty { separator } }
             }
             PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
                       help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
                 .qaID("home-tab", label: "Home")
-                .overlay(alignment: .leading) { if !model.openFiles.isEmpty { separator } }
+                .overlay(alignment: .leading) { if sidebarToggleWidth > 0 || !model.openFiles.isEmpty { separator } }
                 .overlay(alignment: .trailing) { if !model.openFiles.isEmpty { separator } }
                 .animation(Motion.island, value: model.openFiles.isEmpty)
             FadingScroller(scrollTo: model.currentFile) {
@@ -509,21 +506,6 @@ struct SidebarGroupLabel: View {
     }
 }
 
-private struct SidebarGlass: View {
-    var body: some View {
-        Rectangle()
-            .fill(.regularMaterial)
-            .overlay {
-                Rectangle().fill(Color(light: 0xF9F9FA, 0.55, dark: 0x2A2A2E, 0.55))
-            }
-            .clipped()
-            .shadow(color: .white.opacity(0.08), radius: 0, x: 0.5)
-            .shadow(color: .black.opacity(0.6), radius: 0, x: 1)
-            .shadow(color: .black.opacity(0.25), radius: 12, x: 4)
-            .allowsHitTesting(false)
-    }
-}
-
 struct LeftColumn: View {
     @ObservedObject var model: CanvasModel
     /// From RootView: the stored width clamped to the window; nil hides the panel.
@@ -537,29 +519,28 @@ struct LeftColumn: View {
 
     @State private var scrollOffsets: [ScrollKey: CGFloat] = [:]
     @State private var tokenTab: TokenTab = .text
-    @State private var menuOpen = false
     @State private var searchOpen = false
     @State private var query = ""
     @FocusState private var searchFocused: Bool
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            if menuOpen {
+            if model.sidebarMenuOpen {
                 Color.clear.contentShape(Rectangle())
-                    .onTapGesture { menuOpen = false }
+                    .onTapGesture { dismissMenu() }
             }
             if let width = panelWidth {
                 column(width: width)
                     .transition(reduceMotion ? .identity : .offset(x: -width - 32))
             }
         }
-        .padding(.top, sidebarTop)
+        .padding(.top, Metric.topBar)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: panelWidth != nil)
         .onChange(of: panelWidth != nil) { _, shown in
-            if !shown { menuOpen = false; closeSearch() }
+            if !shown { model.sidebarMenuOpen = false; closeSearch() }
         }
-        .onChange(of: model.currentFile) { _, _ in menuOpen = false }
+        .onChange(of: model.currentFile) { _, _ in model.sidebarMenuOpen = false }
         .onChange(of: model.section) { _, _ in closeSearch() }
         .onChange(of: tokenTab) { _, _ in closeSearch() }
     }
@@ -578,12 +559,25 @@ struct LeftColumn: View {
         searchFocused = false
     }
 
+    private func dismissMenu() {
+        model.sidebarMenuOpen = false
+        model.focusCanvas()
+    }
+
+    private func listLoaded(_ section: SidebarSection) -> Bool {
+        !model.revision.isEmpty && (section != .widgets || (model.sidebarWidgetsLoaded && !model.widgetKinds.isEmpty))
+    }
+
     private func column(width: CGFloat) -> some View {
         let section = model.section
         let scrollKey = ScrollKey(file: model.currentFile, section: section)
+        let loaded = listLoaded(section)
         return VStack(spacing: 0) {
             HStack(spacing: 0) {
-                Button { menuOpen.toggle() } label: {
+                Button {
+                    if model.sidebarMenuOpen { dismissMenu() }
+                    else { searchFocused = false; model.sidebarMenuOpen = true }
+                } label: {
                     HStack(spacing: 6) {
                         Text(section.rawValue).font(.system(size: 13, weight: .semibold))
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
@@ -600,7 +594,7 @@ struct LeftColumn: View {
                 Spacer(minLength: 0)
                 if section == .tokens {
                     IconButton(symbol: "magnifyingglass", help: searchPrompt) {
-                        menuOpen = false
+                        model.sidebarMenuOpen = false
                         searchOpen = true
                         searchFocused = true
                     }
@@ -623,9 +617,15 @@ struct LeftColumn: View {
                     .background(Palette.hover, in: RoundedRectangle(cornerRadius: 6))
                     .padding(.horizontal, 8).padding(.bottom, 4)
                 }
+                // The opening preview can show saved rows before the live list arrives.
                 SidePanel(model: model, section: section, tokenTab: $tokenTab, query: query, offset: Binding(
-                    get: { scrollOffsets[scrollKey] }, set: { scrollOffsets[scrollKey] = $0 }
+                    get: { loaded ? scrollOffsets[scrollKey] : nil },
+                    set: {
+                        guard loaded, model.currentFile == scrollKey.file, model.section == section, listLoaded(section) else { return }
+                        scrollOffsets[scrollKey] = $0
+                    }
                 ))
+                .id(loaded)
                 .id(scrollKey)
             }
             .overlay(alignment: .trailing) {
@@ -635,21 +635,21 @@ struct LeftColumn: View {
         }
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(SidebarGlass())
+        .glassBar(sidebar: true)
+        .task(id: section) { if section == .widgets { model.fetchKinds() } }
         .overlay(alignment: .topLeading) {
-            if menuOpen {
+            if model.sidebarMenuOpen {
                 Color.clear.contentShape(Rectangle())
                     .padding(.top, 32)
-                    .onTapGesture { menuOpen = false }
+                    .onTapGesture { dismissMenu() }
                 SidebarSectionMenu(selection: section) {
                     model.section = $0
-                    menuOpen = false
+                    dismissMenu()
                 }
                 .padding(.leading, 8)
                 .padding(.top, 34)
             }
         }
-        .onExitCommand { menuOpen = false }
         .qaID("sidebar-panel")
     }
 }
@@ -658,6 +658,8 @@ private struct SidebarSectionMenu: View {
     let selection: SidebarSection
     let select: (SidebarSection) -> Void
     @State private var hovered: SidebarSection?
+    @State private var keyboardItem: SidebarSection?
+    @FocusState private var focused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -674,7 +676,7 @@ private struct SidebarSectionMenu: View {
                     .padding(.horizontal, 6)
                     .frame(height: 24)
                     .background(RoundedRectangle(cornerRadius: 5)
-                        .fill(selection == item || hovered == item ? SidebarStyle.selection : .clear))
+                        .fill((hovered ?? keyboardItem ?? selection) == item ? SidebarStyle.selection : .clear))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -689,6 +691,20 @@ private struct SidebarSectionMenu: View {
         .frame(width: 184)
         .background(Palette.popover, in: RoundedRectangle(cornerRadius: 8))
         .shadow(color: .black.opacity(0.33), radius: 9, y: 4)
+        .focusable()
+        .focused($focused)
+        .focusEffectDisabled()
+        .onAppear { focused = true }
+        .onKeyPress(.upArrow) { move(-1); return .handled }
+        .onKeyPress(.downArrow) { move(1); return .handled }
+        .onKeyPress(.return) { select(keyboardItem ?? selection); return .handled }
+    }
+
+    private func move(_ step: Int) {
+        let items = SidebarSection.allCases
+        let index = items.firstIndex(of: keyboardItem ?? selection)!
+        keyboardItem = items[(index + step + items.count) % items.count]
+        hovered = nil
     }
 
     private func keycap(_ key: String) -> some View {
@@ -815,7 +831,6 @@ private struct SidePanel: View {
                 .padding(.bottom, 8)
             }
             .scrollIndicators(.never)
-            .task { if section == .widgets { model.fetchKinds() } }
             .scrollPosition($scroll)
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 max(0, geometry.contentOffset.y + geometry.contentInsets.top)

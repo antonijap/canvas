@@ -1,4 +1,6 @@
-import { sc, type T } from "./harness.ts";
+import path from "node:path";
+import { sc, T } from "./harness.ts";
+import { copyDir } from "./lib.ts";
 
 const storageKey = "canvas:sidebar-section";
 const reset = (t: T) => t.ev(`localStorage.removeItem(${JSON.stringify(storageKey)});
@@ -63,7 +65,13 @@ sc("sidebar", "browser section menu restores selection and hides the entire side
         const p = document.querySelector('[data-qa-id="widget-preview-${id}"]');
         return p?.checkVisibility() && p.clientWidth === 112 && p.clientHeight === 72 && p.children.length > 0;
       })()`, `the ${id} preview to render`);
+      t.ok(await t.ev(`(() => {
+        const subtitle = document.querySelector('[data-widget="${id}"] > small');
+        return getComputedStyle(subtitle).position === "static" && subtitle.scrollWidth <= subtitle.clientWidth;
+      })()`), `the ${id} subtitle fits in its tile`);
     }
+    t.eq(await t.ev(`getComputedStyle(document.querySelector('[data-widget="claude-usage"] > strong')).borderTopWidth`),
+      "0px", "the usage card title stays outside the gauge");
     const shown = await geometry();
     await click(t, toggle);
     await t.waitFor(`!document.querySelector('#left').checkVisibility({visibilityProperty:true}) && document.querySelector('#view').getBoundingClientRect().left === 0`,
@@ -75,6 +83,25 @@ sc("sidebar", "browser section menu restores selection and hides the entire side
     await t.waitFor(visible(panel("widgets")), "Widgets remains selected after showing");
     await t.open();
     await t.waitFor(visible(panel("widgets")), "Widgets remains selected after reload");
+    const second = path.join(path.dirname(t.file), "Sidebar second.canvas");
+    copyDir(t.file, second);
+    const otherFile = new T(t.page, second, t.srv);
+    try {
+      await otherFile.open();
+      await otherFile.waitFor(visible(panel("widgets")), "the second file inherits Widgets");
+      await t.open();
+      await select(t, "tokens");
+      await otherFile.open();
+      t.ok(await t.ev(visible(panel("widgets"))), "the second file keeps its inherited section");
+      await select(otherFile, "assets");
+      await t.open();
+      t.ok(await t.ev(visible(panel("tokens"))), "the first file keeps Tokens");
+      await otherFile.open();
+      t.ok(await t.ev(visible(panel("assets"))), "the second file keeps Assets");
+    } finally {
+      await reset(otherFile);
+      await t.open();
+    }
     const other = await t.ev<string>("canvasHost.pages.find(p => p.id !== canvasHost.page).id");
     await t.showPage(other);
     await t.waitFor(visible("#pages .row"), "the other page");
@@ -88,9 +115,9 @@ sc("sidebar", "browser menu navigation stays separate from canvas shortcuts", {
   skip: { visual: "Keyboard focus and canvas edits are checked directly." },
 }, async (t: T) => {
   try {
-    await t.focus("lay_nest");
-    await t.select(["r_free"]);
-    const { y, width } = t.node("r_free")!;
+    await t.focus("lay_auto");
+    await t.select(["fp_a"]);
+    const { y, width } = t.node("fp_a")!;
     await click(t, "#sidebar-section-menu");
     const focused = () => t.ev("document.activeElement.id");
     t.eq(await focused(), "sidebar-layers", "opening the menu focuses the current section");
@@ -103,19 +130,61 @@ sc("sidebar", "browser menu navigation stays separate from canvas shortcuts", {
     t.eq(await t.ev("document.activeElement.id"), "sidebar-tokens-panel", "selection puts focus in the panel");
     await t.io.key("ArrowDown");
     await t.flush();
-    t.eq(t.node("r_free")!.y, y, "Down in the sidebar leaves the layer in place");
+    t.eq(t.node("fp_a")!.y, y, "Down in the sidebar leaves the layer in place");
     await t.io.key("ArrowRight", { meta: true });
     await t.flush();
-    t.eq(t.node("r_free")!.width, width + 1, "Cmd+Right reaches the canvas resize shortcut");
+    t.eq(t.node("fp_a")!.width, width + 1, "Cmd+Right reaches the canvas resize shortcut");
     await t.io.key("Tab", { shift: true });
     t.eq(await t.ev("document.activeElement.id"), "sidebar-section-menu", "Shift+Tab focuses the menu trigger");
     await t.io.key("Enter");
     t.ok(await t.ev(visible("#sidebar-menu")), "Enter opens the focused menu");
     await t.io.key("Escape");
     t.eq(await t.ev("document.activeElement.id"), "sidebar-section-menu", "Escape closes the menu and restores focus");
-    t.eq(await t.sel(), ["r_free"], "menu navigation leaves the selected layer alone");
+    t.eq(await t.sel(), ["fp_a"], "menu navigation leaves the selected layer alone");
+
+    await t.ev("canvasHost.setSelection(['al_txt'])");
+    t.eq(await t.sel(), ["al_txt"], "a text layer is selected");
+    await click(t, "#sidebar-section-menu");
+    await t.io.key("Home");
+    await t.io.key("Enter");
+    t.eq(await focused(), "sidebar-layers-panel", "Enter selects the menu item with a text layer selected");
+    t.eq(await t.sel(), ["al_txt"], "the text layer stays selected");
   } finally {
     await reset(t);
     await t.page.send("Page.bringToFront");
+  }
+});
+
+sc("sidebar", "browser widget drag ignores file drops and clears on cancellation", {
+  covers: ["sidebar:previews"],
+  skip: { visual: "Widget creation is checked on disk." },
+}, async (t: T) => {
+  await select(t, "widgets");
+  const count = () => t.widgets().widgets.length;
+  const before = count();
+  const drag = (finish: "files" | "cancel" | "widget") => t.ev(`(() => {
+    const tile = document.querySelector('[data-widget=todo]');
+    const widget = new DataTransfer();
+    tile.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: widget }));
+    if (${JSON.stringify(finish)} === 'cancel') {
+      tile.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: widget }));
+    }
+    const files = new DataTransfer();
+    files.items.add(new File(['sample'], 'sample.txt', { type: 'text/plain' }));
+    const transfer = ${JSON.stringify(finish)} === 'files' ? files : widget;
+    document.querySelector('#view').dispatchEvent(new DragEvent('drop', {
+      bubbles: true, cancelable: true, dataTransfer: transfer, clientX: 640, clientY: 480,
+    }));
+  })()`);
+  try {
+    await drag("files");
+    await drag("cancel");
+    await t.flush();
+    t.eq(count(), before, "neither a file drop nor a cancelled tile creates a widget");
+    await drag("widget");
+    await t.waitFor(`fetch(canvasHost.api('/api/widgets')).then(r => r.json()).then(x => x.widgets.length === ${before + 1})`,
+      "a widget from a valid tile drop");
+  } finally {
+    await reset(t);
   }
 });

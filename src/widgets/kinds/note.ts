@@ -19,6 +19,7 @@ export const note: WidgetKind = {
   id: "note",
   title: "Page",
   description: "Rich text and checklists",
+  cardSubtitle: "A doc on the board",
   symbol: "text.page",
   defaultSize: { w: 480, h: 80 },
   minSize: { w: 280, h: 80 },

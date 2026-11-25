@@ -145,6 +145,7 @@ export type WidgetKind = {
   id: string;
   title: string;
   description?: string;
+  cardSubtitle?: string;
   picker?: boolean;
   /** SF Symbol name for the native shell. */
   symbol: string;

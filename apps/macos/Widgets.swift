@@ -57,6 +57,7 @@ struct WidgetKindInfo: Identifiable {
     let title: String
     let symbol: String
     let description: String
+    let cardSubtitle: String
     let isLocal: Bool
     let previewHTML: String?
     let inPicker: Bool
@@ -76,6 +77,7 @@ struct WidgetKindInfo: Identifiable {
         title = m["title"] as? String ?? id
         symbol = m["symbol"] as? String ?? "square"
         description = m["description"] as? String ?? ""
+        cardSubtitle = m["cardSubtitle"] as? String ?? description
         isLocal = m["local"] as? Bool ?? false
         previewHTML = m["previewHTML"] as? String
         inPicker = m["picker"] as? Bool ?? true
@@ -437,7 +439,8 @@ struct WidgetPickerTile: View {
                     .accessibilityHidden(true)
                 Text(kind.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Palette.fg)
                     .lineLimit(1).padding(.top, fullPreview ? 2 : 0).qaText(kind.title)
-                Text(kind.description).font(.system(size: fullPreview ? 11 : 12)).foregroundStyle(Palette.mutedFg)
+                Text(fullPreview ? kind.cardSubtitle : kind.description)
+                    .font(.system(size: fullPreview ? 11 : 12)).foregroundStyle(Palette.mutedFg)
                     .lineLimit(fullPreview ? 1 : 2).fixedSize(horizontal: false, vertical: true)
             }
             .frame(maxWidth: fullPreview ? 112 : .infinity, alignment: .topLeading)
@@ -514,7 +517,7 @@ private struct WidgetArtwork {
 
     private func todo() {
         miniPanel(10, 9, 92, 58)
-        for (index, title) in ["Ship the sidebar", "Review cards", "Call Ben at 4"].enumerated() {
+        for (index, title) in ["Ship the sidebar", "Review cards", "Plan next steps"].enumerated() {
             let y = CGFloat(22 + 16 * index)
             if index == 0 {
                 circle(22, y, 4, amber)
@@ -547,7 +550,9 @@ private struct WidgetArtwork {
     private func video() {
         gradient(0, 0, 112, 72, [0x2E3A55, 0x734A5B, 0x473134])
         circle(56, 34, 12, .white.opacity(0.23))
-        line([CGPoint(x: 54, y: 30), CGPoint(x: 61, y: 34), CGPoint(x: 54, y: 38), CGPoint(x: 54, y: 30)], ink, width: 0.8)
+        var play = context.resolve(Image(systemName: "play.fill").symbolRenderingMode(.monochrome))
+        play.shading = .color(ink)
+        context.draw(play, in: CGRect(x: 52, y: 30, width: 8, height: 8))
         text("1:36", 88, 55, size: 6.5, color: .white.opacity(0.76))
         box(8, 62, 96, 2, faint, radius: 1)
         box(8, 62, 38, 2, .white, radius: 1)

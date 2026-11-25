@@ -323,10 +323,10 @@ if (host) {
   }, true);
 
   // ---------- files from Finder ----------
-  const tileDrag = () => !!(host.tileDragLive && host.tileDragLive());
+  const tileDrag = (e) => !!host.tileDragLive?.(e);
   const hasFiles = (e) => !!(e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files"));
   addEventListener("dragover", (e) => {
-    if (tileDrag() || !hasFiles(e)) return;
+    if (tileDrag(e) || !hasFiles(e)) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
     const id = cmdOf(e) ? targetAt(e.clientX, e.clientY) : null;
@@ -335,7 +335,7 @@ if (host) {
   addEventListener("dragleave", (e) => { if (!e.relatedTarget) hide(); });
   addEventListener("drop", (e) => {
     // A sidebar tile's drop (its promised file reads as "Files" too) was taken by /page/widgets.js already.
-    if (e.defaultPrevented || tileDrag() || !hasFiles(e)) return;
+    if (e.defaultPrevented || tileDrag(e) || !hasFiles(e)) return;
     e.preventDefault();
     hide();
     const files = [...(e.dataTransfer.files || [])];

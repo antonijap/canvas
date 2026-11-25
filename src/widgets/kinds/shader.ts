@@ -42,6 +42,7 @@ export const shader: WidgetKind = {
   id: "shader",
   title: "Shader",
   description: "A live shader canvas",
+  cardSubtitle: "Animated GPU art",
   symbol: "camera.filters",
   defaultSize: { w: 480, h: 270 },
   minSize: { w: 96, h: 64 },

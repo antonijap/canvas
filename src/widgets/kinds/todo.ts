@@ -39,6 +39,7 @@ export const todo: WidgetKind = {
   id: "todo",
   title: "To-do",
   description: "Tasks with checkboxes",
+  cardSubtitle: "Tasks you tick off",
   symbol: "checklist",
   defaultSize: { w: 280, h: 160 },
   minSize: { w: 200, h: 120 },
