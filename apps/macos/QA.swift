@@ -377,6 +377,7 @@ enum QA {
             return ["opened": s]
         case "qa.reset":
             // Between scenarios: nothing left open or held from the last one.
+            if a["recentlyClosedTabs"] as? Bool == true { model.resetRecentlyClosedTabsForQA() }
             VirtualDrag.current = nil
             PaintHooks.answerDelay = 0
             AgentsQA.added = []

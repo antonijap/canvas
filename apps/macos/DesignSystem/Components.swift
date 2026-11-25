@@ -198,6 +198,7 @@ struct TabChip: View {
     @State private var hoveringClose = false
 
     var body: some View {
+        let showClose = active || hovering
         HStack(spacing: 0) {
             Button(action: action) {
                 HStack(spacing: 6) {
@@ -215,23 +216,17 @@ struct TabChip: View {
             .buttonStyle(.plain)
             .chromeHelp(missing ? "File not found. Click to locate it or close the tab." : title)
             .accessibilityAddTraits(active ? .isSelected : [])
-            Group {
-                if active || hovering {
-                    Button(action: onClose) {
-                        Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(hoveringClose || active ? Palette.fg : Palette.mutedFg)
-                            .frame(width: Metric.control - 8, height: Metric.control - 8)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(hoveringClose ? Palette.active : .clear))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain).chromeHelp("Close tab").accessibilityLabel("Close \(title)")
-                    .qaID("tab-close", label: title)
-                    .onHover { hoveringClose = $0 }
-                    .onDisappear { hoveringClose = false }
-                } else {
-                    Color.clear.allowsHitTesting(false)
-                }
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(showClose ? (hoveringClose || active ? Palette.fg : Palette.mutedFg) : .clear)
+                    .frame(width: Metric.control - 8, height: Metric.control - 8)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(showClose && hoveringClose ? Palette.active : .clear))
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain).chromeHelp("Close tab").accessibilityLabel("Close \(title)")
+            .qaID("tab-close", label: title)
+            .onHover { hoveringClose = $0 }
+            .allowsHitTesting(showClose)
             .frame(width: Self.closeSlot - 4, height: Metric.control - 8)
             .padding(.trailing, 4)
         }
@@ -242,6 +237,7 @@ struct TabChip: View {
 
 /// The pinned first tab (Home). With files open, it takes one icon slot.
 struct PinnedTab: View {
+    static let compactWidth: CGFloat = 46
     let symbol: String
     let title: String
     var compact = false
@@ -261,7 +257,7 @@ struct PinnedTab: View {
                 }
             }
             .padding(.horizontal, compact ? 0 : 12)
-            .frame(width: compact ? Metric.control : nil, height: Metric.topBar)
+            .frame(width: compact ? Self.compactWidth : nil, height: Metric.topBar)
             .background(active ? Palette.active : (hovering ? Palette.hover : .clear))
             .contentShape(Rectangle())
         }

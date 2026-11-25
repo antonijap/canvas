@@ -217,6 +217,7 @@ private struct TabWidthKey: PreferenceKey {
 }
 
 struct TopBar: View {
+    private static let minimumDragWidth: CGFloat = 24
     @ObservedObject var model: CanvasModel
     @State private var tabWidths: [String: CGFloat] = [:]
     @State private var barWidth: CGFloat = 0
@@ -224,7 +225,7 @@ struct TopBar: View {
     @State private var hoveredTab: String?
 
     private var tabRoom: CGFloat {
-        max(0, barWidth - actionsWidth - Metric.trafficLights - 2 * Metric.control)
+        max(0, barWidth - actionsWidth - Metric.trafficLights - PinnedTab.compactWidth - Metric.control - Self.minimumDragWidth)
     }
     private var fittedWidths: [CGFloat] {
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
@@ -356,6 +357,7 @@ struct TopBar: View {
             PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
                       help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
                 .qaID("home-tab", label: "Home")
+                .overlay(alignment: .leading) { if !model.openFiles.isEmpty { separator } }
                 .overlay(alignment: .trailing) { if !model.openFiles.isEmpty { separator } }
                 .animation(Motion.island, value: model.openFiles.isEmpty)
             FadingScroller(scrollTo: model.currentFile) {
@@ -438,7 +440,7 @@ struct TopBar: View {
             HStack(spacing: 0) {
                 WindowDragArea().frame(width: Metric.trafficLights)
                 tabs
-                WindowDragArea().frame(maxWidth: .infinity)
+                WindowDragArea().frame(minWidth: Self.minimumDragWidth, maxWidth: .infinity)
                 actions
             }
             .frame(height: Metric.topBar)

@@ -2,11 +2,85 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { center, NT, sc } from './harness.ts';
 import { startServer, ROOT, type Scratch } from '../lib.ts';
 import { PLAYGROUND } from '../playground.ts';
 import { expectedMove } from '../cloud-files-fixture.ts';
 const post = async (base: string, p: string, b: unknown) => { const r = await fetch(base + p, { method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, j: await r.json() as any }; };
+
+sc('tabs', 'Recently closed Cloud files check the host and keep the selected tab', { covers: ['tabs:reopen-recent'] }, async (t: NT) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-native-cloud-reopen-'));
+    let host: Scratch | undefined;
+    let file: string | undefined;
+    try {
+        host = await startServer(dir, {
+            HOME: dir, CANVAS_STATE_DIR: path.join(dir, 'state'), CANVAS_CLOUD_SECRETS_FILE: path.join(dir, 'secrets.json'),
+            CANVAS_TUNNEL_BIN: path.join(ROOT, 'test/fixtures/fake-tunnel.sh'),
+            CANVAS_FAKE_TUNNEL_DIR: path.join(t.app.dir, 'tunnels'), CANVAS_FAKE_TUNNEL_NODE: process.execPath,
+            CANVAS_FAKE_TUNNEL_ANY_PORT: '1', CANVAS_CLOUD_HOST_PORT: '0',
+        });
+        const started = await post(host.base, '/api/cloud/host/start', { name: 'Studio', label: 'Ben' });
+        t.eq(started.status, 200, 'Cloud starts');
+        const cloud = started.j.url;
+        const made = await post(host.base, '/api/cloud/files/create', { cloud, name: 'Studio Brief' });
+        t.eq(made.status, 201, 'Cloud file created');
+        const invite = await post(host.base, '/api/cloud/host/invite', { hostId: started.j.hostId, label: 'Anna', role: 'editor' });
+        const joined = await post(t.app.base, '/api/cloud/join', { link: invite.j.link, device: 'Test Mac' });
+        t.eq(joined.status, 200, 'editor joins');
+        await t.cmd('qa.cloud', { clouds: [{ url: cloud, name: 'Studio' }] });
+        const opened = await post(t.app.base, '/api/cloud/files/open', { cloud, id: made.j.id });
+        t.eq(opened.status, 200, 'editor opens the Cloud file');
+        file = opened.j.file;
+        await t.app.openShown(file!);
+        await t.waitState(s => s.file === file, 'the Cloud tab is active');
+        await t.mark({ id: 'file-tab', label: 'Studio Brief', exact: true });
+        const close = async () => {
+            await t.cmd('close', { file });
+            await t.waitState(s => s.file === t.file && !s.openFiles.includes(file), 'the Cloud tab closes');
+            await t.settle();
+        };
+        const reopen = async () => {
+            await t.click(center(await t.mark({ id: 'tab-list' })));
+            await t.waitState(s => s.menu?.items.includes('Studio Brief'), 'the Cloud file in Recently closed');
+            await t.pickMenu('Studio Brief');
+        };
+
+        await close();
+        fs.rmSync(file!, { recursive: true, force: true });
+        // With no local copy, the download waits for this test's host while the app can still switch tabs.
+        const hostPid = Number(execFileSync('pgrep', ['-P', String(host.proc.pid), '-f', 'cloud/adapters/mac/main.ts'], { encoding: 'utf8' }).trim());
+        t.ok(Number.isInteger(hostPid) && hostPid > 0, 'the test Cloud host process exists');
+        process.kill(hostPid, 'SIGSTOP');
+        try {
+            await reopen();
+            t.ok(!(await t.state()).openFiles.includes(file), 'the download is still waiting for the host');
+            await t.click(center(await t.mark({ id: 'home-tab' })));
+            await t.waitState(s => s.homeShown, 'Home selected during the Cloud download');
+        } finally { process.kill(hostPid, 'SIGCONT'); }
+        const reopened = await t.waitState(s => s.openFiles.includes(file), 'the downloaded file has a tab');
+        t.ok(reopened.homeShown, 'the download leaves Home selected');
+        t.eq(reopened.file, t.file, 'the download leaves the local document under Home');
+        await t.app.openShown(t.file);
+        await t.waitState(s => !s.homeShown && s.file === t.file, 'the local tab is active');
+
+        await close();
+        const deleted = await post(host.base, '/api/cloud/files/delete', { cloud, id: made.j.id });
+        t.eq(deleted.status, 200, 'the host deletes the file');
+        t.ok(fs.existsSync(file!), 'the closed file still has a local cache');
+        await reopen();
+        const state = await t.waitState(s => s.file === file || s.toast === 'This file was moved to the Trash', 'the reopen result');
+        t.eq(state.toast, 'This file was moved to the Trash', 'the reopen checks the Cloud before showing the file');
+        t.eq(state.file, t.file, 'the current tab stays active');
+        t.ok(!state.openFiles.includes(file), 'the deleted Cloud file stays closed');
+    } finally {
+        if ((await t.state()).menu) await t.cmd('qa.menu', { cancel: true });
+        if (file && (await t.state()).openFiles.includes(file)) await t.cmd('close', { file });
+        await t.cmd('qa.cloud', { clouds: [] });
+        await host?.stop();
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
 
 sc('cloud-files', 'Selected Cloud file reconnects both streams on relaunch', { covers: ['cloud-files:open'] }, async (t: NT) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-native-cloud-launch-'));

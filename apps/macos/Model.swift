@@ -189,6 +189,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     @Published var allFiles: [FileEntry] = []
     @Published private(set) var recentlyClosedTabs = RecentlyClosedTabs()
+    #if CANVAS_QA
+    func resetRecentlyClosedTabsForQA() { recentlyClosedTabs = RecentlyClosedTabs() }
+    #endif
     @Published var openFiles: [String] = UserDefaults.standard.stringArray(forKey: "canvas.openFiles") ?? [] {
         didSet {
             UserDefaults.standard.set(openFiles, forKey: "canvas.openFiles")
@@ -959,17 +962,29 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func reopenTab(_ file: String) {
-        // A closed Cloud file may have been evicted from disk while its tab was closed.
-        guard isMissing(file), let location = CloudFilePath(file),
-              let cloud = prefs.clouds.first(where: { CloudFilePath.key(for: $0.url) == location.key }) else {
-            openTab(file)
+        guard let location = CloudFilePath(file) else {
+            if isMissing(file) {
+                recentlyClosedTabs.remove(file)
+                flash("File not found")
+            } else {
+                open(file)
+            }
             return
         }
+        guard let cloud = prefs.clouds.first(where: { CloudFilePath.key(for: $0.url) == location.key }) else {
+            flash("This Cloud is unavailable on this Mac.")
+            return
+        }
+        let selection = (loadToken, currentFile, homeShown)
         Task { @MainActor in
             let (status, result) = await CloudAccount.post(self, "api/cloud/files/open", ["cloud": cloud.url, "id": location.id])
             if status == 200, let opened = result["file"] as? String {
                 setCloudFileName(result["name"] as? String, for: opened)
-                open(opened)
+                if selection == (loadToken, currentFile, homeShown) {
+                    open(opened)
+                } else {
+                    openQuietly(opened)
+                }
             } else {
                 flash(CloudFilesText.problem(code: result["code"] as? String, fallback: "Could not open the Cloud file. Try again."))
             }

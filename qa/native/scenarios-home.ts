@@ -486,6 +486,9 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
     t.eq((await t.state()).openFiles, files, "overflow tabs start in file order");
     const home = await t.mark({ id: "home-tab" });
     const plus = await t.mark({ id: "tab-new" });
+    t.near(home.w, 46, 0.5, "the compact Home tab is 46 points wide");
+    const firstAction = await t.mark({ id: "draw-tool", label: "Frame", exact: true });
+    t.ok(firstAction.x - plus.x - plus.w >= 24, "overflow leaves at least 24 points to drag the window");
     t.ok([...single.values()].reduce((a, b) => a + b, 0) > plus.x - home.x - home.w,
       "natural widths exceed the strip");
     for (const file of files) {
