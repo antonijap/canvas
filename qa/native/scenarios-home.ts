@@ -8,7 +8,9 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { decodePng, encodePng } from "../../fidelity/png.ts";
 import { METRICS } from "../../src/tokens.ts";
+import { crop } from "../ink.ts";
 import { copyDir, sleep } from "../lib.ts";
 import { PLAYGROUND } from "../playground.ts";
 import { QaApp } from "./app.ts";
@@ -54,12 +56,12 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   let st = await t.state();
   t.eq(st.homeShown, false, "a file is showing, not Home");
   const tab = await t.mark({ id: "home-tab" });
-  const icon = await t.mark({ id: "pinned-tab-icon" });
-  t.near(tab.w, 32, 0.6, "with files open Home uses one icon slot");
-  t.near(tab.h, 38, 0.6, "Home spans the strip height");
+  const icon = await t.mark({ id: "top-bar-icon", label: "house", exact: true });
+  t.near(tab.w, METRICS.control, 0.6, "Home uses one icon slot");
+  t.near(tab.h, 38, 0.6, "Home fills the strip height");
   t.near(midX(icon), midX(tab), 0.6, "the house is centred across the tab");
   t.near(midY(icon), midY(tab), 0.6, "the house is centred down the tab");
-  t.ok(tab.x < 120, `Home is the first tab, right after the traffic lights (x ${tab.x})`);
+  t.ok(tab.x < (await t.marks({ id: "file-tab" }))[0].x, "Home comes before every file tab");
   t.ok((await t.marks({ label: "Home", id: "text" })).length === 0, "the glyph alone, no name, while files are open");
   await t.click(center(tab));
   await t.waitState((s) => s.homeShown, "a click on the tab to show Home");
@@ -81,7 +83,7 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   t.eq(item.mods, (1 << 17) | (1 << 20), "with Shift and Cmd");
   await t.cmd("qa.mainmenu", { title: "Home", perform: true });
   await t.waitState((s) => s.homeShown, "Window > Home to show Home");
-  // The last file tab closed: Home is what is left, and it carries its name again.
+  // Home keeps its icon slot after the last file tab closes.
   await leaveHome(t, name);
   // Earlier scenarios of a run leave their tabs open: close those first, then this one with Cmd+W.
   for (const f of (await t.state()).openFiles.filter((x: string) => x !== t.file)) await t.app.cmd({ op: "close", args: { file: f } });
@@ -89,11 +91,79 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   await t.key("w", ["cmd"]);
   await t.waitState((s) => s.openFiles.length === 0 && s.homeShown, "Home after the last tab closed");
   await sleep(500);
-  const wide = await t.mark({ id: "home-tab" });
-  t.ok(wide.w > 60, `with no file open the tab shows its name (${wide.w} wide)`);
-  t.near(wide.h, 38, 0.6, "the same strip height");
+  const empty = await t.mark({ id: "home-tab" });
+  t.near(empty.w, tab.w, 0.6, "Home keeps the same width with no tabs");
+  t.near(empty.h, tab.h, 0.6, "Home keeps the same height with no tabs");
   await t.app.openShown(t.file);
   await t.waitState((s) => s.file === t.file && !s.homeShown, "the file to open again");
+});
+
+sc("tabs", "Top bar aligns controls and clears the traffic lights", { covers: ["tabs:spacing"] }, async (t: NT) => {
+  const mark = (id: string) => t.mark({ id });
+  const background = (label: string) => t.mark({ id: "top-bar-button-background", label, exact: true });
+  const check = async (toggleShown: boolean) => {
+    const first = await mark(toggleShown ? "sidebar-toggle" : "home-tab");
+    const home = await mark("home-tab");
+    const plus = await mark("tab-new");
+    const fill = await background("plus");
+    const tabs = (await t.marks({ id: "file-tab" })).sort((a, b) => a.x - b.x);
+    const last = tabs[tabs.length - 1];
+    const title = await t.mark({ id: "tab-title", label: last.label!, exact: true });
+    const zoomRight = (await t.state()).window.zoomButtonRight;
+    const gap = first.x - zoomRight;
+    const leftInset = fill.x - (last.x + last.w + 1);
+    const rightInset = plus.x + plus.w - (fill.x + fill.w);
+    t.note(`toggle ${toggleShown ? "shown" : "hidden"}: traffic light gap ${gap} pt, + insets ${leftInset}/${rightInset} pt`);
+    t.ok(Number.isFinite(zoomRight) && gap >= 12, "the first control clears the green button by at least 12 pt");
+    t.near(leftInset, rightInset, 0.5, "+ is equally inset after the separator and before the drag area");
+    t.ok(leftInset >= 3, "the + background clears the separator by at least 3 pt");
+    const symbols = ["house", "chevron.down", "magnifyingglass", "sidebar.right"];
+    if (toggleShown) {
+      t.near(first.w, home.w, 0.5, "the toggle and Home have matching widths");
+      t.near(first.h, home.h, 0.5, "the toggle and Home have matching heights");
+      t.near(first.x + first.w, home.x, 0.5, "the toggle and Home sit side by side");
+      symbols.push("sidebar.left", "sparkles.2");
+      const close = await t.mark({ id: "tab-close", label: last.label!, exact: true });
+      t.near(close.w, 20, 0.5, "the close target is 20 pt wide");
+      t.near(close.h, close.w, 0.5, "the close target has equal sides");
+      t.near(midY(close), midY(title), 0.5, "the close target shares the tab title's vertical center");
+    }
+    t.near(tabs[0].x - (home.x + home.w), 1, 0.5, "one separator follows Home");
+    for (const r of [fill, ...await Promise.all(symbols.map(background))]) {
+      t.near(r.w, 26, 0.5, r.label + " background is 26 pt wide");
+      t.near(r.h, r.w, 0.5, r.label + " background has equal sides");
+      t.near(midY(r), midY(title), 0.5, r.label + " shares the tab title's vertical center");
+    }
+  };
+  const capture = async (name: string, hoverID: string) => {
+    if (!process.env.CANVAS_TOPBAR_SHOTS) return;
+    await t.move(center(await mark(hoverID)));
+    const shot = await t.cmd<{ data: string; width: number }>("qa.shot");
+    const img = decodePng(Buffer.from(shot.data, "base64"));
+    const scale = shot.width / (await t.state()).window.width;
+    const bar = { x: 0, y: 0, w: img.width, h: 38 * scale };
+    fs.writeFileSync(path.join(OUT, "..", `topbar-${name}.png`), encodePng(crop(img, bar, 2)));
+  };
+  const files = ["Studio", "Reference"].map(name => path.join(t.app.docs, name + ".canvas"));
+  try {
+    for (const f of files) {
+      copyDir(t.file, f);
+      await t.app.openShown(f);
+    }
+    await t.waitState(s => s.file === files[1] && !s.homeShown, "Reference to show");
+    await t.cmd("close", { file: t.file });
+    await t.settle();
+    await check(true);
+    await capture("with-toggle", "tab-new");
+    await t.click(center(await mark("home-tab")));
+    await t.waitState(s => s.homeShown, "Home to show without the sidebar toggle");
+    t.eq((await t.marks({ id: "sidebar-toggle" })).length, 0, "the toggle is hidden on Home");
+    await check(false);
+    await capture("without-toggle", "tab-list");
+  } finally {
+    await t.app.openShown(t.file);
+    for (const file of files) await t.cmd("close", { file });
+  }
 });
 
 sc("home", "Home: recents newest first, comment count and a cloud on a shared card, a missing file, On this Mac and search, thumbnails, alignment", { covers: ["home:recents", "home:remove", "home:thumbnail", "home:alignment", "home:server", "home:light", "home:dark"] }, async (t: NT) => {
@@ -345,21 +415,34 @@ sc("tabs", "Warm tab switching keeps the same document page", { covers: ["tabs:w
   copyDir(PLAYGROUND, other);
   const before = await t.js<number>("return performance.timeOrigin;");
   try {
+    await t.key("s", ["shift"]);
+    await t.mark({ id: "draw-tool-selected", label: "Sticker", exact: true });
     await t.app.openShown(other);
     await t.waitState(s => s.file === other && s.pages.length > 0, "the second tab to open");
+    t.eq(await t.marks({ id: "draw-tool-selected" }), [], "the second tab opens with no tool selected");
     const out = center(await t.mark({ id: "file-tab", label: baseName(other), exact: true }));
     const back = center(await t.mark({ id: "file-tab", label: baseName(t.file), exact: true }));
+    await t.key("f");
+    await t.mark({ id: "draw-tool-selected", label: "Frame", exact: true });
     const samples = [];
     for (let i = 0; i < 5; i++) {
       if (i) {
         await t.systemClick(out);
         await t.waitState(s => s.file === other, "the second tab to return");
+        if (i === 1) {
+          await t.waitJs("document.getElementById('view').style.cursor !== 'crosshair'", "the second tab clears the drawing tool");
+          t.eq(await t.marks({ id: "draw-tool-selected" }), [], "no draw tool highlighted in the second tab");
+        }
       }
       await t.systemClick(back);
       await t.waitState(s => s.file === t.file && s.pages.length > 0, "the original tab to return");
       const marks = await openingState(t.app);
       if (marks.switched != null) samples.push(marks.switched - marks.action);
       t.eq(await t.js<number>("return performance.timeOrigin;"), before, "the page did not navigate again");
+      if (!i) {
+        await t.waitJs('document.querySelector("[data-sticker-tray]")?.hidden && document.getElementById("view").style.cursor !== "crosshair"', "returning to the warm tab clears sticker placement");
+        t.eq(await t.marks({ id: "draw-tool-selected" }), [], "the original tab returns with no tool selected");
+      }
     }
     t.note(`switch samples ${JSON.stringify(samples)} ms`);
     t.ok(samples.length === 5 && samples.sort((a, b) => a - b)[2] < 100, "the median warm switch is under 100 ms");
@@ -486,9 +569,9 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
     t.eq((await t.state()).openFiles, files, "overflow tabs start in file order");
     const home = await t.mark({ id: "home-tab" });
     const plus = await t.mark({ id: "tab-new" });
-    t.near(home.w, 46, 0.5, "the compact Home tab is 46 points wide");
-    const firstAction = await t.mark({ id: "draw-tool", label: "Frame", exact: true });
-    t.ok(firstAction.x - plus.x - plus.w >= 24, "overflow leaves at least 24 points to drag the window");
+    t.near(home.w, METRICS.control, 0.5, "Home uses one icon slot");
+    const actions = await t.mark({ id: "top-bar-actions" });
+    t.ok(actions.x - plus.x - plus.w >= 24, "overflow leaves at least 24 points to drag the window");
     t.ok([...single.values()].reduce((a, b) => a + b, 0) > plus.x - home.x - home.w,
       "natural widths exceed the strip");
     for (const file of files) {
@@ -514,7 +597,7 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
   }
 });
 
-sc("comments", "Comment hint shares the canvas center and zoom center", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
+sc("comments", "Comment hint clears the tool palette in light and dark", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
   const initial = await t.state();
   await t.settle();
   await t.key("c");
@@ -524,8 +607,8 @@ sc("comments", "Comment hint shares the canvas center and zoom center", { covers
       await t.cmd("qa.theme", { theme });
       for (const [width, height] of [[720, 420], [1280, 800], [2000, 1256]]) {
         await t.cmd("qa.window", { width, height });
-        const zoom = await t.mark({ id: "zoom-island" });
-        await t.waitJs(`Math.abs(document.querySelector('.cm-hint').getBoundingClientRect().y + document.querySelector('.cm-hint').getBoundingClientRect().height/2 - ${zoom.y + zoom.h/2}) <= 1`, 'hint on zoom center', 8000);
+        const tools = await t.mark({ id: "tool-palette" });
+        await t.waitJs(`document.querySelector('.cm-hint').getBoundingClientRect().bottom <= ${tools.y - 9}`, 'hint above the tools', 8000);
         const hint = await t.js<{ x:number; expected:number }>("const h=window.canvasHost, r=document.querySelector('.cm-hint').getBoundingClientRect(); return {x:r.x+r.width/2,expected:(h.insets.l+innerWidth-h.insets.r)/2}");
         t.near(hint.x, hint.expected, 1, 'centered on free canvas');
         const state = await t.state();
@@ -633,21 +716,21 @@ sc("tab-actions", "Tab context actions, inline rename and reorder", { covers: ["
   await t.app.cmd({ op: "close", args: { file: away } });
 });
 
-sc('comments', 'Bottom overlays share the free canvas center and zoom center', { covers: ['comments:light', 'comments:dark'] }, async (t: NT) => {
+sc('comments', 'Bottom overlays stack above the tool palette', { covers: ['comments:light', 'comments:dark'] }, async (t: NT) => {
   await t.cmd('qa.cloud', { commentName: 'Anna' });
   await t.settle(); await t.key('c');
   await t.waitJs("document.querySelector('.cm-hint')?.classList.contains('on')", 'comment hint');
-  const zoom = await t.mark({ id: 'zoom-island' });
-  const g = await t.js<any>("const h = window.canvasHost, r = document.querySelector('.cm-hint').getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2,w:innerWidth,l:h.insets.l,r:h.insets.r}");
+  const tools = await t.mark({ id: 'tool-palette' });
+  const g = await t.js<any>("const h = window.canvasHost, r = document.querySelector('.cm-hint').getBoundingClientRect(); return {x:r.x+r.width/2,bottom:r.bottom,w:innerWidth,l:h.insets.l,r:h.insets.r}");
   if (process.env.CANVAS_UI_SHOTS) { fs.mkdirSync(process.env.CANVAS_UI_SHOTS, { recursive: true }); await t.shot(path.join(process.env.CANVAS_UI_SHOTS, 'native-pills-' + (process.env.CANVAS_UI_BEFORE ? 'before' : 'after') + '.png')); }
   t.near(g.x, (g.l + g.w - g.r)/2, 1, 'free canvas center');
-  t.near(g.y, zoom.y + zoom.h/2, 1, 'zoom center');
+  t.ok(g.bottom <= tools.y - 9, 'comment hint clears the palette');
   await t.js("window.canvasHost.post({toast:'Layer copy ready'})");
   await t.waitState(s => s.toast === 'Layer copy ready', 'toast');
   await t.settle();
   const state = await t.state(); const text = state.toastFrames.text;
   t.ok(!!text, 'native toast has a measured frame');
-  t.near(text.y + text.h/2, zoom.y + zoom.h/2, 2, 'native toast center');
+  t.ok(text.y + text.h < tools.y - 9, 'native toast clears the palette');
   const hint = await t.js<any>("const r = document.querySelector('.cm-hint').getBoundingClientRect(); return {bottom:r.bottom}");
   t.ok(hint.bottom < text.y, 'hint stacks above the toast');
 });

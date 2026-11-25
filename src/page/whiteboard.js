@@ -303,6 +303,7 @@ function start(host) {
     delete layer.dataset.placing;
     if (pointer !== undefined && view.hasPointerCapture(pointer)) view.releasePointerCapture(pointer);
     positionSticky();
+    if (host.native) host.post({ drawTool: null });
   }
 
   function activate(type) {
@@ -316,6 +317,7 @@ function start(host) {
     if (type === "sticky") { mark(flyout, color, "color"); colors.hidden = false; }
     else { tray.hidden = false; choose(kind); }
     positionSticky();
+    if (host.native) host.post({ drawTool: type });
   }
 
   function anchorTarget(e) {
@@ -517,7 +519,11 @@ function start(host) {
   addEventListener("pointercancel", cancelled, true);
   addEventListener("blur", () => { if (drag) reset(); });
 
-  host.on("cmd", (c) => { if (c.cmd === "draw" && (c.type === "sticky" || c.type === "sticker")) activate(c.type); });
+  host.on("cmd", (c) => {
+    if (c.cmd === "draw" && (c.type === "sticky" || c.type === "sticker")) activate(c.type);
+    if (c.cmd === "cancelDraw") reset();
+  });
+  addEventListener("pagehide", reset);
   host.on("draw-tool", reset);
   host.on("document", syncSeals);
   host.on("page", () => { reset(); closePopover(); pendingEdit = null; syncSticky(); });

@@ -47,7 +47,7 @@ export function sparkAt(sel, area) {
   let y = sel.y - BOX_OUT;
   x = Math.min(x, area.x + area.w - SPARK - 4);
   y = Math.max(y, area.y + 4);
-  y = Math.min(y, sel.y + sel.h - SPARK);
+  y = Math.min(y, sel.y + sel.h - SPARK, area.y + area.h - SPARK - 4);
   return { x, y };
 }
 

@@ -11,6 +11,13 @@ test('bottom overlays center within free canvas at the zoom vertical center', ()
   }
 });
 
+test('bottom overlays clear the tool palette even when zoom stays at the window edge', () => {
+  const zoom = { left: 586, bottom: 790, height: 40 };
+  const area = bottomOverlayArea(720, 800, { l: 236, r: 304 }, zoom, 40, 72);
+  assert.equal(area.x, 326);
+  assert.equal(area.y + 20, 728);
+});
+
 test('native overlay listener requests geometry after it is ready', async () => {
   const { readFileSync } = await import('node:fs');
   const { runInNewContext } = await import('node:vm');

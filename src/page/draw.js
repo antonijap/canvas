@@ -17,24 +17,25 @@ if (host?.file) {
 
   let tool = null, drag = null, textToEdit = null;
 
-  function reset() {
-    if (!tool) return;
+  function setTool(next = null) {
+    if (!tool && !next) return;
     const pointer = drag?.pointer;
-    tool = null;
+    const previous = tool;
+    tool = next;
     drag = null;
     preview.style.display = "none";
-    view.style.cursor = "";
-    host.clearGuides();
+    view.style.cursor = tool ? "crosshair" : "";
+    if (previous) host.clearGuides();
     if (pointer !== undefined && view.hasPointerCapture(pointer)) view.releasePointerCapture(pointer);
+    // Re-selecting the same tool also dismisses the native sidebar menu.
+    if (host.native) host.post({ drawTool: tool });
   }
 
   function activate(type, target) {
     if (!Object.hasOwn(names, type) || !host.doc || host.readOnly || host.textEdit?.active || target?.closest?.(field)) return false;
-    reset();
     textToEdit = null;
-    tool = type;
     host.emit("draw-tool", type);
-    view.style.cursor = "crosshair";
+    setTool(type);
     return true;
   }
 
@@ -80,12 +81,17 @@ if (host?.file) {
     host.textEdit?.enter(id, { all: true });
   }
 
-  host.on("page", () => { reset(); textToEdit = null; });
-  host.on("tab", (shown) => { if (!shown) { reset(); textToEdit = null; } });
+  const leave = () => { setTool(); textToEdit = null; };
+  host.on("page", leave);
+  host.on("tab", (shown) => { if (!shown) leave(); });
   host.on("render", editNewText);
-  host.on("draw-tool", (type) => { if (!Object.hasOwn(names, type)) reset(); });
-  host.on("cmd", (c) => { if (c.cmd === "draw") activate(c.type, document.activeElement); });
-  addEventListener("blur", () => { if (drag) reset(); });
+  host.on("draw-tool", (type) => { if (!Object.hasOwn(names, type)) setTool(); });
+  host.on("cmd", (c) => {
+    if (c.cmd === "draw") activate(c.type, document.activeElement);
+    if (c.cmd === "cancelDraw") leave();
+  });
+  addEventListener("pagehide", leave);
+  addEventListener("blur", () => { if (drag) setTool(); });
 
   function modifier(e) {
     if (drag?.moved && (e.key === "Shift" || e.key === "Alt" || e.key === "Control" || e.key === "Meta")) {
@@ -97,7 +103,7 @@ if (host?.file) {
     if (e.defaultPrevented || e.target.closest?.(field) || host.textEdit?.active || e.isComposing) return;
     modifier(e);
     if (e.key === "Escape" && tool) {
-      reset();
+      setTool();
     } else if (drag || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || !activate(tools[e.code], e.target)) {
       return;
     }
@@ -144,7 +150,7 @@ if (host?.file) {
     const { parent, parentBox, page, gen, moved } = drag;
     const type = tool, isText = type === "text", isFrame = type === "frame", isBoard = isFrame && !parent;
     const { r } = geometry(e, !moved);
-    reset();
+    setTool();
     if (host.readOnly || host.page !== page || (moved && (r.w < 1 || (!isText && r.h < 1)))) return;
     const textStyle = isText ? {
       content: "Text", fontFamily: "system-ui", fontSize: 16,
@@ -177,7 +183,7 @@ if (host?.file) {
     host.trackWrite(write);
   }, true);
 
-  const cancel = (e) => { if (e.pointerId === drag?.pointer) reset(); };
+  const cancel = (e) => { if (e.pointerId === drag?.pointer) setTool(); };
   view.addEventListener("lostpointercapture", cancel);
   addEventListener("pointercancel", cancel, true);
 }

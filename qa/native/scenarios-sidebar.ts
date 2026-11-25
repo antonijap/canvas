@@ -47,7 +47,23 @@ sc("sidebar", "section menu switches panels and remembers the selection", {
 }, async (t: NT) => {
   if (!(await t.state()).panelOpen) await t.click(await t.sidebarToggle());
   await t.cmd("qa.theme", { theme: "dark" });
-  await t.click(center(await header(t)));
+  await t.section("Layers");
+  const trigger = await header(t);
+  const title = await t.mark({ id: "sidebar-section-title", label: "Layers", exact: true });
+  const openMenu = async () => {
+    await t.click(center(trigger));
+    return t.mark({ id: "sidebar-section-popup" });
+  };
+  const popup = await openMenu();
+  t.near(popup.y, trigger.y + trigger.h + 2, 1, "the menu sits just below the title button");
+  t.near(popup.x, title.x, 0.5, "the menu starts at the title text");
+  const panel = await t.mark({ id: "sidebar-panel" });
+  for (const x of [panel.x + panel.w - 8, panel.x + panel.w + 24]) {
+    await t.click({ x, y: center(popup).y });
+    await t.waitFor(async () => !(await t.marks({ id: "sidebar-section-popup" })).length, "a click outside to dismiss the menu");
+    t.eq((await t.state()).section, "Layers", "dismissing the menu leaves Layers selected");
+    await openMenu();
+  }
   t.eq((await t.marks({ id: "sidebar-section" })).map(item => item.label).sort(), [...sections].sort(),
     "the menu has all four sections");
   await t.click(center(await t.mark({ id: "sidebar-section", label: "Layers", exact: true })));

@@ -18,7 +18,7 @@ struct ShellLogicTests {
     static func main() {
         docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); serverCode(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
-        fieldMath(); mixedEach(); menuSpec(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
+        fieldMath(); mixedEach(); menuSpec(); drawToolPalette(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
         updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress(); tabRenameFocus(); recentlyClosedTabs()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
@@ -473,6 +473,9 @@ struct ShellLogicTests {
         check(a.l == 244 + 10 && a.r == 10 + 284 + 10 && a.t == 60 && a.b == 60, "panel and inspector open: \(a)")
         let b = CanvasInsets.compute(panel: nil, inspector: false, inset: 10, gap: 10, pill: 40, props: 284)
         check(b.l == 0 && b.r == 10 && b.t == 60 && b.b == 60, "panel and inspector closed: \(b)")
+        let tools = CanvasInsets.compute(panel: 226, inspector: true, inset: 10, gap: 10,
+                                         pill: 40, props: 284, bottomClearance: 72)
+        check(tools.b == 72 && tools.t == 60, "fit clears the tool palette")
     }
 
     // Sweep S1: the titlebar's own tooltips never show, so the toolbar draws its own; it must stay on screen.
@@ -604,6 +607,15 @@ struct ShellLogicTests {
         check(w(720, 420, true) == 276, "720 pt: sidebar and inspector leave the minimum canvas")
         check(w(520, 420, false) == 370, "narrow window without inspector: clamped to the room left")
         check(w(600, 420, true) == nil, "no room at all hides the panel")
+        let withTools = ShellLayout.sidebarWidth(window: 720, stored: 420, inspector: true,
+                                                 inset: 10, gap: 10, props: 284, minWidth: 224, minimumCanvas: 170)
+        check(withTools == 226, "720 pt: two sidebars leave room for the tool palette")
+    }
+
+    static func drawToolPalette() {
+        let groups = DrawTool.paletteGroups
+        check(groups == [[.frame, .rectangle, .ellipse, .text], [.sticky, .sticker]], "draw tools precede whiteboard tools")
+        check(groups.flatMap { $0 }.map(\.keycap) == ["F", "R", "O", "T", "S", "\u{21E7}S"], "palette keycaps match tool shortcuts")
     }
 
     // Sidebar resize: the editor panel and the Home sidebar share one set of rules.

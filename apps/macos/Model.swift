@@ -220,12 +220,19 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published private(set) var isCloudFile = false
     @Published var cloudReadOnly = false
     @Published var currentFile: String?
+    @Published private(set) var activeDrawTool: DrawTool?
     /// The Home tab is the shown one (Home.swift): the shown file's page stays alive underneath, hidden, and takes no keys.
     @Published var homeShown = false {
         didSet {
             guard homeShown != oldValue else { return }
             tabHost.isHidden = homeShown
-            if homeShown { webView.window?.makeFirstResponder(nil) } else if let w = webView.window { w.makeFirstResponder(webView) }
+            if homeShown {
+                clearDrawTool()
+                run("{cmd:'cancelDraw'}")
+                webView.window?.makeFirstResponder(nil)
+            } else if let w = webView.window {
+                w.makeFirstResponder(webView)
+            }
         }
     }
     /// Files the app opens on its own (the first launch's course): not recents until the person opens them.
@@ -263,7 +270,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     var repeatLabel: String?
     /// A text layer is being edited in place on the page (src/page/text-edit.js): Undo/Redo step through its typing,
     /// and the canvas commands (Duplicate, Group, Arrange, Delete) wait until the edit ends.
-    var textEditing = false
+    @Published var textEditing = false
     /// While a text layer is edited: the letters selected in it and their style ("mixed" where they differ), from the
     /// page (src/page/text-edit.js). The inspector shows that style and its text edits go to those letters.
     @Published var textRange: TextRangeState?
@@ -396,6 +403,11 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             }
         }
         if let z = m["zoom"] as? Double, let v = JSONNumber.int(z) { zoom = v }
+        if m.keys.contains("drawTool"), !homeShown {
+            let tool = (m["drawTool"] as? String).flatMap(DrawTool.init(rawValue:))
+            if tool != nil && sidebarMenuOpen { sidebarMenuOpen = false }
+            if activeDrawTool != tool { activeDrawTool = tool }
+        }
         if m.keys.contains("selBoard") { selectedBoard = m["selBoard"] as? String }
         if let p = m["pages"] as? [String: Any] {
             pages = (p["list"] as? [[String: Any]] ?? []).compactMap { d in
@@ -443,10 +455,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             NSWorkspace.shared.open(url)
         }
         if m["snapHello"] != nil { pushSnap(); pushPrefs(); resendInsets() }
-        if m["bottomOverlayReady"] != nil {
-            setZoomCorner(frame: zoomCornerFrame)
-            run("{cmd:'bottomToast',shown:\(toast != nil)}")
-        }
+        if m["bottomOverlayReady"] != nil { resendInsets() }
         // The eyedropper key (I, src/page/shortcuts.js): sample the screen into the selection's fill (PaintEditor.swift).
         if m["eyedropper"] != nil { eyedropFill() }
         // Option+L on the canvas (src/page/shortcuts.js): the Layers panel closes every open row.
@@ -904,6 +913,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func clearDocumentState() {
+        clearDrawTool()
         selection = nil; selectedWidgetId = nil; widgetStatus = nil; selectedBoard = nil; renamingBoard = nil
         activeUsage = nil; usage = nil; gestureTarget = nil
         // A page that went away mid-edit never says the edit ended: Undo would stay "Undo Typing" and Delete,
@@ -1413,8 +1423,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
 
     func showPage(_ id: String) { run("{cmd:'page',id:\(jsString(id))}"); focusCanvas() }
     var canDraw: Bool { currentFile != nil && !homeShown && !cloudReadOnly && !textEditing }
+    func clearDrawTool() { if activeDrawTool != nil { activeDrawTool = nil } }
     func draw(_ tool: DrawTool) {
         guard canDraw else { return }
+        if sidebarMenuOpen { sidebarMenuOpen = false }
         run("{cmd:'draw',type:'\(tool.rawValue)'}")
         focusCanvas()
     }
@@ -1432,7 +1444,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// The current free area, sent along with every fit and zoom so the page never fits into a stale one.
     private var insetsArg: String {
         guard let i = lastInsets else { return "" }
-        return ",insets:{l:\(i.0),t:\(i.1),r:\(i.2),b:\(i.3)}"
+        return ",insets:{l:\(i.l),t:\(i.t),r:\(i.r),b:\(i.b)}"
     }
     func select(_ id: String) { run("{cmd:'select',id:'\(id.replacingOccurrences(of: "'", with: "\\'"))'}") }
     func deselect() { run("{cmd:'deselect'}") }
@@ -1494,18 +1506,18 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     /// The free rectangle last sent, so a freshly loaded page (tab switch, reload) gets it again: SwiftUI only
     /// sends insets when they change, and a new page starts with none.
-    private var lastInsets: (CGFloat, CGFloat, CGFloat, CGFloat)?
+    private var lastInsets: (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat, bottomClearance: CGFloat)?
     private var zoomCornerFrame: CGRect = .zero
     func setZoomCorner(frame: CGRect) {
         zoomCornerFrame = frame
         run("{cmd:'zoomCorner',left:\(frame.minX),bottom:\(frame.maxY),height:\(frame.height)}")
     }
-    func setInsets(l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
-        lastInsets = (l, t, r, b)
-        run("{cmd:'insets',l:\(l),t:\(t),r:\(r),b:\(b)}")
+    func setInsets(l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat, bottomClearance: CGFloat) {
+        lastInsets = (l, t, r, b, bottomClearance)
+        run("{cmd:'insets',l:\(l),t:\(t),r:\(r),b:\(b),bottomClearance:\(bottomClearance)}")
     }
     func resendInsets() {
-        if let i = lastInsets { setInsets(l: i.0, t: i.1, r: i.2, b: i.3) }
+        if let i = lastInsets { setInsets(l: i.l, t: i.t, r: i.r, b: i.b, bottomClearance: i.bottomClearance) }
         setZoomCorner(frame: zoomCornerFrame)
         run("{cmd:'bottomToast',shown:\(toast != nil)}")
     }

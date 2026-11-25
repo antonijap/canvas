@@ -479,8 +479,10 @@ enum QA {
     }
 
     private static func windowInfo(_ w: NSWindow) -> [String: Any] {
-        ["x": w.frame.origin.x, "y": w.frame.origin.y, "width": w.frame.width, "height": w.frame.height, "scale": w.backingScaleFactor, "key": w.isKeyWindow,
+        let zoom = w.standardWindowButton(.zoomButton).map { $0.convert($0.bounds, to: nil) }
+        return ["x": w.frame.origin.x, "y": w.frame.origin.y, "width": w.frame.width, "height": w.frame.height, "scale": w.backingScaleFactor, "key": w.isKeyWindow,
          "keyWindow": NSApp.keyWindow?.title ?? NSNull(), "active": NSApp.isActive, "number": w.windowNumber,
+         "zoomButtonRight": zoom.map { $0.maxX } as Any,
          "firstResponder": w.firstResponder.map { String(describing: type(of: $0)) } ?? NSNull()]
     }
 

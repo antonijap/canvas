@@ -1133,7 +1133,13 @@ class Nav: NSObject, WKNavigationDelegate {
   private var generation = 0
   func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
     generation += 1
-    if webView === model.webView { model.textEditing = false } // the page that had an edit open is going: it never says the edit ended
+    if webView === model.webView {
+      model.textEditing = false // the page that had an edit open is going: it never says the edit ended
+    }
+  }
+  func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+    // The old canvas can still draw during a provisional load.
+    if webView === model.webView { model.clearDrawTool() }
   }
   // The page crashed: whatever it was editing is gone with it, and so is its "text editing" state. WebKit
   // reloads a crashed page only when this method is missing, so it reloads here (not again within 10 s: a page
@@ -1143,6 +1149,7 @@ class Nav: NSObject, WKNavigationDelegate {
     // A hidden tab's page loads again when it is shown (reloading it now would open its streams in the background).
     guard webView === model.webView else { model.hiddenPageGone(webView); return }
     model.textEditing = false
+    model.clearDrawTool()
     let now = Date()
     defer { lastCrash = now }
     if let last = lastCrash, now.timeIntervalSince(last) < 10 { return }

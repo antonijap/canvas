@@ -149,7 +149,7 @@
 .vd-time{flex:none;opacity:.9;white-space:nowrap}
 .vd-scrub{flex:1;min-width:24px;height:16px;accent-color:#fff;cursor:pointer}
 
-/* welcome (the Welcome file's card, src/onboarding.ts; design/master/master.canvas, wc-new). Type: title 15 semibold,
+/* welcome (the Welcome file's card, src/onboarding.ts; design/master/Canvas.canvas, wc-new). Type: title 15 semibold,
    agent names 13 medium, buttons and the footer 12. Rows are 48px; the lines between them run edge to edge. Connect
    is grey, never the accent. One-line labels sit at line-height 100%; an error or the temporary-worktree note in the
    footer takes two lines of 14px in the same 40px, so the card never needs to grow. */

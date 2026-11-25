@@ -101,15 +101,17 @@ enum ShellLayout {
     static let minCanvas: CGFloat = 120
 
     /// The widest the panel can be in this window.
-    static func room(window: CGFloat, inspector: Bool, inset: CGFloat, gap: CGFloat, props: CGFloat) -> CGFloat {
-        var room = window - inset * 2 - gap - minCanvas
+    static func room(window: CGFloat, inspector: Bool, inset: CGFloat, gap: CGFloat, props: CGFloat,
+                     minimumCanvas: CGFloat = minCanvas) -> CGFloat {
+        var room = window - inset * 2 - gap - minimumCanvas
         if inspector { room -= props + gap }
         return room
     }
 
     static func sidebarWidth(window: CGFloat, stored: CGFloat, inspector: Bool,
-                             inset: CGFloat, gap: CGFloat, props: CGFloat, minWidth: CGFloat) -> CGFloat? {
-        let room = room(window: window, inspector: inspector, inset: inset, gap: gap, props: props)
+                             inset: CGFloat, gap: CGFloat, props: CGFloat, minWidth: CGFloat,
+                             minimumCanvas: CGFloat = minCanvas) -> CGFloat? {
+        let room = room(window: window, inspector: inspector, inset: inset, gap: gap, props: props, minimumCanvas: minimumCanvas)
         if room < minWidth { return nil }
         return min(max(stored, minWidth), room)
     }
@@ -599,11 +601,12 @@ struct LeadTrailThrottle {
 
 /// The part of the window the shell's islands cover, as insets of the canvas view. The canvas fits into what is left.
 enum CanvasInsets {
-    static func compute(panel: CGFloat?, inspector: Bool, inset: CGFloat, gap: CGFloat, pill: CGFloat, props: CGFloat) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
+    static func compute(panel: CGFloat?, inspector: Bool, inset: CGFloat, gap: CGFloat, pill: CGFloat,
+                        props: CGFloat, bottomClearance: CGFloat = 0) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
         let left = panel.map { $0 + gap } ?? 0
         let right = inset + (inspector ? props + gap : 0)
         let top = inset + pill + gap
-        let bottom = inset + pill + gap
+        let bottom = max(inset + pill + gap, bottomClearance)
         return (left, top, right, bottom)
     }
 }
@@ -1270,7 +1273,10 @@ enum RepeatHint {
 enum DrawTool: String, CaseIterable {
     case frame, rectangle, ellipse, text, sticky, sticker
 
-    static let barTools: [DrawTool] = [.frame, .rectangle, .ellipse, .text]
+    /// The bottom palette's groups, in order; a divider sits between them (ToolPalette, Shell.swift).
+    static let paletteGroups: [[DrawTool]] = [[.frame, .rectangle, .ellipse, .text], [.sticky, .sticker]]
+    /// The key as shown on a keycap.
+    var keycap: String { (self == .sticker ? "\u{21E7}" : "") + key.uppercased() }
     var title: String { rawValue.capitalized }
     var command: String { "draw-" + rawValue }
     var key: String {
@@ -1285,7 +1291,7 @@ enum DrawTool: String, CaseIterable {
     var symbol: String {
         switch self {
         case .frame: return "number"
-        case .rectangle: return "rectangle"
+        case .rectangle: return "square"
         case .ellipse: return "circle"
         case .text: return "textformat"
         case .sticky: return "note"

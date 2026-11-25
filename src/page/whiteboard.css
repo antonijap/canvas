@@ -6,7 +6,7 @@
 .whiteboard-layer button:focus-visible,.whiteboard-layer select:focus-visible{outline:2px solid var(--c-sel);outline-offset:2px}
 .whiteboard-panel,.whiteboard-hint{border:1px solid var(--c-island-rim);background:var(--c-island);box-shadow:0 6px 18px var(--wb-shadow)}
 .whiteboard-panel{pointer-events:auto;border-radius:var(--c-radius-island)}
-.whiteboard-flyout{position:absolute;left:50%;bottom:72px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:8px 12px}
+.whiteboard-flyout{position:absolute;left:50%;bottom:var(--native-bottom,72px);transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:8px 12px}
 .whiteboard-key{background:var(--c-field);padding:2px 5px;border-radius:4px;font-size:var(--c-size-2xs)}
 .sticky-swatch{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:none}
 .sticky-swatch::before{content:"";width:24px;height:24px;background:var(--wb-swatch);border-radius:50%;box-shadow:inset 0 0 0 1px var(--c-hairline)}

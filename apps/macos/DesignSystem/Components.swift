@@ -59,15 +59,16 @@ extension Metric {
     static let topBar: CGFloat = 38
 }
 
-private struct GlassBar: ViewModifier {
+private struct GlassBar<S: Shape>: ViewModifier {
     @Environment(\.appearsActive) private var appearsActive
     let sidebar: Bool
+    let shape: S
 
     func body(content: Content) -> some View {
         content.background {
-            Rectangle()
+            shape
                 .fill(appearsActive || sidebar ? .clear : Palette.sidebar.opacity(0.8))
-                .glassEffect(.regular, in: Rectangle())
+                .glassEffect(.regular, in: shape)
                 .shadow(color: .black.opacity(sidebar ? 0.25 : 0.10), radius: sidebar ? 12 : 14,
                         x: sidebar ? 4 : 0, y: sidebar ? 0 : 4)
                 .allowsHitTesting(false)
@@ -76,7 +77,10 @@ private struct GlassBar: ViewModifier {
 }
 
 extension View {
-    func glassBar(sidebar: Bool = false) -> some View { modifier(GlassBar(sidebar: sidebar)) }
+    func glassBar(sidebar: Bool = false) -> some View { glassBar(in: Rectangle(), sidebar: sidebar) }
+    func glassBar<S: Shape>(in shape: S, sidebar: Bool = false) -> some View {
+        modifier(GlassBar(sidebar: sidebar, shape: shape))
+    }
 }
 
 /// A floating island: Liquid Glass over the canvas and a soft lift. No rim; the glass has its own edge.
@@ -124,7 +128,6 @@ struct IconButton: View {
     /// Bump to bounce the glyph (an add action just landed). Ignored under Reduce Motion.
     var bounce = 0
     var filled = false
-    var inBar = false
     let action: () -> Void
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -145,19 +148,74 @@ struct IconButton: View {
                 .symbolEffect(.bounce, value: reduceMotion ? 0 : bounce)
                 .font(.system(size: Metric.icon, weight: .medium))
                 .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
-                .frame(width: Metric.control, height: inBar ? Metric.topBar : Metric.control)
-                .background {
-                    if inBar {
-                        RoundedRectangle(cornerRadius: 5).fill(fill).frame(width: 28, height: 28)
-                    } else { Circle().fill(fill) }
-                }
-                .contentShape(RoundedRectangle(cornerRadius: inBar ? 0 : Metric.control / 2))
+                .frame(width: Metric.control, height: Metric.control)
+                .background(Circle().fill(fill))
+                .contentShape(RoundedRectangle(cornerRadius: Metric.control / 2))
         }
         .buttonStyle(.plain)
         .chromeHelp(help, shortcut: shortcut)
         .accessibilityLabel(help.isEmpty ? symbol : help)
         .accessibilityAddTraits(active ? .isSelected : [])
         .onHover { h in withAnimation(Motion.fast) { hovering = h } }
+    }
+}
+
+struct TopBarIconButton: View {
+    let symbol: String
+    var active = false
+    let help: String
+    var shortcut: String? = nil
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .glyph(Metric.icon)
+                .qaID("top-bar-icon", label: symbol)
+        }
+        .buttonStyle(TopBarButtonStyle(symbol: symbol, active: active))
+        .chromeHelp(help, shortcut: shortcut)
+        .accessibilityLabel(help)
+        .accessibilityAddTraits(active ? .isSelected : [])
+    }
+}
+
+struct TopBarButtonStyle: ButtonStyle {
+    let symbol: String
+    var active = false
+    var visible = true
+    var diameter: CGFloat = 26
+    var width = Metric.control
+    var height = Metric.topBar
+
+    func makeBody(configuration: Configuration) -> some View {
+        Face(configuration: configuration, style: self)
+    }
+
+    private struct Face: View {
+        let configuration: Configuration
+        let style: TopBarButtonStyle
+        @State private var hovering = false
+
+        private var fill: Color {
+            if !style.visible { return .clear }
+            if configuration.isPressed { return Palette.fg.opacity(0.18) }
+            if style.active { return hovering ? Palette.fg.opacity(0.15) : Palette.active }
+            return hovering ? Palette.hover : .clear
+        }
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(style.active || hovering ? Palette.fg : Palette.mutedFg)
+                .opacity(style.visible ? 1 : 0)
+                .frame(width: style.diameter, height: style.diameter)
+                .background {
+                    Circle().fill(fill).qaID("top-bar-button-background", label: style.symbol)
+                }
+                .frame(width: style.width, height: style.height)
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+        }
     }
 }
 
@@ -187,7 +245,19 @@ struct PillButton: View {
 // MARK: Tabs
 
 struct TabChip: View {
-    static var closeSlot: CGFloat { Metric.control - 4 }
+    private static let leadingInset: CGFloat = 12
+    private static let glyphWidth: CGFloat = 13
+    private static let glyphGap: CGFloat = 6
+    private static let titleInset: CGFloat = 4
+    private static let closeDiameter: CGFloat = 20
+    private static let closeInset: CGFloat = 4
+    static let chromeWidth = leadingInset + glyphWidth + glyphGap + titleInset + closeDiameter + closeInset
+
+    static func closeFrame(in bounds: CGRect) -> CGRect {
+        CGRect(x: bounds.maxX - closeInset - closeDiameter, y: bounds.midY - closeDiameter / 2,
+               width: closeDiameter, height: closeDiameter)
+    }
+
     let title: String
     let symbol: String
     var active = false
@@ -197,20 +267,20 @@ struct TabChip: View {
     var missing = false
     let onClose: () -> Void
     let action: () -> Void
-    @State private var hoveringClose = false
 
     var body: some View {
         let showClose = active || hovering
         HStack(spacing: 0) {
             Button(action: action) {
-                HStack(spacing: 6) {
+                HStack(spacing: Self.glyphGap) {
                     Image(systemName: symbol).glyph(12)
-                        .frame(width: 13)
+                        .frame(width: Self.glyphWidth)
                     Text(title).font(Typography.label).lineLimit(1).truncationMode(.middle)
                         .strikethrough(missing)
+                        .qaID("tab-title", label: title)
                 }
                 .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
-                .padding(.leading, 12).padding(.trailing, 4)
+                .padding(.leading, Self.leadingInset).padding(.trailing, Self.titleInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: Metric.topBar)
                 .contentShape(Rectangle())
@@ -220,54 +290,16 @@ struct TabChip: View {
             .accessibilityAddTraits(active ? .isSelected : [])
             Button(action: onClose) {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(showClose ? (hoveringClose || active ? Palette.fg : Palette.mutedFg) : .clear)
-                    .frame(width: Metric.control - 8, height: Metric.control - 8)
-                    .background(RoundedRectangle(cornerRadius: 4).fill(showClose && hoveringClose ? Palette.active : .clear))
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain).chromeHelp("Close tab").accessibilityLabel("Close \(title)")
+            .buttonStyle(TopBarButtonStyle(symbol: "xmark", visible: showClose, diameter: Self.closeDiameter,
+                                           width: Self.closeDiameter, height: Self.closeDiameter))
+            .chromeHelp("Close tab").accessibilityLabel("Close \(title)")
             .qaID("tab-close", label: title)
-            .onHover { hoveringClose = $0 }
             .allowsHitTesting(showClose)
-            .frame(width: Self.closeSlot - 4, height: Metric.control - 8)
-            .padding(.trailing, 4)
+            .padding(.trailing, Self.closeInset)
         }
         .frame(width: width)
         .background(active ? Palette.active : (hovering ? Palette.hover : .clear))
-    }
-}
-
-/// The pinned first tab (Home). With files open, it takes one icon slot.
-struct PinnedTab: View {
-    static let compactWidth: CGFloat = 46
-    let symbol: String
-    let title: String
-    var compact = false
-    var active = false
-    var help: String = ""
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol).glyph(13).qaID("pinned-tab-icon")
-                    .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
-                if !compact {
-                    Text(title).font(Typography.label).lineLimit(1)
-                        .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
-                }
-            }
-            .padding(.horizontal, compact ? 0 : 12)
-            .frame(width: compact ? Self.compactWidth : nil, height: Metric.topBar)
-            .background(active ? Palette.active : (hovering ? Palette.hover : .clear))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .chromeHelp(help.isEmpty ? title : help)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(active ? .isSelected : [])
-        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
     }
 }
 
@@ -400,6 +432,9 @@ struct KeyValueRow: View {
 // MARK: Compound islands
 
 struct ZoomPill: View {
+    private static let percentWidth: CGFloat = 52
+    static let width = 2 * Metric.control + percentWidth + 2 * Metric.pillPad
+
     let percent: Int
     let zoomOut: () -> Void
     let zoomIn: () -> Void
@@ -418,7 +453,7 @@ struct ZoomPill: View {
                 // The percentage opens a zoom field (type 150 and Return) over the zoom choices.
                 Button { open.toggle() } label: {
                     Text("\(percent)%").font(Typography.numeric).foregroundStyle(Palette.fg)
-                        .frame(width: 52, height: Metric.control).contentShape(Rectangle())
+                        .frame(width: Self.percentWidth, height: Metric.control).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Zoom: type a percentage, or pick a zoom")

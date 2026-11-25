@@ -1,12 +1,22 @@
 import { center, sc } from "./harness.ts";
 
+async function expectTool(t: import("./harness.ts").NT, label?: string) {
+  await t.waitFor(async () => {
+    const marks = await t.marks({ id: "draw-tool-selected" });
+    const placing = await t.js('return document.querySelector(".whiteboard-layer").hasAttribute("data-placing");');
+    return placing === !!label && (label ? marks.length === 1 && marks[0].label === label : marks.length === 0);
+  }, label ? label + " armed and highlighted" : "placement clears the tool and its highlight");
+}
+
 sc("sticky", "Sticky tool edits inline in the Mac app", { covers: ["sticky:create", "sticky:edit", "sticky:author"] }, async (t) => {
   await t.cmd("qa.cloud", { commentName: "Anna" });
   await t.showPage("layout");
   await t.look(0, 0);
   const p = center(await t.rect("r_free"));
   await t.key("s");
+  await expectTool(t, "Sticky");
   await t.click(p);
+  await expectTool(t);
   await t.waitJs("window.canvasHost.textEdit.active", "sticky editor in the app");
   const [id] = await t.pageSel();
   await t.key("a");
@@ -21,9 +31,11 @@ sc("sticker", "Sticker tool places an anchored seal in the Mac app", { covers: [
   await t.look(0, 0);
   const p = center(await t.rect("r_free"));
   await t.key("s", ["shift"]);
+  await expectTool(t, "Sticker");
   await t.waitJs('document.querySelector("[data-sticker-tray]")?.offsetWidth', "sticker tray in the app");
   await t.key("l");
   await t.click(p);
+  await expectTool(t);
   await t.waitJs('window.canvasHost.sel !== null && !!document.querySelector("[data-sticker-seal]")', "seal in the app");
   const [id] = await t.pageSel();
   await t.waitDisk(() => t.node(id)?.type === "sticker", "the sticker on disk");

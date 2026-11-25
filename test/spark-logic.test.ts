@@ -25,6 +25,11 @@ describe("the spark", () => {
     const wide = L.sparkAt({ x: 1200, y: 100, w: 400, h: 100 }, area);
     assert.equal(wide.x, 1400 - 28 - 4);
   });
+  test("clears the bottom inset even when the selection extends underneath it", () => {
+    const free = L.visibleArea({ w: 720, h: 560 }, { l: 236, t: 60, r: 304, b: 72 });
+    const spark = L.sparkAt({ x: 245, y: 480, w: 100, h: 50 }, free);
+    assert.equal(spark.y + L.SPARK, free.y + free.h - 4);
+  });
   test("union of a multi-selection", () => {
     assert.deepEqual(L.unionRects([{ x: 0, y: 0, w: 10, h: 10 }, null, { x: 20, y: -5, w: 5, h: 5 }]), { x: 0, y: -5, w: 25, h: 15 });
     assert.equal(L.unionRects([]), null);

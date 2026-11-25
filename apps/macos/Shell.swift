@@ -116,22 +116,46 @@ struct RootView: View {
     @State private var windowWidth: CGFloat = 0
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden && !model.homeShown }
     private var inspectorShown: Bool { model.inspectorOpen && !model.commentsSidebarOpen && !model.conversationsSidebarOpen && !model.uiHidden && !model.homeShown }
+    private var toolPaletteShown: Bool { model.currentFile != nil && !model.homeShown && !model.cloudReadOnly && !model.uiHidden }
+    private var zoomShown: Bool { !model.uiHidden && !model.homeShown && !model.pageEmpty }
 
     private var rightSidebarShown: Bool { inspectorShown || ((model.commentsSidebarOpen || model.conversationsSidebarOpen) && !model.uiHidden && !model.homeShown) }
+    private var minimumCanvasWidth: CGFloat {
+        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.Size.compact.width - Metric.inset) : ShellLayout.minCanvas
+    }
 
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
     private var panelWidth: CGFloat? {
         guard windowWidth > 0 else { return model.sidebarWidth }
         return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, inspector: rightSidebarShown,
-                                        inset: Metric.inset, gap: Metric.islandGap, props: Metric.propsWidth, minWidth: Metric.sidebarMin)
+                                        inset: Metric.inset, gap: Metric.islandGap, props: Metric.propsWidth, minWidth: Metric.sidebarMin,
+                                        minimumCanvas: minimumCanvasWidth)
     }
 
     /// The widest the panel may be dragged in this window: the maximum, or the room the window leaves.
     private var panelMax: CGFloat {
         guard windowWidth > 0 else { return Metric.sidebarMax }
         let room = ShellLayout.room(window: windowWidth, inspector: rightSidebarShown, inset: Metric.inset,
-                                    gap: Metric.islandGap, props: Metric.propsWidth)
+                                    gap: Metric.islandGap, props: Metric.propsWidth, minimumCanvas: minimumCanvasWidth)
         return min(Metric.sidebarMax, room)
+    }
+
+    private var zoomAboveTools: Bool {
+        guard toolPaletteShown, zoomShown, windowWidth > 0 else { return false }
+        let i = canvasInsets()
+        let toolsRight = (windowWidth + i.l - i.r + toolSize.width) / 2
+        return toolsRight + Metric.islandGap > windowWidth - Metric.inset - ZoomPill.width
+    }
+
+    /// Full size, or compact when the room between the sidebars is too narrow for every group.
+    private var toolSize: ToolPalette.Size {
+        let i = canvasInsets()
+        return windowWidth > 0 && windowWidth - i.l - i.r < ToolPalette.Size.full.width + 8 ? .compact : .full
+    }
+
+    private var bottomClearance: CGFloat {
+        guard toolPaletteShown else { return 0 }
+        return ToolPalette.bottomClearance + (zoomAboveTools ? Metric.pill + Metric.islandGap : 0)
     }
 
     var body: some View {
@@ -166,7 +190,10 @@ struct RootView: View {
                 ZStack(alignment: .topLeading) {
                     if inspectorShown { Inspector(model: model, fonts: model.fonts).disabled(model.cloudReadOnly) }
                     // Nothing to zoom on an empty page: the pill comes back with the first board.
-                    if !model.uiHidden && !model.homeShown && !model.pageEmpty { ZoomCorner(model: model) }
+                    if zoomShown {
+                        ZoomCorner(model: model)
+                            .padding(.bottom, zoomAboveTools ? ToolPalette.bottomClearance - Metric.inset : 0)
+                    }
                     if let t = model.toast {
                         Toast(text: t, kind: model.toastKind, actions: model.toastActions,
                               onCopy: model.toastCopy == nil ? nil : { model.copyToast() }, onHover: { model.toastHovered = $0 })
@@ -182,6 +209,17 @@ struct RootView: View {
             .padding(Metric.inset)
             .ignoresSafeArea()
 
+            if toolPaletteShown {
+                // An overlay never sizes its parent: the palette cannot widen the window.
+                Color.clear.allowsHitTesting(false)
+                    .overlay(alignment: .bottom) {
+                        ToolPalette(model: model, size: toolSize)
+                            .fixedSize()
+                            .offset(x: (insets[0] - insets[2]) / 2, y: -ToolPalette.bottomMargin)
+                    }
+                    .ignoresSafeArea()
+            }
+
             TopBar(model: model).ignoresSafeArea(edges: .top)
 
             // Rename Layers (Cmd+R with several layers): Layers.swift.
@@ -193,15 +231,22 @@ struct RootView: View {
         .frame(minWidth: 720, minHeight: 420)
         .ignoresSafeArea()
         .onChange(of: model.revealBoardId) { _, board in if board != nil { model.panelOpen = true } }
-        .onChange(of: insets) { _, v in model.setInsets(l: v[0], t: v[1], r: v[2], b: v[3]) }
-        .onAppear { model.setInsets(l: insets[0], t: insets[1], r: insets[2], b: insets[3]) }
+        .onChange(of: insets) { _, v in sendInsets(v) }
+        .onAppear { sendInsets(insets) }
+    }
+
+    private func canvasInsets(bottomClearance: CGFloat = 0) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
+        CanvasInsets.compute(panel: panelOpen ? panelWidth : nil, inspector: rightSidebarShown, inset: Metric.inset,
+                             gap: Metric.islandGap, pill: Metric.pill, props: Metric.propsWidth, bottomClearance: bottomClearance)
+    }
+
+    private func sendInsets(_ v: [CGFloat]) {
+        model.setInsets(l: v[0], t: v[1], r: v[2], b: v[3], bottomClearance: bottomClearance)
     }
 
     /// The free rectangle the canvas should fit into, so boards never hide under an island.
     private var insets: [CGFloat] {
-        let shown = panelOpen ? panelWidth : nil
-        let i = CanvasInsets.compute(panel: shown, inspector: rightSidebarShown, inset: Metric.inset,
-                                     gap: Metric.islandGap, pill: Metric.pill, props: Metric.propsWidth)
+        let i = canvasInsets(bottomClearance: bottomClearance)
         return [i.l, i.t, i.r, i.b]
     }
 }
@@ -216,24 +261,27 @@ private struct TabWidthKey: PreferenceKey {
 
 struct TopBar: View {
     private static let minimumDragWidth: CGFloat = 24
+    private static let leadingWidth = Metric.trafficLights + 16
+    private static let separatorWidth: CGFloat = 1
     @ObservedObject var model: CanvasModel
     @State private var tabWidths: [String: CGFloat] = [:]
     @State private var barWidth: CGFloat = 0
     @State private var actionsWidth: CGFloat = 0
     @State private var hoveredTab: String?
 
-    private var sidebarToggleWidth: CGFloat { model.homeShown || model.uiHidden ? 0 : Metric.control }
+    private var showsSidebarToggle: Bool { !model.homeShown && !model.uiHidden }
+    private var hasFileTabs: Bool { !model.openFiles.isEmpty }
 
     private var tabRoom: CGFloat {
-        max(0, barWidth - actionsWidth - Metric.trafficLights - sidebarToggleWidth - PinnedTab.compactWidth - Metric.control - Self.minimumDragWidth)
+        let controls = Metric.control * 2 + (showsSidebarToggle ? Metric.control : 0)
+        let separators = hasFileTabs ? Self.separatorWidth * 2 : 0
+        return max(0, barWidth - actionsWidth - Self.leadingWidth - controls - separators - Self.minimumDragWidth)
     }
     private var fittedWidths: [CGFloat] {
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        // Leading/trailing padding, document glyph, gap and close target, matching TabChip.
-        let chromeWidth: CGFloat = 35 + TabChip.closeSlot
         let natural: [CGFloat] = model.openFiles.map { file in
             let titleWidth = (model.name(of: file) as NSString).size(withAttributes: [.font: font]).width
-            return ceil(titleWidth) + chromeWidth
+            return ceil(titleWidth) + TabChip.chromeWidth
         }
         return TabSizing.widths(natural: natural, available: tabRoom, minimum: Metric.tabMin, maximum: Metric.tabMax)
     }
@@ -349,21 +397,19 @@ struct TopBar: View {
     }
 
     private var separator: some View {
-        Rectangle().fill(Palette.stroke).frame(width: 1).allowsHitTesting(false)
+        Rectangle().fill(Palette.stroke).frame(width: Self.separatorWidth).allowsHitTesting(false)
     }
 
     private var tabs: some View {
         HStack(spacing: 0) {
-            // The sidebar toggle: right after the window buttons, the same spot whether the sidebar shows or not.
-            if sidebarToggleWidth > 0 {
+            if showsSidebarToggle {
                 SidebarToggleButton(model: model)
             }
-            PinnedTab(symbol: "house", title: "Home", compact: !model.openFiles.isEmpty, active: model.homeShown,
-                      help: "Home  \u{21E7}\u{2318}0") { model.showHome() }
-                .qaID("home-tab", label: "Home")
-                .overlay(alignment: .leading) { if sidebarToggleWidth > 0 || !model.openFiles.isEmpty { separator } }
-                .overlay(alignment: .trailing) { if !model.openFiles.isEmpty { separator } }
-                .animation(Motion.island, value: model.openFiles.isEmpty)
+            TopBarIconButton(symbol: "house", active: model.homeShown, help: "Home", shortcut: "\u{21E7}\u{2318}0") {
+                model.showHome()
+            }
+            .qaID("home-tab", label: "Home")
+            if hasFileTabs { separator }
             FadingScroller(scrollTo: model.currentFile) {
                 ForEach(Array(model.openFiles.enumerated()), id: \.element) { i, file in
                     draggableTab(file, index: i)
@@ -371,9 +417,9 @@ struct TopBar: View {
             }
             .frame(width: stripWidth, height: Metric.topBar)
             .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
-            IconButton(symbol: "plus", help: "New file", shortcut: "\u{2318}N", inBar: true) { model.newCanvas() }
+            if hasFileTabs { separator }
+            TopBarIconButton(symbol: "plus", help: "New file", shortcut: "\u{2318}N") { model.newCanvas() }
                 .qaID("tab-new", label: "New file")
-                .overlay(alignment: .leading) { separator }
         }
         .contentShape(Rectangle())
         .keepsWindowStill()
@@ -400,11 +446,8 @@ struct TopBar: View {
             }
         } label: {
             Image(systemName: "chevron.down").glyph(12)
-                .foregroundStyle(Palette.mutedFg)
-                .frame(width: Metric.control, height: Metric.topBar)
-                .contentShape(Rectangle())
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .menuStyle(.button).buttonStyle(TopBarButtonStyle(symbol: "chevron.down")).menuIndicator(.hidden)
         .fixedSize().chromeHelp("Show tabs")
         .accessibilityLabel("Show tabs")
         .qaID("tab-list", label: "Show tabs")
@@ -412,23 +455,14 @@ struct TopBar: View {
 
     private var actions: some View {
         HStack(spacing: 0) {
-            if model.currentFile != nil && !model.homeShown && !model.cloudReadOnly {
-                HStack(spacing: 0) {
-                    ForEach(DrawTool.barTools, id: \.self) { tool in
-                        IconButton(symbol: tool.symbol, help: tool.title, shortcut: tool.key.uppercased(), inBar: true) { model.draw(tool) }
-                            .qaID("draw-tool", label: tool.title)
-                    }
-                }
-                .disabled(!model.canDraw)
-            }
             LivePeopleStrip(model: model)
             ResourceReadout(meter: ResourceMeter.shared, model: model)
-            IconButton(symbol: "magnifyingglass", help: "Quick actions", shortcut: "\u{2318}K", inBar: true) { PaletteController.shared.toggle() }
+            TopBarIconButton(symbol: "magnifyingglass", help: "Quick actions", shortcut: "\u{2318}K") { PaletteController.shared.toggle() }
             if model.currentFile != nil && !model.homeShown {
-                IconButton(symbol: "sparkles.2", active: model.conversationsSidebarOpen, help: "Conversations", inBar: true) { model.run("{cmd:\"conversations\"}") }
+                TopBarIconButton(symbol: "sparkles.2", active: model.conversationsSidebarOpen, help: "Conversations") { model.run("{cmd:\"conversations\"}") }
                     .qaID("conversations-toggle")
             }
-            IconButton(symbol: "sidebar.right", active: model.inspectorOpen, help: model.inspectorOpen ? "Hide properties" : "Show properties", inBar: true) { model.inspectorOpen.toggle() }
+            TopBarIconButton(symbol: "sidebar.right", active: model.inspectorOpen, help: model.inspectorOpen ? "Hide properties" : "Show properties") { model.inspectorOpen.toggle() }
                 .qaID("properties-toggle")
             tabMenu
         }
@@ -436,13 +470,14 @@ struct TopBar: View {
         .keepsWindowStill()
         .padding(.trailing, Metric.pillPad)
         .fixedSize(horizontal: true, vertical: false)
+        .qaID("top-bar-actions")
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { actionsWidth = $0 }
     }
 
     var body: some View {
         GeometryReader { _ in
             HStack(spacing: 0) {
-                WindowDragArea().frame(width: Metric.trafficLights)
+                WindowDragArea().frame(width: Self.leadingWidth)
                 tabs
                 WindowDragArea().frame(minWidth: Self.minimumDragWidth, maxWidth: .infinity)
                 actions
@@ -466,24 +501,11 @@ struct TopBar: View {
 
 private struct SidebarToggleButton: View {
     @ObservedObject var model: CanvasModel
-    @State private var hovering = false
 
     var body: some View {
         let label = model.panelOpen ? "Hide panel" : "Show panel"
-        Button { model.panelOpen.toggle() } label: {
-            Image(systemName: "sidebar.left")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(model.panelOpen ? Palette.fg : Palette.mutedFg)
-                .frame(width: 28, height: 26)
-                .background(RoundedRectangle(cornerRadius: 5).fill(model.panelOpen || hovering ? SidebarStyle.selection : .clear))
-                .frame(width: Metric.control, height: Metric.control)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .chromeHelp(label)
-        .accessibilityLabel(label)
-        .qaID("sidebar-toggle", label: label)
+        TopBarIconButton(symbol: "sidebar.left", active: model.panelOpen, help: label) { model.panelOpen.toggle() }
+            .qaID("sidebar-toggle", label: label)
     }
 }
 
@@ -507,6 +529,9 @@ struct SidebarGroupLabel: View {
 }
 
 struct LeftColumn: View {
+    private static let headerHeight: CGFloat = 32
+    private static let headerInset: CGFloat = 8
+    private static let titleInset: CGFloat = 4
     @ObservedObject var model: CanvasModel
     /// From RootView: the stored width clamped to the window; nil hides the panel.
     let panelWidth: CGFloat?
@@ -580,11 +605,12 @@ struct LeftColumn: View {
                 } label: {
                     HStack(spacing: 6) {
                         Text(section.rawValue).font(.system(size: 13, weight: .semibold))
+                            .qaID("sidebar-section-title", label: section.rawValue)
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Palette.mutedFg)
                     }
-                    .padding(.horizontal, 4)
-                    .frame(height: 32)
+                    .padding(.horizontal, Self.titleInset)
+                    .frame(height: Self.headerHeight)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -601,7 +627,7 @@ struct LeftColumn: View {
                     .qaID("sidebar-search")
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, Self.headerInset)
 
             VStack(spacing: 0) {
                 if section == .tokens && searchOpen {
@@ -639,15 +665,18 @@ struct LeftColumn: View {
         .task(id: section) { if section == .widgets { model.fetchKinds() } }
         .overlay(alignment: .topLeading) {
             if model.sidebarMenuOpen {
-                Color.clear.contentShape(Rectangle())
-                    .padding(.top, 32)
-                    .onTapGesture { dismissMenu() }
-                SidebarSectionMenu(selection: section) {
-                    model.section = $0
-                    dismissMenu()
+                ZStack(alignment: .topLeading) {
+                    Color.clear.contentShape(Rectangle())
+                        .onTapGesture { dismissMenu() }
+                        .padding(.top, Self.headerHeight)
+                    SidebarSectionMenu(selection: section) {
+                        model.section = $0
+                        dismissMenu()
+                    }
+                    .qaID("sidebar-section-popup")
+                    .padding(.leading, Self.headerInset + Self.titleInset)
+                    .padding(.top, Self.headerHeight + 2)
                 }
-                .padding(.leading, 8)
-                .padding(.top, 34)
             }
         }
         .qaID("sidebar-panel")
@@ -909,6 +938,127 @@ extension CanvasModel {
 
 // MARK: Bottom
 
+private struct ToolPalette: View {
+    @ObservedObject var model: CanvasModel
+    let size: Size
+
+    struct Size {
+        let button: CGFloat, padding: CGFloat, gap: CGFloat, divider: CGFloat, glyph: CGFloat
+        static let full = Size(button: 36, padding: 6, gap: 2, divider: 9, glyph: 18)
+        static let compact = Size(button: 26, padding: 4, gap: 1, divider: 7, glyph: 15)
+
+        @MainActor var width: CGFloat {
+            let count = ToolPalette.groups.reduce(0) { $0 + $1.count }
+            let dividers = max(0, ToolPalette.groups.count - 1)
+            return 2 * padding + CGFloat(count) * button + CGFloat(dividers) * divider
+                + CGFloat(max(0, count + dividers - 1)) * gap
+        }
+    }
+
+    private struct Item: Identifiable {
+        let id: String
+        let title: String
+        let symbol: String
+        let shortcut: String
+        let action: (CanvasModel) -> Void
+    }
+
+    /// A tool joins the palette through DrawTool.paletteGroups. A control that is not a draw tool (vote, timer):
+    /// append a group of Items here. Empty groups are skipped.
+    private static let groups: [[Item]] = DrawTool.paletteGroups.map { group in
+        group.map { tool in
+            Item(id: tool.rawValue, title: tool.title, symbol: tool.symbol, shortcut: tool.keycap,
+                 action: { $0.draw(tool) })
+        }
+    }.filter { !$0.isEmpty }
+
+    static let bottomMargin: CGFloat = 14
+    /// Room kept free at the bottom, for the full size (the compact one is lower).
+    static let bottomClearance = bottomMargin + Size.full.button + 2 * Size.full.padding + Metric.islandGap
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 14)
+        HStack(spacing: size.gap) {
+            ForEach(Self.groups.indices, id: \.self) { index in
+                if index > 0 {
+                    Rectangle().fill(Palette.fg.opacity(0.08))
+                        .frame(width: 1, height: size.button)
+                        .frame(width: size.divider)
+                        .accessibilityHidden(true)
+                }
+                HStack(spacing: size.gap) {
+                    ForEach(Self.groups[index]) { item in
+                        ToolButton(item: item, size: size, selected: model.activeDrawTool?.rawValue == item.id) { item.action(model) }
+                    }
+                }
+            }
+        }
+        .padding(size.padding)
+        .contentShape(shape)
+        .onTapGesture {}
+        .glassBar(in: shape)
+        .disabled(!model.canDraw)
+        .qaID("tool-palette")
+    }
+
+    private struct ToolButton: View {
+        let item: Item
+        let size: Size
+        let selected: Bool
+        let action: () -> Void
+        @State private var hovering = false
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 10)
+            Button(action: action) {
+                Group {
+                    if item.id == DrawTool.text.rawValue {
+                        Text("T").font(.system(size: size.glyph, weight: .light))
+                    } else {
+                        Image(systemName: item.symbol).font(.system(size: size.glyph, weight: .medium))
+                    }
+                }
+                .foregroundStyle(selected || hovering ? Palette.fg : Palette.mutedFg)
+                .frame(width: size.button, height: size.button)
+                .background {
+                    if selected {
+                        shape.fill(Palette.fg.opacity(0.12)).qaID("draw-tool-selected", label: item.title)
+                    } else if hovering {
+                        shape.fill(Palette.fg.opacity(0.07))
+                    }
+                }
+                .contentShape(shape)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .overlay(alignment: .bottom) {
+                if hovering {
+                    HStack(spacing: 6) {
+                        Text(item.title)
+                        Text(item.shortcut)
+                            .padding(.horizontal, 3)
+                            .frame(minWidth: 18, minHeight: 18, maxHeight: 18)
+                            .background(Palette.fg.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
+                    }
+                    .font(Typography.label)
+                    .foregroundStyle(Palette.fg)
+                    .padding(.horizontal, 7)
+                    .frame(height: 28)
+                    .fixedSize()
+                    .background(Palette.popover, in: RoundedRectangle(cornerRadius: 8))
+                    .offset(y: -size.button - 8)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                }
+            }
+            .accessibilityLabel(item.title)
+            .accessibilityHint("Shortcut \(item.shortcut)")
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .qaID("draw-tool", label: item.title)
+        }
+    }
+}
+
 struct ZoomCorner: View {
     @ObservedObject var model: CanvasModel
     var body: some View {
@@ -952,7 +1102,7 @@ private struct TabPointer: NSViewRepresentable {
             let local = convert(point, from: superview)
             let event = NSApp.currentEvent
             let secondary = event?.type == .rightMouseDown || event?.modifierFlags.contains(.control) == true
-            if closeVisible && local.x >= bounds.width - TabChip.closeSlot && !secondary { return nil }
+            if closeVisible && TabChip.closeFrame(in: bounds).contains(local) && !secondary { return nil }
             return hit
         }
         override func mouseDown(with event: NSEvent) {

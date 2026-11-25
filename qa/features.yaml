@@ -51,7 +51,7 @@ features:
     name: Draw boards and layers
     area: canvas
     driven: [page, native]
-    cases: [board, rectangle, ellipse, text, cancel, toolbar, menu, palette]
+    cases: [board, rectangle, ellipse, text, cancel, tool-palette, shortcuts, hide-ui, menu, palette]
 
   - id: render
     name: Every node type draws on the engine renderer
@@ -828,7 +828,7 @@ features:
     name: File tabs drag left and right to reorder (a short move is a click, Home stays first), the order is kept, and Shift+Cmd+[ and ] follow it
     area: chrome
     driven: [native]
-    cases: [overflow, drag, threshold, home-pinned, saved, step, context-menu, rename-menu, rename-double-click, close-others, drag-after-rename, warm-switch, new-file, click-switch, reopen-recent]
+    cases: [spacing, overflow, drag, threshold, home-pinned, saved, step, context-menu, rename-menu, rename-double-click, close-others, drag-after-rename, warm-switch, new-file, click-switch, reopen-recent]
   - id: sidebar-resize
     name: Both sidebars (editor panel, Home) drag from their right edge, stop at a minimum and maximum, reset on double-click, and keep their width
     area: chrome
