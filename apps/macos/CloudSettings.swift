@@ -106,6 +106,9 @@ final class CloudAccount: ObservableObject {
     /// The Cloud Settings > Cloud has open (an entry id); nil shows the list.
     @Published var selected: String?
     private var signIns: [String: CloudSignInWindow] = [:]
+    private var hostRefreshGeneration = 0
+    private var stoppingOrDeleting: Set<String> = []
+    private var resumingHosts = false
     /// While hosting: no idle sleep (a closed lid still sleeps).
     private var awake: IOPMAssertionID = 0
 
@@ -189,12 +192,16 @@ final class CloudAccount: ObservableObject {
 
     /// What this Mac hosts: every hosted Cloud's state, by host id (GET /api/cloud/host).
     func refreshHost(_ model: CanvasModel) async {
+        guard stoppingOrDeleting.isEmpty else { return }
+        let generation = hostRefreshGeneration
         var req = URLRequest(url: model.base.appendingPathComponent("api/cloud/host"))
         req.timeoutInterval = 15
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
-              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              generation == hostRefreshGeneration, (response as? HTTPURLResponse)?.statusCode == 200,
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let clouds = j["clouds"] as? [[String: Any]] else { return }
         var next: [String: HostState] = [:]
-        for c in j["clouds"] as? [[String: Any]] ?? [] { let h = HostState(c); if let id = h.hostId { next[id] = h } }
+        for c in clouds { let h = HostState(c); if let id = h.hostId { next[id] = h } }
         let available = j["available"] as? Bool ?? false
         if next != hosts { hosts = next }
         if available != hostAvailable { hostAvailable = available }
@@ -257,7 +264,10 @@ final class CloudAccount: ObservableObject {
         let (status, j) = await CloudAccount.post(model, "api/cloud/host/start", body)
         starting.remove(key)
         guard status == 200, let url = j["url"] as? String else {
-            if let entry { setHosting(model, entry.id, false) }
+            if let entry {
+                hostRefreshGeneration += 1
+                setHosting(model, entry.id, false)
+            }
             await refreshHost(model)
             return j["error"] as? String ?? "Could not start hosting"
         }
@@ -277,22 +287,37 @@ final class CloudAccount: ObservableObject {
 
     /// Canvas started: every Cloud this Mac hosted when it quit starts again, quietly.
     func resumeHosting(_ model: CanvasModel) {
+        guard !resumingHosts else { return }
         // Migration cannot identify the old hosted Cloud from its saved address. Discover it at launch first.
         if UserDefaults.standard.bool(forKey: AppSettings.prefix + CloudList.legacyHostingKey) {
             Task { await refreshHost(model) }
             return
         }
-        let list = model.prefs.clouds.filter { $0.kind == .hosted && $0.hosting }
-        guard !list.isEmpty else { return }
+        let hosted = CloudList.hosted(model.prefs.clouds)
+        guard !hosted.isEmpty else { return }
+        let list = hosted.filter(\.hosting)
+        if !list.isEmpty { resumingHosts = true }
         Task {
             for e in list {
-                guard let id = e.hostId else { continue }
+                guard let id = e.hostId, !stoppingOrDeleting.contains(id),
+                      model.prefs.clouds.contains(where: { $0.id == e.id && $0.kind == .hosted && $0.hosting }) else { continue }
                 var body = names(model, name: e.name)
                 body["hostId"] = id
                 _ = await CloudAccount.post(model, "api/cloud/host/start", body)
             }
+            if !list.isEmpty { resumingHosts = false }
             await refreshHost(model)
         }
+    }
+
+    /// Drop polls already in flight. The last Stop or Delete to finish refreshes the list again.
+    private func beginStoppingOrDeleting(_ model: CanvasModel, _ id: String) -> Bool {
+        guard stoppingOrDeleting.insert(id).inserted else {
+            model.flash("Stop or Delete is already in progress.")
+            return false
+        }
+        hostRefreshGeneration += 1
+        return true
     }
 
     /// Stop hosting one Cloud: everyone in it loses access (they need a new invite), its tunnel stops. It stays in the list.
@@ -303,10 +328,16 @@ final class CloudAccount: ObservableObject {
         a.informativeText = "Everyone in it loses access now, and needs a new invite if you host it again. The comments stay on this Mac until you delete the Cloud."
         a.addButton(withTitle: "Stop Hosting")
         a.addButton(withTitle: "Cancel")
-        guard a.runModal() == .alertFirstButtonReturn else { return }
+        guard a.runModal() == .alertFirstButtonReturn, beginStoppingOrDeleting(model, id) else { return }
+        let wasHosting = model.prefs.clouds.first(where: { $0.id == e.id })?.hosting == true
+        setHosting(model, e.id, false)
         Task {
-            _ = await CloudAccount.post(model, "api/cloud/host/stop", ["hostId": id])
-            setHosting(model, e.id, false)
+            let (status, j) = await CloudAccount.post(model, "api/cloud/host/stop", ["hostId": id])
+            if status != 200 {
+                if status != 0, wasHosting { setHosting(model, e.id, true) }
+                model.flash(j["error"] as? String ?? "Could not stop hosting")
+            }
+            stoppingOrDeleting.remove(id)
             await refreshHost(model)
             await refresh(model)
         }
@@ -408,13 +439,15 @@ final class CloudAccount: ObservableObject {
         a.addButton(withTitle: e.kind == .hosted ? "Delete" : leaving ? "Leave" : "Remove")
         a.addButton(withTitle: "Cancel")
         guard a.runModal() == .alertFirstButtonReturn else { return }
+        let hostId = e.kind == .hosted ? e.hostId : nil
+        if let hostId, !beginStoppingOrDeleting(model, hostId) { return }
         busy.insert(e.url)
         signIns.removeValue(forKey: e.url)?.close()
         Task {
             var wipe: (status: Int, error: String?)?
-            if e.kind == .hosted, let id = e.hostId {
+            if let hostId {
                 // Stops it if it runs (every token revoked), then deletes its folder on this Mac.
-                let (st, j) = await CloudAccount.post(model, "api/cloud/host/wipe", ["hostId": id])
+                let (st, j) = await CloudAccount.post(model, "api/cloud/host/wipe", ["hostId": hostId])
                 wipe = (st, j["error"] as? String)
             }
             if wipe?.status == 200 || wipe == nil {
@@ -425,6 +458,7 @@ final class CloudAccount: ObservableObject {
             }
             var removed: (Int, [String: Any]) = (0, [:])
             if wipe == nil || wipe?.status == 200 { removed = await CloudAccount.post(model, "api/cloud/remove", ["url": e.url]) }
+            if let hostId { stoppingOrDeleting.remove(hostId) }
             // Something failed: the Cloud stays in the list, with its controls, and the toast says what.
             if let why = CloudRemoval.problem(wipe: wipe, remove: (removed.0, removed.1["error"] as? String)) {
                 busy.remove(e.url)

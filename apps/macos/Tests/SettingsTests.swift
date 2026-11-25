@@ -23,7 +23,7 @@ struct SettingsTests {
     }
 
     static func main() {
-        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration(); reviewFixes(); adapters(); windowFit()
+        defaults(); roundTrip(); limits(); payloads(); privacy(); shortcuts(); connect(); cloud(); migration(); reviewFixes(); hostingKept(); adapters(); windowFit()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -386,5 +386,19 @@ extension SettingsTests {
         check(CloudShare.message(already: true, name: "Studio", status: "connected") == ("Already shared. Connected to Studio", true), "already, connected")
         check(CloudShare.message(already: true, name: "Studio", status: "signInAgain") == ("Already shared to Studio. Sign in again", false), "already, but signed out: no claim it connected")
         check(CloudShare.message(already: true, name: "Studio", status: "down").text == "Already shared to Studio. Cloud down", "already, down")
+    }
+}
+
+extension SettingsTests {
+    /// A Cloud hosted on this Mac starts again with Canvas: the saved entry has to learn that it is running.
+    static func hostingKept() {
+        let id = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b"
+        let saved = CloudEntry(url: "canvas-cloud://\(id)", name: "Studio", kind: .hosted, hosting: false)
+        let running = CloudList.reconcile([saved], hosted: [HostedInfo(hostId: id, name: "Studio", hosting: true, legacy: true)], legacyHosting: false)
+        check(running.count == 1 && running[0].id == saved.id && running[0].hosting, "a hosted entry the server runs is saved as hosting: \(running)")
+        let off = HostedInfo(hostId: id, name: "Studio", hosting: false, legacy: true)
+        check(CloudList.reconcile([saved], hosted: [off], legacyHosting: false) == [saved], "a stopped Cloud stays stopped")
+        // Quit and relaunch: the server's Cloud is down then, which must not clear what was saved.
+        check(CloudList.reconcile(running, hosted: [off], legacyHosting: false) == running, "a Cloud that was hosting is still saved as hosting")
     }
 }

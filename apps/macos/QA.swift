@@ -335,7 +335,7 @@ enum QA {
         case "qa.cloud":
             if a.keys.contains("usage") { cloudUsage = a["usage"] as? [String: Any] }
             // The Clouds, as Add Cloud and Settings > Cloud leave them:
-            //   {clouds: [{url, name?, devEmail?, kind?}]}  the whole list ([] for none)
+            //   {clouds: [{url, name?, devEmail?, kind?, hosting?}]}  the whole list ([] for none)
             //   {url, devEmail?, name?}                     one server Cloud as the only one ("" for none)
             //   {hosting}, {commentName}                    Host on this Mac's switch, the host's name (a placeholder)
             //   {select: id | null}                        the Cloud Settings > Cloud shows; {home: id} Home's page for it
@@ -355,7 +355,7 @@ enum QA {
             if let c = a["commentName"] as? String { model.prefs.commentName = c }
             if a.keys.contains("select") { let id = a["select"] as? String; await MainActor.run { CloudAccount.shared.selected = id } }
             if let h = a["home"] as? String { await MainActor.run { HomeStore.shared.section = .cloud(h) } }
-            let clouds = model.prefs.clouds.map { ["id": $0.id, "url": $0.url, "name": $0.name, "devEmail": $0.devEmail, "kind": $0.kind.rawValue] }
+            let clouds = model.prefs.clouds.map { ["id": $0.id, "url": $0.url, "name": $0.name, "devEmail": $0.devEmail, "kind": $0.kind.rawValue, "hosting": $0.hosting] as [String: Any] }
             return ["clouds": clouds, "url": model.prefs.clouds.first?.url ?? "", "rev": model.prefs.cloudsRev,
                     "states": await MainActor.run { CloudAccount.shared.states.mapValues { ["status": $0.status, "email": $0.email ?? ""] } }]
         case "qa.exportdir":

@@ -32,6 +32,61 @@ const post = async (base: string, p: string, body: unknown = {}) => {
 };
 const pgrep = (args: string[]) => { try { return execFileSync("pgrep", args, { encoding: "utf8" }).trim().split("\n").filter(Boolean).map(Number); } catch { return []; } };
 
+sc("settings", "cloud hosting resume after relaunch, and stays off after Stop", { covers: ["settings:cloud-host"] }, async (t: NT) => {
+  const started = await post(t.app.base, "/api/cloud/host/start", { name: "Studio", label: "Anna" });
+  t.eq(started.status, 200, "the server starts Studio");
+  const url: string = started.j.url;
+  const hostId = new URL(url).hostname;
+  const savedId = "3f2b8c1e-5d4a-4e6f-9a7b-1c2d3e4f5a6b";
+  const saved = async () => (await t.cmd("qa.cloud")).clouds.find((c: any) => c.id === savedId);
+  const hosting = async () => {
+    const r = await fetch(`${t.app.base}/api/cloud/host`);
+    t.eq(r.status, 200, "the server lists its hosted Clouds");
+    return (await r.json() as any).clouds.find((c: any) => c.hostId === hostId)?.hosting;
+  };
+  try {
+    await t.cmd("qa.cloud", { clouds: [{ id: savedId, url, name: "Studio", kind: "hosted", hosting: false }] });
+    t.eq((await saved())?.hosting, false, "Studio is saved with hosting off");
+    t.eq(await hosting(), true, "the editor server is already hosting Studio");
+
+    // Leave that server running for this launch, so Canvas can discover Studio without opening Settings.
+    await t.app.relaunch();
+    await t.waitFor(async () => (await saved())?.hosting === true, "the running Cloud to be saved as hosting", 10_000);
+
+    await t.app.relaunch({ restartServer: true });
+    await t.waitFor(async () => (await hosting()) === true, "Studio to resume hosting on the new server", 15_000);
+    await settingsCloud(t);
+    await t.click(center(await t.mark({ id: "cloud-row", label: "Studio", window: "settings" }, 4000)), { window: "settings" });
+    await t.click(center(await t.mark({ id: "cloud-stop-hosting", window: "settings" }, 4000)), { window: "settings" });
+    await t.waitState((s) => s.modal, "Stop asks first", 6000);
+    const stop = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Stop Hosting");
+    t.ok(stop, "Stop Hosting button");
+    const [cloudPid] = pgrep(["-P", String(t.app.server!.pid), "-f", "cloud/adapters/mac/main.ts"]);
+    t.ok(cloudPid, "Studio's Cloud process");
+    // Hold the Stop reply so quitting while it is pending would use the saved preference.
+    process.kill(cloudPid, "SIGSTOP");
+    try {
+      await t.click(center(stop), { window: "modal" });
+      await t.waitFor(async () => (await saved())?.hosting === false, "Stop to save hosting off before the server replies", 2500);
+    } finally {
+      process.kill(cloudPid, "SIGCONT");
+    }
+    await t.waitText("Not hosting", undefined, 15_000, "settings");
+    t.eq((await saved())?.hosting, false, "Stop saves hosting off");
+
+    await t.app.relaunch({ restartServer: true });
+    await settingsCloud(t);
+    await t.click(center(await t.mark({ id: "cloud-row", label: "Studio", window: "settings" }, 4000)), { window: "settings" });
+    await t.waitText("Not hosting", undefined, 10_000, "settings");
+    t.eq((await saved())?.hosting, false, "Studio is still saved as stopped after relaunch");
+    t.eq(await hosting(), false, "Studio stays stopped on the new server");
+  } finally {
+    await post(t.app.base, "/api/cloud/host/wipe", { hostId }).catch(() => {});
+    await t.key("w", ["cmd"], { window: "settings" }).catch(() => {});
+    await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
+  }
+});
+
 /** Host on this Mac from the sheet, under a name. Returns the new Cloud's entry. */
 async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: string }> {
   const before = (await t.cmd("qa.cloud", {})).clouds.map((c: any) => c.id);

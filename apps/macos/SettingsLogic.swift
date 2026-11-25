@@ -471,13 +471,14 @@ extension CloudList {
     /// "hosted" entry this Mac does not host is one it joined. `legacyHosting`: the older version had hosting on.
     static func reconcile(_ list: [CloudEntry], hosted: [HostedInfo], legacyHosting: Bool) -> [CloudEntry] {
         var out = list
-        let ids = Set(hosted.map(\.hostId))
         for i in out.indices where out[i].kind != .server {
             guard let id = out[i].hostId else { continue }
-            if ids.contains(id) {
-                if out[i].kind != .hosted, let h = hosted.first(where: { $0.hostId == id }) {
+            if let h = hosted.first(where: { $0.hostId == id }) {
+                if out[i].kind != .hosted {
                     out[i].kind = .hosted
                     out[i].hosting = h.hosting || (h.legacy && legacyHosting)
+                } else if h.hosting {
+                    out[i].hosting = true
                 }
             } else if out[i].kind == .hosted {
                 out[i].kind = .joined
