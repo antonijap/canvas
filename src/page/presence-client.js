@@ -284,7 +284,7 @@ export function applyPeerPreviews(root, peers) {
       }
     }
     if(p.editing && typeof p.editing.text==='string') {
-      const n=find(root,p.editing.id);if(n?.type==='text') {n.content=p.editing.text;changed=true;}
+      const n=find(root,p.editing.id);if(n?.type==='text'||n?.type==='sticky') {n.content=p.editing.text;changed=true;}
     }
   }
   return changed;

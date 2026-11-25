@@ -8,6 +8,7 @@
 // GET /api/search/match?file=&ids=a,b&page= the select-matching actions that apply, each with its ids on the page
 // GET /api/search/text?file=&q=&case=1&word=1&page= find and replace: every literal occurrence in text layers
 
+import { isTextLayer } from "./page/whiteboard-model.js";
 import { boardCache } from "./boardcache.ts";
 import type { CanvasDoc, DocNode } from "./engine.ts";
 import { layerKind, type LayerKind } from "./layers.ts";
@@ -139,7 +140,7 @@ function partOf(top: DocNode): Part {
     const raw = typeof n.name === "string" ? n.name.trim() : "";
     const hidden = (n as Record<string, unknown>).enabled === false;
     const locked = lockedAbove || (n as Record<string, unknown>).locked === true;
-    const text = n.type === "text" ? textOf(n).replace(/\s+/g, " ").trim() : undefined;
+    const text = isTextLayer(n.type) ? textOf(n).replace(/\s+/g, " ").trim() : undefined;
     const name = raw || (text ? text.slice(0, 60) : String(n.type ?? "layer"));
     entries.push({
       id: String(n.id), board, kind: layerKind(n), name, nameL: lowerSame(name), depth,
@@ -349,7 +350,7 @@ export function findAll(text: string, query: string, o: FindOpts = {}, max = 10_
 
 /** A text layer whose content can be found and replaced: plain text of the file, not a variable's. */
 export function replaceableText(n: DocNode, vars: Record<string, unknown> | undefined): string | null {
-  if (n.type !== "text" || typeof n.content !== "string") return null;
+  if (!isTextLayer(n.type) || typeof n.content !== "string") return null;
   const c = n.content;
   if (c.startsWith("$") && vars && Object.prototype.hasOwnProperty.call(vars, c.slice(1))) return null;
   return c;

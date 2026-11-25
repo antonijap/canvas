@@ -14,6 +14,7 @@
 import type http from "node:http";
 import { buildIndex, expand, findNode, StaleFileError, updateNode, ValidationError, walk, type Json, type CanvasDoc, type DocNode } from "./engine.ts";
 import { findAll, replaceableText } from "./search.ts";
+import { isTextLayer } from "./page/whiteboard-model.js";
 import { follow as followSpans, normalize as normalizeSpans, shift as shiftSpans, spanErrors, type Span } from "./page/text-spans.js";
 import { followLists, listErrors, normalizeLists, paragraphCount, type ListItem } from "./page/text-paras.js";
 import { currentDoc, editDoc } from "./docwriter.ts";
@@ -175,7 +176,7 @@ export async function editText(docFile: string, b: TextBody, who: { source: "use
     }
     const drawn = drawnNode(doc, t, id);
     if (!drawn) throw new TextEditError(404, "not_found", "that text was deleted");
-    if (drawn.type !== "text") throw new TextEditError(400, "invalid", `"${id}" is a ${drawn.type}, not a text layer`);
+    if (!isTextLayer(drawn.type)) throw new TextEditError(400, "invalid", `"${id}" is a ${drawn.type}, not a text layer`);
     // Text bound to a string variable: writing the typed text would replace the binding with plain text.
     const bound = boundVariable(doc, drawn);
     if (bound) throw new TextEditError(409, "variable", `that text comes from the variable ${bound}; edit the variable instead`);
@@ -184,7 +185,7 @@ export async function editText(docFile: string, b: TextBody, who: { source: "use
   const { t, drawn } = resolve(id);
   const others = also.map(resolve);
   // Empty: the layer goes. One structure step, the same as Delete.
-  if (content === "" && t.kind === "node" && others.every((o) => o.t.kind === "node")) {
+  if (content === "" && drawn.type === "text" && t.kind === "node" && others.every((o) => o.t.kind === "node" && o.drawn.type === "text")) {
     const r = await runStructure(docFile, { op: "delete", ids: [id, ...also], expectedRevision: b.expectedRevision }, who);
     return { ok: true, id, changed: true, deleted: true, revision: r.revision, select: r.select };
   }

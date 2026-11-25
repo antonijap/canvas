@@ -1,0 +1,39 @@
+.whiteboard-layer,.sticker-seals{position:absolute;inset:0;pointer-events:none}
+.whiteboard-layer{z-index:5;font-family:var(--c-font-sans);color:var(--c-fg)}
+.whiteboard-layer [hidden]{display:none!important}
+.whiteboard-layer button,.whiteboard-layer select{font:inherit;color:inherit;pointer-events:auto}
+.whiteboard-layer button{cursor:pointer;border:0;margin:0;padding:0}
+.whiteboard-layer button:focus-visible,.whiteboard-layer select:focus-visible{outline:2px solid var(--c-sel);outline-offset:2px}
+.whiteboard-panel,.whiteboard-hint{border:1px solid var(--c-island-rim);background:var(--c-island);box-shadow:0 6px 18px var(--wb-shadow)}
+.whiteboard-panel{pointer-events:auto;border-radius:var(--c-radius-island)}
+.whiteboard-flyout{position:absolute;left:50%;bottom:72px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;padding:8px 12px}
+.whiteboard-key{background:var(--c-field);padding:2px 5px;border-radius:4px;font-size:var(--c-size-2xs)}
+.sticky-swatch{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:none}
+.sticky-swatch::before{content:"";width:24px;height:24px;background:var(--wb-swatch);border-radius:50%;box-shadow:inset 0 0 0 1px var(--c-hairline)}
+.sticky-swatch[aria-pressed="true"]{outline:2px solid var(--c-fg);outline-offset:1px}
+.sticky-ghost{position:absolute;inset:0 auto auto 0;border-radius:6px;background:var(--wb-swatch);opacity:.87;box-shadow:0 8px 22px var(--wb-shadow)}
+.whiteboard-hint{position:absolute;inset:0 auto auto 0;border-radius:var(--c-radius);padding:6px 9px;font-size:var(--c-size-xs);font-weight:550;white-space:nowrap}
+.sticky-controls{position:absolute;inset:0 auto auto 0;display:flex;align-items:center;gap:6px;padding:6px 8px}
+.sticky-size,.whiteboard-layer .sticky-author{height:28px;border-radius:var(--c-radius-field);background:var(--c-field);border:0}
+.sticky-size{padding:0 4px;cursor:pointer;font-size:var(--c-size-xs);color-scheme:light dark}
+.whiteboard-layer .sticky-author{width:28px;display:grid;place-items:center}
+.whiteboard-layer .sticky-author[aria-pressed="true"]{background:var(--c-active)}
+.sticky-author:disabled{opacity:.45;cursor:default}
+.whiteboard-layer .sticky-next{position:absolute;inset:0 auto auto 0;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;color:var(--wb-white);background:var(--c-sel);box-shadow:0 3px 8px var(--wb-shadow)}
+.sticker-tray{display:block;width:max-content;padding:12px 14px}
+.sticker-tray-title,.sticker-popover-title{font-size:var(--c-size-sm);font-weight:650}
+.sticker-tray-grid{display:grid;grid-template-columns:repeat(4,48px);gap:8px;margin-top:8px}
+.whiteboard-layer .sticker-choice{height:48px;border-radius:var(--c-radius);background:transparent;display:grid;place-items:center}
+.whiteboard-layer .sticker-choice:hover,.whiteboard-layer .sticker-choice[aria-pressed="true"]{background:var(--c-active)}
+.whiteboard-layer .sticker-seal{display:grid;place-items:center;box-sizing:border-box;width:var(--wb-seal-size);height:var(--wb-seal-size);border:2px solid var(--wb-white);border-radius:50%;background:var(--wb-sticker);color:var(--wb-white);box-shadow:0 3px 8px var(--wb-shadow)}
+.sticker-choice .sticker-seal{width:40px;height:40px}
+.sticker-ghost,.sticker-placed{position:absolute;inset:0 auto auto 0}
+.sticker-ghost{opacity:.85}
+.sticker-count{position:absolute;top:-4px;right:-6px;min-width:16px;height:16px;padding:0 2px;border-radius:8px;background:var(--c-island);color:var(--c-fg);font-size:var(--c-size-2xs);font-variant-numeric:tabular-nums;line-height:16px;text-align:center}
+.sticker-popover{position:absolute;inset:0 auto auto 0;box-sizing:border-box;width:164px;max-height:220px;overflow:auto;padding:10px 12px;border-radius:14px}
+.sticker-popover-title{margin-bottom:8px}
+.sticker-by{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:var(--c-size-xs);overflow-wrap:anywhere}
+.sticker-avatar{display:grid;place-items:center;flex:0 0 20px;height:20px;border-radius:50%;background:var(--wb-avatar);color:var(--wb-white);font-size:var(--c-size-2xs)}
+
+.whiteboard-layer[data-placing] .sticker-placed{pointer-events:none}
+#sel.seal-selection i,#sel.seal-selection #seldim{display:none}

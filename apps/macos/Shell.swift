@@ -414,7 +414,7 @@ struct TopBar: View {
         HStack(spacing: 0) {
             if model.currentFile != nil && !model.homeShown && !model.cloudReadOnly {
                 HStack(spacing: 0) {
-                    ForEach(DrawTool.allCases, id: \.self) { tool in
+                    ForEach(DrawTool.barTools, id: \.self) { tool in
                         IconButton(symbol: tool.symbol, help: tool.title, shortcut: tool.key.uppercased(), inBar: true) { model.draw(tool) }
                             .qaID("draw-tool", label: tool.title)
                     }

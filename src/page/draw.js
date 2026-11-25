@@ -33,6 +33,7 @@ if (host?.file) {
     reset();
     textToEdit = null;
     tool = type;
+    host.emit("draw-tool", type);
     view.style.cursor = "crosshair";
     return true;
   }
@@ -82,6 +83,7 @@ if (host?.file) {
   host.on("page", () => { reset(); textToEdit = null; });
   host.on("tab", (shown) => { if (!shown) { reset(); textToEdit = null; } });
   host.on("render", editNewText);
+  host.on("draw-tool", (type) => { if (!Object.hasOwn(names, type)) reset(); });
   host.on("cmd", (c) => { if (c.cmd === "draw") activate(c.type, document.activeElement); });
   addEventListener("blur", () => { if (drag) reset(); });
 

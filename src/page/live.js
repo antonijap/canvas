@@ -381,7 +381,7 @@ function start(host) {
       .filter((k) => k && typeof k.id === "string" && !k.id.includes("/") && (layout === "none" || k.layoutPosition === "absolute"))
       .map((k) => ({ id: k.id, x: typeof k.x === "number" ? k.x : 0, y: typeof k.y === "number" ? k.y : 0 }));
     const all = (Array.isArray(n.children) ? n.children : []).map((k) => k && k.id).filter(Boolean);
-    return { id, board, isBoard: board === id, type: n.type, rotation: Number(n.rotation) || 0, layout, kids, all, textGrowth: n.textGrowth, w: n.width, h: n.height, lockAspect: n.lockAspect === true, min: layout !== "none" ? minSize(sides(n.padding)) : null, flipX: !!n.flipX, flipY: !!n.flipY, ext: n.type === "group" ? turnedGroupSize(scene.root, id, (x) => host.worldRectOf(x)) : null,
+    return { id, board, isBoard: board === id, type: n.type, rotation: Number(n.rotation) || 0, layout, kids, all, textGrowth: n.textGrowth, autoHeight: n.autoHeight, w: n.width, h: n.height, lockAspect: n.lockAspect === true, min: layout !== "none" ? minSize(sides(n.padding)) : null, flipX: !!n.flipX, flipY: !!n.flipY, ext: n.type === "group" ? turnedGroupSize(scene.root, id, (x) => host.worldRectOf(x)) : null,
       positioned: placement.positioned, own: { x: Number(n.x) || 0, y: Number(n.y) || 0 } };
   }
   host.on("select", (id) => { loadInfo(id); });
@@ -398,7 +398,7 @@ function start(host) {
     const id = host.sel;
     // Several selected: the box is their union, which a drag moves (the page); one layer's edges must not grab.
     const many = host.selection && host.selection().length > 1;
-    return !!(ev() && info && info.id === id && info.type !== "group" && (!info.rotation || turned()) && !host.hand && !many && !(host.textEdit && host.textEdit.active) && !(host.isLocked && host.isLocked(id)));
+    return !!(ev() && info && info.id === id && info.type !== "group" && info.type !== "sticker" && (!info.rotation || turned()) && !host.hand && !many && !(host.textEdit && host.textEdit.active) && !(host.isLocked && host.isLocked(id)));
   };
   /**
    * A rotated layer's own box, {r, w, h} (degrees, world px), or null: the selection box and handles turn with it.
@@ -411,7 +411,7 @@ function start(host) {
     if (typeof info.w !== "number") return null;
     // Auto height text: its height as drawn, from the turned box on the canvas (its width is its own; a stored
     // height is not what shows).
-    if (info.type === "text" && info.textGrowth === "fixed-width") {
+    if ((info.type === "text" && info.textGrowth === "fixed-width") || (info.type === "sticky" && info.autoHeight !== false)) {
       const h = ownHeight(info.rotation, info.w, host.worldRectOf(info.id));
       return h ? { r: info.rotation, w: info.w, h } : null;
     }

@@ -1,0 +1,27 @@
+import type { DocNode } from "../../cloud/core/schema.ts";
+
+export type WhiteboardPerson = { name: string; id: string };
+export type StickerAnchor = { layer: string; x: number; y: number };
+export type StickerArt = { label: string; key: string; color: string; path: string };
+export type Sticker = { id: string; kind: string; on: StickerAnchor; by: WhiteboardPerson | null; locked: boolean; x: number; y: number; parent?: string; missingTarget?: boolean };
+export const STICKY_COLORS: Readonly<Record<string, string>>;
+export const STICKERS: Readonly<Record<string, StickerArt>>;
+export const WHITEBOARD_PAINT: Readonly<Record<"ink" | "authorInk" | "avatar" | "white" | "shadow", string>>;
+export const STICKY_SIZE: number;
+export const STICKY_PADDING: number;
+export const STICKER_SIZE: number;
+export const STICKY_GAP: number;
+export const STICKER_MIN_ICON: number;
+export function isStickyColor(key: unknown): key is string;
+export function isStickerKind(key: unknown): key is string;
+export function isTextLayer(type: unknown): boolean;
+export function stickyTextId(id: string): string;
+export function stickyOwner(id: string): string;
+export function whiteboardPerson(value: unknown): WhiteboardPerson | null;
+export function stickerAnchor(value: unknown): StickerAnchor | null;
+export function stickerData(node: DocNode): Sticker | null;
+export function stackStickers(stickers: Iterable<Sticker>): Map<string, Sticker[]>;
+export function stickerGlyph(kind: string, size?: number): string;
+export function stickyText(node: DocNode): DocNode;
+export function stickyFrame(node: DocNode): DocNode;
+export function whiteboardScene(node: DocNode): DocNode;

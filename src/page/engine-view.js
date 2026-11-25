@@ -7,6 +7,7 @@
 // engine, and falls back to the DOM only when that keeps happening: engineRestartDelay below).
 // The pure helpers at the bottom are imported by node tests too.
 
+import { stickyOwner, stickyTextId, whiteboardScene } from "./whiteboard-model.js";
 import { createImageOverview, imageOverviewBoard, localJpegPath } from "./image-overview.js";
 
 /** What an image is decoded at while boards show it large, but not larger than this on screen. */
@@ -533,6 +534,14 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   const loaded = new Map(); // board id -> { seq, content, x, y, ids:Set }
   const nodeIndex = new Map(); // node id -> { board, radius }
   let opening = true;
+  function engineText(scene, text) {
+    if (!text.includes('"type":"sticky"') && !text.includes('"type":"sticker"')) return text;
+    return JSON.stringify({ ...scene, root: whiteboardScene(scene.root) });
+  }
+  function publicId(id) {
+    const owner = stickyOwner(id);
+    return nodeIndex.get(owner)?.type === "sticky" ? owner : id;
+  }
   /**
    * Load boards in one batch: every scene is fetched first, then the fonts they need are registered once, then
    * each board is laid out. A font registered after a board exists lays that board out again (the system-ui
@@ -673,7 +682,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       root = engine.nodeRectIn(meta.id, meta.id);
     }
     if (content !== rec.content || wasParked) {
-      if (content !== rec.content) root = engine.setBoard(meta.id, at.x, at.y, text).root;
+      if (content !== rec.content) root = engine.setBoard(meta.id, at.x, at.y, engineText(scene, text)).root;
       if (fresh) paint.push(meta.id);
       for (const id of rec.ids) if (nodeIndex.get(id) && nodeIndex.get(id).board === meta.id) nodeIndex.delete(id);
       const uses = [];
@@ -803,7 +812,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     if (content === rec.content) return engine.nodeRectIn(id, id);
     if (simpleOverview) endOverview();
     const at = posOf(id) || { x: rec.x, y: rec.y };
-    const root = engine.setBoard(id, at.x, at.y, text).root;
+    const root = engine.setBoard(id, at.x, at.y, engineText(scene, text)).root;
     rec.rect = root;
     for (const n of rec.ids) if (nodeIndex.get(n) && nodeIndex.get(n).board === id) nodeIndex.delete(n);
     rec.ids = indexScene(scene.root, id, nodeIndex);
@@ -839,7 +848,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     const rec = loaded.get(board);
     if (!rec || !rec.content || dead || !engine.updateNode) return false;
     let ok = false;
-    try { ok = engine.updateNode(board, id, JSON.stringify(node)); } catch { ok = false; }
+    try { ok = engine.updateNode(board, id, JSON.stringify(whiteboardScene(node))); } catch { ok = false; }
     if (!ok) return false;
     if (simpleOverview) endOverview();
     rec.content = -1;
@@ -918,12 +927,12 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       }
       return engine.frame();
     },
-    pick: (x, y) => engine.hitTest(x, y) ?? null,
+    pick: (x, y) => publicId(engine.hitTest(x, y)) ?? null,
     // Every layer under a point, topmost first (right-click > Select layer).
-    pickAll: (x, y) => (engine.hitTestAll ? engine.hitTestAll(x, y) : []),
+    pickAll: (x, y) => (engine.hitTestAll ? [...new Set(engine.hitTestAll(x, y).map(publicId))] : []),
     rect: (id) => { const n = nodeIndex.get(id), r = n ? engine.nodeRectIn(n.board, id) : engine.nodeRect(id); return r ? { x: r.x, y: r.y, w: r.w, h: r.h } : null; },
     /** A text layer's lines and list markers as drawn, world px (engine textLines): QA checks the editor against them. */
-    textLines: (id) => (engine.textLines ? engine.textLines(id) : null),
+    textLines: (id) => (engine.textLines ? engine.textLines(nodeIndex.get(id)?.type === "sticky" ? stickyTextId(id) : id) : null),
     boardOf: (id) => (nodeIndex.get(id) || {}).board || null,
     parentOf: (id) => { const n = nodeIndex.get(id); return n && n.parent !== undefined ? n.parent : null; },
     /** A drawn layer's type, name and whether it is a component instance (drops, /page/drops.js; Select layer). */
@@ -1340,7 +1349,7 @@ export function indexScene(root, board, index, uses) {
     if (n.id !== undefined) {
       const id = String(n.id);
       ids.add(id);
-      const cr = n.cornerRadius;
+      const cr = n.type === "sticky" ? 6 : n.cornerRadius;
       const radius = n.type === "ellipse" ? 1e9 : typeof cr === "number" ? cr : Array.isArray(cr) && typeof cr[0] === "number" ? cr[0] : 0;
       index.set(id, { board, radius, parent, name: typeof n.name === "string" ? n.name : "", type: n.type, instance: typeof n.component === "string" });
       if (uses) for (const k of ["fill", "stroke"]) for (const p of [].concat(n[k] || [])) if (p && p.type === "image" && typeof p.url === "string") uses.push([id, p.url]);

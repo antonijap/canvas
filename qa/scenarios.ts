@@ -1,4 +1,6 @@
 import "./scenarios-blueprint.ts";
+import "./scenarios-whiteboard.ts";
+import "./scenarios-whiteboard-cloud.ts";
 
 // The QA scenarios. Each runs on its own fresh copy of demos/playground.canvas (see qa/run.ts).
 // Coordinates in the playground are fixed (qa/playground.ts); layers are found by id.

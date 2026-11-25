@@ -201,6 +201,10 @@ struct GeneralSettings: View {
                     }
                     .frame(width: 200)
                 }
+                SettingsDivider()
+                SettingsRow("Show my name on stickies and votes", detail: "Also applies to stickers you place") {
+                    SettingsSwitch(isOn: $model.prefs.showWhiteboardName).qaID("whiteboard-show-name")
+                }
             }
             UpdateSettings()
         }

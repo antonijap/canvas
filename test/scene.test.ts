@@ -103,7 +103,7 @@ describe("/api/scene", () => {
     const r = await fetch(`${base}/api/scene${q("&id=B1")}`);
     assert.equal(r.status, 200);
     const s = (await r.json()) as { version: number; id: string; x: number; y: number; root: Node; fonts: any[]; images: string[]; key: string };
-    assert.equal(s.version, 2);
+    assert.equal(s.version, 3);
     assert.deepEqual([s.x, s.y], [40, 60]);
     assert.equal(s.root.fill, "#111111");
     assert.equal(s.root.gap, 12);

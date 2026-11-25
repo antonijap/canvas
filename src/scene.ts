@@ -15,13 +15,14 @@ import { buildIndex, defaultTheme, expand, iconArt, resolveProps, resolveVariabl
 import { keyedAnswer, sceneEnvOf } from "./keyed.ts";
 import { readBodyText } from "./body.ts";
 import { resolveShaderFill } from "./shader-fill.ts";
+import { stickyFrame } from "./page/whiteboard-model.js";
 import { adjustFragment } from "./page/image-adjust.js";
 import { version } from "./version.ts";
 import { googleFailed, localPath, fallbackFace, fallbackFamilies, FALLBACK_MAX_BYTES, FALLBACK_MAX_BYTES_CJK, FALLBACK_ORDER, findFont, googleFaces, installedFaces, isSystemFamily, pickFace, pickGoogle, SYSTEM_UI, webFontsOn, weightOf, coverageOfFile, type Coverage } from "./fontfiles.ts";
 
 type Theme = Record<string, string>;
 
-export const SCENE_VERSION = 2;
+export const SCENE_VERSION = 3;
 
 export type IconShape = { d: string; fill: string; stroke: string; strokeWidth?: number; cap?: string; join?: string; fillRule?: string };
 /**
@@ -224,6 +225,11 @@ function sceneNode(raw: DocNode, theme: Theme, c: Ctx): DocNode | undefined {
   if (out.fill !== undefined) out.fill = rewritePaints(out.fill, c) as Json;
   if (out.stroke !== undefined) out.stroke = rewritePaints(out.stroke, c) as Json;
   const type = String(n.type);
+  if (type === "sticky") {
+    // Register the projected text's fonts, including styled ranges and the author footer.
+    for (const child of stickyFrame(n).children ?? []) sceneNode(child, active, c);
+    if (typeof raw.content === "string" && raw.content.startsWith("$") && n.content !== raw.content) out.contentVar = raw.content;
+  }
   if (TEXTY.has(type)) {
     const family = n.fontFamily ? String(n.fontFamily) : "Inter";
     const weight = weightOf(n.fontWeight);

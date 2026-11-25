@@ -107,7 +107,8 @@ ${cornerRadii.toString()}
 ${roundedPath.toString()}
 ${roundedShape.toString()}
 window.__svg=function(id){
-  const root=document.querySelector('[data-id="'+CSS.escape(id)+'"]');
+  let root=document.querySelector('[data-id="'+CSS.escape(id)+'"]');
+  if(root?.dataset.stickerAlias)root=document.querySelector('[data-id="'+CSS.escape(root.dataset.stickerAlias)+'"]');
   if(!root)throw new Error('nothing drawn for "'+id+'" (it may be hidden)');
   const warn=new Set();const defs=[];let uid=0;const nid=(p)=>p+(++uid);
   const esc=(s)=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');

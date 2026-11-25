@@ -27,6 +27,7 @@
 //
 // The pure helpers at the top are node-tested (test/text-edit.test.ts).
 
+import { isTextLayer, stickyText } from "./whiteboard-model.js";
 import { dblClickEdits } from "./geometry.js";
 import * as SP from "./text-spans.js";
 import * as PA from "./text-paras.js";
@@ -438,8 +439,9 @@ export function attach(host) {
     const path = pathTo(scene.root, id);
     if (!path) return null;
     const node = path[path.length - 1];
-    if (node.type !== "text") return null;
-    return { board, scene, node, rot: rotationOf(path) };
+    if (!isTextLayer(node.type)) return null;
+    const sticky = node.type === "sticky";
+    return { board, scene, node: sticky ? stickyText(node) : node, sticky, rot: rotationOf(path) };
   }
   // Warm the fonts of a selected text layer, so a double-click lands the caret right the first time.
   host.on("select", (id) => {
@@ -792,7 +794,7 @@ export function attach(host) {
     if (!te) return;
     fixHangs();
     const v = ev(), c = host.cam;
-    const r = v && v.rect(te.id);
+    const r = v && v.rect(te.drawId);
     if (!r || !c) { te.wrap.style.visibility = "hidden"; return; }
     te.wrap.style.visibility = "";
     // The box the text lays out in (world px): a fixed width wraps there; fill_container takes what layout gave it.
@@ -899,7 +901,7 @@ export function attach(host) {
     // The field holds the text and has focus from the start: an edit ended (Esc, a click away, another file)
     // while the fonts still load ends with the text as it was, never empty (which deleted the layer), and keys
     // typed meanwhile land in it.
-    te = { id, also, board, original, origSpans, origLists, lists: origLists, para: {}, paraMode: false, value: original, spans: origSpans, base: null, fonts: [], lastSel: { start: original.length, end: original.length, back: false }, wrap, tb, ta, rot: inf.rot, hist: new TextHistory(), growth: "auto", fixedW: null, fixedH: null, rectKey: "", ready: false, touched: false };
+    te = { id, drawId: node.id, sticky: inf.sticky, also, board, original, origSpans, origLists, lists: origLists, para: {}, paraMode: false, value: original, spans: origSpans, base: null, fonts: [], lastSel: { start: original.length, end: original.length, back: false }, wrap, tb, ta, rot: inf.rot, hist: new TextHistory(), growth: "auto", fixedW: null, fixedH: null, rectKey: "", ready: false, touched: false };
     // Multi-edit: each other layer as it was, so it shows (and keeps) its own styling mapped to the typed text.
     te.alsoWas = new Map(also.map((x) => { const n = nodeInfo(x).node; return [x, { content: typeof n.content === "string" ? n.content : "", spans: Array.isArray(n.spans) ? n.spans : [], lists: Array.isArray(n.lists) ? n.lists : [] }]; }));
     const loading = styleFrom(node, scene);
@@ -1030,6 +1032,7 @@ export function attach(host) {
       if (!k || k === "compose") return; // the field's own, or the IME's while it composes
       e.preventDefault();
       if (k === "commit") commit("key");
+      else if (k === "tab" && te.sticky) host.whiteboard?.next(te.id, "right");
       else if (k === "tab" || k === "swallow") {
         // In a list item Tab nests it a level deeper and Shift+Tab a level out.
         const s = selOf();
@@ -1114,6 +1117,7 @@ export function attach(host) {
     const under = L.underPin ? L.underPin(te.id) : null;
     const t = teardown();
     const plan = commitPlan(t.original, value, t.id, t.origSpans, t.spans, t.origLists, t.lists);
+    const deletes = plan.kind === "delete" && !t.sticky && !t.also.some((id) => nodeInfo(id)?.sticky);
     // Multi-edit: the others take the text only when something was typed or styled.
     const also = t.touched ? t.also : [];
     if (plan.kind === "none" && !also.length) { L.unpin(t.id); for (const id of t.also) L.unpin(id); host.syncSel(); return true; }
@@ -1121,12 +1125,12 @@ export function attach(host) {
     const op = L.nextOp();
     // The canvas keeps what was typed (an override settled by the write's answer) from the next frame on.
     const typed = typedOf(t);
-    for (const id of [t.id, ...also]) L.override(id, plan.kind === "delete" ? { enabled: false } : id === t.id ? typed : otherTyped(t, id), op);
+    for (const id of [t.id, ...also]) L.override(id, deletes ? { enabled: false } : id === t.id ? typed : otherTyped(t, id), op);
     L.unpin(t.id);
     for (const id of t.also) L.unpin(id);
-    if (plan.kind === "delete" && host.sel === t.id) host.clearSel();
+    if (deletes && host.sel === t.id) host.clearSel();
     else host.syncSel();
-    const body = JSON.stringify(plan.kind === "delete" ? { file, id: t.id, content: "", ...(also.length ? { also } : {}) } : { file, id: t.id, ...typed, ...(also.length ? { also } : {}) });
+    const body = JSON.stringify(deletes ? { file, id: t.id, content: "", ...(also.length ? { also } : {}) } : { file, id: t.id, ...typed, ...(also.length ? { also } : {}) });
     // keepalive lets the write outlive the page (a reload, a closed tab); browsers take only 64 KB that way.
     const keepalive = !!o.keepalive && body.length < 60_000;
     const p = fetch("/api/text", { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body, keepalive })
@@ -1134,7 +1138,7 @@ export function attach(host) {
       .then((j) => {
         for (const id of [t.id, ...also]) L.ack(id, op, true);
         // A layer the server kept (a replacement inside an instance takes an empty override, never a delete).
-        if (plan.kind === "delete" && !j.deleted && !host.sel) host.selectId(t.id);
+        if (deletes && !j.deleted && !host.sel) host.selectId(t.id);
         if (agentMoved) tell("An agent changed this text while you typed; your text replaced theirs (Undo brings theirs back)");
         return true;
       })
@@ -1143,7 +1147,7 @@ export function attach(host) {
         const typed = plan.kind === "write" ? plan.content : "";
         if (err.code === "not_found") lose(typed ? "The text was deleted while you typed" : "The text was deleted", typed);
         else lose((/component|variable/.test(err.message) ? "" : "Could not save the text: ") + err.message, typed);
-        if (plan.kind === "delete" && !host.sel && err.code !== "not_found") host.selectId(t.id);
+        if (deletes && !host.sel && err.code !== "not_found") host.selectId(t.id);
         return false;
       });
     inflight.add(p);
@@ -1176,9 +1180,9 @@ export function attach(host) {
     if (!te || board !== te.board) return;
     const path = pathTo(scene.root, te.id);
     const node = path && path[path.length - 1];
-    if (!node || node.type !== "text") { setTimeout(() => { if (te && !nodeInfo(te.id)) cancel(true); }, 0); return; }
+    if (!node || !isTextLayer(node.type)) { setTimeout(() => { if (te && !nodeInfo(te.id)) cancel(true); }, 0); return; }
     te.rot = rotationOf(path);
-    styleFrom(node, scene);
+    styleFrom(te.sticky ? stickyText(node) : node, scene);
   });
 
   // ---------- ways in ----------
@@ -1226,7 +1230,7 @@ export function attach(host) {
   // A press anywhere else ends the edit; the press then does what it does (select, pan, deselect). A plain press on
   // another text layer edits that one at once, the caret where it was pressed, and goes no further.
   addEventListener("pointerdown", (e) => {
-    if (!te || te.wrap.contains(e.target)) return;
+    if (!te || te.wrap.contains(e.target) || e.target.closest?.("[data-sticky-controls]")) return;
     const onCanvas = e.target === view || view.contains(e.target);
     const leaf = onCanvas && host.pick ? host.pick(e.clientX, e.clientY) : null;
     const inf = leaf && leaf !== te.id ? nodeInfo(leaf) : null;

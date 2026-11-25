@@ -88,6 +88,13 @@ struct SettingsTests {
         let sent = s.serverSettings
         check((sent["claude"] as? [String: String]) == ["model": "opus", "effort": "high"] && (sent["codex"] as? [String: String]) == ["model": "gpt-a", "effort": "xhigh"], "the server gets each agent's model and reasoning")
         // Off stays off: a stored false is not mistaken for "never set".
+        var anonymous = AppSettings()
+        anonymous.commentName = "Anna"
+        anonymous.showWhiteboardName = false
+        anonymous.save(d)
+        let restored = AppSettings.load(d)
+        check(restored.pagePrefs["whiteboardName"] as? String == "", "the canvas receives no name when the whiteboard setting is off")
+        check(restored.commentName == "Anna" && !restored.showWhiteboardName, "the setting leaves the comment name in place")
         var cleared = AppSettings(); cleared.commentName = ""
         cleared.save(d)
         check(AppSettings.load(d).commentName.isEmpty, "a cleared name stays cleared: it is not refilled with the Mac's name")

@@ -55,6 +55,7 @@ struct AppSettings: Equatable {
     var boardLabels = true
     /// The name on the comments made here (Settings > General). Starts as the Mac's full user name; empty: the server says "Me".
     var commentName = ""
+    var showWhiteboardName = true
     /// Settings > Cloud: every Cloud this Canvas talks to (CloudList below). The sign-in token is never a setting.
     var clouds: [CloudEntry] = []
     /// Bumped whenever `clouds` changes (Model.swift), so the server takes the newest list only (src/cloud-config.ts).
@@ -89,6 +90,7 @@ struct AppSettings: Equatable {
         if has("scrollZooms") { s.scrollZooms = d.bool(forKey: k("scrollZooms")) }
         if has("boardLabels") { s.boardLabels = d.bool(forKey: k("boardLabels")) }
         s.commentName = d.string(forKey: k("commentName")) ?? NSFullUserName()
+        if has("showWhiteboardName") { s.showWhiteboardName = d.bool(forKey: k("showWhiteboardName")) }
         s.clouds = CloudList.load(d)
         s.cloudsRev = d.integer(forKey: k("cloudsRev"))
         if let v = d.string(forKey: k("harness")).flatMap(AgentHarness.init) { s.harness = v }
@@ -114,6 +116,7 @@ struct AppSettings: Equatable {
         d.set(scrollZooms, forKey: k("scrollZooms"))
         d.set(boardLabels, forKey: k("boardLabels"))
         d.set(commentName, forKey: k("commentName"))
+        d.set(showWhiteboardName, forKey: k("showWhiteboardName"))
         d.set(CloudList.encode(clouds), forKey: k(CloudList.key))
         d.set(cloudsRev, forKey: k("cloudsRev"))
         d.set(harness.rawValue, forKey: k("harness"))
@@ -146,7 +149,8 @@ struct AppSettings: Equatable {
     /// What the page reads (`prefs` in the page script, src/server.ts), as a JS object literal for {cmd: "prefs"}.
     var pagePrefs: [String: Any] {
         ["boardLabels": boardLabels, "openView": openView.rawValue, "scrollZooms": scrollZooms,
-         "agentCursor": agentCursor, "agentCursorSpeed": cursorSpeed.multiplier, "snapshotMB": snapshotMB]
+         "agentCursor": agentCursor, "agentCursorSpeed": cursorSpeed.multiplier, "snapshotMB": snapshotMB,
+         "whiteboardName": showWhiteboardName ? commentName : ""]
     }
     var pagePrefsJSON: String {
         guard let d = try? JSONSerialization.data(withJSONObject: pagePrefs, options: [.sortedKeys]),

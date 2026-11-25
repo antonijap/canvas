@@ -1,0 +1,117 @@
+import { sc, type T } from "./harness.ts";
+
+sc("sticky", "Sticky click, live edit, Tab and undo", { covers: ["sticky:create", "sticky:edit", "sticky:next", "sticky:undo"], skip: { visual: "Checks the drawn text and note bounds with the engine." } }, async (t: T) => {
+  await t.focus("lay_nest");
+  await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');
+  const p = await t.center("r_free");
+  await t.io.key("s");
+  await t.io.move(p.x, p.y);
+  await t.waitFor('document.querySelector("[data-sticky-ghost]")?.offsetWidth', "sticky preview");
+  await t.io.click(p.x, p.y);
+  await t.waitFor("window.canvasHost.textEdit.active", "sticky text editor");
+  const [id] = await t.sel();
+  await t.io.type("Plan the next sprint");
+  await t.io.key("Tab");
+  await t.waitFor(`window.canvasHost.sel !== ${JSON.stringify(id)} && window.canvasHost.textEdit.active`, "next sticky editor");
+  const [next] = await t.sel();
+  await t.waitFor(`window.canvasHost.engineView.textLines(${JSON.stringify(id)})?.lines.length > 0`, "sticky text drawn by the engine");
+  await t.io.key("Escape");
+  await t.flush();
+  const note = t.node(id)!;
+  t.eq([note.type, note.content, note.width === note.height], ["sticky", "Plan the next sprint", true], "saved square sticky and text");
+  t.ok(t.node(next)!.x > note.x, "the next sticky is to the right");
+  await t.undo();
+  t.eq(t.node(next), null, "undo removes the next sticky");
+  await t.select([id]);
+  const below = await t.waitFor<{ x: number; y: number }>(`(() => {
+    const el = document.querySelector(".sticky-next-below:not([hidden])");
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`, "the add-below handle");
+  await t.io.click(below.x, below.y);
+  await t.waitFor(`window.canvasHost.sel !== ${JSON.stringify(id)} && window.canvasHost.textEdit.active`, "the sticky editor below");
+  const [lower] = await t.sel();
+  await t.io.key("Escape");
+  await t.flush();
+  t.ok(t.node(lower)!.y > note.y, "the handle adds the next sticky below");
+});
+
+sc("sticker", "Sticker placement stacks and follows the target", { covers: ["sticker:place", "sticker:stack", "sticker:anchor"], skip: { visual: "Measures the seal, the stack count and its movement with the layer." } }, async (t: T) => {
+  await t.focus("lay_nest");
+  await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');
+  const p = await t.center("r_free");
+  for (let i = 0; i < 2; i++) {
+    await t.ev('window.canvasHost.emit("cmd", { cmd: "draw", type: "sticker" })');
+    await t.waitFor('document.querySelector("[data-sticker-tray]")?.offsetWidth', "sticker tray");
+    await t.io.key("l");
+    await t.io.click(p.x, p.y);
+    await t.flush();
+  }
+  await t.waitFor('document.querySelector("[data-sticker-count]")?.textContent === "2"', "one seal with a count of two");
+  const [id] = await t.sel();
+  t.eq([t.node(id)?.type, t.node(id)?.kind, t.node(id)?.on?.layer], ["sticker", "love", "r_free"], "saved sticker and anchor");
+  const previous = await t.rect(id);
+  await t.select(["r_free"]);
+  await t.io.key("ArrowRight", { shift: true });
+  await t.flush();
+  await t.waitFor(`window.canvasHost.worldRectOf(${JSON.stringify(id)})?.x > 0`, "the sticker to be drawn");
+  t.near((await t.rect(id)).x - previous.x, 10, 1, "the seal moved with its target");
+  const seal = await t.center(id);
+  await t.io.move(seal.x, seal.y);
+  await t.waitFor('document.querySelector(".sticker-popover:not([hidden])")?.textContent.includes("Anna")', "placed-by popover");
+  await t.undo();
+  await t.select([id]);
+  await t.undo();
+  t.eq(t.node(id), null, "undo removes the second sticker");
+  await t.waitFor('!document.querySelector("[data-sticker-count]")', "stack collapses back to one");
+});
+
+sc("sticky", "Sticky drag sizes the note and long text grows it", { covers: ["sticky:create", "sticky:resize", "sticky:style"], skip: { visual: "Measures the note and text after a real drag and edit." } }, async (t: T) => {
+  await t.focus("lay_nest");
+  await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');
+  const board = await t.rect("lay_nest");
+  const x = board.x + 320, y = board.y + 245;
+  await t.io.key("s");
+  const purple = await t.ev<{x: number; y: number}>(`(() => {
+    const r = document.querySelector('.whiteboard-flyout [data-color="purple"]').getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  })()`);
+  await t.io.click(purple.x, purple.y);
+  await t.waitFor(`document.querySelector('.whiteboard-flyout [data-color="purple"]')?.getAttribute("aria-pressed") === "true"`, "the purple swatch selected");
+  await t.io.drag(x, y, x + 140, y + 90);
+  await t.waitFor("window.canvasHost.textEdit.active", "sticky opened after dragging");
+  const [id] = await t.sel();
+  const original = await t.rect(id);
+  t.near(original.w, 140, 1, "dragged width");
+  t.near(original.h, 90, 1, "dragged height");
+  const long = "Make time to review notes and agree on the plan ".repeat(8);
+  await t.io.type(long);
+  await t.waitFor(`window.canvasHost.worldRectOf(${JSON.stringify(id)})?.h > ${original.h * 2}`, "live text grows the sticky");
+  await t.io.key("Escape");
+  await t.flush();
+  t.eq([t.node(id)?.color, t.node(id)?.content], ["purple", long], "chosen colour and long text on disk");
+  await t.waitFor('document.querySelector(".sticky-controls:not([hidden])")', "the selected sticky controls");
+  await t.ev(`(() => {
+    const size = document.querySelector(".sticky-size");
+    size.value = "18";
+    size.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await t.flush();
+  t.eq(t.node(id)?.fontSize, 18, "the controls set the note's font size");
+  const author = await t.ev<{ x: number; y: number }>(`(() => {
+    const r = document.querySelector(".sticky-author").getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`);
+  await t.io.click(author.x, author.y);
+  await t.flush();
+  t.eq(t.node(id)?.showAuthor, false, "the author toggle hides the footer");
+  await t.select([id]);
+  await t.io.key("c", { meta: true });
+  await t.waitFor(`fetch("/api/structure/clipboard").then(r => r.json()).then(j => j.payload?.nodes[0]?.id === ${JSON.stringify(id)})`, "the sticky on the clipboard");
+  await t.io.key("v", { meta: true });
+  await t.waitFor(`window.canvasHost.sel && window.canvasHost.sel !== ${JSON.stringify(id)}`, "select the pasted sticky");
+  await t.flush();
+  const [copy] = await t.sel();
+  t.eq([t.node(copy)?.type, t.node(copy)?.content, t.node(copy)?.color], ["sticky", long, "purple"], "copy and paste preserve the note");
+});

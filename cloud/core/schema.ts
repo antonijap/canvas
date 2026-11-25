@@ -6,6 +6,8 @@
 import { spanErrors } from "../../src/page/text-spans.js";
 import { listErrors, paragraphCount } from "../../src/page/text-paras.js";
 
+import { isStickerKind, isStickyColor, stickerAnchor, whiteboardPerson } from "../../src/page/whiteboard-model.js";
+
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export type DocNode = { [k: string]: Json } & { id?: string; type?: string; children?: DocNode[] };
 
@@ -24,6 +26,9 @@ export const NODE_KEYS: Record<string, Set<string>> = {
   polygon: new Set([...ENTITY, ...SIZE, ...GRAPHICS, "polygonCount", "cornerRadius"]),
   path: new Set([...ENTITY, ...SIZE, ...GRAPHICS, "fillRule", "geometry", "viewBox"]),
   text: new Set([...ENTITY, ...SIZE, ...GRAPHICS, ...TEXT_STYLE, "content", "textGrowth", "spans", "textTruncation", "maxLines", "paragraphSpacing", "paragraphIndent", "lists", "listSpacing", "hangingList", "hangingPunctuation", "letterCase"]),
+  sticky: new Set([...ENTITY, ...SIZE, ...TEXT_STYLE, "color", "content", "spans", "author", "showAuthor", "autoHeight",
+    "fill", "lists", "paragraphSpacing", "paragraphIndent", "listSpacing", "hangingList", "hangingPunctuation", "letterCase"]),
+  sticker: new Set([...ENTITY, "kind", "by", "on"]),
   note: new Set([...ENTITY, ...SIZE, ...TEXT_STYLE, "content", "color"]),
   prompt: new Set([...ENTITY, ...SIZE, ...TEXT_STYLE, "content", "model"]),
   context: new Set([...ENTITY, ...SIZE, ...TEXT_STYLE, "content"]),
@@ -61,7 +66,7 @@ const ENUMS: Record<string, string[]> = {
 };
 
 const NUMERIC = ["x", "y", "opacity", "cornerSmoothing", "rotation", "gap", "fontSize", "letterSpacing", "lineHeight", "maxLines", "paragraphSpacing", "paragraphIndent", "listSpacing", "innerRadius", "startAngle", "sweepAngle", "polygonCount", "weight", "zoom", "scrollX", "scrollY"];
-const BOOLEAN = ["reusable", "enabled", "locked", "mask", "flipX", "flipY", "clip", "underline", "strikethrough", "layoutIncludeStroke", "placeholder", "hangingList", "hangingPunctuation"];
+const BOOLEAN = ["reusable", "enabled", "locked", "mask", "flipX", "flipY", "clip", "underline", "strikethrough", "layoutIncludeStroke", "placeholder", "hangingList", "hangingPunctuation", "showAuthor", "autoHeight"];
 
 const COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const SIZING_RE = /^(fit_content|fill_container)(\(\s*-?\d+(\.\d+)?\s*\))?$/;
@@ -169,6 +174,15 @@ export function validateNode(node: DocNode, opts: { keys?: string[]; path?: stri
       errs.push(`${where}: ${k} must be a string`);
     }
     // Styled ranges over the content (src/page/text-spans.js): checked against the content they sit on.
+    if (type === "sticky" && k === "color" && !isStickyColor(v)) errs.push(`${where}: invalid sticky colour`);
+    if (type === "sticker" && k === "kind" && !isStickerKind(v)) errs.push(`${where}: invalid sticker kind`);
+    if ((type === "sticky" && k === "author") || (type === "sticker" && k === "by")) {
+      if (!whiteboardPerson(v)) errs.push(`${where}: ${k} needs a name and id`);
+    }
+    if (type === "sticker" && k === "on") {
+      const anchor = stickerAnchor(v);
+      if (!anchor || anchor.layer === node.id) errs.push(`${where}: on needs another layer id and x/y fractions from 0 to 1`);
+    }
     if (k === "spans") {
       const content = typeof node.content === "string" ? node.content : undefined;
       for (const e of spanErrors(v, content === undefined ? undefined : content.length)) errs.push(`${where}: ${e}`);
@@ -187,6 +201,7 @@ export function validateNode(node: DocNode, opts: { keys?: string[]; path?: stri
   }
   if (type === "ref" && keys.includes("ref") && (typeof node.ref !== "string" || !node.ref)) errs.push(`${where}: ref must be the id of a reusable component`);
   if (type === "ref" && !opts.keys && node.ref === undefined) errs.push(`${where}: an instance needs "ref" (the id of a reusable component)`);
+  if (type === "sticker" && !opts.keys && (node.kind === undefined || node.on === undefined)) errs.push(`${where}: a sticker needs "kind" and "on"`);
   if (type === "path" && !opts.keys && typeof node.geometry !== "string") errs.push(`${where}: a path needs "geometry" (an SVG path string)`);
   if (type === "icon" && !opts.keys && (typeof node.icon !== "string" || typeof node.library !== "string")) {
     errs.push(`${where}: an icon needs "library" (lucide, feather, Material Symbols Outlined/Rounded/Sharp, phosphor) and "icon"`);

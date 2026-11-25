@@ -31,6 +31,7 @@ import { handleSearchRoute } from "./search.ts";
 import { handleLayersRoute } from "./layers.ts";
 import { handleColorsRoute } from "./colors.ts";
 import { applyAutoTracking, prepareAutoTracking } from "./tracking.ts";
+import { cleanName } from "./settings.ts";
 import { cssVariables } from "./tokens.ts";
 import { sidebarWidgetTiles } from "./sidebar-widgets.ts";
 import { codeRootId, version } from "./version.ts";
@@ -1166,6 +1167,7 @@ const PAGE = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Canvas</title>
 <link rel="stylesheet" href="/page/widgets.css">
+<link rel="stylesheet" href="/page/whiteboard.css">
 <link rel="stylesheet" href="/page/charts.css">
 <link rel="stylesheet" href="/page/sidebar.css">
 <style>
@@ -1487,13 +1489,14 @@ addEventListener("keydown", (e) => {
 // Settings the app owns (Canvas > Settings, apps/macos/SettingsLogic.swift): the shell sends them as {cmd: "prefs"}
 // (with the snapping ones, whenever the page says snapHello) and the page keeps a copy, so the next load starts with
 // them. A browser has the defaults.
-const PREF_DEFAULTS = { boardLabels: true, openView: "restore", scrollZooms: false, agentCursor: true, agentCursorSpeed: 1, snapshotMB: 200 };
+const PREF_DEFAULTS = { whiteboardName: ${JSON.stringify(cleanName(process.env.CANVAS_COMMENT_NAME)).replace(/</g, "\\u003c")}, boardLabels: true, openView: "restore", scrollZooms: false, agentCursor: true, agentCursorSpeed: 1, snapshotMB: 200 };
 let prefs = Object.assign({}, PREF_DEFAULTS, native ? store.get("canvas:prefs") || {} : {});
 document.documentElement.classList.toggle("no-labels", !prefs.boardLabels);
 function setPrefs(p) {
   if (!p || typeof p !== "object") return;
   prefs = Object.assign({}, prefs, p);
-  store.set("canvas:prefs", prefs);
+  const { whiteboardName, ...remembered } = prefs;
+  store.set("canvas:prefs", remembered);
   document.documentElement.classList.toggle("no-labels", !prefs.boardLabels);
   if (snaps && snaps.setBudget) snaps.setBudget(Math.max(16, Number(prefs.snapshotMB) || 200) * 1048576);
   host.emit("prefs", prefs);
@@ -1680,6 +1683,7 @@ function camWork() {
   saveT = setTimeout(saveCam, 250);
   placeBoards();
   scheduleVisible();
+  if (sel && host.whiteboard?.isSticker(sel.id)) syncSel();
   placeOverlays();
   host.emit("cam");
 }
@@ -1816,7 +1820,7 @@ function syncPh(b) {
   // A held picture must match the board key; on Blueprint pages the live grid must show through.
   if (b.snap && b.snap.el && (blueprint || b.snap.key !== b.meta.key)) { URL.revokeObjectURL(b.snap.url); b.snap = null; }
   const shown = boards.get(b.meta.id) === b && (mode === "engine" || mode === "pending");
-  const want = shown && (!b.loadedKey || (b.snap?.el && snapHold && performance.now() < b.snap.until &&
+  const want = b.meta.type !== "sticker" && shown && (!b.loadedKey || (b.snap?.el && snapHold && performance.now() < b.snap.until &&
     (engineBusy || camRaf || (ev && ev.imagesPending() > 0))));
   if (!want) {
     if (b.ph) { b.ph.remove(); b.ph = null; }
@@ -1854,6 +1858,7 @@ const firstBoardId = () => { const m = pageMetas()[0]; return m && m.id; };
 function flyToBoard(id) { if (!boards.has(id)) return; select(id); fit(id); }
 // A node's box in world coordinates, from where it is drawn now; null when its board is not drawn yet.
 function worldRectOf(id) {
+  if (host.whiteboard?.isSticker(id)) return host.whiteboard.rect(id);
   if (isW(id)) { const r = host.widgetRect && host.widgetRect(id); return r ? { x: r.x, y: r.y, w: r.w, h: r.h } : null; }
   if (mode === "engine") return ev ? ev.rect(id) : null;
   if (mode !== "dom") return null;
@@ -2111,6 +2116,7 @@ function placeOverlays() {
 // Re-read the selected node from the live drawing, then place. Call when the selection or a drawing changes.
 function syncSel() {
   // Mid-drag, and after a layer's move until its board redraws, the box shows where the person put it.
+  selBox.classList.toggle("seal-selection", !!sel && !!host.whiteboard?.isSticker(sel.id));
   const held = sel && (mv && mv.pos && mv.id === sel.id ? { x: mv.pos.x, y: mv.pos.y, w: mv.r0.w, h: mv.r0.h } : selHold && selHold.id === sel.id ? selHold.rect : null);
   if (held) { selWorld = held; putBox(selBox, selWorld); return; }
   if (multi) {
@@ -2124,16 +2130,13 @@ function syncSel() {
   } else if (sel && isW(sel.id)) {
     // Widgets are placed by math from the camera, so a card mid-drag still gets its box.
     selWorld = host.widgetRect ? host.widgetRect(sel.id, true) : null;
-  } else if (mode === "engine") {
-    selWorld = sel && ev && cam ? ev.rect(sel.id) : null;
   } else {
-    const el = sel && mode === "dom" && liveEl(sel.id);
-    selWorld = el && cam ? measureWorld(el) : null;
+    selWorld = sel && cam ? worldRectOf(sel.id) : null;
   }
   let sb = null;
   if (sel && !isW(sel.id) && selWorld) {
     if (mode === "engine") sb = boards.get(ev.boardOf(sel.id)) || null;
-    else { const bel = liveEl(sel.id).closest(".board"); sb = (bel && elBoard.get(bel)) || null; }
+    else { const bel = liveEl(sel.id)?.closest(".board"); sb = (bel && elBoard.get(bel)) || null; }
   }
   if (sb !== selBoard) { if (selBoard) selBoard.lbl.el.classList.remove("sel"); selBoard = sb; if (sb) sb.lbl.el.classList.add("sel"); labelsVer++; if (cam) placeLabels(); if (native) post({ selBoard: sb ? sb.meta.id : null }); if (doc) renderLeft(doc); }
   selBox.classList.toggle("cmp", !!sel && !multi && host.isCmp(sel.id));
@@ -2157,7 +2160,7 @@ function placeMultiBoxes() {
   multiBoxes.forEach((d, i) => { if (i < want) { d.classList.toggle("cmp", host.isCmp(multi[i])); d.classList.toggle("wbox", isW(multi[i])); putBox(d, multiWorld[i]); } else d.style.display = "none"; });
 }
 // A board another page lists is drawn nowhere here: selected, Delete and the arrow keys would reach it unseen.
-const offPage = (id) => !isW(id) && !boards.has(id) && pageList.some((p) => p.id !== activePage && p.boards.includes(id));
+const offPage = (id) => !host.whiteboard?.rect(id) && !isW(id) && !boards.has(id) && pageList.some((p) => p.id !== activePage && p.boards.includes(id));
 const toggled = (id) => { const cur = host.selection(); return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]; };
 /** Select several layers (one or none fall back to select / deselect). The inspector shows "N selected". */
 function setSelection(ids) {
@@ -2301,6 +2304,7 @@ function setDoc(d) {
   pruneSnaps();
   syncSel(); // boards may have moved
   renderLeft(d);
+  host.emit("document", d);
   if (native) post({ file, doc: docMsg(), pages: pagesMsg() });
   schedulePrefetch();
 }
@@ -2744,7 +2748,9 @@ function postSel() {
   // An instance shows what it draws: its component's props with its own on top (/api/node resolved), overrides marked.
   const node = overlayNode(n.resolved ? Object.assign({}, n.resolved, n.node) : n.node, host.live && host.live.overlay ? host.live.overlay(id, at) : []);
   const wr = selWorld || worldRectOf(id);
-  const fixedW = typeof node.width === "number", fixedH = typeof node.height === "number";
+  const sticky = (n.resolved?.type ?? node.type) === "sticky";
+  const fixedW = typeof node.width === "number";
+  const fixedH = typeof node.height === "number" && (!sticky || node.autoHeight === false);
   // The drawn box is axis-aligned: a turned layer whose size the layout decides (a group, Hug) shows its own size.
   // The turned box the selection draws (live.js shape: the badge's numbers) when the page has it; else solved from the
   // drawn box, which for a group is its layers' ink, not its box.
@@ -4134,6 +4140,7 @@ function historyStep(dir, plain) {
 })();
 </script>
 <script>${PAGE_BRIDGE_JS}</script>
+<script type="module" src="/page/whiteboard.js"></script>
 <script type="module" src="/page/draw.js"></script>
 <script type="module" src="/page/widgets.js"></script>
 <script type="module" src="/page/drops.js"></script>

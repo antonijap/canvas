@@ -509,8 +509,8 @@ test("the host process imports cloud code only", () => {
     for (const m of fs.readFileSync(file, "utf8").matchAll(/^import[^"]*"([^"]+)"/gm)) {
       if (!m[1].startsWith(".")) { assert.match(m[1], /^node:/, `${path.relative(ROOT, file)} imports ${m[1]}`); continue; }
       const next = path.resolve(path.dirname(file), m[1]);
-      const sharedText = ["text-spans.js", "text-paras.js"].some(name => next === path.join(ROOT, "src", "page", name));
-      assert.ok((sharedText || next.startsWith(path.join(ROOT, "cloud") + path.sep)) && !next.includes(`${path.sep}cloudflare${path.sep}`), `${path.relative(ROOT, file)} imports ${m[1]}`);
+      const sharedModel = ["text-spans.js", "text-paras.js", "whiteboard-model.js"].some(name => next === path.join(ROOT, "src", "page", name));
+      assert.ok((sharedModel || next.startsWith(path.join(ROOT, "cloud") + path.sep)) && !next.includes(`${path.sep}cloudflare${path.sep}`), `${path.relative(ROOT, file)} imports ${m[1]}`);
       walk(next);
     }
   };

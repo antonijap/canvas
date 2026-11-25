@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import type { CanvasDoc } from "../docfile.ts";
 import { resolveProps, type Theme } from "../resolve.ts";
 import type { Json, DocNode } from "../schema.ts";
+import { stackStickers, stickerData, stickerGlyph, stickyFrame, STICKERS, STICKER_SIZE, WHITEBOARD_PAINT, type Sticker } from "../../page/whiteboard-model.js";
 import { iconArt } from "./icons.ts";
 import { caseCss, hasParagraphs, markerColor, paragraphPlan, paragraphStarts, wordStarts } from "../../page/text-paras.js";
 // Pure colour math shared with the engine's page (the one import from outside this folder).
@@ -19,7 +20,7 @@ type Style = Record<string, string>;
 const css = (s: Style) => Object.entries(s).map(([k, v]) => `${k}:${v}`).join(";");
 
 type ParentCtx = { layout: "horizontal" | "vertical" | "none"; root?: boolean };
-export type HtmlOptions = { doc: CanvasDoc; baseDir: string; theme: Theme; warnings: string[]; assetUrl?: (abs: string) => string; layerNames?: boolean; layerIds?: boolean };
+export type HtmlOptions = { doc: CanvasDoc; baseDir: string; theme: Theme; warnings: string[]; assetUrl?: (abs: string) => string; layerNames?: boolean; layerIds?: boolean; whiteboard?: { seals: Map<string, Sticker[][]>; attached: Set<string> }; canvasView?: boolean };
 
 const sizing = (v: unknown): { mode: "fixed" | "fit" | "fill"; value?: number } => {
   if (typeof v === "number") return { mode: "fixed", value: v };
@@ -412,11 +413,43 @@ function svgPaint(n: DocNode, s: Style): { fill: string; defs: string; stroke: s
   return { fill: c ?? "none", defs: "", stroke };
 }
 
+function stickerHtml(group: Sticker[], position: string): string {
+  const { id, kind } = group[0];
+  const art = STICKERS[kind], white = WHITEBOARD_PAINT.white, ink = WHITEBOARD_PAINT.ink;
+  const count = group.length > 1 ? `<div data-id="${esc(id)}/:count" style="position:absolute;top:-4px;right:-5px;min-width:16px;height:16px;border-radius:8px;background:${ink};color:${white};font:600 11px/16px system-ui;text-align:center">${group.length}</div>` : "";
+  return `<div data-id="${esc(id)}" data-t="sticker" data-name="${esc(art.label)}" style="${position};width:${STICKER_SIZE}px;height:${STICKER_SIZE}px;box-sizing:border-box;border-radius:50%;background:${art.color};color:${white};box-shadow:inset 0 0 0 2px ${white},0 3px 8px ${WHITEBOARD_PAINT.shadow};display:grid;place-items:center">${stickerGlyph(kind)}${count}</div>`;
+}
+
+function appendedStickers(id: string, o: HtmlOptions): string {
+  return (o.whiteboard?.seals.get(id) ?? []).map((group) => {
+    const { x, y } = group[0].on;
+    const position = `position:absolute;left:calc(${x * 100}% - ${STICKER_SIZE / 2}px);top:calc(${y * 100}% - ${STICKER_SIZE / 2}px);z-index:1`;
+    const seal = stickerHtml(group, position);
+    // Each design node can be exported by id. The aliases have the seal's box and are transparent during a board export.
+    const aliases = group.slice(1).map((s) => `<div data-id="${esc(s.id)}" data-sticker-alias="${esc(group[0].id)}" style="${position};width:${STICKER_SIZE}px;height:${STICKER_SIZE}px"></div>`).join("");
+    return seal + aliases;
+  }).join("");
+}
+
 export function nodeHtml(raw: DocNode, parent: ParentCtx, o: HtmlOptions, families: Set<string>, theme: Theme): string {
   if (raw.enabled === false) return "";
   const activeTheme: Theme = raw.theme ? { ...theme, ...(raw.theme as Theme) } : theme;
-  const n = resolveProps(o.doc, raw, activeTheme, o.warnings);
-  if (n.enabled === false) return "";
+  const resolved = resolveProps(o.doc, raw, activeTheme, o.warnings);
+  if (resolved.enabled === false) return "";
+  if (resolved.type === "sticker") {
+    const sticker = stickerData(resolved);
+    if (!sticker || o.whiteboard?.attached.has(sticker.id)) return "";
+    if (o.canvasView) return `<div data-id="${esc(sticker.id)}" data-t="sticker" style="position:absolute;width:0;height:0;pointer-events:none"></div>`;
+    const { x: left, y: top } = sticker;
+    return stickerHtml([sticker], parent.root ? "position:relative" : `position:absolute;left:${left}px;top:${top}px`);
+  }
+  const n = resolved.type === "sticky" ? stickyFrame(resolved) : resolved;
+  const body = renderNodeHtml(n, resolved, parent, o, families, activeTheme);
+  const stickers = appendedStickers(String(n.id), o);
+  return stickers && body.endsWith("</div>") ? body.slice(0, -6) + stickers + "</div>" : body;
+}
+
+function renderNodeHtml(n: DocNode, raw: DocNode, parent: ParentCtx, o: HtmlOptions, families: Set<string>, activeTheme: Theme): string {
   const type = String(n.type);
   const s: Style = { "box-sizing": "border-box", "flex-shrink": "0" };
   const absolute = !parent.root && (parent.layout === "none" || n.layoutPosition === "absolute");
@@ -445,7 +478,7 @@ export function nodeHtml(raw: DocNode, parent: ParentCtx, o: HtmlOptions, famili
   const attrs: string[] = [`data-id="${esc(n.id)}"`, `data-t="${esc(type)}"`];
   if (o.layerNames && n.name) attrs.push(`data-name="${esc(n.name)}"`);
   if (n.locked === true) attrs.push(`data-locked="1"`);
-  const kids = Array.isArray(raw.children) ? (raw.children as DocNode[]) : [];
+  const kids = Array.isArray(raw.type === "sticky" ? n.children : raw.children) ? (raw.type === "sticky" ? n.children! : raw.children!) : [];
   const open = () => `<div ${attrs.join(" ")} style="${esc(css(s))}">`;
 
   if (type === "frame" || type === "group") {
@@ -457,6 +490,11 @@ export function nodeHtml(raw: DocNode, parent: ParentCtx, o: HtmlOptions, famili
       s["justify-content"] = JUSTIFY[String(n.justifyContent)] ?? "flex-start";
       s["align-items"] = ALIGN[String(n.alignItems)] ?? "flex-start";
       if (num(n.gap)) s.gap = px(n.gap as number);
+    }
+    if (raw.type === "sticky") {
+      attrs[1] = 'data-t="sticky"';
+      const layout = n.canvasLayout as Record<string, Json> | undefined;
+      if (typeof layout?.minHeight === "number") s["min-height"] = px(layout.minHeight);
     }
     const p = padding(n.padding);
     if (p) s.padding = p;
@@ -635,7 +673,39 @@ window.__layout=async function(){
     out[el.dataset.id]={x:q?r.left-q.left:0,y:q?r.top-q.top:0,width:r.width,height:r.height,pageX:r.left+sx,pageY:r.top+sy,...(problems?{problems}:{})};}
   return out;};`;
 
+function whiteboardExport(roots: DocNode[], doc: CanvasDoc): HtmlOptions["whiteboard"] {
+  const visit = (nodes: DocNode[], take: (node: DocNode) => void) => {
+    for (const node of nodes) {
+      if (node.enabled === false) continue;
+      take(node);
+      if (node.children) visit(node.children, take);
+    }
+  };
+  const all = new Map<string, Sticker>();
+  const collect = (node: DocNode) => {
+    const sticker = stickerData(node);
+    if (sticker) all.set(sticker.id, sticker);
+  };
+  visit(doc.children, collect);
+  visit(roots, collect);
+  if (!all.size) return undefined;
+  const seen = new Set<string>();
+  visit(roots, (node) => { if (node.type !== "sticker") seen.add(String(node.id)); });
+  const seals = new Map<string, Sticker[][]>(), attached = new Set<string>();
+  for (const group of stackStickers(all.values()).values()) {
+    const id = group[0].on.layer;
+    if (!seen.has(id)) continue;
+    const existing = seals.get(id);
+    if (existing) existing.push(group);
+    else seals.set(id, [group]);
+    for (const member of group) attached.add(member.id);
+  }
+  return { seals, attached };
+}
+
 export function documentHtml(roots: DocNode[], o: HtmlOptions): string {
+  const whiteboard = whiteboardExport(roots, o.doc);
+  if (whiteboard) o = { ...o, whiteboard };
   const families = new Set<string>();
   const bodies = roots.map((r) => `<div class="stage">${nodeHtml(r, { layout: "none", root: true }, o, families, o.theme)}</div>`).join("");
   const jobs = shaderJobs.get(o);

@@ -60,7 +60,7 @@ export function docDiff(prev: DocPayload, next: DocPayload): DocDiff {
   for (const b of next.boards) {
     const old = before.get(b.id);
     if (!old) out.added.push(b);
-    else if (old.key !== b.key || old.name !== b.name || old.x !== b.x || old.y !== b.y || old.width !== b.width || old.height !== b.height) out.changed.push(b);
+    else if (old.key !== b.key || old.name !== b.name || old.x !== b.x || old.y !== b.y || old.width !== b.width || old.height !== b.height || !same(old.stickers, b.stickers)) out.changed.push(b);
   }
   const kept = prev.boards.filter((b) => after.has(b.id)).map((b) => b.id).concat(out.added.map((b) => b.id));
   if (kept.length !== next.boards.length || kept.some((id, i) => id !== next.boards[i].id)) out.order = next.boards.map((b) => b.id);

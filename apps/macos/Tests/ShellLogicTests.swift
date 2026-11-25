@@ -774,6 +774,7 @@ struct ShellLogicTests {
         check(has("File", "Close Tab", "w", [.command]), "Cmd+W closes the tab")
         check(has("Window", "Home", "0", [.command, .shift]) && MenuSpec.window.first??.title == "Home", "Window > Home on Shift+Cmd+0, first in the menu")
         check(items.contains { $0.0 == "Edit" && $0.1.command == "repeat" && $0.1.key == "." && $0.1.mods.isEmpty && $0.1.pageKey }, "Edit > Repeat on the page's . key")
+        check(has("View", "Draw Sticky", "s", []) && has("View", "Place Sticker", "s", [.shift]), "whiteboard tools have distinct shortcuts")
         check(has("View", "Zoom to 100%", "0", [.shift]) && has("View", "Zoom to Fit", "1", [.shift]) && has("View", "Zoom to Selection", "2", [.shift]), "zoom keys")
         check(has("View", "Zoom In", "=", [.command]) && has("View", "Zoom Out", "-", [.command]), "zoom in and out")
         check(has("Object", "Create Component", "k", [.command, .option]) && has("Object", "Detach Instance", "b", [.command, .option]), "components")

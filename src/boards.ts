@@ -4,6 +4,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { displayPath } from "./docpath.ts";
+import { stickerData, type Sticker } from "./page/whiteboard-model.js";
 import { boardCache } from "./boardcache.ts";
 import { freezeBoards, warmBoardFacts } from "./doc/boardindex.ts";
 import { reusableNodes, styleKey, textProps, usageIndex } from "./usage.ts";
@@ -18,7 +19,7 @@ const numOr = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v :
 /** `guides`: ruler guides saved on the board (metadata.canvasGuides, src/page/navigate.js), offsets from its top-left. */
 /** `layoutGuides`: the frames in the board (itself included) that have layout guides (metadata.canvasLayoutGuides,
  * src/page/layout-guides-logic.js), with their guides; the page draws them over the canvas. */
-export type BoardMeta = { id: string; name: string; type: string; x: number; y: number; width?: number; height?: number; key: string; guides?: { axis: "x" | "y"; at: number }[]; layoutGuides?: { id: string; guides: LayoutGuide[] }[] };
+export type BoardMeta = { id: string; name: string; type: string; x: number; y: number; width?: number; height?: number; key: string; stickers?: Sticker[]; guides?: { axis: "x" | "y"; at: number }[]; layoutGuides?: { id: string; guides: LayoutGuide[] }[] };
 
 /** A board's ruler guides, when it has any: well-formed ones only. */
 function guidesOf(n: Record<string, any>): { guides?: { axis: "x" | "y"; at: number }[] } {
@@ -34,21 +35,26 @@ function hasRef(n: DocNode): boolean {
 }
 
 /** Per board object: a digest of its content, whether it uses components, and a digest of the components it holds. */
-type BoardFacts = { digest: string; hasRef: boolean; comps: string; layoutGuides: { id: string; guides: LayoutGuide[] }[] };
+type BoardFacts = { stickers: Sticker[]; digest: string; hasRef: boolean; comps: string; layoutGuides: { id: string; guides: LayoutGuide[] }[] };
 const facts = boardCache<BoardFacts>();
 function factsOf(n: DocNode): BoardFacts {
   let f = facts.get(n);
   if (f) return f;
   const components: DocNode[] = [];
+  const stickers: Sticker[] = [];
   const layoutGuides: { id: string; guides: LayoutGuide[] }[] = [];
-  walk({ children: [n] } as CanvasDoc, (c) => {
+  walk({ children: [n] } as CanvasDoc, (c, parent, ancestors) => {
+    const sticker = stickerData(c);
+    if (sticker && ancestors.every((a) => a.enabled !== false)) {
+      stickers.push(parent?.id ? { ...sticker, parent: parent.id } : sticker);
+    }
     if (c.reusable === true) components.push(c);
     if (c.type === "frame" && c.metadata && typeof c.metadata === "object") {
       const g = layoutGuidesIn(c.metadata);
       if (g.length) layoutGuides.push({ id: String(c.id), guides: g });
     }
   });
-  f = { digest: sha1(JSON.stringify(n)), hasRef: hasRef(n), comps: components.length ? sha1(JSON.stringify(components)) : "", layoutGuides };
+  f = { stickers, digest: sha1(JSON.stringify(n)), hasRef: hasRef(n), comps: components.length ? sha1(JSON.stringify(components)) : "", layoutGuides };
   facts.set(n, f);
   return f;
 }
@@ -68,6 +74,7 @@ export function boardDigestStale(n: object): boolean {
 export function boardsOf(doc: CanvasDoc): BoardMeta[] {
   const shared = sha1(JSON.stringify([doc.variables ?? {}, doc.themes ?? {}, doc.fonts ?? []]));
   const all = doc.children.map((n) => (n && typeof n === "object" ? factsOf(n) : undefined));
+  const layers = all.some((f) => f?.stickers.length) ? buildIndex(doc) : null;
   const comps = sha1(all.map((f) => f?.comps ?? "").join(","));
   return doc.children
     .map((n, i) => ({ n, f: all[i] }))
@@ -81,6 +88,7 @@ export function boardsOf(doc: CanvasDoc): BoardMeta[] {
       width: numOr(n.width),
       height: numOr(n.height),
       key: sha1(`${shared}:${f!.hasRef ? comps : ""}:${f!.digest}`),
+      ...(f!.stickers.length ? { stickers: f!.stickers.map((s) => layers?.has(s.on.layer.split("/")[0]) ? s : { ...s, missingTarget: true }) } : {}),
       ...guidesOf(n),
       ...(f!.layoutGuides.length ? { layoutGuides: f!.layoutGuides } : {}),
     }));
@@ -91,7 +99,7 @@ export function boardHtml(doc: CanvasDoc, file: string, id: string): { html: str
   const raw = doc.children.find((n) => String(n.id) === id);
   if (!raw) throw new Error(`no board "${id}"`);
   const warnings: string[] = [];
-  const o = { doc, baseDir: path.dirname(file), theme: defaultTheme(doc), warnings, assetUrl: (abs: string) => `/asset?p=${encodeURIComponent(abs)}` };
+  const o = { doc, baseDir: path.dirname(file), theme: defaultTheme(doc), warnings, canvasView: true, assetUrl: (abs: string) => `/asset?p=${encodeURIComponent(abs)}` };
   const families = new Set<string>();
   const html = nodeHtml(expand(buildIndex(doc), raw, warnings), { layout: "none", root: true }, o, families, o.theme);
   return { html, ...fontAssets(o, families), warnings };

@@ -24,6 +24,7 @@
 // copy. The server also keeps the last payload (one slot, in memory), so a tab or file in the same server can
 // paste even when the system clipboard only holds the marker (see src/page/structure.js).
 
+import { stickerAnchor } from "./page/whiteboard-model.js";
 import { asOneAction } from "./cloud-files-ops.ts";
 import { fitAround, groupsAround, turnedBox } from "./groupfit.ts";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
@@ -226,6 +227,13 @@ function freshCopies(nodes: DocNode[], taken: Set<string>, index: Map<string, Do
     }).join("/");
   };
   const fix = (n: DocNode) => {
+    const anchor = n.type === "sticker" ? stickerAnchor(n.on) : null;
+    if (anchor) {
+      const slash = anchor.layer.indexOf("/");
+      const root = slash < 0 ? anchor.layer : anchor.layer.slice(0, slash);
+      const replacement = map.get(root);
+      if (replacement) n.on = { ...anchor, layer: replacement + (slash < 0 ? "" : anchor.layer.slice(slash)) };
+    }
     // An instance, or an override that swaps a nested one (a ref without a type).
     if ((n.type === "ref" || !n.type) && typeof n.ref === "string") {
       const target = n.ref;

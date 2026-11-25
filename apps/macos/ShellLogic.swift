@@ -1268,8 +1268,9 @@ enum RepeatHint {
 }
 
 enum DrawTool: String, CaseIterable {
-    case frame, rectangle, ellipse, text
+    case frame, rectangle, ellipse, text, sticky, sticker
 
+    static let barTools: [DrawTool] = [.frame, .rectangle, .ellipse, .text]
     var title: String { rawValue.capitalized }
     var command: String { "draw-" + rawValue }
     var key: String {
@@ -1278,6 +1279,7 @@ enum DrawTool: String, CaseIterable {
         case .rectangle: return "r"
         case .ellipse: return "o"
         case .text: return "t"
+        case .sticky, .sticker: return "s"
         }
     }
     var symbol: String {
@@ -1286,6 +1288,8 @@ enum DrawTool: String, CaseIterable {
         case .rectangle: return "rectangle"
         case .ellipse: return "circle"
         case .text: return "textformat"
+        case .sticky: return "note"
+        case .sticker: return "seal"
         }
     }
 }
@@ -1386,7 +1390,7 @@ enum MenuSpec {
         Item(title: "Quick Actions\u{2026}", command: "palette", key: "k"),
         nil,
     ] + DrawTool.allCases.map { tool in
-        Item(title: "Draw " + tool.title, command: tool.command, key: tool.key, mods: [], pageKey: true)
+        Item(title: (tool == .sticker ? "Place " : "Draw ") + tool.title, command: tool.command, key: tool.key, mods: tool == .sticker ? [.shift] : [], pageKey: true)
     } + [
         nil,
         Item(title: "Zoom In", command: "zoomIn", key: "="),
