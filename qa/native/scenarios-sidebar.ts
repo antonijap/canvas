@@ -60,6 +60,7 @@ sc("sidebar", "right panels dock and align with the Layers header", { covers: ["
   };
   const inspector = await t.mark({ id: "right-sidebar-panel" });
   docked(inspector, await t.mark({ id: "right-sidebar-header" }), "Inspector");
+  const trailingX = center(await t.mark({ id: "inspector-header-action" })).x;
   const checkZoom = async (name: string) => {
     const zoom = await t.mark({ id: "zoom-island" });
     t.near(zoom.x + zoom.w, window.width - METRICS.propsWidth - METRICS.inset, 1, name + " leaves the normal gap before zoom");
@@ -70,14 +71,15 @@ sc("sidebar", "right panels dock and align with the Layers header", { covers: ["
   await t.click(center(await t.mark({ id: "conversations-toggle" })));
   const checkWeb = async (panel: string, head: string, name: string) => {
     await t.waitFor(() => t.js(`return !!document.querySelector('${panel}:not([hidden]) ${head}');`), name + " opens");
-    const rects = await t.js<{ panel: typeof inspector; title: typeof leftHeader }>(`
+    const rects = await t.js<{ panel: typeof inspector; title: typeof leftHeader; close: typeof leftHeader }>(`
       const rect = (selector) => {
         const { x, y, width: w, height: h } = document.querySelector(selector).getBoundingClientRect();
         return { x, y, w, h };
       };
-      return { panel: rect('${panel}'), title: rect('${head}') };
+      return { panel: rect('${panel}'), title: rect('${head}'), close: rect('${head} .right-sidebar-close') };
     `);
     docked(rects.panel, rects.title, name);
+    t.near(center(rects.close).x, trailingX, 1, name + " close aligns with the inspector action");
     await checkZoom(name);
   };
   await checkWeb(".cv-sidebar", ".cv-head", "Conversations");

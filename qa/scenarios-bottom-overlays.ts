@@ -77,7 +77,9 @@ for (const [name, panel, header, open] of [
       const panel = document.querySelector('${panel}'), header = panel.querySelector('${header}');
       const p = panel.getBoundingClientRect(), h = header.getBoundingClientRect();
       const close = header.querySelector('[aria-label^="Close"]');
+      const button = close.getBoundingClientRect();
       return { top:p.top, right:innerWidth-p.right, bottom:innerHeight-p.bottom, width:p.width,
+        closeCenter: p.right - (button.left + button.width / 2),
         headerHeight:h.height, closeWidth:close.offsetWidth, closeText:close.textContent,
         radius:getComputedStyle(panel).borderRadius, shadow:getComputedStyle(panel).boxShadow };
     })()`);
@@ -87,6 +89,7 @@ for (const [name, panel, header, open] of [
     t.near(r.width, METRICS.propsWidth, 1, name + ' replaces the browser inspector');
     t.near(r.headerHeight, METRICS.control, 1, name + ' header height');
     t.ok(r.closeWidth >= 24 && r.closeWidth <= 28 && !r.closeText, 'the close control is icon-only');
+    t.near(r.closeCenter, METRICS.sidebarInset + METRICS.sidebarRow / 2, 1, name + ' close aligns with the trailing action column');
     t.eq(r.radius, '0px', 'square panel corners');
     t.eq(r.shadow, 'none', 'flat panel edge');
   });
@@ -97,12 +100,12 @@ sc('sidebar', 'Browser Conversations shortcut switches away from Comments', {
   skip: { visual: 'The actual pointer click verifies the shortcut is exposed.' },
 }, async (t: T) => {
   await t.waitFor("!!document.querySelector('.cv-btn') && !!document.querySelector('.cm-sidebar')", 'both panels are ready');
+  await t.ev(`document.querySelector('[aria-label^="Open comments"]').click()`);
+  await t.waitFor("!document.querySelector('.cm-sidebar').hidden", 'Comments opens');
   const point = await t.ev<{x: number; y: number}>(`(() => {
     const r = document.querySelector('.cv-btn').getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   })()`);
-  await t.ev(`document.querySelector('[aria-label^="Open comments"]').click()`);
-  await t.waitFor("!document.querySelector('.cm-sidebar').hidden", 'Comments opens');
   t.ok(await t.ev(`(() => {
     const close = document.querySelector('.cm-sidebar-head [aria-label="Close"]');
     const r = close.getBoundingClientRect();

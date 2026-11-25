@@ -96,7 +96,7 @@ extension CanvasModel {
 struct PaperShadersGrid: View {
     @ObservedObject var model: CanvasModel
     var body: some View {
-        SectionHeader(title: "Shaders", inset: Metric.sidebarInset)
+        SidebarGroupLabel(title: "Shaders", inset: Metric.sidebarInset)
         LazyVGrid(columns: WidgetsPanel.columns, spacing: 8) {
             ForEach(model.paperShaders) { s in
                 PaperTile(model: model, shader: s)

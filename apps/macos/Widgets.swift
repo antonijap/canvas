@@ -473,13 +473,10 @@ struct WidgetThumbnail: View {
         }
         .background {
             if kind != "shader" && kind != "video" {
-                LinearGradient(colors: [.white.opacity(0.07), .white.opacity(0.02)],
-                               startPoint: .top, endPoint: .bottom)
-                    .background(Color.black.opacity(0.18))
+                Palette.field.opacity(0.65)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: kind == "shader" ? .clear : .black.opacity(0.28), radius: 3, y: 2)
     }
 }
 

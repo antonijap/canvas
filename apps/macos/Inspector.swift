@@ -296,9 +296,10 @@ struct InspectorBody: View {
             }
             Menu { nodeMenu } label: {
                 Image(systemName: "ellipsis").glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg)
-                    .frame(width: 24, height: 24).contentShape(Circle())
+                    .frame(width: Metric.sidebarRow, height: Metric.sidebarRow).contentShape(Circle())
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("More actions")
+            .qaID("inspector-header-action")
         }
         .sidebarHeader()
         .qaID("right-sidebar-header")

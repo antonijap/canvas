@@ -35,9 +35,10 @@ function start(host) {
 .cv-stop{margin-left:auto;flex:none;border:0;border-radius:6px;padding:4px 8px;background:var(--c-accent);color:var(--c-fg);font:inherit;cursor:pointer}
 .cv-stop:hover{background:var(--c-hover)}
 .cv-btn{position:fixed;top:8px;right:8px;z-index:13;width:28px;height:28px;border:0;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--c-popover);color:var(--c-fg);cursor:pointer;box-shadow:0 0 0 .5px #0000000f,0 1px 3px #00000014}
-body.cm-sidebar-open .cv-btn{top:2px;z-index:15;background:transparent;box-shadow:none}
+body.cm-sidebar-open .cv-btn{top:2px;right:calc(var(--c-sidebar-inset) + var(--c-sidebar-row) + 4px);z-index:15;background:transparent;box-shadow:none}
 body.cm-sidebar-open .cv-btn:hover{background:var(--c-hover)}
-body.cm-sidebar-open:not(.native) .cm-sidebar-head{position:sticky;top:0;z-index:1;padding-inline-end:32px;background:var(--c-sidebar-surface)}
+body.cm-sidebar-open:not(.native) .cm-sidebar-head{position:sticky;top:0;z-index:1;background:var(--c-sidebar-surface)}
+body.cm-sidebar-open:not(.native) .cm-sidebar-head .right-sidebar-close{margin-inline-start:32px}
 .native .cv-btn{display:none}
 @keyframes cv-pulse{50%{opacity:.35}}
 `;
