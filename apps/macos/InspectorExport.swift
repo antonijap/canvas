@@ -31,7 +31,7 @@ extension InspectorBody {
                 Button { model.exportWithSettings(ids) } label: {
                     Text("Export \(name)").font(Typography.label).foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.middle)
                         .frame(maxWidth: .infinity).frame(height: Metric.field)
-                        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+                        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.sidebarField))
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)

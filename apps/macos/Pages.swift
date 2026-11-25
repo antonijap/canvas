@@ -96,7 +96,7 @@ struct PagesSection: View {
                     model.addPage { id, name in startRename(PageInfo(id: id, name: name, count: 0)) }
                 } label: {
                     Image(systemName: "plus").font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Palette.mutedFg).frame(width: 24, height: 24).contentShape(Rectangle())
+                        .foregroundStyle(Palette.mutedFg).frame(width: Metric.sidebarRow, height: Metric.sidebarRow).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).chromeHelp("Add page").accessibilityLabel("Add page")
                 .qaID("page-add", label: "Add page").disabled(model.cloudReadOnly || model.revision.isEmpty)

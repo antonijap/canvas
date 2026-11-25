@@ -19,24 +19,12 @@ function start(host) {
 
   const css = document.createElement("style");
   css.textContent = `
-.cv-sidebar{position:fixed;right:0;top:0;bottom:0;width:var(--c-props-width);z-index:14;display:flex;flex-direction:column;gap:2px;padding:12px;overflow:auto;background:var(--c-popover);color:var(--c-fg);font:13px/100% var(--c-font-sans);-webkit-font-smoothing:antialiased;box-shadow:0 0 0 .5px #0000000f,0 1px 3px #00000014,0 12px 32px -6px #0000002e}
-.native .cv-sidebar{right:var(--c-inset,18px);top:calc(var(--c-inset,18px) + var(--c-pill,36px) + var(--c-island-gap,10px));bottom:var(--c-inset,18px);border-radius:16px}
-@media (prefers-color-scheme: dark){.cv-sidebar{box-shadow:0 0 0 .5px #00000099,0 1px 3px #00000066,0 12px 32px -6px #000000a6}}
-.cv-sidebar *{box-sizing:border-box}
-.cv-sidebar[hidden]{display:none}
-body.cv-open #props{visibility:hidden}
-.cv-head{display:flex;align-items:center;gap:8px;padding:4px 8px 10px}
-.cv-head strong{margin-right:auto;font-weight:600}
-.cv-x{border:0;background:transparent;color:var(--c-muted-fg);font:inherit;padding:6px 8px;border-radius:8px;cursor:pointer}
-.cv-x:hover{background:var(--c-hover)}
-.cv-empty{margin:0;padding:8px;color:var(--c-muted-fg);line-height:18px}
-.cv-row{display:flex;flex-direction:column;gap:8px;flex:none;width:100%;padding:10px 8px;text-align:left;border:0;border-radius:10px;background:transparent;color:inherit;font:inherit;cursor:pointer}
-.cv-row:hover,.cv-row[aria-current=true]{background:var(--c-hover)}
+.cv-empty{margin:0;padding-inline:calc(var(--c-sidebar-label-inset) - var(--c-sidebar-inset));color:var(--c-muted-fg)}
 .cv-row[aria-disabled=true]{cursor:default;opacity:.7}
 .cv-l1{display:flex;align-items:center;gap:8px;min-width:0}
 .cv-l1 b{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cv-when{margin-left:auto;flex:none;color:var(--c-muted-fg)}
-.cv-prompt{line-height:16px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;color:color-mix(in srgb,var(--c-fg) 80%,transparent)}
+.cv-prompt{line-height:16px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;color:var(--c-muted-fg)}
 .cv-l3{display:flex;align-items:center;gap:8px;min-width:0;color:var(--c-muted-fg)}
 .cv-state{display:inline-flex;align-items:center;gap:6px;flex:none}
 .cv-state i{width:6px;height:6px;border-radius:50%;background:currentColor}
@@ -51,7 +39,7 @@ body.cv-open #props{visibility:hidden}
 `;
   document.head.appendChild(css);
 
-  const side = h("aside", "cv-sidebar");
+  const side = h("aside", "cv-sidebar right-sidebar");
   side.hidden = true;
   side.setAttribute("aria-label", "Conversations");
   const spark = `<svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 2l1 2.9 2.9 1-2.9 1-1 2.9-1-2.9-2.9-1 2.9-1zM10.8 8.6l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/></svg>`;
@@ -75,8 +63,9 @@ body.cv-open #props{visibility:hidden}
   function draw() {
     if (side.hidden) return;
     side.replaceChildren();
-    const head = h("div", "cv-head");
-    const close = h("button", "cv-x", "Close");
+    const head = h("div", "cv-head right-sidebar-header");
+    const close = h("button", "right-sidebar-close");
+    close.title = "Close conversations";
     close.type = "button";
     close.setAttribute("aria-label", "Close conversations");
     close.onclick = () => toggle(false);
@@ -86,7 +75,7 @@ body.cv-open #props{visibility:hidden}
     for (const c of L.runningFirst(list)) side.append(rowEl(L.rowOf(c)));
   }
   function rowEl(r) {
-    const row = h("div", "cv-row");
+    const row = h("div", "cv-row right-sidebar-row");
     row.setAttribute("role", "button");
     row.tabIndex = 0;
     row.dataset.run = r.run;

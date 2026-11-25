@@ -113,7 +113,7 @@ extension InspectorBody {
                 } label: {
                     Image(systemName: sideSymbol(mode)).glyph(12).foregroundStyle(Palette.mutedFg)
                         .frame(width: Metric.field, height: Metric.field)
-                        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+                        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.sidebarField))
                         .contentShape(Rectangle())
                 }
                 .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()

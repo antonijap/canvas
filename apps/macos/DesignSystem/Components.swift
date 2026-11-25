@@ -2,7 +2,7 @@
 //
 // Rule: a component takes content and state, never a color or a size. Every value comes from
 // Palette, Metric, Typography or Motion (generated from src/tokens.ts), so one token edit
-// restyles the studio. Glass carries its own edge light, so nothing here draws a border.
+// restyles the studio.
 
 import SwiftUI
 
@@ -55,31 +55,46 @@ struct StatusDot: View {
 
 // MARK: Surfaces
 
-extension Metric {
-    static let topBar: CGFloat = 38
-}
-
 private struct GlassBar<S: Shape>: ViewModifier {
     @Environment(\.appearsActive) private var appearsActive
-    let sidebar: Bool
     let shape: S
 
     func body(content: Content) -> some View {
         content.background {
             shape
-                .fill(appearsActive || sidebar ? .clear : Palette.sidebar.opacity(0.8))
+                .fill(appearsActive ? .clear : Palette.sidebar.opacity(0.8))
                 .glassEffect(.regular, in: shape)
-                .shadow(color: .black.opacity(sidebar ? 0.25 : 0.10), radius: sidebar ? 12 : 14,
-                        x: sidebar ? 4 : 0, y: sidebar ? 0 : 4)
+                .shadow(color: .black.opacity(0.10), radius: 14, y: 4)
                 .allowsHitTesting(false)
         }
     }
 }
 
 extension View {
-    func glassBar(sidebar: Bool = false) -> some View { glassBar(in: Rectangle(), sidebar: sidebar) }
-    func glassBar<S: Shape>(in shape: S, sidebar: Bool = false) -> some View {
-        modifier(GlassBar(sidebar: sidebar, shape: shape))
+    func glassBar<S: Shape>(in shape: S) -> some View { modifier(GlassBar(shape: shape)) }
+
+    func topBarSurface() -> some View {
+        background { Rectangle().fill(Palette.sidebarSurface).allowsHitTesting(false) }
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(Palette.sidebarHairline).frame(height: 1).allowsHitTesting(false)
+        }
+    }
+
+    func sidebarSurface(canvasEdge: HorizontalAlignment) -> some View {
+        background {
+            Rectangle().fill(Palette.sidebarSurface)
+                .background(.ultraThinMaterial)
+                .allowsHitTesting(false)
+        }
+        .overlay(alignment: Alignment(horizontal: canvasEdge, vertical: .center)) {
+            Rectangle().fill(Palette.sidebarHairline).frame(width: 1).allowsHitTesting(false)
+        }
+    }
+
+    func sidebarHeader() -> some View {
+        frame(height: Metric.control)
+            .padding(.leading, Metric.sidebarLabelInset)
+            .padding(.trailing, Metric.sidebarInset)
     }
 }
 
@@ -704,17 +719,24 @@ struct InspectorSection<Trailing: View, Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
                 if let symbol { Image(systemName: symbol).glyph(10).foregroundStyle(tint ?? Palette.mutedFg) }
-                Text(title).font(Typography.label).foregroundStyle(tint ?? Palette.fg).qaText(title)
+                Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg).qaText(title)
                 Spacer(minLength: 0)
                 trailing()
             }
-            content()
+            .frame(height: Metric.sidebarRow)
+            .padding(.leading, Metric.sidebarLabelInset)
+            .padding(.trailing, Metric.sidebarInset)
+            VStack(alignment: .leading, spacing: 8, content: content)
+                .padding(.horizontal, Metric.sidebarLabelInset)
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .overlay(alignment: .top) { Rectangle().fill(Palette.stroke).frame(height: 1).padding(.horizontal, 12) }
+        .padding(.top, 4).padding(.bottom, 10)
+        .overlay(alignment: .top) {
+            Rectangle().fill(Palette.sidebarHairline).frame(height: 1)
+                .padding(.horizontal, Metric.sidebarLabelInset).allowsHitTesting(false)
+        }
     }
 }
 
@@ -753,14 +775,20 @@ extension EnvironmentValues {
     }
 }
 
+extension EnvironmentValues {
+    @Entry var fieldFill: Color = Palette.field
+}
+
 /// The rounded well every field sits in.
 struct FieldBox<Content: View>: View {
     var disabled = false
     @ViewBuilder var content: () -> Content
+    @Environment(\.fieldFill) private var fieldFill
+
     var body: some View {
         HStack(spacing: 6, content: content)
             .padding(.horizontal, 8).frame(height: Metric.field)
-            .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+            .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(fieldFill))
             .opacity(disabled ? 0.5 : 1)
     }
 }
@@ -974,6 +1002,8 @@ struct SegmentedIcons<Tag: Hashable>: View {
     var enabled = true
     let onSelect: (Tag) -> Void
 
+    @Environment(\.fieldFill) private var fieldFill
+
     var body: some View {
         HStack(spacing: 2) {
             ForEach(items.indices, id: \.self) { i in
@@ -992,7 +1022,7 @@ struct SegmentedIcons<Tag: Hashable>: View {
             }
         }
         .padding(2)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(fieldFill))
         .opacity(enabled ? 1 : 0.5).disabled(!enabled)
     }
 }
@@ -1129,6 +1159,8 @@ struct TextAreaField: View {
 
     private func sync() { text = value; draft.show(text, for: target) }
 
+    @Environment(\.fieldFill) private var fieldFill
+
     var body: some View {
         TextEditor(text: $text)
             .font(monospaced ? Typography.mono : Typography.body).scrollContentBackground(.hidden)
@@ -1138,7 +1170,7 @@ struct TextAreaField: View {
             .focused($focused).disabled(!enabled)
             .padding(.horizontal, 4).padding(.vertical, 4)
             .frame(minHeight: minHeight)
-            .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+            .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(fieldFill))
             .overlay(alignment: .topLeading) {
                 if text.isEmpty && !placeholder.isEmpty {
                     Text(placeholder).font(Typography.body).foregroundStyle(Palette.mutedFg)

@@ -42,6 +42,55 @@ async function captureStudio(t: NT, dir: string) {
   }
 }
 
+sc("sidebar", "right panels dock and align with the Layers header", { covers: ["sidebar:menu"] }, async (t: NT) => {
+  await t.section("Layers");
+  await t.showPage("layout");
+  await t.selectIds(["lay_nest"]);
+  if (!(await t.state()).inspectorOpen) await t.click(center(await t.mark({ id: "properties-toggle" })));
+  await t.settle();
+  const { window } = await t.state();
+  const leftHeader = await header(t);
+  const docked = (panel: { x: number; y: number; w: number; h: number }, title: { y: number; h: number }, name: string) => {
+    t.near(panel.x + panel.w, window.width, 1, name + " reaches the right edge");
+    t.near(panel.y, METRICS.topBar, 1, name + " starts below the top bar");
+    t.near(panel.y + panel.h, window.height, 1, name + " reaches the bottom");
+    t.near(panel.w, METRICS.propsWidth, 1, name + " has the shared width");
+    t.near(title.h, METRICS.control, 1, name + " header height");
+    t.near(title.y + title.h / 2, center(leftHeader).y, 1, name + " header centre");
+  };
+  const inspector = await t.mark({ id: "right-sidebar-panel" });
+  docked(inspector, await t.mark({ id: "right-sidebar-header" }), "Inspector");
+  const checkZoom = async (name: string) => {
+    const zoom = await t.mark({ id: "zoom-island" });
+    t.near(zoom.x + zoom.w, window.width - METRICS.propsWidth - METRICS.inset, 1, name + " leaves the normal gap before zoom");
+    await t.waitFor(async () => await t.js("return canvasHost.insets.r;") === METRICS.propsWidth + METRICS.gap,
+      name + " reserves its width and gap on the canvas");
+  };
+  await checkZoom("Inspector");
+  await t.click(center(await t.mark({ id: "conversations-toggle" })));
+  const checkWeb = async (panel: string, head: string, name: string) => {
+    await t.waitFor(() => t.js(`return !!document.querySelector('${panel}:not([hidden]) ${head}');`), name + " opens");
+    const rects = await t.js<{ panel: typeof inspector; title: typeof leftHeader }>(`
+      const rect = (selector) => {
+        const { x, y, width: w, height: h } = document.querySelector(selector).getBoundingClientRect();
+        return { x, y, w, h };
+      };
+      return { panel: rect('${panel}'), title: rect('${head}') };
+    `);
+    docked(rects.panel, rects.title, name);
+    await checkZoom(name);
+  };
+  await checkWeb(".cv-sidebar", ".cv-head", "Conversations");
+  const close = await t.js<{x: number; y: number}>(`
+    const r = document.querySelector('.cv-head [aria-label^="Close"]').getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  `);
+  await t.click(close);
+  await t.waitJs("document.querySelector('.cv-sidebar').hidden", "Conversations closes");
+  await t.js(`document.querySelector('[aria-label^="Open comments"]').click(); return true;`);
+  await checkWeb(".cm-sidebar", ".cm-sidebar-head", "Comments");
+});
+
 sc("sidebar", "section menu switches panels and remembers the selection", {
   covers: ["sidebar:menu", "sidebar:restore", "sidebar:toggle", "sidebar:previews"],
 }, async (t: NT) => {

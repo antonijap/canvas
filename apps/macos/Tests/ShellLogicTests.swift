@@ -469,11 +469,11 @@ struct ShellLogicTests {
     }
 
     static func canvasInsets() {
-        let a = CanvasInsets.compute(panel: 244, inspector: true, inset: 10, gap: 10, pill: 40, props: 284)
-        check(a.l == 244 + 10 && a.r == 10 + 284 + 10 && a.t == 60 && a.b == 60, "panel and inspector open: \(a)")
-        let b = CanvasInsets.compute(panel: nil, inspector: false, inset: 10, gap: 10, pill: 40, props: 284)
+        let a = CanvasInsets.compute(panel: 244, rightSidebar: true, inset: 10, gap: 10, pill: 40, props: 284)
+        check(a.l == 244 + 10 && a.r == 284 + 10 && a.t == 60 && a.b == 60, "panel and inspector open: \(a)")
+        let b = CanvasInsets.compute(panel: nil, rightSidebar: false, inset: 10, gap: 10, pill: 40, props: 284)
         check(b.l == 0 && b.r == 10 && b.t == 60 && b.b == 60, "panel and inspector closed: \(b)")
-        let tools = CanvasInsets.compute(panel: 226, inspector: true, inset: 10, gap: 10,
+        let tools = CanvasInsets.compute(panel: 226, rightSidebar: true, inset: 10, gap: 10,
                                          pill: 40, props: 284, bottomClearance: 72)
         check(tools.b == 72 && tools.t == 60, "fit clears the tool palette")
     }
@@ -600,16 +600,16 @@ struct ShellLogicTests {
     // Finding swift-10: a 420 pt panel in a 720 pt window overlapped the inspector.
     static func layout() {
         func w(_ win: Double, _ stored: Double, _ insp: Bool) -> Double? {
-            ShellLayout.sidebarWidth(window: win, stored: stored, inspector: insp, inset: 10, gap: 10, props: 284, minWidth: 232).map(Double.init)
+            ShellLayout.sidebarWidth(window: win, stored: stored, rightSidebar: insp, inset: 10, gap: 10, props: 284, minWidth: 232).map(Double.init)
         }
         check(w(1560, 420, true) == 420, "wide window keeps the stored width")
         check(w(1560, 100, false) == 232, "never below the minimum")
-        check(w(720, 420, true) == 276, "720 pt: sidebar and inspector leave the minimum canvas")
-        check(w(520, 420, false) == 370, "narrow window without inspector: clamped to the room left")
+        check(w(720, 420, true) == 296, "720 pt: sidebar and inspector leave the minimum canvas")
+        check(w(520, 420, false) == 380, "narrow window without inspector: clamped to the room left")
         check(w(600, 420, true) == nil, "no room at all hides the panel")
-        let withTools = ShellLayout.sidebarWidth(window: 720, stored: 420, inspector: true,
+        let withTools = ShellLayout.sidebarWidth(window: 720, stored: 420, rightSidebar: true,
                                                  inset: 10, gap: 10, props: 284, minWidth: 224, minimumCanvas: 170)
-        check(withTools == 226, "720 pt: two sidebars leave room for the tool palette")
+        check(withTools == 246, "720 pt: two sidebars leave room for the tool palette")
     }
 
     static func drawToolPalette() {
@@ -642,9 +642,9 @@ struct ShellLogicTests {
         check(SidebarSize.cap(window: 700, share: 0.4, min: 200, max: 360) == 280, "mid window: a share of it")
         check(SidebarSize.cap(window: 300, share: 0.4, min: 200, max: 360) == 200, "tiny window: never under the minimum")
         // The editor panel's room is the same figure sidebarWidth clamps to.
-        check(ShellLayout.room(window: 1560, inspector: true, inset: 10, gap: 10, props: 284) == 1560 - 20 - 10 - 120 - 294,
+        check(ShellLayout.room(window: 1560, rightSidebar: true, inset: 10, gap: 10, props: 284) == 1560 - 10 - 120 - 294,
               "room beside the inspector")
-        check(ShellLayout.room(window: 1560, inspector: false, inset: 10, gap: 10, props: 284) == 1560 - 20 - 10 - 120,
+        check(ShellLayout.room(window: 1560, rightSidebar: false, inset: 10, gap: 10, props: 284) == 1560 - 10 - 10 - 120,
               "room without the inspector")
         // The edge's hit strip is wide enough to grab and its centre sits on the edge.
         check(SidebarSize.hitWidth >= 12, "hit strip at least 12 pt")

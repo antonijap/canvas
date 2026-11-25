@@ -256,9 +256,9 @@ window.isReleasedWhenClosed = false
 window.titleVisibility = .hidden
 window.titlebarAppearsTransparent = true
 window.styleMask.insert(.fullSizeContentView)
-// The empty unified toolbar gives the standard window buttons room to align with the custom bar.
+// The compact system toolbar leaves the docked sidebar headers available for clicks.
 window.toolbar = NSToolbar(identifier: "canvas.titlebar")
-window.toolbarStyle = .unified
+window.toolbarStyle = .unifiedCompact
 window.titleVisibility = .hidden
 window.isMovableByWindowBackground = false
 window.contentView = ControlHostingView(rootView: RootView(model: model))

@@ -749,13 +749,7 @@ sc("components", "swap an instance from the inspector's component picker; its te
   await t.section("Layers");
   await t.showPage("components");
   await t.selectIds(["inst_text"]);
-  const region = await inspectorRegion(t);
-  await t.waitText("Instance of", region, 15000);
-  const of = (await t.findText("Instance of", region))[0];
-  t.ok(of, "no Instance of in the inspector");
-  const names = (await t.findText("Button/Primary", region)).filter((m) => Math.abs(m.y + m.h / 2 - (of.y + of.h / 2)) < 10 && m.x > of.x);
-  t.ok(names.length, "no component name beside Instance of");
-  await t.click(center(names[0]));
+  await t.click(center(await t.mark({ id: "swap-instance", label: "Button/Primary", exact: true })));
   const open = await t.waitState((s) => s.menu, "the swap menu to open");
   t.ok(open.menu.items.includes("Button/Secondary"), `the swap menu has no Button/Secondary (${open.menu.items.join(", ")})`);
   t.ok(!open.menu.items.includes("Button/Primary"), "the swap menu offers the instance's own component");
@@ -763,7 +757,7 @@ sc("components", "swap an instance from the inspector's component picker; its te
   const n = await t.waitDisk(() => t.node("inst_text")?.ref === "cmp_button_sec" && t.node("inst_text"), "inst_text to point at Button/Secondary");
   t.eq(n.descendants, { cmp_button_sec_label: { content: "Text override" } }, "the text override, moved to the new label");
   t.eq(n.name, undefined, "the name follows the new main");
-  await t.waitText("Button/Secondary", { ...region, h: 200 }, 15000);
+  await t.mark({ id: "swap-instance", label: "Button/Secondary", exact: true });
   const s = await inspectorShot(t, "components-swap", 420, 260);
   t.note(JSON.stringify(s));
   // One undo step puts it back.
@@ -824,19 +818,14 @@ sc("components", "swap a nested instance from the inspector's component picker; 
   const before = fs.readFileSync(doc, "utf8");
   await t.selectIds(["qa_card_inst/qa_card_btn"]);
   const region = await inspectorRegion(t);
-  await t.waitText("Instance of", region, 15000);
-  const of = (await t.findText("Instance of", region))[0];
-  t.ok(of, "no Instance of for the nested instance");
-  const names = (await t.findText("Button/Primary", region)).filter((m) => Math.abs(m.y + m.h / 2 - (of.y + of.h / 2)) < 10 && m.x > of.x);
-  t.ok(names.length, "no component picker beside Instance of on a nested instance");
-  await t.click(center(names[0]));
+  await t.click(center(await t.mark({ id: "swap-instance", label: "Button/Primary", exact: true })));
   const open = await t.waitState((s) => s.menu, "the swap menu to open");
   t.ok(open.menu.items.includes("Button/Secondary"), `the swap menu has no Button/Secondary (${open.menu.items.join(", ")})`);
   await t.pickMenu("Button/Secondary");
   const n = await t.waitDisk(() => t.node("qa_card_inst")?.descendants?.qa_card_btn?.ref === "cmp_button_sec" && t.node("qa_card_inst"), "the nested instance to draw Button/Secondary");
   t.eq(n.descendants, { qa_card_btn: { ref: "cmp_button_sec" } }, "an override that swaps it, in the outer instance");
   t.eq(t.node("qa_card_btn")!.ref, "cmp_button", "the Card component keeps its own button");
-  await t.waitText("Button/Secondary", { ...region, h: 200 }, 15000);
+  await t.mark({ id: "swap-instance", label: "Button/Secondary", exact: true });
   const row = await t.waitText("Swapped component", { ...region, h: 300 }, 8000);
   // The canvas draws the swapped button (Button/Secondary's light grey) inside the Card instance.
   await waitDrawn(t, "qa_card_inst/qa_card_btn", "#111827", "the swapped nested instance");
@@ -1805,8 +1794,7 @@ sc("inspector", "letter spacing: the token button on hover sits beside the numbe
     if (!b) throw new Error(`${what}: no token button in the letter spacing field`);
     t.ok(b.x >= f.x + f.w - 0.5, `${what}: the token button (x ${b.x.toFixed(1)}) starts inside the number field (it ends at ${(f.x + f.w).toFixed(1)})`);
     // Auto sits beside the caption, above the field, whole.
-    const auto = (await t.findText("Auto", { x: f.x - 40, y: f.y - 30, w: 220, h: 30 }));
-    t.ok(auto.length > 0, `${what}: no "Auto" beside the Letter spacing caption`);
+    await t.mark({ id: "tracking-auto", region: { x: f.x - 40, y: f.y - 30, w: 220, h: 30 } });
     await t.cmd("qa.hoverbind", { on: false });
   };
   await check("Auto on");

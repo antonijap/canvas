@@ -599,16 +599,20 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
 
 sc("comments", "Comment hint clears the tool palette in light and dark", { covers: ["comments:light", "comments:dark"] }, async (t: NT) => {
   const initial = await t.state();
+  await t.section("Layers");
+  if (!initial.inspectorOpen) await t.click(center(await t.mark({ id: "properties-toggle" })));
   await t.settle();
   await t.key("c");
   await t.waitJs("document.querySelector('.cm-hint')?.classList.contains('on')", "comment hint");
   try {
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
-      for (const [width, height] of [[720, 420], [1280, 800], [2000, 1256]]) {
+      for (const [width, height] of [[720, 420], [900, 640], [1320, 800], [2000, 1256]]) {
         await t.cmd("qa.window", { width, height });
         const tools = await t.mark({ id: "tool-palette" });
         await t.waitJs(`document.querySelector('.cm-hint').getBoundingClientRect().bottom <= ${tools.y - 9}`, 'hint above the tools', 8000);
+        const zoom = await t.mark({ id: "zoom-island" });
+        t.ok(tools.x + tools.w <= zoom.x || zoom.y + zoom.h <= tools.y, "zoom clears the palette");
         const hint = await t.js<{ x:number; expected:number }>("const h=window.canvasHost, r=document.querySelector('.cm-hint').getBoundingClientRect(); return {x:r.x+r.width/2,expected:(h.insets.l+innerWidth-h.insets.r)/2}");
         t.near(hint.x, hint.expected, 1, 'centered on free canvas');
         const state = await t.state();
@@ -628,6 +632,7 @@ sc("comments", "Comment hint clears the tool palette in light and dark", { cover
     await t.key("escape");
     await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });
     await t.cmd("qa.theme", { theme: initial.theme });
+    if (!initial.inspectorOpen) await t.click(center(await t.mark({ id: "properties-toggle" })));
   }
 });
 
@@ -784,7 +789,8 @@ sc('comments-list-navigation', 'Native comment pill shows list instead of proper
     const op={opId:crypto.randomUUID(),doc:h.comments.doc||'00000000-0000-4000-8000-000000000000',at:new Date().toISOString(),op:{kind:'thread.create',thread:crypto.randomUUID(),comment:crypto.randomUUID(),anchor:{x:120,y:80,page:h.page},body:'Review this spacing'}};
     const r=await fetch('/api/comments/ops?file='+encodeURIComponent(h.file),{method:'POST',headers:{'x-canvas':'1','content-type':'application/json'},body:JSON.stringify({ops:[op]})});
     const result=await r.json(); if(!r.ok || result.rejected?.length) throw new Error(JSON.stringify(result)); await h.comments.reload();`);
-  await t.waitJs("document.querySelector('.cm-bar').classList.contains('on')", 'comment pill');
+  await t.waitJs("document.querySelector('.cm-bar.on')?.style.top", 'positioned comment pill');
+  await t.settle();
   const click = async (selector: string) => {
     const p = await t.js<any>(`const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}`);
     await t.click(p);
@@ -800,7 +806,15 @@ sc('comments-list-navigation', 'Native comment pill shows list instead of proper
   t.near(g.x,g.cx,2,'pin horizontally centered');
   t.near(g.y,g.cy,2,'pin vertically centered');
   await t.shot(path.join(process.cwd(), 'qa/out/native/comments-sidebar-navigation.png'));
-  await click('.cm-sidebar-head button');
+  const menuRight = await t.js<number>(`
+    const x = innerWidth - canvasHost.insets.r - 4;
+    const pin = document.querySelector('.cm-pin');
+    pin.dispatchEvent(new MouseEvent('contextmenu', { clientX: x, clientY: pin.getBoundingClientRect().top, bubbles: true }));
+    return document.querySelector('.cm-pin-menu').getBoundingClientRect().right;
+  `);
+  const canvasRight = await t.js<number>("return innerWidth - canvasHost.insets.r;");
+  t.ok(menuRight <= canvasRight, "the pin menu clears the docked sidebar");
+  await click('.cm-sidebar-head [aria-label="Close"]');
   await t.waitJs("document.querySelector('.cm-sidebar').hidden", 'list closes');
 });
 

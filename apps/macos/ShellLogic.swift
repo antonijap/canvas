@@ -101,17 +101,15 @@ enum ShellLayout {
     static let minCanvas: CGFloat = 120
 
     /// The widest the panel can be in this window.
-    static func room(window: CGFloat, inspector: Bool, inset: CGFloat, gap: CGFloat, props: CGFloat,
+    static func room(window: CGFloat, rightSidebar: Bool, inset: CGFloat, gap: CGFloat, props: CGFloat,
                      minimumCanvas: CGFloat = minCanvas) -> CGFloat {
-        var room = window - inset * 2 - gap - minimumCanvas
-        if inspector { room -= props + gap }
-        return room
+        window - minimumCanvas - gap - CanvasInsets.rightInset(rightSidebar: rightSidebar, inset: inset, gap: gap, props: props)
     }
 
-    static func sidebarWidth(window: CGFloat, stored: CGFloat, inspector: Bool,
+    static func sidebarWidth(window: CGFloat, stored: CGFloat, rightSidebar: Bool,
                              inset: CGFloat, gap: CGFloat, props: CGFloat, minWidth: CGFloat,
                              minimumCanvas: CGFloat = minCanvas) -> CGFloat? {
-        let room = room(window: window, inspector: inspector, inset: inset, gap: gap, props: props, minimumCanvas: minimumCanvas)
+        let room = room(window: window, rightSidebar: rightSidebar, inset: inset, gap: gap, props: props, minimumCanvas: minimumCanvas)
         if room < minWidth { return nil }
         return min(max(stored, minWidth), room)
     }
@@ -599,12 +597,16 @@ struct LeadTrailThrottle {
     mutating func sent(now: Double) { scheduled = false; lastSent = now }
 }
 
-/// The part of the window the shell's islands cover, as insets of the canvas view. The canvas fits into what is left.
+/// The space that keeps the canvas clear of the sidebars and bottom controls.
 enum CanvasInsets {
-    static func compute(panel: CGFloat?, inspector: Bool, inset: CGFloat, gap: CGFloat, pill: CGFloat,
+    static func rightInset(rightSidebar: Bool, inset: CGFloat, gap: CGFloat, props: CGFloat) -> CGFloat {
+        rightSidebar ? props + gap : inset
+    }
+
+    static func compute(panel: CGFloat?, rightSidebar: Bool, inset: CGFloat, gap: CGFloat, pill: CGFloat,
                         props: CGFloat, bottomClearance: CGFloat = 0) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
         let left = panel.map { $0 + gap } ?? 0
-        let right = inset + (inspector ? props + gap : 0)
+        let right = rightInset(rightSidebar: rightSidebar, inset: inset, gap: gap, props: props)
         let top = inset + pill + gap
         let bottom = max(inset + pill + gap, bottomClearance)
         return (left, top, right, bottom)

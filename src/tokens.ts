@@ -10,6 +10,9 @@ export type Palette = Record<string, string>;
 const light: Palette = {
   canvasBg: "#f6f6f6",
   sidebar: "#fafafa",
+  sidebarSurface: "#fafafafa",
+  sidebarHairline: "#00000014",
+  sidebarField: "#00000012",
   sidebarBorder: "#e4e4e7",
   sidebarFg: "#18181b",
   popover: "#ffffff",
@@ -45,6 +48,7 @@ const light: Palette = {
   tooltip: "#18181be6",
   /** A selected row in a list or the palette: neutral grey, never the accent (the accent is the canvas selection). */
   rowSelected: "#0000000f",
+  sidebarSelected: "#00000017",
   /** Secondary text and icons on the accent tint: the tint's hue, darker. Never grey on a coloured background. */
   selInk: "#3f6db8",
 };
@@ -52,6 +56,9 @@ const light: Palette = {
 const dark: Palette = {
   canvasBg: "#18181b",
   sidebar: "#18181b",
+  sidebarSurface: "#18181bfa",
+  sidebarHairline: "#ffffff14",
+  sidebarField: "#ffffff12",
   sidebarBorder: "#3f3f46",
   sidebarFg: "#f4f4f5",
   popover: "#27272a",
@@ -84,6 +91,7 @@ const dark: Palette = {
   disabled: "#52525b",
   tooltip: "#3f3f46f2",
   rowSelected: "#ffffff14",
+  sidebarSelected: "#ffffff17",
   selInk: "#93b4f0",
 };
 
@@ -99,6 +107,11 @@ export const METRICS = {
   radius: 10,
   radiusRow: 10,
   sidebarWidth: 248,
+  sidebarInset: 8,
+  sidebarLabelInset: 14,
+  sidebarRadius: 5,
+  sidebarRow: 24,
+  topBar: 38,
   sidebarMin: 224,
   sidebarMax: 420,
   resizeHit: 12,

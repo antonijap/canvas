@@ -157,3 +157,83 @@
 @media (prefers-reduced-motion: reduce) {
   #left { transition: none; }
 }
+
+.right-sidebar {
+  position: fixed;
+  inset: 0 0 0 auto;
+  width: var(--c-props-width);
+  box-sizing: border-box;
+  z-index: 14;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 var(--c-sidebar-inset) var(--c-sidebar-inset) calc(var(--c-sidebar-inset) - 1px);
+  overflow: auto;
+  background: var(--c-sidebar-surface);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border-inline-start: 1px solid var(--c-sidebar-hairline);
+  color: var(--c-fg);
+  font: var(--c-size-xs)/1.35 var(--c-font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+.right-sidebar[hidden] { display: none; }
+.native .right-sidebar { top: var(--c-top-bar); }
+body:is(.cm-sidebar-open, .cv-open) #props { visibility: hidden; }
+.right-sidebar * { box-sizing: border-box; }
+.right-sidebar-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding-inline-start: calc(var(--c-sidebar-label-inset) - var(--c-sidebar-inset));
+  height: var(--c-control);
+}
+.right-sidebar-header strong {
+  margin-inline-end: auto;
+  font: 600 var(--c-size-sm)/1 var(--c-font-sans);
+}
+.right-sidebar-close {
+  position: relative;
+  flex: none;
+  width: var(--c-sidebar-row);
+  height: var(--c-sidebar-row);
+  padding: 0;
+  border: 0;
+  border-radius: var(--c-sidebar-radius);
+  background: transparent;
+  color: var(--c-muted-fg);
+  cursor: pointer;
+}
+.right-sidebar-close:hover { background: var(--c-hover); color: var(--c-fg); }
+.right-sidebar-close::before,
+.right-sidebar-close::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 10px;
+  height: 1.25px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.right-sidebar-close::after { transform: translate(-50%, -50%) rotate(-45deg); }
+.right-sidebar-row {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  min-height: var(--c-sidebar-row);
+  padding: 5px calc(var(--c-sidebar-label-inset) - var(--c-sidebar-inset));
+  text-align: start;
+  border: 0;
+  border-radius: var(--c-sidebar-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.right-sidebar-row:hover { background: var(--c-hover); }
+.right-sidebar-row[aria-current=true] { background: var(--c-sidebar-selected); }

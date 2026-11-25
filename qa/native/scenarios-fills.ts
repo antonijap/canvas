@@ -12,35 +12,6 @@ import { ROOT, copyDir, gradientPng, sleep } from "../lib.ts";
 const OUT = path.join(ROOT, "qa", "out", "native");
 type R = { x: number; y: number; w: number; h: number };
 
-/** The inspector's area of the window. */
-async function inspector(t: NT): Promise<R> {
-  const st = await t.state();
-  return { x: st.window.width - 320, y: 60, w: 320, h: st.window.height - 60 };
-}
-/** Where text `label` is drawn in the inspector, matched whole (OCR). */
-async function labelIn(t: NT, label: string, region?: R, window: "main" | "popover" = "main"): Promise<R> {
-  const reg = region ?? (await inspector(t));
-  const t0 = Date.now();
-  for (;;) {
-    const m = (await t.findText(label, reg, window).catch(() => [])).filter((x) => { const s = x.text.trim().toLowerCase(), l = label.toLowerCase(); return s === l || s.replace(/[^a-z0-9. ]+$/, "").trim() === l || s.startsWith(l + " "); });
-    if (m.length) return m.sort((a, b) => a.y - b.y)[0];
-    if (Date.now() - t0 > 25000) throw new Error(`no "${label}" in the ${window === "popover" ? "popover" : "inspector"}`);
-    await sleep(500);
-  }
-}
-/** The right edge of the inspector's content (the opacity fields end there). */
-async function rightEdge(t: NT) { return Math.max(...(await t.fields()).map((f) => f.x + f.w)); }
-/** A section's "+" (Fill, Stroke): at the content's right edge on the title's line. */
-async function plusOf(t: NT, section: string): Promise<Pt> {
-  // Fill with a colour row: the "+" sits on the title line right above the first hex field (text recognition
-  // misses the short word "Fill" now and then while other instances use it).
-  if (section === "Fill") {
-    const hex = (await t.fields()).find((f) => /^[0-9A-F]{6}$/i.test(f.value));
-    if (hex) return { x: (await rightEdge(t)) - 12, y: hex.y + hex.h / 2 - 14 - 8 - 12 };
-  }
-  const l = await labelIn(t, section);
-  return { x: (await rightEdge(t)) - 12, y: l.y + l.h / 2 };
-}
 /** The swatch of the top paint row (a gradient, image or shader has no hex) over a colour row: the colour row's
  * swatch column, the top row's opacity field line. */
 async function topRowSwatch(t: NT): Promise<Pt> {
@@ -83,7 +54,7 @@ const list = (v: unknown): any[] => (Array.isArray(v) ? v : v === undefined ? []
 sc("inspector", "Fill + asks for the type: Linear gradient goes on top; the swatch's Solid tab turns it back", { covers: ["paint-type:rectangle", "paint-type:mouse", "paint-type:gradient", "paint-type:solid", "gradient-edit:rectangle", "gradient-edit:mouse", "gradient-edit:stops", "gradient-edit:angle", "gradient-edit:keyboard"] }, async (t: NT) => {
   await t.showPage("style");
   await t.selectIds(["pt_solid"]);
-  await t.click(await plusOf(t, "Fill"));
+  await t.click(center(await t.mark({ id: "add-paint", label: "fill", exact: true })));
   const open = await t.waitState((s) => s.menu, "the type menu");
   for (const want of ["Solid", "Linear gradient", "Radial gradient", "Angular gradient", "Image…", "Shader"]) t.ok(open.menu.items.includes(want), `the + menu has ${want} (${open.menu.items.join(", ")})`);
   await t.pickMenu("Linear gradient");
@@ -104,7 +75,7 @@ sc("inspector", "Fill + asks for the type: Linear gradient goes on top; the swat
   await t.waitDisk(() => list(t.node("pt_solid")?.fill)[1]?.rotation === 135, "rotation 135 (file degrees for the field's 45)");
   await t.shot(path.join(OUT, "fills-gradient-popover.png"), "popover");
   // The Solid tab: the gradient becomes its first stop's colour.
-  await t.click(await popPoint(t, "Solid", { x: POP.x0 + 25, y: POP.tabsY }), { window: "popover" });
+  await t.click({ x: POP.x0 + 25, y: POP.tabsY }, { window: "popover" });
   await t.waitDisk(() => list(t.node("pt_solid")?.fill)[1] === "#D9D9D9", "the paint back to a colour");
   await closePopover(t);
 });
@@ -113,7 +84,7 @@ sc("inspector", "Fill + Image... adds the picked file; Tile, Rotate 90 and Satur
   await t.showPage("style");
   await t.selectIds(["pt_solid"]);
   await t.cmd("qa.paint", { image: tmpImage("Fill photo.png", 120, 80) });
-  await t.click(await plusOf(t, "Fill"));
+  await t.click(center(await t.mark({ id: "add-paint", label: "fill", exact: true })));
   await t.waitState((s) => s.menu, "the type menu");
   await t.pickMenu("Image…");
   const img = await t.waitDisk(() => { const f = list(t.node("pt_solid")?.fill); return f[1]?.type === "image" && f[1]; }, "an image fill on top");
@@ -144,7 +115,7 @@ sc("inspector", "Fill + Shader adds a Paper preset; its popover switches the pre
   await t.showPage("style");
   await t.selectIds(["pt_corners"]);
 
-  await t.click(await plusOf(t, "Fill"));
+  await t.click(center(await t.mark({ id: "add-paint", label: "fill", exact: true })));
   const open = await t.waitState((s) => s.menu, "the type menu");
   t.ok(open.menu.items.includes("Shader"), "a Shader item");
   const shaders = (await t.a.get("/api/shaders/presets")).shaders as { id: string; name: string; presets: string[] }[];
@@ -201,22 +172,14 @@ sc("inspector", "Shift+Up in the hex field lightens; the layer blend menu; iOS c
   const lighter = String(t.node("pt_solid")!.fill);
   t.ok(parseInt(lighter.slice(1, 3), 16) > 0x25, `lighter: ${lighter}`);
   await t.key("Escape");
-  // The layer's blend mode: the icon left of Appearance's eye.
-  // The Appearance title line: above the opacity field (the "100" with the radius field beside it).
-  const fs = await t.fields();
-  const op = fs.find((f) => f.value === "100" && fs.some((g) => g.value === "0" && Math.abs(g.y - f.y) < 2 && g.x > f.x))!;
-  await t.click({ x: (await rightEdge(t)) - 44, y: op.y + op.h / 2 - 34 });
+  await t.click(center(await t.mark({ id: "layer-blend-mode" })));
   const m = await t.waitState((s) => s.menu, "the blend menu");
   t.ok(m.menu.items.includes("Multiply"), `blend modes: ${m.menu.items.join(", ")}`);
   await t.pickMenu("Multiply");
   await t.waitDisk(() => t.node("pt_solid")?.blendMode === "multiply", "blendMode multiply");
   // Per-corner radii show the corner fields, and smoothing under them.
   await t.selectIds(["pt_corners"]);
-  // Corner smoothing: the field under the four corners, the iOS button at the row's right end.
-  const cf = await t.fields();
-  const br = cf.find((f) => f.value === "24")!;
-  const sm = cf.filter((f) => f.y > br.y + 4).sort((a, b) => a.y - b.y)[0];
-  await t.click({ x: (await rightEdge(t)) - 10, y: sm.y + sm.h / 2 });
+  await t.click(center(await t.mark({ id: "corner-smoothing-preset" })));
   await t.waitDisk(() => t.node("pt_corners")?.cornerSmoothing === 0.6, "corner smoothing 60%");
 });
 
@@ -295,7 +258,7 @@ sc("inspector", "review c5: an image chosen for one layer never lands on the lay
   await t.selectIds(["pt_solid"]);
   const grad = JSON.stringify(t.node("pt_grad")?.fill);
   await t.cmd("qa.paint", { image: tmpImage("Slow photo.png", 60, 40), delay: 2.5 });
-  await t.click(await plusOf(t, "Fill"));
+  await t.click(center(await t.mark({ id: "add-paint", label: "fill", exact: true })));
   await t.waitState((s) => s.menu, "the type menu");
   await t.pickMenu("Image…");
   // While the upload's answer is held: another layer.

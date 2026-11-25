@@ -10,30 +10,30 @@ struct Inspector: View {
 
     var body: some View {
         if model.currentFile != nil {
-            HStack {
-                Spacer(minLength: 0)
-                GlassIsland(padding: 0, dense: true) {
-                    ScrollView {
-                        if let id = model.selectedWidgetId {
-                            WidgetInspector(model: model, widgetId: id)
-                                .environment(\.editTarget, (model.currentFile ?? "") + "\u{1F}widget:" + id)
-                        } else if let s = model.selection {
-                            InspectorBody(model: model, fonts: fonts, s: s)
-                                .environment(\.editTarget, ([model.currentFile ?? "", s.id] + s.ids).joined(separator: "\u{1F}"))
-                        } else if let page = model.pages.first(where: { $0.id == model.activePage }) {
-                            PageInspector(model: model, page: page)
-                                .environment(\.editTarget, (model.currentFile ?? "") + "\u{1F}page:" + page.id)
-                                .id((model.currentFile ?? "") + page.id)
-                        }
+            ScrollView {
+                Group {
+                    if let id = model.selectedWidgetId {
+                        WidgetInspector(model: model, widgetId: id)
+                            .environment(\.editTarget, (model.currentFile ?? "") + "\u{1F}widget:" + id)
+                    } else if let s = model.selection {
+                        InspectorBody(model: model, fonts: fonts, s: s)
+                            .environment(\.editTarget, ([model.currentFile ?? "", s.id] + s.ids).joined(separator: "\u{1F}"))
+                    } else if let page = model.pages.first(where: { $0.id == model.activePage }) {
+                        PageInspector(model: model, page: page)
+                            .environment(\.editTarget, (model.currentFile ?? "") + "\u{1F}page:" + page.id)
+                            .id((model.currentFile ?? "") + page.id)
                     }
-                    .scrollIndicators(.never)
                 }
-                .frame(width: Metric.propsWidth)
+                .padding(.bottom, Metric.sidebarLabelInset)
             }
-            .padding(.top, Metric.inset + Metric.pill + Metric.islandGap)
-            .padding(.bottom, Metric.pill + Metric.islandGap)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-            .transition(.move(edge: .trailing).combined(with: .opacity))
+            .scrollIndicators(.never)
+            .environment(\.fieldFill, Palette.sidebarField)
+            .frame(width: Metric.propsWidth)
+            .frame(maxHeight: .infinity, alignment: .top)
+            .sidebarSurface(canvasEdge: .leading)
+            .qaID("right-sidebar-panel")
+            .padding(.top, Metric.topBar)
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }
@@ -127,9 +127,18 @@ private struct PageInspector: View {
     }
 
     var body: some View {
-        InspectorSection(title: "Page") {
+        VStack(spacing: 0) {
+            Text("Page").font(SidebarStyle.title).qaText("Page")
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .sidebarHeader()
+                .qaID("right-sidebar-header")
+            backgroundSection
+        }
+    }
+
+    private var backgroundSection: some View {
+        InspectorSection(title: "Background") {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Background").font(Typography.label).foregroundStyle(Palette.mutedFg).qaText("Background")
                 HStack(spacing: 4) {
                     ColorAlphaField(model: model, value: color, enabled: !model.isCloudFile,
                                     swatch: AnyView(ColorSwatchButton(value: color, enabled: !model.isCloudFile,
@@ -147,7 +156,7 @@ private struct PageInspector: View {
                         modeButton("Blueprint", blueprint: true)
                     }
                     .padding(2)
-                    .background(RoundedRectangle(cornerRadius: Metric.radiusField).fill(Palette.field))
+                    .background(RoundedRectangle(cornerRadius: Metric.radiusField).fill(Palette.sidebarField))
                     if let pattern = page.pattern { gridControls(pattern) }
                 }
                 .disabled(model.isCloudFile)
@@ -234,7 +243,7 @@ struct InspectorBody: View {
             header
             if !editable {
                 Text("Inside a component instance: read only.").font(Typography.micro).foregroundStyle(Palette.mutedFg)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.bottom, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, Metric.sidebarLabelInset).padding(.bottom, 8)
             }
             // Several layers: align, distribute and tidy up first (ArrangeActions).
             if ArrangeActions.shows(count: s.ids.count) { ArrangeSection(model: model, s: s) }
@@ -252,7 +261,6 @@ struct InspectorBody: View {
             layoutGuideSection
             exportSection
         }
-        .padding(.bottom, 8)
         .modifier(LayoutProbeRefresh(probe: probe, model: model, s: s))
     }
 
@@ -278,10 +286,10 @@ struct InspectorBody: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: headerSymbol).glyph(12).foregroundStyle(s.isComponent ? Palette.component : Palette.mutedFg)
-            Text(layerTitle).font(Typography.title).foregroundStyle(Palette.fg).lineLimit(1)
+            Text(layerTitle).font(SidebarStyle.title).foregroundStyle(Palette.fg).lineLimit(1)
             Spacer(minLength: 0)
             if ContextMenuLayout.canCreateComponent(type: str(n["type"]), reusable: n["reusable"] as? Bool == true, path: s.isPath, inInstance: s.inInstance), !s.id.hasPrefix("widget:") {
-                IconButton(symbol: "diamond", help: "Create Component") { model.run("{cmd:'shortcut',op:'component'}") }
+                MiniButton(symbol: "diamond", help: "Create Component") { model.run("{cmd:'shortcut',op:'component'}") }
                     .qaID("create-component", label: "Create Component").disabled(model.cloudReadOnly)
             }
             Menu { nodeMenu } label: {
@@ -290,7 +298,8 @@ struct InspectorBody: View {
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("More actions")
         }
-        .padding(.leading, 12).padding(.trailing, 8).padding(.top, 12).padding(.bottom, 10)
+        .sidebarHeader()
+        .qaID("right-sidebar-header")
         .contextMenu { nodeMenu }
     }
 
@@ -746,6 +755,7 @@ struct SwapPicker: View {
         .disabled(targets.isEmpty)
         .help(targets.isEmpty ? "No other component to swap to" : "Swap instance")
         .accessibilityLabel("Swap instance: \(current)")
+        .qaID("swap-instance", label: current)
         .onHover { h in withAnimation(Motion.fast) { hovering = h } }
     }
 }
@@ -760,7 +770,7 @@ struct OverrideRow: View {
     var body: some View {
         HStack(spacing: 6) {
             Circle().fill(Palette.component).frame(width: 5, height: 5)
-            Text(title).font(Typography.body).foregroundStyle(Palette.component).lineLimit(1)
+            Text(title).font(Typography.body).foregroundStyle(Palette.component).lineLimit(1).qaText(title)
             Spacer(minLength: 0)
             Button(action: reset) {
                 Image(systemName: "arrow.uturn.backward").font(.system(size: 10, weight: .medium))
@@ -979,7 +989,7 @@ struct ToggleIcons: View {
             }
         }
         .padding(2)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.sidebarField))
         .opacity(enabled ? 1 : 0.5).disabled(!enabled)
     }
 }
@@ -1058,7 +1068,7 @@ private struct ArrangeButtons: View {
             }
         }
         .padding(2)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.sidebarField))
     }
 }
 

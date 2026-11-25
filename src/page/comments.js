@@ -84,10 +84,10 @@ function start(host) {
 .cm-layer{position:absolute;left:0;top:0;width:100%;height:100%;z-index:14;pointer-events:none;overflow:hidden;font-family:var(--c-font-sans);-webkit-font-smoothing:antialiased;
   --cm-card:0 0 0 .5px #0000000f,0 1px 3px #00000014,0 12px 32px -6px #0000002e;--cm-pin:0 0 0 .5px #00000014,0 1px 2px #0000001f,0 4px 10px -2px #00000033;
   --cm-chip:var(--c-hover);--cm-line:var(--c-stroke);--cm-body:color-mix(in srgb,var(--c-fg) 80%,transparent);--cm-time:color-mix(in srgb,var(--c-muted-fg) 80%,transparent);
-  --cm-unread-fill:#2165d9;--cm-unread-text:#1859c6;--cm-unread-row:#e9f1ff;--cm-unread-hover:#dceaff}
+  --cm-unread-fill:#2165d9;--cm-unread-text:#1859c6}
 .cm-layer *{box-sizing:border-box}
 @media (prefers-color-scheme: dark){.cm-layer{--cm-card:0 0 0 .5px #00000099,0 1px 3px #00000066,0 12px 32px -6px #000000a6;--cm-pin:0 0 0 .5px #00000099,0 1px 2px #00000066,0 4px 10px -2px #00000080}}
-@media (prefers-color-scheme: dark){.cm-layer{--cm-unread-text:#8cbaff;--cm-unread-row:#203453;--cm-unread-hover:#283f62}}
+@media (prefers-color-scheme: dark){.cm-layer{--cm-unread-text:#8cbaff}}
 .cm-pin{position:absolute;left:0;top:0;width:${PIN}px;height:${PIN}px;border:0;padding:0;border-radius:14px 14px 14px 3px;background:var(--c-popover);color:var(--c-fg);font:600 12px/100% var(--c-font-sans);display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;box-shadow:var(--cm-pin);will-change:transform}
 .cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1.06}
 .cm-pin.open{color:var(--c-fg)}
@@ -101,26 +101,21 @@ function start(host) {
 .cm-ui{pointer-events:auto}
 .cm-pop,.cm-comp{position:absolute;left:0;top:0;border-radius:16px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:13px;line-height:18px;-webkit-user-select:text;user-select:text;cursor:default}
 .cm-pop{width:340px}.cm-comp{width:320px}
-.cm-pop[hidden],.cm-comp[hidden],.cm-sidebar[hidden]{display:none}
-.cm-sidebar{position:fixed;right:0;top:0;bottom:0;width:var(--c-props-width);display:flex;flex-direction:column;gap:8px;padding:16px;overflow:auto;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:13px;line-height:18px}
-.native .cm-sidebar{right:var(--c-inset,18px);top:calc(var(--c-inset,18px) + var(--c-pill,36px) + var(--c-island-gap,10px));bottom:var(--c-inset,18px);border-radius:16px}
-.cm-sidebar-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
-.cm-sidebar-head strong{margin-right:auto}
-.cm-sidebar h3{margin:4px 0 0;font:600 12px/18px var(--c-font-sans);color:var(--c-muted-fg)}
-.cm-thread-row{display:flex;flex-direction:column;gap:8px;flex:none;width:100%;padding:12px;text-align:left;border:0;border-radius:10px;background:transparent;color:inherit;font:inherit;cursor:pointer}
-.cm-thread-row:hover,.cm-thread-row[aria-current=true]{background:var(--cm-chip)}
-.cm-thread-row span{white-space:pre-wrap;overflow-wrap:anywhere}
-.cm-thread-row.unread{background:var(--cm-unread-row)}
-.cm-thread-row.unread span::first-line{font-weight:600}
-.cm-thread-row.unread:is(:hover,[aria-current=true]){background:var(--cm-unread-hover)}
+.cm-pop[hidden],.cm-comp[hidden]{display:none}
+.cm-sidebar :is(h3,p){margin:0;padding-inline:calc(var(--c-sidebar-label-inset) - var(--c-sidebar-inset));color:var(--c-muted-fg)}
+.cm-sidebar h3{margin-block-start:4px;font:600 var(--c-size-2xs)/20px var(--c-font-sans)}
+.cm-thread-row span{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--c-muted-fg)}
+.cm-thread-row strong{font-weight:600}
+.cm-thread-row.unread span::first-line{font-weight:600;color:var(--c-fg)}
 .cm-new{color:var(--cm-unread-text);font-weight:600}
-body.cm-sidebar-open #props{visibility:hidden}
 .cm-chip{display:inline-flex;align-items:center;gap:5px;height:22px;min-width:0;padding:0 7px 0 6px;border-radius:7px;background:var(--cm-chip);color:color-mix(in srgb,var(--c-fg) 75%,transparent);font:500 12px/100% var(--c-font-sans)}
 .cm-chip svg{flex:none;color:var(--c-muted-fg)}
 .cm-chip span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:3px 0;margin:-3px 0}
 .cm-sp{flex:1;min-width:0;height:1px}
 .cm-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:26px;min-width:26px;padding:0;border:0;border-radius:8px;background:var(--cm-chip);color:var(--c-fg);font:500 12px/100% var(--c-font-sans);cursor:pointer;white-space:nowrap}
 .cm-btn.txt{padding:0 9px}
+.cm-read-all{height:var(--c-sidebar-row);border-radius:var(--c-sidebar-radius);background:transparent;color:var(--c-muted-fg)}
+.cm-read-all:hover{background:var(--c-hover);color:var(--c-fg)}
 .cm-btn.txt:has(svg){padding-left:7.5px}
 .cm-btn:hover{background:var(--c-active)}
 .cm-btn.on{background:var(--c-fg);color:var(--c-popover)}
@@ -164,7 +159,7 @@ body.cm-sidebar-open #props{visibility:hidden}
 .cm-menu{position:absolute;left:0;top:0;min-width:150px;padding:4px;border-radius:10px;background:var(--c-popover);box-shadow:var(--cm-card);z-index:2}
 .cm-menu button{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--c-danger);font:500 12px/100% var(--c-font-sans);cursor:pointer;text-align:left}
 .cm-menu button:hover{background:var(--c-hover)}
-.cm-pin-menu{min-width:166px;z-index:4}
+.cm-pin-menu{min-width:min(166px,var(--cm-pin-menu-width));max-width:var(--cm-pin-menu-width);z-index:4}
 .cm-pin-menu button:not(.danger){color:var(--c-fg)}
 .cm-pin-menu button:disabled{opacity:.45;cursor:default}
 .cm-pin-menu p{margin:4px 8px;color:var(--c-muted-fg);font-size:12px}
@@ -184,7 +179,7 @@ body.cm-sidebar-open #props{visibility:hidden}
 .cm-bar.on,.cm-hint.on{display:flex}
 .cm-bar svg{color:var(--c-muted-fg)}
 .cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
-.cm-hint{min-height:36px;padding:8px 12px 8px 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
+.cm-hint{flex-wrap:wrap;overflow-wrap:anywhere;min-height:36px;padding:8px 12px 8px 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
 .native .cm-hint .cm-soft{min-width:0;padding:3px 0;margin:-3px 0}
 .native .cm-hint>b,.native .cm-hint>.cm-key,.native .cm-hint>span:first-child{flex-shrink:0}
 .cm-hint b{font-weight:600}
@@ -232,10 +227,11 @@ body.cm-sidebar-open #props{visibility:hidden}
   const hint = h("div", "cm-hint");
   const shared = h("div", "cm-shared cm-ui");
   const bar = h("div", "cm-bar cm-ui");
-  const sidebar = h("aside", "cm-sidebar cm-ui");
+  const sidebar = h("aside", "cm-sidebar right-sidebar");
   sidebar.hidden = true;
   sidebar.setAttribute("aria-label", "Comments");
-  layer.append(hov, pop, comp, hint, bar, shared, sidebar);
+  layer.append(hov, pop, comp, hint, bar, shared);
+  document.body.append(sidebar);
   bar.setAttribute("role", "button");
   bar.tabIndex = 0;
   bar.setAttribute("aria-label", "Open comments");
@@ -258,11 +254,13 @@ body.cm-sidebar-open #props{visibility:hidden}
   function drawSidebar() {
     if (sidebar.hidden) return;
     sidebar.replaceChildren();
-    const head = h("div", "cm-sidebar-head");
-    const close = txtBtn("cm-btn txt", "Close");
+    const head = h("div", "cm-sidebar-head right-sidebar-header");
+    const close = h("button", "right-sidebar-close");
+    close.type = "button";
+    close.title = "Close";
     close.onclick = () => showList(false);
     close.setAttribute("aria-label", "Close");
-    const read = txtBtn("cm-btn txt", "Mark all as read");
+    const read = txtBtn("cm-btn txt cm-read-all", "Mark all as read");
     read.setAttribute("aria-label", "Mark all as read");
     read.onclick = () => setRead();
     head.append(h("strong", "", "Comments"));
@@ -280,7 +278,7 @@ body.cm-sidebar-open #props{visibility:hidden}
     function drawRow(thread, unread) {
       const first = L.liveComments(thread)[0];
       if (!first) return;
-      const row = h("button", "cm-thread-row" + (unread ? " unread" : ""));
+      const row = h("button", "cm-thread-row right-sidebar-row" + (unread ? " unread" : ""));
       row.type = "button";
       row.title = (unread ? "Unread comment from " : "Open comment from ") + (first.author?.name || "Someone");
       row.dataset.thread = thread.id;
@@ -555,14 +553,21 @@ body.cm-sidebar-open #props{visibility:hidden}
     };
     for (const t of list) put(t.id, spotOf(t, slots));
     if (st.draft) put("draft", st.draft.spot());
-    const size = (el, w, hh) => ({ w: el.offsetWidth || w, h: el.offsetHeight || hh });
+    const ins = host.insets || {};
+    const placePopover = (el, pin) => {
+      const left = ins.l || 0, width = vw - left - (ins.r || 0);
+      const maxWidth = Math.max(0, width - 16) + "px";
+      if (el.style.maxWidth !== maxWidth) el.style.maxWidth = maxWidth;
+      const localPin = { x: pin.x - left, y: pin.y };
+      const { x, y } = L.popoverAt(localPin, { w: el.offsetWidth, h: el.offsetHeight }, width, vh);
+      el.style.transform = `translate(${left + x}px,${y}px)`;
+    };
     if (st.open && !pop.hidden) {
-      if (at.has(st.open)) { const o = L.popoverAt(at.get(st.open), size(pop, 340, 200), vw, vh); pop.style.transform = `translate(${o.x}px,${o.y}px)`; }
+      if (at.has(st.open)) placePopover(pop, at.get(st.open));
       else pop.style.transform = "translate(-9999px,0)";
     }
-    if (st.draft && at.has("draft") && !comp.hidden) { const o = L.popoverAt(at.get("draft"), size(comp, 320, 110), vw, vh); comp.style.transform = `translate(${o.x}px,${o.y}px)`; }
+    if (st.draft && at.has("draft") && !comp.hidden) placePopover(comp, at.get("draft"));
 
-    const ins = host.insets || {};
     // In the app the shell's insets say what its islands cover; in the browser the bar sits under the page's own islands.
     let below = 0;
     if (!host.native) { const vt = view.getBoundingClientRect().top; for (const e of document.querySelectorAll(".island")) below = Math.max(below, e.getBoundingClientRect().bottom - vt - 4); }
@@ -859,8 +864,10 @@ body.cm-sidebar-open #props{visibility:hidden}
       e.stopPropagation();
     });
     const bounds = layer.getBoundingClientRect();
+    const left = (host.insets?.l || 0) + 4, right = layer.clientWidth - (host.insets?.r || 0) - 4;
+    menu.style.setProperty("--cm-pin-menu-width", Math.max(0, right - left) + "px");
     layer.append(menu);
-    menu.style.left = Math.max(4, Math.min(x - bounds.left, layer.clientWidth - menu.offsetWidth - 4)) + "px";
+    menu.style.left = Math.max(left, Math.min(x - bounds.left, right - menu.offsetWidth)) + "px";
     menu.style.top = Math.max(4, Math.min(y - bounds.top, layer.clientHeight - menu.offsetHeight - 4)) + "px";
     pinMenu = menu;
     menu.querySelector("button:enabled")?.focus();

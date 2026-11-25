@@ -5,6 +5,9 @@ import SwiftUI
 enum Palette {
     static let canvasBg = Color(light: 0xF6F6F6, dark: 0x18181B)
     static let sidebar = Color(light: 0xFAFAFA, dark: 0x18181B)
+    static let sidebarSurface = Color(light: 0xFAFAFA, 0.98, dark: 0x18181B, 0.98)
+    static let sidebarHairline = Color(light: 0x000000, 0.08, dark: 0xFFFFFF, 0.08)
+    static let sidebarField = Color(light: 0x000000, 0.07, dark: 0xFFFFFF, 0.07)
     static let sidebarBorder = Color(light: 0xE4E4E7, dark: 0x3F3F46)
     static let sidebarFg = Color(light: 0x18181B, dark: 0xF4F4F5)
     static let popover = Color(light: 0xFFFFFF, dark: 0x27272A)
@@ -35,6 +38,7 @@ enum Palette {
     static let disabled = Color(light: 0xD4D4D8, dark: 0x52525B)
     static let tooltip = Color(light: 0x18181B, 0.90, dark: 0x3F3F46, 0.95)
     static let rowSelected = Color(light: 0x000000, 0.06, dark: 0xFFFFFF, 0.08)
+    static let sidebarSelected = Color(light: 0x000000, 0.09, dark: 0xFFFFFF, 0.09)
     static let selInk = Color(light: 0x3F6DB8, dark: 0x93B4F0)
 }
 
@@ -48,6 +52,11 @@ enum Metric {
     static let radius: CGFloat = 10
     static let radiusRow: CGFloat = 10
     static let sidebarWidth: CGFloat = 248
+    static let sidebarInset: CGFloat = 8
+    static let sidebarLabelInset: CGFloat = 14
+    static let sidebarRadius: CGFloat = 5
+    static let sidebarRow: CGFloat = 24
+    static let topBar: CGFloat = 38
     static let sidebarMin: CGFloat = 224
     static let sidebarMax: CGFloat = 420
     static let resizeHit: CGFloat = 12

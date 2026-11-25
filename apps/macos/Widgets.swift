@@ -817,17 +817,17 @@ struct WidgetInspector: View {
                 if w.kind == "video" { VideoSection(model: model, widget: w) }
                 WidgetStatusSection(model: model, widget: w, kind: kind)
             }
-            .padding(.bottom, 8)
         }
     }
 
     private func header(_ w: WidgetInfo, _ kind: WidgetKindInfo?) -> some View {
         HStack(spacing: 8) {
             Image(systemName: kind?.symbol ?? "square").railGlyph().foregroundStyle(Palette.mutedFg)
-            Text(w.name.isEmpty ? (kind?.title ?? w.kind) : w.name).font(Typography.title).foregroundStyle(Palette.fg).lineLimit(1)
+            Text(w.name.isEmpty ? (kind?.title ?? w.kind) : w.name).font(SidebarStyle.title).foregroundStyle(Palette.fg).lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 10)
+        .sidebarHeader()
+        .qaID("right-sidebar-header")
     }
 
     private func position(_ w: WidgetInfo, _ kind: WidgetKindInfo?) -> some View {

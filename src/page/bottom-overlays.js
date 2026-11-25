@@ -1,10 +1,16 @@
 /** Geometry shared by every bottom notice, including the native toast. Coordinates are relative to the view. */
-export function bottomOverlayArea(width, height, insets = {}, zoom = null, pill = 36, bottomClearance = 0) {
+export function bottomOverlayArea(width, height, insets = {}, zoom = null, pill = 36, inset = 10, gap = 10, bottomClearance = 0) {
   const left = insets.l || 0, right = width - (insets.r || 0), x = (left + right) / 2;
-  const zoomCenter = zoom?.bottom > 0 ? zoom.bottom - (zoom.height || pill) / 2 : height - 18 - pill / 2;
-  const y = bottomClearance ? height - bottomClearance - pill / 2 : zoomCenter;
-  const edge = Math.min(right, !bottomClearance && zoom?.left > x ? zoom.left - 12 : right);
-  return { x, y, width: Math.max(48, 2 * Math.min(x - left - 8, edge - x - 8)) };
+  const widthBetweenPanels = Math.max(0, right - left - 2 * inset);
+  if (bottomClearance) return { x, y: height - bottomClearance - pill / 2, width: widthBetweenPanels, aboveZoom: true };
+  if (!(zoom?.bottom > 0)) return { x, y: height - inset - pill / 2, width: widthBetweenPanels };
+  const zoomHeight = zoom.height || pill;
+  const y = zoom.bottom - zoomHeight / 2;
+  const widthBesideZoom = 2 * (zoom.left - gap - x);
+  if (widthBesideZoom >= Math.min(48, widthBetweenPanels)) {
+    return { x, y, width: Math.min(widthBetweenPanels, widthBesideZoom) };
+  }
+  return { x, y: zoom.bottom - zoomHeight - gap - pill / 2, width: widthBetweenPanels, aboveZoom: true };
 }
 
 export function installBottomOverlays(host) {
@@ -14,9 +20,12 @@ export function installBottomOverlays(host) {
   function place() {
     frame = 0;
     const view = host.view, vr = view.getBoundingClientRect();
-    const pill = zoom?.height || parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--c-pill')) || 36;
+    const style = getComputedStyle(document.documentElement);
+    const pill = parseFloat(style.getPropertyValue('--c-pill')) || 40;
+    const inset = parseFloat(style.getPropertyValue('--c-inset')) || 10;
+    const gap = parseFloat(style.getPropertyValue('--c-island-gap')) || 10;
     const z = zoom && { left: zoom.left - vr.left, bottom: zoom.bottom - vr.top, height: zoom.height };
-    const area = bottomOverlayArea(vr.width, vr.height, host.insets, z, pill, bottomClearance);
+    const area = bottomOverlayArea(vr.width, vr.height, host.insets, z, pill, inset, gap, bottomClearance);
     let offset = nativeToast ? pill + 10 : 0;
     if (host.native) {
       const geometry = { x: vr.left + area.x, y: vr.top + area.y, width: area.width };
@@ -35,8 +44,8 @@ export function installBottomOverlays(host) {
       set('right', 'auto'); set('bottom', 'auto');
       set('translate', '-50% -50%'); set('transform', 'none');
       const h = el.getBoundingClientRect().height;
-      const y = area.y - offset + (bottomClearance ? (pill - h) / 2 : 0);
-      set('top', (y + (fixed ? vr.top : 0)) + 'px');
+      const lift = area.aboveZoom ? Math.max(0, h - pill) / 2 : 0;
+      set('top', (area.y - offset - lift + (fixed ? vr.top : 0)) + 'px');
       offset += h + 10;
     }
   }

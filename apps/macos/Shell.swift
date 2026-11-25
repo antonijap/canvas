@@ -109,26 +109,24 @@ final class ControlHostingController<Content: View>: NSHostingController<Content
     required init?(coder: NSCoder) { fatalError("Use init(rootView:)") }
 }
 
-private let columnTop: CGFloat = Metric.inset + Metric.pill + Metric.islandGap
-
 struct RootView: View {
     @ObservedObject var model: CanvasModel
     @State private var windowWidth: CGFloat = 0
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden && !model.homeShown }
-    private var inspectorShown: Bool { model.inspectorOpen && !model.commentsSidebarOpen && !model.conversationsSidebarOpen && !model.uiHidden && !model.homeShown }
+    private var inspectorShown: Bool { model.currentFile != nil && model.inspectorOpen && !model.commentsSidebarOpen && !model.conversationsSidebarOpen && !model.uiHidden && !model.homeShown }
     private var toolPaletteShown: Bool { model.currentFile != nil && !model.homeShown && !model.cloudReadOnly && !model.uiHidden }
     private var zoomShown: Bool { !model.uiHidden && !model.homeShown && !model.pageEmpty }
 
     private var rightSidebarShown: Bool { inspectorShown || ((model.commentsSidebarOpen || model.conversationsSidebarOpen) && !model.uiHidden && !model.homeShown) }
     private var minimumCanvasWidth: CGFloat {
         // Leave room for the timer beside Vote when it joins the palette.
-        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.Size.compact.paletteWidth(reserving: 1) - Metric.inset) : ShellLayout.minCanvas
+        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.Size.compact.paletteWidth(reserving: 1) + Metric.pillPad) : ShellLayout.minCanvas
     }
 
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
     private var panelWidth: CGFloat? {
         guard windowWidth > 0 else { return model.sidebarWidth }
-        return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, inspector: rightSidebarShown,
+        return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, rightSidebar: rightSidebarShown,
                                         inset: Metric.inset, gap: Metric.islandGap, props: Metric.propsWidth, minWidth: Metric.sidebarMin,
                                         minimumCanvas: minimumCanvasWidth)
     }
@@ -136,7 +134,7 @@ struct RootView: View {
     /// The widest the panel may be dragged in this window: the maximum, or the room the window leaves.
     private var panelMax: CGFloat {
         guard windowWidth > 0 else { return Metric.sidebarMax }
-        let room = ShellLayout.room(window: windowWidth, inspector: rightSidebarShown, inset: Metric.inset,
+        let room = ShellLayout.room(window: windowWidth, rightSidebar: rightSidebarShown, inset: Metric.inset,
                                     gap: Metric.islandGap, props: Metric.propsWidth, minimumCanvas: minimumCanvasWidth)
         return min(Metric.sidebarMax, room)
     }
@@ -145,7 +143,7 @@ struct RootView: View {
         guard toolPaletteShown, zoomShown, windowWidth > 0 else { return false }
         let i = canvasInsets()
         let toolsRight = (windowWidth + i.l - i.r + toolSize.paletteWidth()) / 2
-        return toolsRight + Metric.islandGap > windowWidth - Metric.inset - ZoomPill.width
+        return toolsRight + Metric.islandGap > windowWidth - i.r - ZoomPill.width
     }
 
     /// Full size, or compact when the room between the sidebars is too narrow for every group.
@@ -187,12 +185,14 @@ struct RootView: View {
 
             LeftColumn(model: model, panelWidth: panelOpen ? panelWidth : nil, panelMax: panelMax)
 
+            if inspectorShown { Inspector(model: model, fonts: model.fonts).disabled(model.cloudReadOnly) }
+
             GlassEffectContainer(spacing: Metric.islandGap) {
                 ZStack(alignment: .topLeading) {
-                    if inspectorShown { Inspector(model: model, fonts: model.fonts).disabled(model.cloudReadOnly) }
                     // Nothing to zoom on an empty page: the pill comes back with the first board.
                     if zoomShown {
                         ZoomCorner(model: model)
+                            .padding(.trailing, rightSidebarShown ? Metric.propsWidth : 0)
                             .padding(.bottom, zoomAboveTools ? ToolPalette.bottomClearance - Metric.inset : 0)
                     }
                     if let t = model.toast {
@@ -205,7 +205,6 @@ struct RootView: View {
                 }
             }
             .transaction { if model.resizingSidebar { $0.animation = nil } }
-            .animation(Motion.island, value: inspectorShown)
             .animation(Motion.island, value: model.uiHidden)
             .padding(Metric.inset)
             .ignoresSafeArea()
@@ -237,7 +236,7 @@ struct RootView: View {
     }
 
     private func canvasInsets(bottomClearance: CGFloat = 0) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
-        CanvasInsets.compute(panel: panelOpen ? panelWidth : nil, inspector: rightSidebarShown, inset: Metric.inset,
+        CanvasInsets.compute(panel: panelOpen ? panelWidth : nil, rightSidebar: rightSidebarShown, inset: Metric.inset,
                              gap: Metric.islandGap, pill: Metric.pill, props: Metric.propsWidth, bottomClearance: bottomClearance)
     }
 
@@ -484,7 +483,7 @@ struct TopBar: View {
                 actions
             }
             .frame(height: Metric.topBar)
-            .glassBar()
+            .topBarSurface()
         }
         .frame(height: Metric.topBar)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
@@ -511,9 +510,10 @@ private struct SidebarToggleButton: View {
 }
 
 enum SidebarStyle {
-    static let row: CGFloat = 24
-    static let radius: CGFloat = 5
-    static let selection = Color(light: 0x000000, 0.09, dark: 0xFFFFFF, 0.09)
+    static let row = Metric.sidebarRow
+    static let radius = Metric.sidebarRadius
+    static let selection = Palette.sidebarSelected
+    static let title = Font.system(size: 13, weight: .semibold)
     static let text = Font.system(size: 12)
 }
 
@@ -531,8 +531,6 @@ struct SidebarGroupLabel: View {
 
 struct LeftColumn: View {
     private static let headerHeight: CGFloat = 32
-    private static let headerInset: CGFloat = 8
-    private static let titleInset: CGFloat = 4
     @ObservedObject var model: CanvasModel
     /// From RootView: the stored width clamped to the window; nil hides the panel.
     let panelWidth: CGFloat?
@@ -605,12 +603,12 @@ struct LeftColumn: View {
                     else { searchFocused = false; model.sidebarMenuOpen = true }
                 } label: {
                     HStack(spacing: 6) {
-                        Text(section.rawValue).font(.system(size: 13, weight: .semibold))
+                        Text(section.rawValue).font(SidebarStyle.title)
                             .qaID("sidebar-section-title", label: section.rawValue)
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Palette.mutedFg)
                     }
-                    .padding(.horizontal, Self.titleInset)
+                    .padding(.trailing, 4)
                     .frame(height: Self.headerHeight)
                     .contentShape(Rectangle())
                 }
@@ -620,7 +618,7 @@ struct LeftColumn: View {
                 .qaID("sidebar-section-menu", label: section.rawValue)
                 Spacer(minLength: 0)
                 if section == .tokens {
-                    IconButton(symbol: "magnifyingglass", help: searchPrompt) {
+                    MiniButton(symbol: "magnifyingglass", help: searchPrompt) {
                         model.sidebarMenuOpen = false
                         searchOpen = true
                         searchFocused = true
@@ -628,7 +626,8 @@ struct LeftColumn: View {
                     .qaID("sidebar-search")
                 }
             }
-            .padding(.horizontal, Self.headerInset)
+            .padding(.leading, Metric.sidebarLabelInset)
+            .padding(.trailing, Metric.sidebarInset)
 
             VStack(spacing: 0) {
                 if section == .tokens && searchOpen {
@@ -662,7 +661,7 @@ struct LeftColumn: View {
         }
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
-        .glassBar(sidebar: true)
+        .sidebarSurface(canvasEdge: .trailing)
         .task(id: section) { if section == .widgets { model.fetchKinds() } }
         .overlay(alignment: .topLeading) {
             if model.sidebarMenuOpen {
@@ -675,7 +674,7 @@ struct LeftColumn: View {
                         dismissMenu()
                     }
                     .qaID("sidebar-section-popup")
-                    .padding(.leading, Self.headerInset + Self.titleInset)
+                    .padding(.leading, Metric.sidebarLabelInset)
                     .padding(.top, Self.headerHeight + 2)
                 }
             }
@@ -857,7 +856,7 @@ private struct SidePanel: View {
                         WidgetsPanel(model: model)
                     }
                 }
-                .padding(.horizontal, section == .widgets ? 0 : 6)
+                .padding(.horizontal, section == .widgets ? 0 : Metric.sidebarInset)
                 .padding(.bottom, 8)
             }
             .scrollIndicators(.never)

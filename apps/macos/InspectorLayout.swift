@@ -126,7 +126,7 @@ struct TextSegments<Tag: Hashable>: View {
             }
         }
         .padding(2)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(showsTrack ? Palette.field : .clear))
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(showsTrack ? Palette.sidebarField : .clear))
         .opacity(enabled ? 1 : 0.5).disabled(!enabled)
     }
 }
@@ -661,7 +661,7 @@ private struct AlignmentBox: View {
             }
         }
         .padding(4)
-        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field))
+        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.sidebarField))
         .overlay(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).stroke(Palette.sel, lineWidth: focused ? 1.5 : 0))
         .opacity(enabled ? 1 : 0.5)
         .focusable(enabled)

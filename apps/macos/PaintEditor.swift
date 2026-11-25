@@ -288,6 +288,7 @@ struct AddPaintMenu: View {
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
         .disabled(!enabled).opacity(enabled ? 1 : 0.4)
         .help("Add \(noun)").accessibilityLabel("Add \(noun)")
+        .qaID("add-paint", label: noun)
         .onHover { hovering = $0 }
         .task { model.fetchPaperShaders() }
     }
@@ -945,6 +946,7 @@ extension InspectorBody {
         BlendMenu(current: mixed("blendMode") ? nil : n["blendMode"] as? String, help: "Layer blend mode", enabled: editable) { id in
             if id == "normal" { model.update([:], remove: ["blendMode"]) } else { model.update(["blendMode": id]) }
         }
+        .qaID("layer-blend-mode")
     }
 
     /// Corner smoothing (a slider; 60% is iOS), for frames and rectangles with a radius.
@@ -959,6 +961,7 @@ extension InspectorBody {
                 }
                 .help("Corner smoothing")
                 FieldWellButton(title: "iOS") { model.update(["cornerSmoothing": 0.6]) }.help("Corner smoothing 60%, as iOS draws its corners").disabled(!editable)
+                    .qaID("corner-smoothing-preset")
             }
         }
     }

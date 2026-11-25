@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { METRICS } from "../src/tokens.ts";
 import { sc, type T } from "./harness.ts";
 
 sc('comments', 'Bottom pill positions share canvas center and zoom center', { covers: ['comments:light', 'comments:dark'], skip: { visual: 'Measured at multiple widths and saved review screenshots.' } }, async (t: T) => {
@@ -61,3 +62,32 @@ sc('comments', 'Comment pill opens sidebar list and centers the chosen pin', { c
   await click('.cm-thread-row:last-child');
   await t.waitFor(`window.canvasHost.page === ${JSON.stringify(other)} && !!window.canvasHost.comments.open`, 'other page comment opens');
 });
+
+for (const [name, panel, header, open] of [
+  ['Comments', '.cm-sidebar', '.cm-sidebar-head', `document.querySelector('[aria-label^="Open comments"]').click()`],
+  ['Conversations', '.cv-sidebar', '.cv-head', "window.canvasCmd({cmd:'conversations',open:true})"],
+]) {
+  sc('sidebar', name + ' has a flush browser panel and compact header', {
+    covers: ['sidebar:menu'], skip: { visual: 'Panel and header geometry and computed styles are asserted.' },
+  }, async (t: T) => {
+    await t.waitFor('!!document.querySelector(' + JSON.stringify(panel) + ')', name + ' is ready');
+    await t.ev(open);
+    await t.waitFor(`!!document.querySelector('${panel}:not([hidden]) ${header}')`, name + ' opens');
+    const r = await t.ev<any>(`(() => {
+      const panel = document.querySelector('${panel}'), header = panel.querySelector('${header}');
+      const p = panel.getBoundingClientRect(), h = header.getBoundingClientRect();
+      const close = header.querySelector('[aria-label^="Close"]');
+      return { top:p.top, right:innerWidth-p.right, bottom:innerHeight-p.bottom, width:p.width,
+        headerHeight:h.height, closeWidth:close.offsetWidth, closeText:close.textContent,
+        radius:getComputedStyle(panel).borderRadius, shadow:getComputedStyle(panel).boxShadow };
+    })()`);
+    t.near(r.right, 0, 1, name + ' reaches the right edge');
+    t.near(r.bottom, 0, 1, name + ' reaches the bottom');
+    t.near(r.top, 0, 1, name + ' starts at the top');
+    t.near(r.width, METRICS.propsWidth, 1, name + ' replaces the browser inspector');
+    t.near(r.headerHeight, METRICS.control, 1, name + ' header height');
+    t.ok(r.closeWidth >= 24 && r.closeWidth <= 28 && !r.closeText, 'the close control is icon-only');
+    t.eq(r.radius, '0px', 'square panel corners');
+    t.eq(r.shadow, 'none', 'flat panel edge');
+  });
+}
