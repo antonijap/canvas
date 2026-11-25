@@ -1,4 +1,64 @@
 import { sc, type T } from "./harness.ts";
+import fs from "node:fs";
+import path from "node:path";
+
+sc("vote", "Vote on objects, reveal results and undo the conclusion", { covers: ["vote:start", "vote:scope", "vote:ballot", "vote:persistence", "vote:results", "vote:undo", "vote:clear"], skip: { visual: "Checks the vote UI at each stage and captures the start, active and results states." } }, async (t: T) => {
+  await t.focus("lay_nest");
+  await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');
+  await t.select(["lay_nest"]);
+  const original = t.disk();
+  await t.io.key("d", { shift: true });
+  const click = async (selector: string) => {
+    const at = await t.waitFor<{ x: number; y: number }>(`(() => {
+      const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+      return r?.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    })()`, selector);
+    await t.io.click(at.x, at.y);
+  };
+  await click('[data-vote-mode="anything"]');
+  fs.writeFileSync("qa/out/vote-start.png", await t.shot());
+  await click("[data-vote-start]");
+  await t.waitFor('document.querySelector("[data-vote-end]")?.offsetWidth', "vote started");
+  const outside = await t.center("lay_auto");
+  await t.io.click(outside.x, outside.y);
+  await t.flush();
+  t.eq(await t.ev('document.querySelectorAll("[data-vote-mark]").length'), 0, "clicks outside the selected frame do not vote");
+  const target = await t.center("r_free");
+  await t.io.click(target.x, target.y);
+  await t.waitFor('document.querySelectorAll("[data-vote-mark]").length === 1', "my vote dot");
+  fs.writeFileSync("qa/out/vote-active.png", await t.shot());
+  await t.open();
+  await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');
+  await t.waitFor('document.querySelectorAll("[data-vote-mark]").length === 1', "my vote dot after reload");
+  await click("[data-vote-mark]");
+  await t.waitFor('!document.querySelector("[data-vote-mark]")', "my dot removed");
+  await t.io.click(target.x, target.y);
+  await t.waitFor('document.querySelectorAll("[data-vote-mark]").length === 1', "my dot added again");
+  t.eq(t.disk(), original, "casting and removing dots leave the design unchanged");
+  await click("[data-vote-end]");
+  await t.waitFor('document.querySelector("[data-vote-count]")?.textContent === "1"', "result badge");
+  await t.waitFor('document.querySelector("[data-vote-results]:not([hidden])")?.textContent.includes("Results")', "results panel");
+  await t.waitFor('document.querySelector(".vote-avatar")?.title === "Anna"', "the name from Settings");
+  fs.writeFileSync("qa/out/vote-reveal.png", await t.shot());
+  await t.flush();
+  const read = () => JSON.parse(fs.readFileSync(path.join(t.file, "comments.json"), "utf8"));
+  t.eq([read().seq, read().votes[0].state, read().votes[0].ballots[0].layer], [0, "ended", "r_free"], "the verdict is stored alongside comments");
+  const cards = () => t.disk().children.filter((n) => n.name === "Vote conclusion");
+  t.eq(cards().length, 1, "one conclusion on the canvas");
+  t.ok(cards()[0].children?.some((node: any) => node.type === "text" && node.content === "1. Free rect"), "the conclusion has the ranked object");
+  await t.ev('Object.defineProperty(navigator.clipboard, "writeText", { value: async (text) => { window.__copiedVote = text; } })');
+  await click("[data-vote-copy]");
+  await t.waitFor('window.__copiedVote === "1. Free rect (1 vote)"', "copied ranked list");
+  await click("[data-vote-done]");
+  await t.undo();
+  t.eq(cards().length, 0, "one undo removes the conclusion");
+  t.eq(read().votes[0].state, "ended", "undo leaves ballots intact");
+  await t.redo();
+  t.eq(cards().length, 1, "redo restores exactly one conclusion");
+  await click("[data-vote-clear]");
+  await t.waitFor('!document.querySelector("[data-vote-count]")', "clear removes badges");
+  t.eq(read().votes[0].state, "dismissed", "the cleared vote stays dismissed");
+});
 
 sc("sticky", "Sticky click, live edit, Tab and undo", { covers: ["sticky:create", "sticky:edit", "sticky:next", "sticky:undo"], skip: { visual: "Checks the drawn text and note bounds with the engine." } }, async (t: T) => {
   await t.focus("lay_nest");

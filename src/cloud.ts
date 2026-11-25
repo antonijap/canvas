@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
-import { PROTOCOL_VERSION, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread } from "../cloud/protocol.ts";
+import { isVoteOp, PROTOCOL_VERSION, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread } from "../cloud/protocol.ts";
 import { readBodyText } from "./body.ts";
 import { addCloud, bump, cleanServerUrl, cloudConfigs, devEmailFor, generation, hostedId, hostedUrl, hostOf, isConfigured, isLocalDev, onCloudsChanged, parseInvite, removeCloud } from "./cloud-config.ts";
 import { hostsHere, hostStatus, hostStatusAll, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
@@ -504,7 +504,8 @@ export function flush(s: Session): void {
   const now = Date.now();
   s.sentAt = s.sentAt.filter((t) => now - t < 60_000);
   const room = OPS_PER_MINUTE - s.sentAt.length;
-  const todo = f.outbox.filter((e) => !s.inflight.has(e.opId));
+  // Vote ops stay in the outbox until the room implements private ballots and vote snapshots.
+  const todo = f.outbox.filter((e) => !isVoteOp(e.op) && !s.inflight.has(e.opId));
   if (!todo.length) return;
   if (room <= 0) { delayFlush(s, s.sentAt[0] + 60_000 - now + 50); return; }
   if (s.inflight.size) return; // one batch at a time; the answer sends the next
@@ -603,9 +604,10 @@ export function vouch(pkg: string, f: SyncFile): boolean {
   const key = knownKey(pkg, f);
   if (readKnown().includes(key)) return false;
   markKnown(key);
-  if (!f.outbox.length) return false;
-  f.rejected = [...(f.rejected ?? []), ...f.outbox.map((envelope) => ({ envelope, code: "forbidden" as const, message: UNVOUCHED }))];
-  f.outbox = [];
+  const comments = f.outbox.filter(e => !isVoteOp(e.op));
+  if (!comments.length) return false;
+  f.rejected = [...(f.rejected ?? []), ...comments.map((envelope) => ({ envelope, code: "forbidden" as const, message: UNVOUCHED }))];
+  f.outbox = f.outbox.filter(e => isVoteOp(e.op));
   return true;
 }
 hooks.vouch = vouch;

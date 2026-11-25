@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { checkBlobPath, blobTypeOf, type BlobPath, type FileOp, type Json } from '../cloud/protocol-files.ts';
-import { readCommentsFile } from './comments-file.ts';
+import { isVoteOp } from '../cloud/protocol.ts';
+import { emptyComments, readCommentsFile, writeCommentsFile } from './comments-file.ts';
 import { opsForShare } from './cloud-sync.ts';
 import { openInPackage } from '../cloud/core/files/confine.ts';
 import { stripPageAppearance } from '../cloud/core/files/state.ts';
@@ -110,7 +111,8 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     walk(doc);
     walk(env);
     const comments = readCommentsFile(pkg);
-    const dest = await publish(path.basename(pkg, '.canvas'), doc, env, blobs, comments ? opsForShare(comments) : []);
+    const ops = comments ? opsForShare(comments) : [];
+    const dest = await publish(path.basename(pkg, '.canvas'), doc, env, blobs, ops.filter(e => !isVoteOp(e.op)));
     const actual = JSON.parse(fs.readFileSync(path.join(dest.file, 'document.json'), 'utf8'));
     if (JSON.stringify(actual) !== JSON.stringify(doc))
         throw new Error('Move verification failed: document differs');
@@ -134,6 +136,13 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     await finalize?.(dest);
     // No await between this final source check and the recoverable rename.
     if (fingerprint(pkg) !== sourceHash) throw new Error('Local file changed during the move; source kept');
+    if (comments?.votes?.length) {
+        const sidecar = readCommentsFile(dest.file) ?? { ...emptyComments(), doc: dest.id };
+        sidecar.votes = comments.votes;
+        if (comments.voteConclusions) sidecar.voteConclusions = comments.voteConclusions;
+        sidecar.outbox.push(...ops.filter(e => isVoteOp(e.op)).map(e => ({ ...e, doc: sidecar.doc })));
+        writeCommentsFile(dest.file, sidecar);
+    }
     trashPackage(pkg);
     return { ...dest, verified: true };
 }

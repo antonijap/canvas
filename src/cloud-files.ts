@@ -19,7 +19,8 @@ import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, 
 import { createPackage, targetPath } from './docpath.ts';
 import { type BlobRow } from '../cloud/core/files/seam.ts';
 import { readBodyText } from './body.ts';
-import { applyOp, type OpEnvelope, type Thread } from '../cloud/protocol.ts';
+import { applyOp, isVoteOp, type OpEnvelope, type Thread } from '../cloud/protocol.ts';
+import { readCommentsFile, writeCommentsFile } from './comments-file.ts';
 import { prepareMove } from './cloud-files-move.ts';
 import { checkPresence, stripIdentity, keep, type Presence, type PeerPresence } from '../cloud/core/presence.ts';
 import { createPresenceSender } from './page/presence-client.js';
@@ -243,8 +244,17 @@ async function downloadBlobs(cloud: string, file: string, pkg: string, blobs: Re
 function render(s: Session) { if (s.stopped)
     return; adoptWriters(path.join(s.store.pkg, 'document.json'), s.store.replica.view().allVers()); s.store.materialize(); fileEvents.view?.(path.join(s.store.pkg, 'document.json')); }
 function commentState(s: Session) { return { format: 1 as const, doc: s.store.meta.file, seq: s.commentsSeq, threads: s.comments, outbox: s.commentsPending, rejected: s.commentsRejected ?? [] }; }
-function saveComments(s: Session) { s.store.db.prepare('INSERT OR REPLACE INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: s.comments, commentsSeq: s.commentsSeq, commentsPending: s.commentsPending, commentsRejected: s.commentsRejected ?? [] })); const threads = structuredClone(s.comments); for (const e of [...s.commentsPending, ...(s.commentsRejected ?? []).map(r => r.envelope)])
-    applyOp(threads, s.store.meta.file, e.op, { name: s.store.meta.author.name ?? "Me", id: s.store.meta.author.id }, e.at); fs.writeFileSync(path.join(s.store.pkg, 'comments.json'), JSON.stringify({ ...commentState(s), threads })); }
+function saveComments(s: Session) {
+    s.store.db.prepare('INSERT OR REPLACE INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: s.comments, commentsSeq: s.commentsSeq, commentsPending: s.commentsPending, commentsRejected: s.commentsRejected ?? [] }));
+    const threads = structuredClone(s.comments);
+    for (const e of [...s.commentsPending, ...(s.commentsRejected ?? []).map(r => r.envelope)])
+        applyOp(threads, s.store.meta.file, e.op, { name: s.store.meta.author.name ?? "Me", id: s.store.meta.author.id }, e.at);
+    const local = readCommentsFile(s.store.pkg);
+    const state = commentState(s);
+    writeCommentsFile(s.store.pkg, {
+        ...local, ...state, threads, outbox: [...state.outbox, ...(local?.outbox.filter(e => isVoteOp(e.op)) ?? [])],
+    });
+}
 function waitForQuota(s: Session) {
     s.status = 'quota'; for (const p of s.store.replica.pending) p.sent = false; s.store.commit();
     if (s.timer) clearTimeout(s.timer);
@@ -768,6 +778,8 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             if (s.store.meta.role === 'viewer')
                 return out(403, { code: 'read_only', error: 'Viewers cannot comment' });
             const ops = (b.ops ?? []).map((e: OpEnvelope) => ({ ...e, doc: s.store.meta.file }));
+            if (ops.some((e: OpEnvelope) => e.op && isVoteOp(e.op)))
+                return out(400, { code: 'invalid', error: 'Use the vote controls to vote' });
             s.commentsPending.push(...ops);
             saveComments(s);
             if (s.ws?.readyState === WebSocket.OPEN && s.status !== 'quota')

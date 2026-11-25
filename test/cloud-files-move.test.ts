@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -10,6 +10,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { PLAYGROUND } from '../qa/playground.ts';
 import { ROOT, startServer } from '../qa/lib.ts';
 import { expectedMove } from '../qa/cloud-files-fixture.ts';
+import { NIL_DOC } from '../src/cloud-sync.ts';
+import { readCommentsFile } from '../src/comments-file.ts';
 
 test('Cloud moves preserve complete packages byte for byte after JSON serialization', async t => {
     const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-roundtrip-')));
@@ -95,6 +97,13 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 const assets = ['media', 'shaders'].flatMap(folder => fs.readdirSync(path.join(source, folder))
                     .filter(name => fs.statSync(path.join(source, folder, name)).isFile() && !name.includes('.poster-'))
                     .map(name => ({ rel: folder + '/' + name, bytes: fs.readFileSync(path.join(source, folder, name)) })));
+                const vote = randomUUID();
+                const envelopeFor = (op: object) => ({ opId: randomUUID(), doc: NIL_DOC, at: new Date().toISOString(), op });
+                if (fixture === 'playground') {
+                    const route = '/api/votes?file=' + encodeURIComponent(source);
+                    await call(route, { name: 'Anna', envelope: envelopeFor({ kind: 'vote.start', vote, scope: { page: 'layout' }, on: 'anything', perPerson: 3, hidden: true, anonymous: false }) });
+                    await call(route, { name: 'Anna', envelope: envelopeFor({ kind: 'vote.cast', vote, ballot: randomUUID(), layer: 'r_free' }) });
+                }
                 const moved = await call('/api/cloud/files/move?file=' + encodeURIComponent(source), { cloud: host.url });
                 assert.equal(moved.verified, true);
                 assert.equal(fs.existsSync(source), false);
@@ -106,6 +115,18 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     for (const asset of [...assets, ...images]) assert.deepEqual(fs.readFileSync(path.join(file, asset.rel)), asset.bytes, asset.rel);
                 };
                 check(moved.file);
+                if (fixture === 'playground') {
+                    const before = readCommentsFile(moved.file)!;
+                    assert.equal(before.votes?.[0].id, vote);
+                    assert.equal(before.votes?.[0].ballots[0].voter.name, 'Anna');
+                    assert.deepEqual(before.outbox.map(e => [e.doc, e.op.kind]), [[moved.id, 'vote.start'], [moved.id, 'vote.cast']]);
+                    const reply = await fetch(server.base + '/api/comments/ops?file=' + encodeURIComponent(moved.file), {
+                        method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json', 'x-canvas-source': 'mcp' },
+                        body: JSON.stringify({ ops: [envelopeFor({ kind: 'thread.create', thread: randomUUID(), comment: randomUUID(), body: 'Review this frame', anchor: { nodeId: 'lay_nest', x: 0.5, y: 0.5 } })] }),
+                    });
+                    assert.equal(reply.status, 200);
+                    assert.deepEqual(readCommentsFile(moved.file)?.votes, before.votes);
+                }
                 if (fixture === 'children first') {
                     const health = await (await fetch(server.base + '/health')).json() as { version: string };
                     const client = new Client({ name: 'page-background-test', version: '1' });

@@ -134,6 +134,7 @@ struct SparkButton: View {
             }
         }
         .accessibilityLabel(item.kind == "ring" ? "\(item.tip) \(item.count)" : "Ask about this")
+        .qaID("canvas-spark-" + item.id)
     }
 
     /// Track and arc, 2.5 pt, just inside the glass edge. No plan: a quarter arc going round.

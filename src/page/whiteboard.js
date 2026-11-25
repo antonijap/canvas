@@ -1,4 +1,5 @@
 import { drawRect } from "./draw-logic.js";
+import { BADGE, SPARK, sparkAt, visibleArea } from "./spark-logic.js";
 import { STICKY_COLORS, STICKY_SIZE, STICKY_GAP, STICKERS, STICKER_SIZE, stackStickers, stickerGlyph,
   isStickyColor, isStickerKind, whiteboardPerson, WHITEBOARD_PAINT } from "./whiteboard-model.js";
 
@@ -8,16 +9,16 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const round = (n) => Math.round(n * 1000) / 1000;
 const get = (key) => { try { return localStorage.getItem("canvas:whiteboard:" + key); } catch { return null; } };
 function remember(key, value) { try { localStorage.setItem("canvas:whiteboard:" + key, value); } catch { /* private browsing */ } }
-const icon = (path) => `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
+export const icon = (path) => `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
 
-function el(tag, cls, text) {
+export function el(tag, cls, text) {
   const item = document.createElement(tag);
   if (cls) item.className = cls;
   if (text) item.textContent = text;
   return item;
 }
 
-function button(label, cls, action) {
+export function button(label, cls, action) {
   const b = el("button", cls);
   b.type = "button";
   b.title = label;
@@ -262,14 +263,16 @@ function start(host) {
   }
 
   function positionSticky() {
-    const r = !tool && parentId && !host.hand && !host.live?.busy && host.cam && host.worldRectOf(parentId);
+    const r = !tool && !host.votes?.capturing() && parentId && !host.hand && !host.live?.busy && host.cam && host.worldRectOf(parentId);
     controls.hidden = right.hidden = below.hidden = !r;
     if (!r) return;
     const top = screen(r.x, r.y), bottom = screen(r.x + r.w, r.y + r.h);
     const width = controls.offsetWidth;
     at(controls, clamp((top.x + bottom.x - width) / 2, 4, Math.max(4, view.clientWidth - width - 4)), top.y > 52 ? top.y - 48 : top.y + 4);
-    at(right, bottom.x + 8, (top.y + bottom.y) / 2 - 12);
-    at(below, (top.x + bottom.x) / 2 - 12, bottom.y + 8);
+    const box = { ...top, w: bottom.x - top.x, h: bottom.y - top.y };
+    const spark = sparkAt(box, visibleArea({ w: view.clientWidth, h: view.clientHeight }, host.insets));
+    at(right, bottom.x + 8, Math.max(spark ? spark.y + SPARK + 6 : top.y, (top.y + bottom.y) / 2 - 12));
+    at(below, (top.x + bottom.x) / 2 - 12, bottom.y + BADGE + 4);
   }
 
   function preview() {
@@ -411,7 +414,7 @@ function start(host) {
       const title = art.label + (group.length > 1 ? " (" + group.length + ")" : "");
       if (!b) {
         b = button(title, "sticker-seal sticker-placed", () => {
-          if (tool) return;
+          if (tool || host.votes?.active()) return;
           const items = stacks.get(key);
           if (!items) return;
           const pick = [...items].reverse().find((item) => !item.locked);
@@ -424,13 +427,14 @@ function start(host) {
         b.setAttribute("aria-expanded", "false");
         b.style.setProperty("--wb-sticker", art.color);
         b.innerHTML = stickerGlyph(first.kind);
-        b.addEventListener("pointerenter", () => { if (!tool && (!pinned || open === key)) showPopover(key); });
+        b.addEventListener("pointerenter", () => { if (!tool && !host.votes?.active() && (!pinned || open === key)) showPopover(key); });
         b.addEventListener("pointerleave", laterClose);
         b.addEventListener("focus", () => { if (!tool && !pinned) showPopover(key); });
         b.addEventListener("blur", laterClose);
         rendered.set(key, b);
         sealLayer.append(b);
       }
+      b.dataset.stickerLayer = first.id;
       b.title = title;
       b.setAttribute("aria-label", title);
       let count = b.querySelector("[data-sticker-count]");
@@ -462,6 +466,7 @@ function start(host) {
   addEventListener("keydown", (e) => {
     if (e.defaultPrevented || e.isComposing || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.(field) || host.textEdit?.active) return;
     const key = e.key.toLowerCase();
+    if (host.votes?.capturing() && key !== "escape") return;
     if (key === "escape" && (tool || open)) { reset(); closePopover(); }
     else if (key === "s" && e.shiftKey) activate("sticker");
     else if (tool === "sticker" && !e.shiftKey) {
@@ -477,7 +482,7 @@ function start(host) {
 
   addEventListener("pointerdown", (e) => {
     if (open && !popover.contains(e.target) && !e.target.closest?.("[data-sticker-seal]")) closePopover();
-    if (!tool || drag || host.hand || host.readOnly || !host.cam || e.button !== 0 || !view.contains(e.target) || e.target.closest(insideChrome)) return;
+    if (!tool || drag || host.hand || host.readOnly || host.votes?.active() || !host.cam || e.button !== 0 || !view.contains(e.target) || e.target.closest(insideChrome)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (tool === "sticker") { placeSticker(e); return; }

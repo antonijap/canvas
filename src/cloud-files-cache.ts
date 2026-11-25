@@ -6,6 +6,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {createHash,randomUUID} from 'node:crypto';
 import {gzipSync,gunzipSync} from 'node:zlib';
 import type {DocNode} from '../cloud/protocol-files.ts';
+import {readCommentsFile} from './comments-file.ts';
 export function writeBoardCheckpoint(dir:string,children:DocNode[]):{id:string;sha256:string}[]{
  fs.mkdirSync(dir,{recursive:true,mode:0o700});if(fs.lstatSync(dir).isSymbolicLink())throw new Error('Board cache is a link');
  return children.map(node=>{
@@ -53,6 +54,7 @@ export function evictClosedPackages(root:string,open:Set<string>,cap=5*1024**3,b
   for(const f of fs.readdirSync(cloud,{withFileTypes:true})){
    if(!f.isDirectory()||!/^[0-9a-f-]{36}\.canvas$/.test(f.name))continue;const pkg=path.join(cloud,f.name),file=path.join(pkg,'.cloud','state.sqlite');let pending=true;
    if(!open.has(pkg)&&fs.existsSync(file)){let db:DatabaseSync|undefined;try{db=new DatabaseSync(file,{readOnly:true});pending=Number(db.prepare('SELECT COUNT(*) AS n FROM pending').get()!.n)>0;const have=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='comments_state'").get();if(have){const c=db.prepare('SELECT json FROM comments_state WHERE id=1').get();if(c){const saved=JSON.parse(String(c.json));pending ||= saved.commentsPending?.length>0 || saved.commentsRejected?.length>0;}}}catch{pending=true;}finally{db?.close();}}
+   if(!pending){try{pending=readCommentsFile(pkg)?.votes?.some(v=>v.state!=='dismissed')??false;}catch{pending=true;}}
    files.push({pkg,bytes:bytes(pkg),at:fs.statSync(pkg).mtimeMs,pending:pending||open.has(pkg)});
   }
  }

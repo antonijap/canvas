@@ -1,4 +1,57 @@
-import { center, sc } from "./harness.ts";
+import { center, sc, type NT } from "./harness.ts";
+import fs from "node:fs";
+import path from "node:path";
+
+sc("vote", "Vote on a sticky and reveal the conclusion in the Mac app", { covers: ["vote:start", "vote:ballot", "vote:privacy", "vote:results", "sticky:handles"] }, async (t: NT) => {
+  await t.cmd("qa.cloud", { commentName: "Anna" });
+  await t.showPage("layout");
+  await t.look(0, 0);
+  const p = center(await t.rect("r_free"));
+  await t.key("s");
+  await t.click({ x: p.x - 120, y: p.y });
+  await t.waitJs("window.canvasHost.textEdit.active", "sticky editor");
+  const [note] = await t.pageSel();
+  await t.key("a");
+  await t.key("Escape");
+  await t.waitDisk(() => t.node(note)?.content === "a", "the sticky is saved");
+  const handles = `(() => {
+    const below = document.querySelector(".sticky-next-below:not([hidden])");
+    const right = document.querySelector(".sticky-next-right:not([hidden])");
+    const badge = document.querySelector("#seldim");
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    };
+    return below && right && badge && { below: box(below), badge: box(badge), right: box(right) };
+  })()`;
+  await t.waitJs(handles, "sticky quick-add handles");
+  await t.look(0, 0, 0.25);
+  await t.waitJs(`(${handles}) && window.canvasHost.cam.z === 0.25`, "small sticky with quick-add handles");
+  const spark = await t.mark({ id: "canvas-spark-spark" });
+  const { below, badge, right } = await t.js(`return ${handles};`);
+  const { webFrame } = await t.state();
+  const overlaps = (a: typeof right, b: typeof right) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  t.ok(!overlaps(below, badge), "the add-below handle clears the size badge");
+  t.ok(!overlaps({ ...right, x: right.x + webFrame.x, y: right.y + webFrame.y }, spark), "the add-right handle clears Ask about this");
+  await t.look(0, 0);
+  await t.key("d", ["shift"]);
+  const click = async (selector: string) => {
+    const rect = `document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect()`;
+    await t.waitJs(`${rect}?.width`, selector);
+    const at = await t.js(`const r = ${rect}; return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+    const { webFrame } = await t.state();
+    await t.click({ x: at.x + webFrame.x, y: at.y + webFrame.y });
+  };
+  await click("[data-vote-anonymous]");
+  await click("[data-vote-start]");
+  await t.waitJs('document.querySelector("[data-vote-end]")?.offsetWidth', "vote started");
+  await t.click(center(await t.rect(note)));
+  await t.waitJs('document.querySelector("[data-vote-mark]")', "my dot appears during the vote");
+  await click("[data-vote-end]");
+  await t.waitJs('document.querySelector("[data-vote-results]:not([hidden])")?.textContent.includes("Anonymous")', "anonymous result");
+  const vote = JSON.parse(fs.readFileSync(path.join(t.file, "comments.json"), "utf8")).votes[0];
+  t.eq([vote.host.name, vote.ballots[0].voter.name, vote.ballots[0].layer], [undefined, undefined, note], "anonymous vote stores no name");
+});
 
 async function expectTool(t: import("./harness.ts").NT, label?: string) {
   await t.waitFor(async () => {

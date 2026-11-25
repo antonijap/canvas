@@ -1,4 +1,4 @@
-import { applyOp, canonicalMentions, checkEnvelope, LIMITS, mayApply } from "../protocol.ts";
+import { applyOp, canonicalMentions, checkEnvelope, isVoteOp, LIMITS, mayApply } from "../protocol.ts";
 import type { Applied, Author, OpEnvelope, Rejected, Role, Thread } from "../protocol.ts";
 import { initializeRoom } from "./room-schema.ts";
 import type { SqlStore } from "./sql.ts";
@@ -52,6 +52,7 @@ export class Operations {
       const invalid = checkEnvelope(value);
       if (invalid) { reject("invalid", invalid); continue; }
       const envelope = value as OpEnvelope;
+      if (isVoteOp(envelope.op)) { reject("version", "This room does not support votes yet"); continue; }
       if (envelope.doc !== doc) { reject("invalid", "Document does not match the room"); continue; }
       this.storage.transactionSync(() => {
         const sql = this.storage.sql;

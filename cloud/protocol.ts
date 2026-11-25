@@ -86,6 +86,31 @@ export interface Thread {
   comments: Comment[];
 }
 
+export interface VoteScope { page: string; frame?: string }
+export interface Voter { id: string; name?: string }
+export interface VoteBallot { id: Uuid; voter: Voter; layer: string }
+export interface VoteTimer { ms: number; startedAt?: Iso; pausedAt?: Iso; endsAt?: Iso }
+export interface Vote {
+  id: Uuid;
+  host: Voter;
+  scope: VoteScope;
+  on: "stickies" | "anything";
+  perPerson: number;
+  hidden: boolean;
+  anonymous: boolean;
+  timer?: VoteTimer;
+  state: "active" | "ended" | "dismissed";
+  ballots: VoteBallot[];
+  retracted?: Uuid[];
+}
+
+export type VoteOp =
+  | ({ kind: "vote.start"; vote: Uuid; showName?: boolean } & Pick<Vote, "scope" | "on" | "perPerson" | "hidden" | "anonymous">)
+  | { kind: "vote.cast"; vote: Uuid; ballot: Uuid; layer: string; showName?: boolean }
+  | { kind: "vote.retract"; vote: Uuid; ballot: Uuid }
+  | { kind: "vote.end"; vote: Uuid }
+  | { kind: "vote.clear"; vote: Uuid };
+
 /** One change. Every change to comments is one of these, locally and on the server. */
 export type Op =
   | { kind: "thread.create"; thread: Uuid; anchor: Anchor; comment: Uuid; body: string; mentions?: Mention[] }
@@ -94,7 +119,10 @@ export type Op =
   | { kind: "comment.delete"; comment: Uuid }
   | { kind: "thread.resolve"; thread: Uuid; resolved: boolean }
   | { kind: "thread.move"; thread: Uuid; anchor: Anchor }
-  | { kind: "thread.delete"; thread: Uuid };
+  | { kind: "thread.delete"; thread: Uuid }
+  | VoteOp;
+
+export const isVoteOp = (op: Op): op is VoteOp => "vote" in op && op.kind.startsWith("vote.");
 
 /** An op as a client sends it. The same opId sent twice is applied once (idempotent retries). */
 export interface OpEnvelope {
@@ -164,6 +192,9 @@ export interface CommentsFile {
   /** The last server seq this file has applied. */
   seq: number;
   threads: Thread[];
+  votes?: Vote[];
+  /** Local vote conclusions still being placed in the design. */
+  voteConclusions?: Uuid[];
   /** Ops made here and not yet acknowledged by the server, oldest first. Empty for a file never shared. */
   outbox: OpEnvelope[];
   /** Who this app is on the server (from /v1/me), so the page can tell its own comments. Shared files only. */
@@ -184,6 +215,10 @@ export const LIMITS = {
   commentsPerThread: 500,
   socketsPerUserPerDoc: 5,
   anchorBytes: 2_048,
+  votesPerPerson: 10,
+  ballotsPerVote: 1_000,
+  voteChangesPerVote: 5_000,
+  votesPerDoc: 100,
 } as const;
 
 // ---------- pure helpers (both sides use these, so they agree) ----------
@@ -194,6 +229,7 @@ const finite = (n: unknown): n is number => typeof n === "number" && Number.isFi
 const ANCHOR_KEYS = new Set(["page", "nodeId", "x", "y", "board", "revision", "preview"]);
 const PREVIEW_KEYS = new Set(["name", "type", "width", "height"]);
 const shortText = (v: unknown, max: number) => v === undefined || (typeof v === "string" && v.length <= max);
+const layerId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 200;
 
 /** Null when an anchor is small and plain: known keys only, short strings, finite numbers, under LIMITS.anchorBytes. */
 export function checkAnchor(a: unknown): string | null {
@@ -232,6 +268,7 @@ export function checkEnvelope(e: unknown): string | null {
     return null;
   };
   const anchor = (a: unknown) => checkAnchor(a);
+  const checkShowName = (value: unknown) => value !== undefined && typeof value !== "boolean" ? "showName must be a boolean" : null;
   switch (op.kind) {
     case "thread.create": return !isUuid(op.thread) || !isUuid(op.comment) ? "thread and comment need uuids" : anchor(op.anchor) ?? body(op.body) ?? mentions(op);
     case "comment.add": return !isUuid(op.thread) || !isUuid(op.comment) ? "thread and comment need uuids" : body(op.body) ?? mentions(op);
@@ -240,6 +277,16 @@ export function checkEnvelope(e: unknown): string | null {
     case "thread.resolve": return !isUuid(op.thread) || typeof op.resolved !== "boolean" ? "thread needs a uuid and resolved a boolean" : null;
     case "thread.move": return !isUuid(op.thread) ? "thread needs a uuid" : anchor(op.anchor);
     case "thread.delete": return !isUuid(op.thread) ? "thread needs a uuid" : null;
+    case "vote.start":
+      if (!isUuid(op.vote)) return "vote needs a uuid";
+      if (!op.scope || Array.isArray(op.scope) || !layerId(op.scope.page) || (op.scope.frame !== undefined && !layerId(op.scope.frame))) return "vote needs a page and optional frame";
+      if (op.on !== "stickies" && op.on !== "anything") return "invalid vote target";
+      if (!Number.isInteger(op.perPerson) || op.perPerson < 1 || op.perPerson > LIMITS.votesPerPerson) return "invalid number of votes each";
+      return typeof op.hidden === "boolean" && typeof op.anonymous === "boolean" ? checkShowName(op.showName) : "vote preferences need booleans";
+    case "vote.cast": return !isUuid(op.vote) || !isUuid(op.ballot) || !layerId(op.layer) ? "vote and ballot need uuids and a layer" : checkShowName(op.showName);
+    case "vote.retract": return !isUuid(op.vote) || !isUuid(op.ballot) ? "vote and ballot need uuids" : null;
+    case "vote.end":
+    case "vote.clear": return !isUuid(op.vote) ? "vote needs a uuid" : null;
     default: return "unknown op kind";
   }
 }
@@ -249,7 +296,8 @@ export function checkEnvelope(e: unknown): string | null {
  * reason when the op cannot apply (its thread or comment is deleted or unknown). The local file uses it for its own
  * ops; the server for everyone's, in seq order.
  */
-export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Iso): string | null {
+export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Iso, votes?: Vote[]): string | null {
+  if (isVoteOp(op)) return votes ? applyVote(votes, op, by) : "Voting is unavailable here";
   const thread = (id: Uuid) => threads.find((t) => t.id === id);
   const comment = (id: Uuid) => { for (const t of threads) { const c = t.comments.find((c) => c.id === id); if (c) return { t, c }; } return null; };
   switch (op.kind) {
@@ -303,6 +351,54 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Op, by: Author, at: Is
       return null;
     }
   }
+}
+
+function applyVote(votes: Vote[], op: VoteOp, by: Author): string | null {
+  const id = by.id || by.email;
+  if (!id || by.agent) return "A person must cast the vote";
+  const vote = votes.find(v => v.id === op.vote);
+  if (op.kind === "vote.start") {
+    if (vote) return vote.host.id === id ? null : "Vote already exists";
+    if (votes.some(v => v.scope.page === op.scope.page && v.state !== "dismissed")) return "Clear the previous vote first";
+    if (votes.length >= LIMITS.votesPerDoc) {
+      const dismissed = votes.findIndex(v => v.state === "dismissed");
+      if (dismissed === -1) return "Document has too many votes";
+      votes.splice(dismissed, 1);
+    }
+    const { page, frame } = op.scope;
+    const { on, perPerson, hidden, anonymous } = op;
+    const host = { id, ...(!anonymous && op.showName !== false && by.name ? { name: by.name } : {}) };
+    votes.push({ id: op.vote, host, scope: frame === undefined ? { page } : { page, frame }, on, perPerson, hidden, anonymous, state: "active", ballots: [] });
+    return null;
+  }
+  if (!vote) return "No such vote";
+  if (op.kind === "vote.end" || op.kind === "vote.clear") {
+    if (vote.host.id !== id) return "Only the host can end or clear the vote";
+    if (op.kind === "vote.end" && vote.state === "active") vote.state = "ended";
+    if (op.kind === "vote.clear") {
+      if (vote.state === "active") return "End the vote before clearing it";
+      vote.state = "dismissed";
+      vote.ballots = [];
+      delete vote.retracted;
+    }
+    return null;
+  }
+  if (vote.state !== "active") return "The vote has ended";
+  const ballotIndex = vote.ballots.findIndex(b => b.id === op.ballot);
+  const ballot = vote.ballots[ballotIndex];
+  if (op.kind === "vote.retract") {
+    if (!ballot) return null;
+    if (ballot.voter.id !== id) return "You can only remove your own votes";
+    (vote.retracted ??= []).push(ballot.id);
+    vote.ballots.splice(ballotIndex, 1);
+    return null;
+  }
+  if (vote.retracted?.includes(op.ballot)) return null;
+  if (ballot) return ballot.voter.id === id && ballot.layer === op.layer ? null : "Ballot already exists";
+  if (vote.ballots.filter(b => b.voter.id === id).length >= vote.perPerson) return "You have no votes left";
+  if (vote.ballots.length >= LIMITS.ballotsPerVote || vote.ballots.length + (vote.retracted?.length ?? 0) >= LIMITS.voteChangesPerVote) return "The vote is full";
+  vote.ballots.push({ id: op.ballot, voter: { id, ...(!vote.anonymous && op.showName !== false && by.name ? { name: by.name } : {}) }, layer: op.layer });
+  return null;
 }
 
 /**

@@ -37,6 +37,7 @@ import { sidebarWidgetTiles } from "./sidebar-widgets.ts";
 import { codeRootId, version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
+import { handleVotesRoute } from "./votes.ts";
 import { commentReads } from "./comment-reads.ts";
 import { handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
 import { scrubSecrets } from "./cloud-secrets.ts";
@@ -645,6 +646,7 @@ try {
       if (await handleImageRoute(req, res, url)) return;
       if (await handleVideoRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
       if (await handleWidgetRoute(req, res, url, (f, id) => trackChange(f, "widget:" + id))) return;
+      if (await handleVotesRoute(req, res, url, { changed: tellCommentPages, place: (file, body) => varCtx.structure(file, body, { source: "user" }) })) return;
       if (await handleCommentsRoute(req, res, url, tellCommentPages)) return;
       if (await handleCloudRoute(req, res, url, tellCommentPages)) return;
       if (await handleAgentRoute(req, res, url, agentCtx)) return;
@@ -4141,6 +4143,7 @@ function historyStep(dir, plain) {
 </script>
 <script>${PAGE_BRIDGE_JS}</script>
 <script type="module" src="/page/whiteboard.js"></script>
+<script type="module" src="/page/votes.js"></script>
 <script type="module" src="/page/draw.js"></script>
 <script type="module" src="/page/widgets.js"></script>
 <script type="module" src="/page/drops.js"></script>

@@ -26,7 +26,7 @@ export const emptyComments = (): CommentsFile => ({ format: 1, doc: randomUUID()
 export function asCommentsFile(v: unknown): CommentsFile | null {
   if (!v || typeof v !== "object") return null;
   const f = v as Partial<CommentsFile>;
-  if (f.format !== 1 || typeof f.doc !== "string" || !Array.isArray(f.threads)) return null;
+  if (f.format !== 1 || typeof f.doc !== "string" || !Array.isArray(f.threads) || (f.votes !== undefined && !Array.isArray(f.votes))) return null;
   return { ...(f as CommentsFile), seq: Number.isFinite(f.seq) ? (f.seq as number) : 0, outbox: Array.isArray(f.outbox) ? f.outbox : [] };
 }
 
@@ -78,6 +78,6 @@ export function forkComments(fromPkg: string, toDir: string): void {
   if (!f) return;
   const doc = randomUUID();
   const threads: Thread[] = f.threads.map((t) => ({ ...t, doc }));
-  const copy: CommentsFile = { format: 1, doc, seq: 0, threads, outbox: [] };
+  const copy: CommentsFile = { format: 1, doc, seq: 0, threads, outbox: [], ...(f.votes && { votes: f.votes }), ...(f.voteConclusions && { voteConclusions: f.voteConclusions }) };
   fs.writeFileSync(path.join(toDir, COMMENTS_FILE), JSON.stringify(copy, null, 2) + "\n");
 }

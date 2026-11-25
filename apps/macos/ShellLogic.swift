@@ -1271,7 +1271,7 @@ enum RepeatHint {
 }
 
 enum DrawTool: String, CaseIterable {
-    case frame, rectangle, ellipse, text, sticky, sticker
+    case frame, rectangle, ellipse, text, sticky, sticker, vote
 
     /// The bottom palette's groups, in order; a divider sits between them (ToolPalette, Shell.swift).
     static let paletteGroups: [[DrawTool]] = [[.frame, .rectangle, .ellipse, .text], [.sticky, .sticker]]
@@ -1286,6 +1286,7 @@ enum DrawTool: String, CaseIterable {
         case .ellipse: return "o"
         case .text: return "t"
         case .sticky, .sticker: return "s"
+        case .vote: return "d"
         }
     }
     var symbol: String {
@@ -1296,8 +1297,17 @@ enum DrawTool: String, CaseIterable {
         case .text: return "textformat"
         case .sticky: return "note"
         case .sticker: return "seal"
+        case .vote: return "checkmark.square"
         }
     }
+    var menuTitle: String {
+        switch self {
+        case .sticker: return "Place Sticker"
+        case .vote: return "Start a Vote"
+        default: return "Draw " + title
+        }
+    }
+    var usesShift: Bool { self == .sticker || self == .vote }
 }
 
 /// The menu bar: what each menu holds, in order, with its key. main.swift wires each command to its action;
@@ -1396,7 +1406,7 @@ enum MenuSpec {
         Item(title: "Quick Actions\u{2026}", command: "palette", key: "k"),
         nil,
     ] + DrawTool.allCases.map { tool in
-        Item(title: (tool == .sticker ? "Place " : "Draw ") + tool.title, command: tool.command, key: tool.key, mods: tool == .sticker ? [.shift] : [], pageKey: true)
+        Item(title: tool.menuTitle, command: tool.command, key: tool.key, mods: tool.usesShift ? [.shift] : [], pageKey: true)
     } + [
         nil,
         Item(title: "Zoom In", command: "zoomIn", key: "="),

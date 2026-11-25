@@ -14,7 +14,7 @@
 //   relayed  = agent authors, by comment id. The server knows people only, so a comment an agent wrote through this
 //              app is sent as this person's. On this machine it keeps showing as the agent's (Author.agent).
 
-import { applyOp, checkEnvelope, LIMITS, type Applied, type Author, type CommentsFile, type ErrorCode, type Op, type OpEnvelope, type Rejected, type Thread } from "../cloud/protocol.ts";
+import { applyOp, checkEnvelope, isVoteOp, LIMITS, type Applied, type Author, type CommentsFile, type ErrorCode, type Op, type OpEnvelope, type Rejected, type Thread, type Vote } from "../cloud/protocol.ts";
 
 /** An envelope that says "the document of the file this request names" (the local server replaces it before storing or sending). */
 export const NIL_DOC = "00000000-0000-4000-8000-000000000000";
@@ -43,7 +43,7 @@ function authorOfOp(f: SyncFile, op: Op, fallback: Author): Author {
 export function viewOf(f: SyncFile, fallback: Author = { name: "Me" }): Thread[] {
   const threads = clone(f.threads);
   if (!isShared(f)) return threads;
-  for (const e of f.outbox) applyOp(threads, f.doc, e.op, authorOfOp(f, e.op, fallback), e.at);
+  for (const e of f.outbox) if (!isVoteOp(e.op)) applyOp(threads, f.doc, e.op, authorOfOp(f, e.op, fallback), e.at);
   for (const r of f.rejected ?? []) if (makesComment(r.envelope.op)) applyOp(threads, f.doc, r.envelope.op, authorOfOp(f, r.envelope.op, fallback), r.envelope.at);
   if (f.relayed) for (const t of threads) for (const c of t.comments) { const a = f.relayed[c.id]; if (a) c.author = a; }
   return threads;
@@ -205,7 +205,16 @@ export function opsForShare(f: CommentsFile, now: Date = new Date(), id: () => s
     if (t.deletedAt) out.push(env({ kind: "thread.delete", thread: t.id }));
     else if (t.resolvedAt) out.push(env({ kind: "thread.resolve", thread: t.id, resolved: true }));
   }
-  return out;
+  return [...out, ...(f.votes ?? []).flatMap(vote => voteOpsForShare(vote).map(env))];
+}
+
+export function voteOpsForShare(vote: Vote): Op[] {
+  if (vote.state === "dismissed") return [];
+  const { id, scope, on, perPerson, hidden, anonymous } = vote;
+  const ops: Op[] = [{ kind: "vote.start", vote: id, scope, on, perPerson, hidden, anonymous, showName: !!vote.host.name }];
+  for (const { id: ballot, layer, voter } of vote.ballots) ops.push({ kind: "vote.cast", vote: id, ballot, layer, showName: !!voter.name });
+  if (vote.state === "ended") ops.push({ kind: "vote.end", vote: id });
+  return ops;
 }
 
 /**
