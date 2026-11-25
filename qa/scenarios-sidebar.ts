@@ -1,3 +1,4 @@
+import { METRICS } from "../src/tokens.ts";
 import { sc, type T } from "./harness.ts";
 
 const tab = (name: string) => `#left [role="tab"]#sidebar-${name}`;
@@ -13,9 +14,9 @@ async function click(t: T, name: string) {
 }
 
 sc("sidebar", "browser segments keep separate scroll positions and restore the selected tab", {
-  covers: ["sidebar:segments", "sidebar:scroll", "sidebar:restore"],
+  covers: ["sidebar:segments", "sidebar:scroll", "sidebar:restore", "sidebar:header"],
   skip: { visual: "Sidebar layout and content are asserted directly. The canvas picture is unchanged." },
-}, async (t) => {
+}, async (t: T) => {
   const panel = (name: string) => `#left [role="tabpanel"]#sidebar-${name}-panel`;
   const visible = (selector: string) => `!!document.querySelector(${JSON.stringify(selector)})?.getClientRects().length`;
   const check = async (name: string, content: string[]) => {
@@ -36,7 +37,36 @@ sc("sidebar", "browser segments keep separate scroll positions and restore the s
     await reset(t);
     await t.open();
     await check("layers", ["pages", "boards"]);
-    const top = await t.ev(`document.querySelector(${JSON.stringify(tab("layers"))}).getBoundingClientRect().top`);
+    t.eq(await t.ev(`document.querySelector('#left [role="tablist"]').getBoundingClientRect().height`),
+      METRICS.field, "the segment track is 28 px tall");
+    const header = await t.ev<{
+      name: string | null; title: string; text: string; icon: string | null;
+      top: number; y: number; left: number; right: number; height: number;
+    }[]>(`[...document.querySelectorAll('#left [role="tablist"] button')].map(button => {
+      const box = button.getBoundingClientRect();
+      const svg = button.querySelector('svg[aria-hidden="true"]');
+      const iconBox = svg?.getBoundingClientRect();
+      const visible = iconBox?.width > 0 && iconBox.height > 0 &&
+        svg.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+      return {
+        name: button.getAttribute("aria-label"), title: button.title, text: button.textContent.trim(),
+        icon: visible ? svg.innerHTML : null,
+        top: box.top, y: box.top + box.height / 2, left: box.left, right: box.right, height: box.height
+      };
+    })`);
+    t.eq(header.map((button) => button.title), ["Layers", "Assets", "Tokens"], "each tab has a tooltip");
+    t.eq(header.map((button) => button.name), ["Layers", "Assets", "Tokens"], "each tab has an accessible name");
+    for (const button of header) {
+      t.eq(button.text, "", `${button.name} has no visible text label`);
+      t.ok(button.icon, `${button.name} displays a visible icon`);
+    }
+    t.eq(new Set(header.map((button) => button.icon)).size, 3, "the three glyphs are distinct");
+    for (const [i, button] of header.entries()) {
+      t.eq(button.y, header[0].y, "the tabs share one centre line");
+      t.eq(button.height, METRICS.field - 4, "tabs keep their 24 px control height");
+      if (i > 0) t.ok(button.left >= header[i - 1].right, "tabs do not overlap");
+    }
+    const top = header[0].top;
     await addOverflow("layers", 120);
     t.eq(await t.ev(`document.querySelector(${JSON.stringify(tab("layers"))}).getBoundingClientRect().top`), top, "header stays pinned");
     await click(t, "assets");
@@ -75,6 +105,8 @@ sc("sidebar", "browser segment keys stay separate from canvas shortcuts", {
     t.ok(await t.ev(active("assets")), "Right in the panel leaves the segment selected");
     await t.io.key("Tab", { shift: true });
     t.eq(await t.ev("document.activeElement.id"), "sidebar-assets", "Shift+Tab focuses the active segment");
+    t.ok(await t.ev(`document.activeElement.matches(":focus-visible") &&
+      getComputedStyle(document.activeElement).outlineStyle === "solid"`), "the keyboard focus ring is visible");
     t.eq(await t.sel(), ["r_free"], "Tab navigation leaves the selected layer alone");
     await t.io.key("ArrowRight");
     t.ok(await t.ev(active("tokens")), "Right on a focused segment selects the next one");

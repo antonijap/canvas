@@ -271,6 +271,7 @@ enum QA {
         case "qa.type": return try await typeText(a)
         case "qa.state": return state()
         case "qa.views": return try views(a)
+        case "qa.accessibility": return try accessibilityAt(a)
         case "qa.marks": return try marks(a)
         case "qa.find": return try await find(a)
         case "qa.shot": return try await shot(a)
@@ -855,6 +856,31 @@ enum QA {
     }
 
     // MARK: views
+
+    /// Reads AppKit accessibility elements at a window point, including controls within SwiftUI groups.
+    private static func accessibilityAt(_ a: [String: Any]) throws -> [String: Any] {
+        let w = try target(a)
+        guard let (x, y) = point(a) else { throw QAError(code: "invalid", message: "accessibility needs x and y") }
+        // SwiftUI builds its accessibility tree on demand. Enable it in this background QA instance.
+        NSApp.accessibilitySetValue(true, forAttribute: NSAccessibility.Attribute(rawValue: "AXEnhancedUserInterface"))
+        let screen = w.convertPoint(toScreen: base(w, x, y))
+        var elements: [[String: String]] = []
+        func walk(_ item: Any) {
+            guard !(item is WKWebView) else { return }
+            // SwiftUI nodes respond to AppKit's selectors without conforming to NSAccessibilityProtocol.
+            let element = item as AnyObject
+            let frame = element.accessibilityFrame?() ?? .zero
+            guard frame.isEmpty || frame.contains(screen) else { return }
+            if !frame.isEmpty, let role = element.accessibilityRole?() {
+                elements.append(["role": role.rawValue,
+                                 "label": element.accessibilityLabel?() ?? "",
+                                 "help": element.accessibilityHelp?() ?? ""])
+            }
+            element.accessibilityChildren?()?.forEach(walk)
+        }
+        walk(w)
+        return ["elements": elements]
+    }
 
     /// The window's AppKit views that hold state or take input: text fields (the inspector's), buttons and
     /// switches, segmented controls, pop-ups, sliders, scroll views. SwiftUI draws rows and icon buttons without

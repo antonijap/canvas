@@ -31,7 +31,7 @@ import { handleSearchRoute } from "./search.ts";
 import { handleLayersRoute } from "./layers.ts";
 import { handleColorsRoute } from "./colors.ts";
 import { applyAutoTracking, prepareAutoTracking } from "./tracking.ts";
-import { cssVariables } from "./tokens.ts";
+import { cssVariables, METRICS } from "./tokens.ts";
 import { codeRootId, version } from "./version.ts";
 import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts";
 import { handleCommentsRoute } from "./comments.ts";
@@ -1146,6 +1146,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   });
 }
 
+const sidebarIcon = (paths: string) => `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+
 const PAGE = `<!doctype html>
 <html lang="en">
 <head>
@@ -1179,10 +1181,11 @@ button:hover{background:var(--c-accent)}
 button:focus-visible{outline:2px solid var(--c-ring)}
 .spacer{flex:1}
 #left{position:fixed;left:0;top:0;bottom:0;width:var(--c-sidebar-width);box-sizing:border-box;display:flex;flex-direction:column;background:var(--c-sidebar);border-right:1px solid var(--c-sidebar-border);padding:40px 10px 0 var(--c-inset);z-index:5;color:var(--c-sidebar-fg)}
-#left [role=tablist]{display:flex;flex:none;gap:2px;padding:2px;border-radius:var(--c-radius);background:var(--c-field)}
-#left [role=tab]{flex:1;padding:6px 4px;font-size:var(--c-size-xs);line-height:1;color:var(--c-muted-fg)}
+#left [role=tablist]{display:flex;flex:none;gap:2px;box-sizing:border-box;height:${METRICS.field}px;padding:2px;border-radius:var(--c-radius);background:var(--c-hover)}
+#left [role=tab]{flex:1;display:grid;place-items:center;padding:0;color:var(--c-muted-fg)}
+#left [role=tab] svg{width:var(--c-icon);height:var(--c-icon)}
 #left [role=tab]:hover{background:var(--c-hover)}
-#left [role=tab][aria-selected=true]{color:var(--c-fg);background:var(--c-active)}
+#left [role=tab][aria-selected=true]{color:var(--c-fg);background:var(--c-active);box-shadow:0 1px 2px #00000024}
 #left [role=tabpanel]{flex:1;min-height:0;overflow:auto;padding:0 0 14px}
 #left [role=tabpanel]:focus-visible{outline:2px solid var(--c-ring);outline-offset:-2px}
 #left #sidebar-assets-panel{padding-top:8px}
@@ -1265,9 +1268,9 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 </header>
 <aside id="left">
   <div role="tablist" aria-label="Sidebar">
-    <button id="sidebar-layers" role="tab" aria-controls="sidebar-layers-panel" aria-selected="true">Layers</button>
-    <button id="sidebar-assets" role="tab" aria-controls="sidebar-assets-panel" aria-selected="false" tabindex="-1">Assets</button>
-    <button id="sidebar-tokens" role="tab" aria-controls="sidebar-tokens-panel" aria-selected="false" tabindex="-1">Tokens</button>
+    <button id="sidebar-layers" role="tab" aria-controls="sidebar-layers-panel" aria-selected="true" title="Layers" aria-label="Layers">${sidebarIcon('<path d="m3 8 9-5 9 5-9 5zM3 12l9 5 9-5M3 16l9 5 9-5"/>')}</button>
+    <button id="sidebar-assets" role="tab" aria-controls="sidebar-assets-panel" aria-selected="false" tabindex="-1" title="Assets" aria-label="Assets">${sidebarIcon('<path d="M8 8V5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-3"/><rect x="3" y="8" width="13" height="13" rx="2"/>')}</button>
+    <button id="sidebar-tokens" role="tab" aria-controls="sidebar-tokens-panel" aria-selected="false" tabindex="-1" title="Tokens" aria-label="Tokens">${sidebarIcon('<path d="m10 4.5 2.6-1.3a2 2 0 0 1 2.7.9l3.9 8a2 2 0 0 1-.9 2.7L10 19m6.3-12.9 3.7 2.5a2 2 0 0 1 .5 2.8l-1.1 1.7"/><rect x="3" y="3" width="7" height="18" rx="2"/><path d="M3 9h7m-7 6h7"/>')}</button>
   </div>
   <div id="sidebar-layers-panel" role="tabpanel" aria-labelledby="sidebar-layers" tabindex="0">
     <h3>Pages</h3><div id="pages"></div>

@@ -440,11 +440,15 @@ struct LeftColumn: View {
         let shown = panelOpen ? panelWidth : nil
         return GlassIsland(radius: shown == nil ? 999 : Metric.radiusIsland, padding: 0, dense: shown != nil) {
             VStack(alignment: .leading, spacing: 4) {
-                toggle(shown: shown != nil)
-                    .padding([.top, .horizontal], Metric.pillPad)
+                HStack(spacing: Metric.pillPad) {
+                    toggle(shown: shown != nil)
+                    if shown != nil {
+                        SidebarSegments(selection: section) { model.section = $0 }
+                    }
+                }
+                .padding([.top, .leading], Metric.pillPad)
+                .padding(.trailing, shown == nil ? Metric.pillPad : Metric.islandPad)
                 if let width = shown {
-                    SidebarSegments(selection: section) { model.section = $0 }
-                        .padding(.horizontal, Metric.islandPad)
                     SidePanel(model: model, section: section, tokenTab: $tokenTab, offset: Binding(
                         get: { scrollOffsets[section] }, set: { scrollOffsets[section] = $0 }
                     ))
@@ -464,7 +468,7 @@ struct LeftColumn: View {
     }
 
     private func toggle(shown: Bool) -> some View {
-        IconButton(symbol: "sidebar.left", active: shown, help: shown ? "Hide panel" : "Show panel") { panelOpen.toggle() }
+        IconButton(symbol: "sidebar.left", help: shown ? "Hide panel" : "Show panel") { panelOpen.toggle() }
             .qaID("sidebar-toggle", label: shown ? "Hide panel" : "Show panel")
     }
 }
@@ -477,21 +481,28 @@ private struct SidebarSegments: View {
         HStack(spacing: 2) {
             ForEach(SidebarSection.allCases) { section in
                 let selected = selection == section
+                let name = section.rawValue
                 Button { onSelect(section) } label: {
-                    Text(section.rawValue)
-                        .font(Typography.label)
-                        .fixedSize()
+                    Image(systemName: section.symbol)
+                        .railGlyph()
                         .foregroundStyle(selected ? Palette.fg : Palette.mutedFg)
-                        .qaID("sidebar-segment-label", label: section.rawValue)
-                        .padding(.horizontal, 6)
+                        .frame(width: Metric.icon, height: Metric.icon)
                         .frame(minWidth: 0, maxWidth: .infinity)
                         .frame(height: Metric.field - 4)
-                        .background(RoundedRectangle(cornerRadius: Metric.radiusField - 2).fill(selected ? Palette.active : .clear))
+                        .background {
+                            if selected {
+                                RoundedRectangle(cornerRadius: Metric.radiusField - 2)
+                                    .fill(Palette.active)
+                                    .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
+                            }
+                        }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .chromeHelp(name)
+                .accessibilityLabel(name)
                 .accessibilityAddTraits(selected ? .isSelected : [])
-                .qaID("sidebar-segment", label: section.rawValue)
+                .qaID("sidebar-segment", label: name)
             }
         }
         .padding(2)

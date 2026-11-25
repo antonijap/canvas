@@ -65,6 +65,8 @@ pnpm start "$PWD/demos/learn.canvas"
 
 The browser version has the web chrome (file menu, left sidebar, properties). The app adds the native shell (Liquid Glass islands, native inspector, colour picker, menus). Query flags on the page: `?renderer=dom` forces the DOM renderer, `?shell=native` hides the web chrome (the app sets it).
 
+The editor sidebar has one row of icon buttons for Layers, Assets and Tokens. The macOS row also has Widgets and a panel toggle. When the panel closes, the toggle stays in place.
+
 The file menu lists `.canvas` documents under `~/Desktop` and `~/Code`. Set `CANVAS_ROOTS` to change that.
 
 The server listens on `127.0.0.1` only and answers only to localhost host names. Writes need an `x-canvas: 1` header.

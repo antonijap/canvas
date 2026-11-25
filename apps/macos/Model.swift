@@ -92,9 +92,9 @@ enum SidebarSection: String, CaseIterable, Identifiable {
     var symbol: String {
         switch self {
         case .layers: "square.3.layers.3d"
-        case .assets: "diamond"
-        case .tokens: "textformat"
-        case .widgets: "square.grid.2x2"
+        case .assets: "square.on.square"
+        case .tokens: "swatchpalette"
+        case .widgets: "widget.small"
         }
     }
 }
