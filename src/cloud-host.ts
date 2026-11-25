@@ -29,7 +29,7 @@ import fs from "node:fs";
 import net from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
-import { deleteSecret, readSecretStrict, writeSecret } from "./cloud-secrets.ts";
+import { createSecret, deleteSecret, readSecretStrict } from "./cloud-secrets.ts";
 import { fingerprint, genkey, helperPath, hostIdFor, isTunnelAddr, ownsPort, serve, type Helper } from "./cloud-tunnel.ts";
 import { stateDir } from "./usage-counts.ts";
 
@@ -41,6 +41,7 @@ const dirOf = (slot: string) => (slot === "main" ? hostDir() : path.join(stateDi
 const keysAccount = (slot: string) => (slot === "main" ? "host:keys" : `host:keys:${slot}`);
 const indexFile = () => path.join(stateDir(), "cloud-hosts.json");
 const keychainReadError = "Couldn't read this Cloud's keys from the Keychain. Unlock the Keychain and try again.";
+const hostIdentityError = "This Cloud's saved identities do not match.";
 /** The ports a hosted Cloud may take: the tunnel helper serves these and no other (cloud/tunnel/main.go). */
 export const HOST_PORTS = { first: 5190, last: 5197 };
 /** The most Clouds one Mac hosts (running or kept): one port each. */
@@ -109,22 +110,28 @@ class HostedCloud {
     });
   }
 
+  private knownHostId(): string | undefined {
+    const ids = [this.hostId, readIndex()[this.slot], keptHostId(this.slot)].filter((id): id is string => !!id);
+    if (ids.some((id) => id !== ids[0])) throw new Error(hostIdentityError);
+    return ids[0];
+  }
+
   async loadKeys(bin: string): Promise<HostKeys> {
     const account = keysAccount(this.slot);
     const stored = await readSecretStrict(account);
     if (stored.status === "failed") throw new Error(keychainReadError);
-    const ids = [this.hostId, readIndex()[this.slot], keptHostId(this.slot)].filter(Boolean);
+    const known = this.knownHostId();
     if (stored.status === "found") {
       const keys = parseKeys(stored.value);
       const id = hostIdFor(keys.enrol.public);
-      if (ids.some((known) => known !== id)) throw new Error("The keys do not match this Cloud.");
+      if (known && known !== id) throw new Error("The keys do not match this Cloud.");
       return keys;
     }
-    if (ids.length) throw new Error("This Cloud's keys are missing from the Keychain.");
+    if (known) throw new Error("This Cloud's keys are missing from the Keychain.");
     const m = await genkey(bin, "server"), e = await genkey(bin, "server");
     const raw = JSON.stringify({ member: m, enrol: e });
     const k = parseKeys(raw);
-    if (!(await writeSecret(account, raw))) throw new Error("Could not save the tunnel keys to the Keychain");
+    if (!(await createSecret(account, raw))) throw new Error("Could not create this Cloud's tunnel keys in the Keychain. The item may already exist or the Keychain may be locked.");
     return k;
   }
 
@@ -195,6 +202,7 @@ class HostedCloud {
     this.name = opts.name.slice(0, 60);
     if (this.child) { await this.follow(); return; }
     if (this.starting) return this.starting;
+    this.tunnelError = "";
     this.starting = (async () => {
       const port = await freePort();
       // Check the keys before the worker opens its database and can assign a host id.
@@ -203,7 +211,10 @@ class HostedCloud {
         try { this.keys = await this.loadKeys(bin); }
         catch (e) { this.tunnelError = (e as Error).message; throw e; }
       }
-      const env: Record<string, string> = { ...(process.env as Record<string, string>), CANVAS_CLOUD_HOST_DIR: dirOf(this.slot), CANVAS_CLOUD_HOST_PORT: String(port) };
+      const known = this.knownHostId();
+      const expected = bin && this.keys ? hostIdFor(this.keys.enrol.public) : known;
+      if (known && expected !== known) throw new Error(hostIdentityError);
+      const env = { ...process.env, CANVAS_CLOUD_HOST_DIR: dirOf(this.slot), CANVAS_CLOUD_HOST_PORT: String(port), CANVAS_CLOUD_HOST_ID: expected ?? "" };
       const c = fork(MAIN, [], { env, stdio: ["ignore", "ignore", "ignore", "ipc"], execArgv: [] });
       this.child = c;
       c.on("message", (m: any) => {
@@ -221,12 +232,13 @@ class HostedCloud {
         c.once("message", () => { clearTimeout(t); resolve(); });
         c.once("exit", () => { clearTimeout(t); reject(new Error("The Cloud stopped while starting")); });
       });
-      const r = await this.ask("start", { label: opts.label, ...(this.keys ? { hostId: hostIdFor(this.keys.enrol.public) } : {}) });
+      const r = await this.ask("start", { label: opts.label });
       if (!(await ownsPort(c.pid!, r.port))) { c.kill("SIGKILL"); throw new Error("Another program is using the Cloud's port"); }
-      this.port = r.port; this.hostId = r.hostId; this.ownerToken = r.ownerToken;
+      const current = this.knownHostId();
       const ix = readIndex();
-      if (ix[this.slot] !== r.hostId) { ix[this.slot] = r.hostId; writeIndex(ix); }
-      this.tunnelError = "";
+      if ([expected, current, ix[this.slot]].some((id) => id && id !== r.hostId)) throw new Error(hostIdentityError);
+      if (!ix[this.slot]) { ix[this.slot] = r.hostId; writeIndex(ix); }
+      this.port = r.port; this.hostId = r.hostId; this.ownerToken = r.ownerToken;
       await this.follow();
     })();
     try { await this.starting; } catch (e) { this.stopChild(); throw e; } finally { this.starting = null; }

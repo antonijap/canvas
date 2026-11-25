@@ -23,6 +23,23 @@ function fileStore(): Record<string, string> {
   return values;
 }
 
+function updateFileStore(update: (values: Record<string, string>) => Record<string, string> | null): boolean {
+  const file = process.env.CANVAS_CLOUD_SECRETS_FILE!;
+  const lock = `${file}.lock`;
+  try {
+    // Serialize changes across processes, including the check for an existing account.
+    fs.mkdirSync(lock, { mode: 0o700 });
+    try {
+      const values = update(fileStore());
+      if (!values) return false;
+      const next = `${lock}/next`;
+      fs.writeFileSync(next, JSON.stringify(values), { mode: 0o600 });
+      fs.renameSync(next, file);
+      return true;
+    } finally { fs.rmSync(lock, { recursive: true, force: true }); }
+  } catch { return false; }
+}
+
 type SecretRead = { status: "found"; value: string } | { status: "missing" } | { status: "failed" };
 
 export async function readSecretStrict(account: string): Promise<SecretRead> {
@@ -47,14 +64,20 @@ export async function readSecret(account: string): Promise<string | null> {
 }
 
 /** Writes (or replaces) a value. True when it is saved. */
-export async function writeSecret(account: string, value: string): Promise<boolean> {
+export function writeSecret(account: string, value: string): Promise<boolean> {
+  return saveSecret(account, value, true);
+}
+
+/** Adds a new item. An existing item makes the add fail. */
+export function createSecret(account: string, value: string): Promise<boolean> {
+  return saveSecret(account, value, false);
+}
+
+async function saveSecret(account: string, value: string, replace: boolean): Promise<boolean> {
   if (!ACCOUNT.test(account)) return false;
   if (process.env.CANVAS_CLOUD_SECRETS_FILE) {
-    try {
-      const all = { ...fileStore(), [account]: value };
-      fs.writeFileSync(process.env.CANVAS_CLOUD_SECRETS_FILE, JSON.stringify(all), { mode: 0o600 });
-      return true;
-    } catch { return false; }
+    return updateFileStore((values) =>
+      !replace && Object.hasOwn(values, account) ? null : { ...values, [account]: value });
   }
   const b64 = Buffer.from(value, "utf8").toString("base64");
   return new Promise((resolve) => {
@@ -63,19 +86,19 @@ export async function writeSecret(account: string, value: string): Promise<boole
     p.on("exit", (code) => { clearTimeout(t); resolve(code === 0); });
     p.on("error", () => { clearTimeout(t); resolve(false); });
     p.stdin.on("error", () => {});
-    p.stdin.end(`add-generic-password -U -s ${SERVICE()} -a ${account} -w ${b64}\n`);
+    // In interactive mode EOF returns the status of this single command.
+    p.stdin.end(`add-generic-password${replace ? " -U" : ""} -s ${SERVICE()} -a ${account} -w ${b64}\n`);
   });
 }
 
 export async function deleteSecret(account: string): Promise<void> {
   if (!ACCOUNT.test(account)) return;
   if (process.env.CANVAS_CLOUD_SECRETS_FILE) {
-    try {
-      const all = fileStore();
-      if (!Object.hasOwn(all, account)) return;
-      delete all[account];
-      fs.writeFileSync(process.env.CANVAS_CLOUD_SECRETS_FILE, JSON.stringify(all), { mode: 0o600 });
-    } catch { /* Leave an unreadable store alone. */ }
+    updateFileStore((values) => {
+      if (!Object.hasOwn(values, account)) return null;
+      delete values[account];
+      return values;
+    });
     return;
   }
   await new Promise<void>((resolve) => execFile(bin(), ["delete-generic-password", "-s", SERVICE(), "-a", account], { timeout: 5000 }, () => resolve()));

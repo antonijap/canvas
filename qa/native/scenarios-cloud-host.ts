@@ -164,9 +164,83 @@ process.exit(1);
   }
 });
 
-/** Host on this Mac from the sheet, under a name. Returns the new Cloud's entry. */
-async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: string }> {
-  const before = (await t.cmd("qa.cloud", {})).clouds.map((c: any) => c.id);
+sc("settings", "late manual hosting replies respect Stop and Delete", { covers: ["settings:cloud-host", "settings:cloud-remove"] }, async (t: NT) => {
+  const start = await post(t.app.base, "/api/cloud/host/start", { name: "Studio", label: "Host" });
+  t.eq(start.status, 200, "the server starts Studio");
+  const url: string = start.j.url;
+  const hostId = new URL(url).hostname;
+  const savedId = "22222222-3333-4444-8555-666666666666";
+  const cloud = () => t.cmd("qa.cloud");
+  try {
+    await post(t.app.base, "/api/cloud/host/stop", { hostId });
+    await t.cmd("qa.cloud", { holdStarts: true, clouds: [{ id: savedId, url, name: "Studio", kind: "hosted", hosting: false }] });
+    await settingsCloud(t);
+    await t.click(center(await t.mark({ id: "cloud-row", label: "Studio", window: "settings" }, 4000)), { window: "settings" });
+    for (const [action, id] of [["Stop Hosting", "cloud-stop-hosting"], ["Delete", "cloud-remove-cloud"]]) {
+      await t.click(center(await t.mark({ id: "cloud-host", window: "settings" }, 8000)), { window: "settings" });
+      await t.waitFor(async () => (await cloud()).heldStarts === 1, "the successful Start response to be held");
+      await t.click(center(await t.mark({ id, window: "settings" }, 8000)), { window: "settings" });
+      await t.waitState((s) => s.modal, `${action} asks first`, 4000);
+      const button = (await t.views("modal")).find(v => v.kind === "button" && v.title === action);
+      t.ok(button, action);
+      await t.click(center(button), { window: "modal" });
+      if (action === "Stop Hosting") {
+        await t.waitFor(async () => (await t.marks({ id, window: "settings" })).length === 0, "Stop to finish", 8000);
+      } else await t.waitState((s) => s.toast === "Studio deleted", "Delete to finish", 8000);
+      await t.cmd("qa.cloud", { releaseStart: true });
+      await t.waitFor(async () => !(await cloud()).starting.includes(hostId), "the manual Start to finish");
+      await sleep(250);
+      const saved = (await cloud()).clouds.find((c: any) => c.url === url);
+      t.eq(saved?.hosting, action === "Stop Hosting" ? false : undefined, `late Start after ${action} must not restore hosting`);
+    }
+  } finally {
+    await t.cmd("qa.cloud", { holdStarts: false }).catch(() => {});
+    await post(t.app.base, "/api/cloud/host/wipe", { hostId }).catch(() => {});
+    await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
+  }
+});
+
+sc("settings", "a canceled hosting resume leaves its replacement registered", { covers: ["settings:cloud-host"] }, async (t: NT) => {
+  const start = await post(t.app.base, "/api/cloud/host/start", { name: "Studio", label: "Host" });
+  t.eq(start.status, 200, "the server starts Studio");
+  const url: string = start.j.url;
+  const hostId = new URL(url).hostname;
+  const savedId = "33333333-4444-4555-8666-777777777777";
+  const cloud = () => t.cmd("qa.cloud");
+  try {
+    await post(t.app.base, "/api/cloud/host/stop", { hostId });
+    await t.cmd("qa.cloud", { holdStarts: true, resume: true, clouds: [{ id: savedId, url, name: "Studio", kind: "hosted", hosting: true }] });
+    await t.waitFor(async () => (await cloud()).heldStarts === 1, "the first resume response to be held");
+    await settingsCloud(t);
+    await t.click(center(await t.mark({ id: "cloud-row", label: "Studio", window: "settings" }, 4000)), { window: "settings" });
+    await t.click(center(await t.mark({ id: "cloud-stop-hosting", window: "settings" }, 4000)), { window: "settings" });
+    await t.waitState((s) => s.modal, "Stop asks first", 4000);
+    const stop = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Stop Hosting");
+    t.ok(stop, "Stop Hosting button");
+    await t.click(center(stop), { window: "modal" });
+    await t.waitFor(async () => {
+      const r = await fetch(`${t.app.base}/api/cloud/host?hostId=${hostId}`);
+      return !(await r.json() as any).hosting;
+    }, "the Cloud to stop");
+    await t.waitFor(async () => {
+      await t.cmd("qa.cloud", { hosting: true, resume: true });
+      return (await cloud()).heldStarts === 2;
+    }, "a new resume to register while the canceled reply is held");
+    await t.cmd("qa.cloud", { releaseStart: true });
+    await sleep(250);
+    const pending = await cloud();
+    t.ok(pending.starting.includes(hostId), "the canceled resume leaves the new resume starting");
+    t.ok(pending.resuming.includes(hostId), "the canceled resume leaves the new resume registered");
+    await t.cmd("qa.cloud", { releaseStart: true });
+    await t.waitFor(async () => !(await cloud()).starting.includes(hostId), "the new resume to finish");
+  } finally {
+    await t.cmd("qa.cloud", { holdStarts: false, hosting: false }).catch(() => {});
+    await post(t.app.base, "/api/cloud/host/wipe", { hostId }).catch(() => {});
+    await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
+  }
+});
+
+async function beginHostFromSheet(t: NT, name: string) {
   await home(t);
   await t.click(center(await t.mark({ id: "home-add-cloud" }, 4000)));
   await t.waitState((s) => s.addCloud, "the Add Cloud sheet");
@@ -177,6 +251,44 @@ async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: st
   await t.type(name, { window: SHEET });
   await t.waitText("Only people you invite can join", undefined, 4000, SHEET);
   await t.click(center(await t.mark({ id: "add-cloud-host-go", window: SHEET })), { window: SHEET });
+}
+
+sc("settings", "a late first hosting reply respects Stop from Settings", { covers: ["settings:cloud-host"] }, async (t: NT) => {
+  const name = "First Cloud";
+  const saved = async () => (await t.cmd("qa.cloud")).clouds.find((c: any) => c.name === name);
+  let hostId: string | undefined;
+  try {
+    await t.cmd("qa.cloud", { holdStarts: true });
+    await settingsCloud(t);
+    await beginHostFromSheet(t, name);
+    await t.waitFor(async () => (await t.cmd("qa.cloud")).heldStarts === 1, "the first Start response to be held");
+    await t.click(center(await t.mark({ id: "cloud-row", label: name, window: "settings" }, 8000)), { window: "settings" });
+    hostId = new URL((await saved()).url).hostname;
+    const id = "cloud-stop-hosting";
+    await t.click(center(await t.mark({ id, window: "settings" })), { window: "settings" });
+    await t.waitState((s) => s.modal, "Stop asks first", 4000);
+    const stop = (await t.views("modal")).find(v => v.kind === "button" && v.title === "Stop Hosting");
+    t.ok(stop, "Stop Hosting button");
+    await t.click(center(stop), { window: "modal" });
+    await t.waitFor(async () => (await t.marks({ id, window: "settings" })).length === 0, "Stop to finish", 8000);
+    await t.cmd("qa.cloud", { releaseStart: true });
+    await t.waitState((s) => !s.addCloud, "the Add Cloud sheet to close", 8000);
+    t.eq((await saved())?.hosting, false, "the late first Start must not restore hosting");
+  } finally {
+    await t.cmd("qa.cloud", { holdStarts: false }).catch(() => {});
+    if (!hostId) {
+      const entry = await saved().catch(() => null);
+      if (entry) hostId = new URL(entry.url).hostname;
+    }
+    if (hostId) await post(t.app.base, "/api/cloud/host/wipe", { hostId }).catch(() => {});
+    await t.cmd("qa.cloud", { clouds: [] }).catch(() => {});
+  }
+});
+
+/** Host on this Mac from the sheet, under a name. Returns the new Cloud's entry. */
+async function hostFromSheet(t: NT, name: string): Promise<{ id: string; url: string }> {
+  const before = (await t.cmd("qa.cloud", {})).clouds.map((c: any) => c.id);
+  await beginHostFromSheet(t, name);
   await t.waitState((s) => !s.addCloud && s.homeSection === "cloud", `${name}'s page`, 20_000);
   const added = (await t.cmd("qa.cloud", {})).clouds.find((c: any) => !before.includes(c.id));
   t.ok(added && added.kind === "hosted" && added.name === name, `${name} is in the list as hosted here`);

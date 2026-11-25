@@ -33,6 +33,13 @@ typealias QAError = BridgeClient.BridgeError
 @MainActor
 enum QA {
     static var cloudUsage: [String: Any]?
+    private static var holdCloudStarts = false
+    private static var cloudStartReplies: [CheckedContinuation<Void, Never>] = []
+    static func holdCloudStartReply() async {
+        guard holdCloudStarts else { return }
+        await withCheckedContinuation { cloudStartReplies.append($0) }
+    }
+
     static var model: CanvasModel!
     static var window: NSWindow!
     static var tabRenameFile: () -> String? = { nil }
@@ -340,6 +347,14 @@ enum QA {
             return ["added": AgentsQA.added.sorted()]
         case "qa.cloud":
             if a.keys.contains("usage") { cloudUsage = a["usage"] as? [String: Any] }
+            if let hold = a["holdStarts"] as? Bool {
+                holdCloudStarts = hold
+                if !hold {
+                    for reply in cloudStartReplies { reply.resume() }
+                    cloudStartReplies.removeAll()
+                }
+            }
+            if a["releaseStart"] as? Bool == true, !cloudStartReplies.isEmpty { cloudStartReplies.removeFirst().resume() }
             // The Clouds, as Add Cloud and Settings > Cloud leave them:
             //   {clouds: [{url, name?, devEmail?, kind?, hosting?}]}  the whole list ([] for none)
             //   {url, devEmail?, name?}                     one server Cloud as the only one ("" for none)
@@ -361,8 +376,11 @@ enum QA {
             if let c = a["commentName"] as? String { model.prefs.commentName = c }
             if a.keys.contains("select") { let id = a["select"] as? String; await MainActor.run { CloudAccount.shared.selected = id } }
             if let h = a["home"] as? String { await MainActor.run { HomeStore.shared.section = .cloud(h) } }
+            if a["resume"] as? Bool == true { CloudAccount.shared.resumeHosting(model) }
             let clouds = model.prefs.clouds.map { ["id": $0.id, "url": $0.url, "name": $0.name, "devEmail": $0.devEmail, "kind": $0.kind.rawValue, "hosting": $0.hosting] as [String: Any] }
             return ["clouds": clouds, "url": model.prefs.clouds.first?.url ?? "", "rev": model.prefs.cloudsRev,
+                    "heldStarts": cloudStartReplies.count, "starting": CloudAccount.shared.starting.sorted(),
+                    "resuming": model.prefs.clouds.filter { CloudAccount.shared.isResuming($0) }.compactMap(\.hostId),
                     "states": await MainActor.run { CloudAccount.shared.states.mapValues { ["status": $0.status, "email": $0.email ?? ""] } }]
         case "qa.exportdir":
             // Shift+Cmd+E's folder: a QA instance never shows the open panel (it would be modal), it exports here.

@@ -9,6 +9,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-host-keys-"));
 const security = path.join(tmp, "security");
 const store = path.join(tmp, "keys.json");
 const blocked = path.join(tmp, "blocked");
+const falseMissing = path.join(tmp, "false-missing");
 const tunnels = path.join(tmp, "tunnels");
 fs.mkdirSync(tunnels);
 delete process.env.CANVAS_CLOUD_SECRETS_FILE;
@@ -23,7 +24,7 @@ Object.assign(process.env, {
 fs.writeFileSync(security, `#!${process.execPath}
 const fs = require("node:fs");
 const file = ${JSON.stringify(store)};
-const keys = JSON.parse(fs.readFileSync(file, "utf8"));
+const read = () => JSON.parse(fs.readFileSync(file, "utf8"));
 const [op, ...args] = process.argv.slice(2);
 const account = args[args.indexOf("-a") + 1];
 if (op === "find-generic-password") {
@@ -32,13 +33,29 @@ if (op === "find-generic-password") {
     else process.exit(1);
     return;
   }
-  if (!(account in keys)) process.exit(44);
+  const keys = read();
+  if (!(account in keys) || fs.existsSync(${JSON.stringify(falseMissing)})) process.exit(44);
   console.log(Buffer.from(keys[account]).toString("base64"));
 } else if (op === "-i") {
   const words = fs.readFileSync(0, "utf8").trim().split(" ");
-  keys[words[words.indexOf("-a") + 1]] = Buffer.from(words[words.indexOf("-w") + 1], "base64").toString();
-  fs.writeFileSync(file, JSON.stringify(keys));
+  const target = words[words.indexOf("-a") + 1];
+  const lock = file + ".lock";
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try { fs.mkdirSync(lock); break; }
+    catch (e) { if (e.code !== "EEXIST") throw e; Atomics.wait(wait, 0, 0, 5); }
+  }
+  try {
+    const keys = read();
+    if (target in keys && !words.includes("-U")) process.exitCode = 1;
+    else {
+      keys[target] = Buffer.from(words[words.indexOf("-w") + 1], "base64").toString();
+      fs.writeFileSync(file + ".tmp", JSON.stringify(keys));
+      fs.renameSync(file + ".tmp", file);
+    }
+  } finally { fs.rmdirSync(lock); }
 } else if (op === "delete-generic-password") {
+  const keys = read();
   delete keys[account];
   fs.writeFileSync(file, JSON.stringify(keys));
 }
@@ -56,6 +73,12 @@ const opts = { name: "Studio", label: "Anna" };
 const originalIndex = JSON.stringify({ main: id });
 let caseNumber = 0;
 
+async function loadHost(): Promise<typeof import("../src/cloud-host.ts")> {
+  const hostModule = new URL("../src/cloud-host.ts", import.meta.url);
+  hostModule.searchParams.set("test", String(++caseNumber));
+  return import(hostModule.href);
+}
+
 async function setup({ raw, indexed = true, locked = false }: { raw?: string; indexed?: boolean; locked?: boolean } = {}) {
   const state = fs.mkdtempSync(path.join(tmp, "state-"));
   process.env.CANVAS_STATE_DIR = state;
@@ -64,10 +87,7 @@ async function setup({ raw, indexed = true, locked = false }: { raw?: string; in
   fs.writeFileSync(store, JSON.stringify(raw === undefined ? {} : { "host:keys": raw }));
   if (locked) fs.writeFileSync(blocked, "");
   else fs.rmSync(blocked, { force: true });
-  const hostModule = new URL("../src/cloud-host.ts", import.meta.url);
-  hostModule.searchParams.set("test", String(++caseNumber));
-  const host: typeof import("../src/cloud-host.ts") = await import(hostModule.href);
-  return { host, index, state };
+  return { host: await loadHost(), index, state };
 }
 
 after(() => { stopHelpers(); fs.rmSync(tmp, { recursive: true, force: true }); });
@@ -143,6 +163,72 @@ test("a genuinely unused slot generates keys and a matching host id", async (t) 
   assert.equal((await host.hostStatus(hostId)).tunnelError, null);
 });
 
+test("a false missing result cannot replace existing tunnel keys", async (t) => {
+  const { host, index } = await setup({ raw: keys, indexed: false });
+  t.after(async () => { fs.rmSync(falseMissing); await host.stopHosting(); });
+  fs.writeFileSync(falseMissing, "");
+  const before = fs.readFileSync(store, "utf8");
+  await assert.rejects(host.startHosting(opts), /could not create.*keys.*keychain/i);
+  assert.equal(fs.readFileSync(store, "utf8"), before);
+  assert.equal(fs.existsSync(index), false);
+});
+
+test("only one server can create tunnel keys for the same slot", async (t) => {
+  const { host, index } = await setup({ indexed: false });
+  const other = await loadHost();
+  t.after(async () => { fs.rmSync(falseMissing); await Promise.all([host.stopHosting(), other.stopHosting()]); });
+  // Both servers see a missing key, even if one reaches the add before the other.
+  fs.writeFileSync(falseMissing, "");
+  const results = await Promise.allSettled([host.startHosting(opts), other.startHosting(opts)]);
+  const started = results.filter((r) => r.status === "fulfilled");
+  const refused = results.filter((r) => r.status === "rejected");
+  assert.equal(started.length, 1, "exactly one server starts");
+  assert.match(refused[0].reason.message, /could not create.*keys.*keychain/i);
+  const stored = JSON.parse(JSON.parse(fs.readFileSync(store, "utf8"))["host:keys"]);
+  assert.equal(started[0].value, hostIdFor(stored.enrol.public));
+  assert.equal(JSON.parse(fs.readFileSync(index, "utf8")).main, started[0].value);
+});
+
+test("without a helper an indexed slot rebuilds its missing database with the same id", async (t) => {
+  const { host, index, state } = await setup();
+  const bin = process.env.CANVAS_TUNNEL_BIN;
+  delete process.env.CANVAS_TUNNEL_BIN;
+  t.after(async () => { process.env.CANVAS_TUNNEL_BIN = bin; await host.stopHosting(); });
+  assert.equal(fs.existsSync(path.join(state, "cloud-host", "team.sqlite")), false);
+  assert.equal(await host.startHosting({ ...opts, hostId: id }), id);
+  assert.equal(fs.readFileSync(index, "utf8"), originalIndex);
+});
+
+test("without a helper a kept database and a conflicting index are preserved", async (t) => {
+  const { host, index, state } = await setup();
+  const bin = process.env.CANVAS_TUNNEL_BIN;
+  delete process.env.CANVAS_TUNNEL_BIN;
+  t.after(async () => { process.env.CANVAS_TUNNEL_BIN = bin; await host.stopHosting(); });
+  const dir = path.join(state, "cloud-host");
+  fs.mkdirSync(dir);
+  const db = new DatabaseSync(path.join(dir, "team.sqlite"));
+  const otherId = "00000000-0000-4000-8000-000000000000";
+  try {
+    db.exec("CREATE TABLE host (id INTEGER PRIMARY KEY, host_id TEXT NOT NULL, created_at TEXT NOT NULL)");
+    db.prepare("INSERT INTO host VALUES (1, ?, '2020-01-01')").run(otherId);
+    await assert.rejects(host.startHosting({ ...opts, hostId: id }), /saved identities do not match/i);
+    assert.equal(fs.readFileSync(index, "utf8"), originalIndex);
+    assert.equal(db.prepare("SELECT host_id FROM host WHERE id = 1").get()?.host_id, otherId);
+  } finally { db.close(); }
+});
+
+test("a new start that fails in the worker clears the earlier Keychain error", async (t) => {
+  const { host } = await setup({ raw: keys, locked: true });
+  const port = process.env.CANVAS_CLOUD_HOST_PORT;
+  t.after(async () => { process.env.CANVAS_CLOUD_HOST_PORT = port; await host.stopHosting(); });
+  await assert.rejects(host.startHosting({ ...opts, hostId: id }), { message: readError });
+  assert.equal((await host.hostStatus(id)).tunnelError, readError);
+  fs.rmSync(blocked);
+  process.env.CANVAS_CLOUD_HOST_PORT = "65536";
+  await assert.rejects(host.startHosting({ ...opts, hostId: id }), { message: "The Cloud could not do that" });
+  assert.equal((await host.hostStatus(id)).tunnelError, null);
+});
+
 test("the file stand-in distinguishes missing values from failed reads and preserves a corrupt store", async () => {
   const { readSecretStrict, writeSecret } = await import("../src/cloud-secrets.ts");
   const file = path.join(tmp, "stand-in.json");
@@ -164,6 +250,20 @@ test("the file stand-in distinguishes missing values from failed reads and prese
     fs.mkdirSync(file);
     assert.deepEqual(await readSecretStrict("host:keys"), { status: "failed" });
     assert.equal(await writeSecret("host:keys", "new"), false);
+  } finally { delete process.env.CANVAS_CLOUD_SECRETS_FILE; }
+});
+
+test("the file stand-in only creates a new account and keeps existing values", async () => {
+  const { createSecret, writeSecret } = await import("../src/cloud-secrets.ts");
+  const file = path.join(tmp, "create-only.json");
+  process.env.CANVAS_CLOUD_SECRETS_FILE = file;
+  try {
+    assert.equal(await createSecret("host:keys", "first"), true);
+    const before = fs.readFileSync(file, "utf8");
+    assert.equal(await createSecret("host:keys", "second"), false);
+    assert.equal(fs.readFileSync(file, "utf8"), before);
+    assert.equal(await writeSecret("host:keys", "replacement"), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { "host:keys": "replacement" });
   } finally { delete process.env.CANVAS_CLOUD_SECRETS_FILE; }
 });
 

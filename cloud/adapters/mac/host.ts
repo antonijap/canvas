@@ -93,6 +93,8 @@ interface RoomState { store: SqliteStore; ops: Operations; sockets: Map<ServerSo
 export interface HostOptions {
   /** Where the SQLite files live. Created 0700. */
   dir: string;
+  /** The ID to save when creating a Cloud with a known identity. */
+  hostId?: string;
   /** Tests only: another port (0 for a free one). Always on 127.0.0.1. */
   port?: number;
   storageCap?: number;
@@ -141,9 +143,8 @@ export class CloudHost {
       CREATE TABLE IF NOT EXISTS persons (id TEXT PRIMARY KEY, label TEXT NOT NULL UNIQUE COLLATE NOCASE, role TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, person_id TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE, name TEXT NOT NULL, hash TEXT NOT NULL, node_key TEXT, joined_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS invites (id TEXT PRIMARY KEY, person_id TEXT NOT NULL REFERENCES persons(id) ON DELETE CASCADE, hash TEXT NOT NULL, expires_at INTEGER NOT NULL)`);
-    if (!this.db.sql.exec("SELECT 1 FROM host").toArray().length) {
-      this.db.sql.exec("INSERT INTO host (id, host_id, created_at) VALUES (1, ?, ?)", crypto.randomUUID(), new Date().toISOString());
-    }
+    this.db.sql.exec("INSERT OR IGNORE INTO host (id, host_id, created_at) VALUES (1, ?, ?)",
+      opts.hostId ?? crypto.randomUUID(), new Date().toISOString());
     this.files = new MacFiles(opts.dir, this.db, me => this.current(me), id => this.person(id)?.role as Role | null ?? null, () => this.now(), opts.storageCap ?? Number(process.env.CANVAS_CLOUD_STORAGE_CAP || 20 * 1024 ** 3));
     this.protect();
   }
@@ -159,14 +160,11 @@ export class CloudHost {
 
   /**
    * This Cloud's id. With a tunnel it is derived from the enrolment tunnel's public key (src/cloud-tunnel.ts
-   * hostIdFor), which a joining Mac checks against the key its tunnel actually reached; Canvas sets it with useHostId.
-   * Without a tunnel (tests), a random id made once.
+   * hostIdFor), which a joining Mac checks against the key its tunnel actually reached.
+   * A new Cloud without a tunnel gets a random id.
    */
   hostId(): string {
     return this.db.sql.exec<{ host_id: string }>("SELECT host_id FROM host WHERE id = 1").one().host_id;
-  }
-  useHostId(id: string): void {
-    if (uuid(id)) this.db.sql.exec("UPDATE host SET host_id = ? WHERE id = 1", id);
   }
   /** The member tunnel's public key, sent with its address in a join answer, so the joining Mac can pin it. */
   memberKey: string | null = null;

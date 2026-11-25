@@ -104,12 +104,14 @@ final class CloudAccount: ObservableObject {
     /// Clouds with work under way (joining, signing in, removing), by address.
     @Published var busy: Set<String> = []
     /// Hosted Clouds starting, by host id ("new" for one being made).
-    @Published var starting: Set<String> = []
+    @Published private var startAttempts: [String: UUID] = [:]
+    var starting: Set<String> { Set(startAttempts.keys) }
     /// The Cloud Settings > Cloud has open (an entry id); nil shows the list.
     @Published var selected: String?
     private var signIns: [String: CloudSignInWindow] = [:]
     private var hostRefreshGeneration = 0
     private var stoppingOrDeleting: Set<String> = []
+    private var stoppedDuringCreation: Set<String> = []
     private var resumeTasks: [String: Task<Void, Never>] = [:]
     /// While hosting: no idle sleep (a closed lid still sleeps).
     private var awake: IOPMAssertionID = 0
@@ -260,29 +262,38 @@ final class CloudAccount: ObservableObject {
     /// Host on this Mac: with an entry, that Cloud again; without one, a new Cloud (this Mac hosts up to eight, one per
     /// team). This Canvas is each one's first member (the owner, on loopback). Nil when it worked, else why not.
     func startHosting(_ model: CanvasModel, entry: CloudEntry? = nil, name: String) async -> String? {
+        let creating = entry == nil
         let key = entry?.hostId ?? "new"
         guard !stoppingOrDeleting.contains(key) else { return "Stop or Delete is already in progress." }
-        starting.insert(key)
+        guard startAttempts[key] == nil else { return "Hosting is already starting." }
+        if creating {
+            stoppedDuringCreation.removeAll()
+            lastStarted = nil
+        }
+        let attemptID = UUID()
+        startAttempts[key] = attemptID
         var body = names(model, name: name)
         if let id = entry?.hostId { body["hostId"] = id }
         let (status, j) = await CloudAccount.post(model, "api/cloud/host/start", body)
-        starting.remove(key)
+        guard startAttempts[key] == attemptID else { return nil }
+        startAttempts[key] = nil
         guard status == 200, let url = j["url"] as? String else {
             await refreshHost(model)
             return j["error"] as? String ?? "Could not start hosting"
         }
+        if creating, stoppedDuringCreation.contains(CloudURL.host(url)) { return nil }
         let given = name.trimmingCharacters(in: .whitespaces)
         if let (list, e) = CloudList.add(model.prefs.clouds, url: url, name: given.isEmpty && entry == nil ? "Cloud" : given, kind: .hosted) {
             model.prefs.clouds = list
             setHosting(model, e.id, true)
-            lastStarted = e.id
+            if creating { lastStarted = e.id }
         }
         await refreshHost(model)
         _ = await waitListed(model, url)
         await refresh(model, fresh: true)
         return nil
     }
-    /// The entry the last Start hosting made or started (the sheet opens its page).
+    /// The entry the Add Cloud sheet just created.
     private(set) var lastStarted: String?
 
     /// Resume the Clouds that were hosting at quit. The Keychain may still be locked at login.
@@ -295,12 +306,15 @@ final class CloudAccount: ObservableObject {
         let hosted = CloudList.hosted(model.prefs.clouds)
         guard !hosted.isEmpty else { return }
         for e in hosted where e.hosting {
-            guard let id = e.hostId, resumeTasks[id] == nil else { continue }
-            starting.insert(id)
+            guard let id = e.hostId, startAttempts[id] == nil, !stoppingOrDeleting.contains(id) else { continue }
+            let attemptID = UUID()
+            startAttempts[id] = attemptID
             resumeTasks[id] = Task {
                 defer {
-                    resumeTasks[id] = nil
-                    starting.remove(id)
+                    if startAttempts[id] == attemptID {
+                        resumeTasks[id] = nil
+                        startAttempts[id] = nil
+                    }
                 }
                 var body = names(model, name: e.name)
                 body["hostId"] = id
@@ -329,7 +343,10 @@ final class CloudAccount: ObservableObject {
             return false
         }
         hostRefreshGeneration += 1
-        resumeTasks[id]?.cancel()
+        // A poll can list a new Cloud before Start's reply tells the Add Cloud sheet its ID.
+        if startAttempts["new"] != nil { stoppedDuringCreation.insert(id) }
+        resumeTasks.removeValue(forKey: id)?.cancel()
+        startAttempts[id] = nil
         return true
     }
 
@@ -708,6 +725,9 @@ final class CloudAccount: ObservableObject {
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         guard let (data, resp) = try? await URLSession.shared.data(for: req) else { return (0, [:]) }
         let j = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        #if CANVAS_QA
+        if path == "api/cloud/host/start" { await QA.holdCloudStartReply() }
+        #endif
         return ((resp as? HTTPURLResponse)?.statusCode ?? 0, j)
     }
 }
