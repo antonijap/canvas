@@ -370,7 +370,7 @@ struct TopBar: View {
         return max(natural, sidebarWidth)
     }
     /// The space between the leading group and the first file tab.
-    private var tabsLead: CGFloat { sidebarWidth == nil ? gap : Metric.sidebarInset }
+    private var tabsLead: CGFloat { sidebarWidth == nil ? gap : (Metric.topBar - Metric.toolbarControl) / 2 } // as far from the sidebar edge as from the bar's top and bottom
 
     private var tabRoom: CGFloat {
         let fixedWidth = ToolbarButtonStyle.newTabWidth
