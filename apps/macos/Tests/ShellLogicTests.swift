@@ -26,30 +26,55 @@ struct ShellLogicTests {
     }
 
     static func sidebarPeek() {
+        // The edge zone: a window at (100, 50) on screen, 900 by 600. Screen y grows upward.
+        let f = CGRect(x: 100, y: 50, width: 900, height: 600)
+        check(SidebarPeek.inEdge(screen: CGPoint(x: 100, y: 300), frame: f), "x 0 is in")
+        check(SidebarPeek.inEdge(screen: CGPoint(x: 110, y: 300), frame: f), "x 10 is in")
+        check(!SidebarPeek.inEdge(screen: CGPoint(x: 111, y: 300), frame: f), "x 11 is out")
+        check(SidebarPeek.inEdge(screen: CGPoint(x: 96, y: 300), frame: f), "just left of the window is in")
+        check(!SidebarPeek.inEdge(screen: CGPoint(x: 90, y: 300), frame: f), "far left of the window is out")
+        check(SidebarPeek.inEdge(screen: CGPoint(x: 104, y: 648), frame: f), "the title bar is in")
+        check(!SidebarPeek.inEdge(screen: CGPoint(x: 104, y: 660), frame: f), "above the window is out")
+        check(!SidebarPeek.inEdge(screen: CGPoint(x: 104, y: 40), frame: f), "below the window is out")
+        check(SidebarPeek.windowPoint(screen: CGPoint(x: 104, y: 640), frame: f) == CGPoint(x: 4, y: 10), "screen to window top left")
+
         var peek = SidebarPeek()
-        peek.moved(x: 20, y: 300, top: 38, allowed: true)
-        check(!peek.shown, "away from the edge stays hidden")
-        peek.moved(x: 3, y: 10, top: 38, allowed: true)
-        check(!peek.shown, "the title bar does not peek")
-        peek.moved(x: 3, y: 300, top: 38, allowed: false)
-        check(!peek.shown, "no peek while dragging, pinned or with the UI hidden")
-        peek.moved(x: 8, y: 300, top: 38, allowed: true)
-        check(peek.shown, "the edge strip peeks")
-        peek.tick(inside: true, held: false, allowed: true, now: 1)
-        peek.tick(inside: false, held: false, allowed: true, now: 2)
-        peek.tick(inside: false, held: false, allowed: true, now: 2.2)
-        check(peek.shown, "it waits after the pointer leaves")
-        peek.tick(inside: true, held: false, allowed: true, now: 2.25)
-        peek.tick(inside: false, held: false, allowed: true, now: 2.4)
-        check(peek.shown, "coming back restarts the wait")
-        peek.tick(inside: false, held: true, allowed: true, now: 5)
-        peek.tick(inside: false, held: false, allowed: true, now: 5.1)
-        check(peek.shown, "a menu or name field holds it")
-        peek.tick(inside: false, held: false, allowed: true, now: 5.41)
-        check(!peek.shown, "peeking goes back to hidden")
-        peek.open()
-        peek.tick(inside: true, held: true, allowed: false, now: 6)
-        check(!peek.shown, "pinning ends the peek at once")
+        func poll(edge: Bool = false, toggle: Bool = false, inside: Bool = false, held: Bool = false,
+                  canPeek: Bool = true, block: String? = nil, _ now: Double) -> SidebarPeek.Event? {
+            peek.poll(edge: edge, toggle: toggle, inside: inside, held: held, canPeek: canPeek, block: block, now: now)
+        }
+        check(poll(0) == nil && !peek.shown, "away from the edge stays hidden")
+        check(poll(edge: true, canPeek: false, 0.1) == .blocked(.edge, "canPeek false"), "pinned or no room: blocked, with the reason")
+        check(poll(edge: true, canPeek: false, 0.2) == nil, "the same block logs once")
+        check(poll(edge: true, block: "button down", 0.3) == .blocked(.edge, "button down"), "a button down blocks")
+        check(poll(0.4) == nil, "leaving the edge")
+        check(poll(edge: true, block: "sheet", 0.5) == .blocked(.edge, "sheet"), "a sheet blocks")
+        check(poll(edge: true, 0.6) == .opened(.edge) && peek.shown, "the edge strip peeks")
+        check(poll(inside: true, 1) == nil, "over the sidebar")
+        check(poll(2) == nil && peek.shown, "left: it waits")
+        check(poll(2.2) == nil && peek.shown, "still waiting")
+        check(poll(inside: true, 2.25) == nil, "coming back restarts the wait")
+        check(poll(2.4) == nil && peek.shown, "waiting again")
+        check(poll(held: true, 5) == nil, "a menu or name field holds it")
+        check(poll(5.1) == nil && peek.shown, "held, then left")
+        check(poll(5.41) == .closed && !peek.shown, "peeking goes back to hidden")
+
+        // The toggle: a rest of toggleDelay peeks, a pass over it does not.
+        check(poll(toggle: true, 10) == nil && !peek.shown, "a moment on the toggle does not peek")
+        check(poll(10.05) == nil, "passing over")
+        check(poll(toggle: true, 10.1) == nil, "back on the toggle")
+        check(poll(toggle: true, 10.2) == nil && !peek.shown, "100 ms is not enough")
+        check(poll(toggle: true, 10.26) == .opened(.toggle) && peek.shown, "150 ms on the toggle peeks")
+        check(poll(toggle: true, 11) == nil && peek.shown, "on the toggle it stays")
+        // A click on the toggle pins it; hidden again with the pointer still there, it does not peek at once.
+        check(poll(toggle: true, inside: true, canPeek: false, 11.1) == .closed, "pinning ends the peek at once")
+        peek.begin(toggle: true)
+        check(poll(toggle: true, 12) == nil && poll(toggle: true, 13) == nil && !peek.shown, "the clicked toggle does not peek")
+        check(poll(13.1) == nil && poll(toggle: true, 13.2) == nil && poll(toggle: true, 13.4) == .opened(.toggle),
+              "leaving and coming back peeks again")
+        peek.close()
+        check(poll(toggle: true, canPeek: false, 14) == nil, "hovering while pinned does not log or peek")
+        check(poll(toggle: true, 14.5) == nil && !peek.shown, "then allowed, still on the toggle: no peek until a new hover")
     }
 
     static func recentlyClosedTabs() {

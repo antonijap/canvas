@@ -115,23 +115,82 @@ enum ShellLayout {
     }
 }
 
-/// The hidden left sidebar shown over the canvas while the pointer is at the window's left edge. Points are
+/// The hidden left sidebar shown over the canvas while the pointer is at the window's left edge or rests on the
+/// sidebar toggle. A timer polls the pointer (SidebarPeekTracker.swift) and hands each sample to `poll`. Points are
 /// window points from the top left; times are seconds.
 struct SidebarPeek: Equatable {
-    static let edge: CGFloat = 8
+    /// The edge strip: x from 0 to `edge`, the whole window height, title bar included.
+    static let edge: CGFloat = 10
+    /// A little left of the window still counts, so pushing against the screen edge peeks.
+    static let overshoot: CGFloat = 6
+    /// How long the pointer rests on the sidebar toggle before it peeks.
+    static let toggleDelay = 0.15
+    /// How long it stays after the pointer leaves.
     static let delay = 0.3
+
+    enum Trigger: String { case edge, toggle }
+    enum Event: Equatable {
+        case opened(Trigger)
+        case closed
+        /// The pointer asked for a peek but something stops it; the reason says what.
+        case blocked(Trigger, String)
+    }
 
     private(set) var shown = false
     private var leftAt: Double?
+    private var toggleSince: Double?
+    /// The toggle was hovered when the peek ended (a click pinned it): it needs a fresh hover to peek again.
+    private var toggleSpent = false
+    private var lastBlock: String?
 
-    /// The pointer moved. `allowed`: the sidebar is hidden, may peek, and no mouse button is down.
-    mutating func moved(x: CGFloat, y: CGFloat, top: CGFloat, allowed: Bool) {
-        if !shown && allowed && x >= 0 && x <= Self.edge && y >= top { open() }
+    /// A screen point (bottom-left origin, as NSEvent.mouseLocation) in window points from the top left.
+    static func windowPoint(screen p: CGPoint, frame: CGRect) -> CGPoint {
+        CGPoint(x: p.x - frame.minX, y: frame.maxY - p.y)
+    }
+
+    /// The pointer is in the left edge strip of a window with this frame (both in screen coordinates).
+    static func inEdge(screen p: CGPoint, frame: CGRect) -> Bool {
+        let w = windowPoint(screen: p, frame: frame)
+        return w.x >= -overshoot && w.x <= edge && w.y >= 0 && w.y <= frame.height
+    }
+
+    /// One pointer sample. `edge`: in the edge strip and this window is on top there. `toggle`: over the sidebar
+    /// toggle. `inside`: over the peeking sidebar. `held`: it is in use (a menu, a name field, a press on it).
+    /// `canPeek`: the sidebar is hidden by the toggle and has room. `block`: what else stops a new peek (a mouse
+    /// button down, a sheet), nil when nothing does. Returns what changed, for the log.
+    mutating func poll(edge: Bool, toggle: Bool, inside: Bool, held: Bool, canPeek: Bool, block: String?,
+                       now: Double) -> Event? {
+        if toggle { if toggleSince == nil { toggleSince = now } } else { toggleSince = nil; toggleSpent = false }
+        if toggle && !canPeek { toggleSpent = true }
+        let toggleReady = !toggleSpent && toggleSince.map { now - $0 >= Self.toggleDelay } == true
+        if !shown {
+            guard let trigger: Trigger = edge ? .edge : toggleReady ? .toggle : nil else { lastBlock = nil; return nil }
+            if let reason = canPeek ? block : "canPeek false" {
+                if lastBlock == reason { return nil }
+                lastBlock = reason
+                return .blocked(trigger, reason)
+            }
+            open()
+            return .opened(trigger)
+        }
+        tick(inside: inside || edge || toggle, held: held, allowed: canPeek, now: now)
+        if shown { return nil }
+        if toggle { toggleSpent = true }
+        return .closed
+    }
+
+    /// Polling starts (the sidebar was just hidden, or the window came back). A pointer already on the toggle has
+    /// just clicked it: it does not peek until it leaves and comes back.
+    mutating func begin(toggle: Bool) {
+        toggleSince = nil
+        toggleSpent = toggle
+        lastBlock = nil
     }
 
     mutating func open() {
         shown = true
         leftAt = nil
+        lastBlock = nil
     }
 
     /// While shown. `inside`: the pointer is over the sidebar. `held`: it is in use (a menu, a name field, a drag).

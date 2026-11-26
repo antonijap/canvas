@@ -256,7 +256,7 @@ struct RootView: View {
             LeftColumn(model: model, panelWidth: panelOpen || peeking ? panelWidth : nil, panelMax: panelMax, floating: peeking)
                 .zIndex(model.panelOpen ? 0 : 1)
 
-            SidebarPeekTracker(model: model, canPeek: canPeek, width: panelWidth ?? 0)
+            SidebarPeekTracker(model: model, canPeek: canPeek, pinned: model.panelOpen, width: panelWidth ?? 0)
                 .allowsHitTesting(false)
                 .ignoresSafeArea()
 
@@ -620,11 +620,11 @@ struct TopBar: View {
 private struct SidebarPeekTracker: NSViewRepresentable {
     let model: CanvasModel
     let canPeek: Bool
+    let pinned: Bool
     let width: CGFloat
 
     func makeNSView(context: Context) -> SidebarPeekTrackerView {
         let v = SidebarPeekTrackerView()
-        v.top = Metric.topBar
         v.holdWidth = Metric.trafficLights + 2 * Metric.toolbarControl + 24
         return v
     }
@@ -638,9 +638,12 @@ private struct SidebarPeekTracker: NSViewRepresentable {
             #endif
             return model.sidebarMenuOpen || model.resizingSidebar
         }
+        v.toggleFrame = { [weak model] in model?.sidebarToggleFrame ?? .zero }
+        v.toggleHovered = { [weak model] in model?.sidebarToggleHovered ?? false }
         v.canPeek = canPeek
+        v.pinned = pinned
         v.panelWidth = width
-        v.watch(model.sidebarPeek.shown)
+        v.update()
     }
     static func dismantleNSView(_ v: SidebarPeekTrackerView, coordinator: ()) { v.stop() }
 }
@@ -651,6 +654,9 @@ private struct SidebarToggleButton: View {
     var body: some View {
         let label = model.panelOpen ? "Hide panel" : "Show panel"
         TopBarIconButton(symbol: "sidebar.left", active: model.panelOpen, help: label) { model.panelOpen.toggle() }
+            // Resting on it peeks the hidden sidebar (SidebarPeekTracker); the frame is the backup for missed hovers.
+            .onHover { model.sidebarToggleHovered = $0 }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { model.sidebarToggleFrame = $0 }
             .qaID("sidebar-toggle", label: label)
     }
 }

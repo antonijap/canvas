@@ -264,6 +264,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var uiHidden = false
     /// The hidden left panel shown over the canvas by a hover at the window's left edge (SidebarPeekTracker).
     @Published var sidebarPeek = SidebarPeek()
+    /// The sidebar toggle in the top bar, for the peek: the pointer resting on it peeks the hidden sidebar.
+    var sidebarToggleHovered = false
+    var sidebarToggleFrame = CGRect.zero
     #if CANVAS_QA
     /// qa.peek holds the peek open without a pointer, for screenshots.
     var qaPeekHeld = false
