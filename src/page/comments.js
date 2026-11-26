@@ -593,9 +593,11 @@ function start(host) {
   host.on("render", schedule);
   host.on("visible", schedule);
   host.on("page", () => { st.open = null; closePinMenu(); closeDraft(); render(); });
+  host.on("draw-tool", () => setMode(false, { keepDraft: true }));
   host.on("cmd", (c) => {
     if (c && c.cmd === "insets") schedule();
     if (c && c.cmd === "comment") setMode(!st.mode);
+    if (c && c.cmd === "commentsSidebar" && typeof c.open === "boolean" && c.open === sidebar.hidden) showList(c.open);
   });
   host.on("resync", () => { if (host.native) host.post({ commentsSidebar: !sidebar.hidden }); resyncPeople(); load(); });
   if (host.es) host.es.addEventListener("comments", () => load());
@@ -1048,13 +1050,19 @@ function start(host) {
   host.on("presencechange", drawShared);
 
   // ---------- comment mode ----------
-  function setMode(on) {
+  function setMode(on, { keepDraft = false } = {}) {
     on = !!on;
     if (st.mode === on) return;
     st.mode = on;
     view.classList.toggle("cm-mode", on);
     if (btn) { btn.classList.toggle("on", on); btn.setAttribute("aria-pressed", String(on)); }
-    if (!on) { closeDraft(); st.repin = null; hovId = null; hov.style.display = "none"; }
+    if (!on) {
+      if (!keepDraft) closeDraft();
+      else if (comp.contains(document.activeElement)) document.activeElement.blur();
+      st.repin = null;
+      hovId = null;
+      hov.style.display = "none";
+    }
     render();
     host.emit("commentmode", on);
   }

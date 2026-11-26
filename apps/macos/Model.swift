@@ -1434,6 +1434,16 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     func showPage(_ id: String) { run("{cmd:'page',id:\(jsString(id))}"); focusCanvas() }
+    var editorChromeShown: Bool { currentFile != nil && !homeShown && !uiHidden }
+    var propertiesShown: Bool { editorChromeShown && inspectorOpen && !commentsSidebarOpen && !conversationsSidebarOpen }
+
+    func toggleProperties() {
+        guard editorChromeShown else { return }
+        inspectorOpen = !propertiesShown
+        if commentsSidebarOpen { run("{cmd:'commentsSidebar',open:false}") }
+        if conversationsSidebarOpen { run("{cmd:'conversations',open:false}") }
+    }
+
     var canDraw: Bool { currentFile != nil && !homeShown && !cloudReadOnly && !textEditing }
     func clearDrawTool() {
         if activeDrawTool != nil { activeDrawTool = nil }

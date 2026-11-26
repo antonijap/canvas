@@ -301,13 +301,12 @@ extension MeterLevel {
     }
 }
 
-/// Memory and CPU in the toolbar pill, each after an SF Symbol (memorychip, cpu). Fixed width, so the buttons beside it never move as the numbers change.
+/// Memory and CPU in the toolbar, each after an SF Symbol (memorychip, cpu). Fixed width, so the buttons beside it never move as the numbers change.
 /// Shown only in the warn state (amber or red) or while its popover is open; otherwise it takes no room. The view
 /// itself always stays in the pill: it starts the sampler and anchors the popover.
 struct ResourceReadout: View {
     @ObservedObject var meter: ResourceMeter
     @ObservedObject var model: CanvasModel
-    @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var open: Bool { meter.popoverOpen }
@@ -317,7 +316,7 @@ struct ResourceReadout: View {
 
     var body: some View {
         ZStack {
-            Color.clear.frame(width: 0, height: Metric.control)
+            Color.clear.frame(width: 0, height: Metric.toolbarControl)
             if MeterThresholds.readoutShown(level: meter.level, popoverOpen: open) { readout }
         }
         .onAppear { meter.start(model: model) }
@@ -347,23 +346,21 @@ struct ResourceReadout: View {
                 }
             }
             .font(Typography.label.monospacedDigit())
-            .foregroundStyle(open ? Palette.fg : meter.level.tint)
             .animation(reduceMotion ? nil : Motion.fast, value: memory + cpu)
             .animation(Motion.island, value: meter.level)
             .lineLimit(1)
             .padding(.horizontal, 10)
-            .frame(height: Metric.control)
-            .background(Capsule().fill(open ? Palette.active : (hovering ? Palette.hover : .clear)))
-            .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ToolbarButtonStyle(active: open, width: nil, tint: meter.level.tint))
+        .padding(.horizontal, 3)
         .fixedSize()
         .chromeHelp("Memory and CPU used by Canvas")
         .accessibilityLabel("Memory and CPU used by Canvas")
         .accessibilityValue(ready ? "\(ResourceFormat.memorySpoken(meter.totalMemory)), \(meter.totalCPU.map(ResourceFormat.cpuSpoken) ?? "CPU measuring")"
                                   : "Measuring")
         .accessibilityHint("Shows memory and CPU per process")
-        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
+        .accessibilityAddTraits(open ? .isSelected : [])
+        .qaID("resource-readout")
     }
 }
 

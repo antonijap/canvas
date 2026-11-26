@@ -113,13 +113,13 @@ struct RootView: View {
     @ObservedObject var model: CanvasModel
     @State private var windowWidth: CGFloat = 0
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden && !model.homeShown }
-    private var inspectorShown: Bool { model.currentFile != nil && model.inspectorOpen && !model.commentsSidebarOpen && !model.conversationsSidebarOpen && !model.uiHidden && !model.homeShown }
+    private var inspectorShown: Bool { model.propertiesShown }
     private var toolPaletteShown: Bool { model.currentFile != nil && !model.homeShown && !model.cloudReadOnly && !model.uiHidden }
     private var zoomShown: Bool { !model.uiHidden && !model.homeShown && !model.pageEmpty }
 
     private var rightSidebarShown: Bool { inspectorShown || ((model.commentsSidebarOpen || model.conversationsSidebarOpen) && !model.uiHidden && !model.homeShown) }
     private var minimumCanvasWidth: CGFloat {
-        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.Size.compact.paletteWidth() + Metric.pillPad) : ShellLayout.minCanvas
+        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.width(compact: true) + Metric.pillPad) : ShellLayout.minCanvas
     }
 
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
@@ -141,19 +141,21 @@ struct RootView: View {
     private var zoomAboveTools: Bool {
         guard toolPaletteShown, zoomShown, windowWidth > 0 else { return false }
         let i = canvasInsets()
-        let toolsRight = (windowWidth + i.l - i.r + toolSize.paletteWidth()) / 2
+        let toolsRight = (windowWidth + i.l - i.r + ToolPalette.width(compact: compactTools)) / 2
         return toolsRight + Metric.islandGap > windowWidth - i.r - ZoomPill.width
     }
 
     /// Full size, or compact when the room between the sidebars is too narrow for every group.
-    private var toolSize: ToolPalette.Size {
+    private var compactTools: Bool {
         let i = canvasInsets()
-        return windowWidth > 0 && windowWidth - i.l - i.r < ToolPalette.Size.full.paletteWidth() + 8 ? .compact : .full
+        return windowWidth > 0 && windowWidth - i.l - i.r < ToolPalette.width(compact: false) + 8
     }
+
+    private var toolClearance: CGFloat { ToolPalette.clearance(compact: compactTools) }
 
     private var bottomClearance: CGFloat {
         guard toolPaletteShown else { return 0 }
-        return ToolPalette.bottomClearance + (zoomAboveTools ? Metric.pill + Metric.islandGap : 0)
+        return toolClearance + (zoomAboveTools ? Metric.pill + Metric.islandGap : 0)
     }
 
     var body: some View {
@@ -192,7 +194,7 @@ struct RootView: View {
                     if zoomShown {
                         ZoomCorner(model: model)
                             .padding(.trailing, rightSidebarShown ? Metric.propsWidth : 0)
-                            .padding(.bottom, zoomAboveTools ? ToolPalette.bottomClearance - Metric.inset : 0)
+                            .padding(.bottom, zoomAboveTools ? toolClearance - Metric.inset : 0)
                     }
                     if let t = model.toast {
                         Toast(text: t, kind: model.toastKind, actions: model.toastActions,
@@ -212,7 +214,7 @@ struct RootView: View {
                 // An overlay never sizes its parent: the palette cannot widen the window.
                 Color.clear.allowsHitTesting(false)
                     .overlay(alignment: .bottom) {
-                        ToolPalette(model: model, size: toolSize, tooltipClearance: zoomAboveTools ? bottomClearance : 0)
+                        ToolPalette(model: model, compact: compactTools, tooltipClearance: zoomAboveTools ? bottomClearance : 0)
                             .fixedSize()
                             .offset(x: (insets[0] - insets[2]) / 2, y: -ToolPalette.bottomMargin)
                     }
@@ -267,12 +269,13 @@ struct TopBar: View {
     @State private var barWidth: CGFloat = 0
     @State private var actionsWidth: CGFloat = 0
     @State private var hoveredTab: String?
+    @State private var pressedTab: String?
 
     private var showsSidebarToggle: Bool { !model.homeShown && !model.uiHidden }
     private var hasFileTabs: Bool { !model.openFiles.isEmpty }
 
     private var tabRoom: CGFloat {
-        let controls = Metric.control * 2 + (showsSidebarToggle ? Metric.control : 0)
+        let controls = ToolbarButtonStyle.topBarSlot * (showsSidebarToggle ? 3 : 2)
         let separators = hasFileTabs ? Self.separatorWidth * 2 : 0
         return max(0, barWidth - actionsWidth - Self.leadingWidth - controls - separators - Self.minimumDragWidth)
     }
@@ -355,7 +358,7 @@ struct TopBar: View {
         let active = isActive(f)
         let hovering = hoveredTab == f
         return TabChip(title: model.name(of: f), symbol: fileSymbol(f, missing: missing), active: active,
-                       width: fittedWidths[i], hovering: hovering, missing: missing,
+                       width: fittedWidths[i], hovering: hovering, pressed: pressedTab == f, missing: missing,
                        onClose: { model.close(f) }) { model.openTab(f) }
             .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
             .overlay {
@@ -367,7 +370,10 @@ struct TopBar: View {
                         .onAppear { traceTabRename("overlay-appear", f) }
                         .onDisappear { traceTabRename("overlay-disappear", f) }
                 } else {
-                    TabPointer(closeVisible: active || hovering, onClick: { model.openTab(f) }, onRename: { beginRename(f) },
+                    TabPointer(closeVisible: active || hovering, onPress: { pressed in
+                        if pressed { pressedTab = f }
+                        else if pressedTab == f { pressedTab = nil }
+                    }, onClick: { model.openTab(f) }, onRename: { beginRename(f) },
                                onMenu: { view, at in tabMenu(f, view: view, at: at) },
                                onDrag: { dx in
                         guard let at = model.openFiles.firstIndex(of: f) else { return }
@@ -446,7 +452,7 @@ struct TopBar: View {
         } label: {
             Image(systemName: "chevron.down").glyph(12)
         }
-        .menuStyle(.button).buttonStyle(TopBarButtonStyle(symbol: "chevron.down")).menuIndicator(.hidden)
+        .menuStyle(.button).buttonStyle(ToolbarButtonStyle(topBarSymbol: "chevron.down")).menuIndicator(.hidden)
         .fixedSize().chromeHelp("Show tabs")
         .accessibilityLabel("Show tabs")
         .qaID("tab-list", label: "Show tabs")
@@ -461,8 +467,13 @@ struct TopBar: View {
                 TopBarIconButton(symbol: "sparkles.2", active: model.conversationsSidebarOpen, help: "Conversations") { model.run("{cmd:\"conversations\"}") }
                     .qaID("conversations-toggle")
             }
-            TopBarIconButton(symbol: "sidebar.right", active: model.inspectorOpen, help: model.inspectorOpen ? "Hide properties" : "Show properties") { model.inspectorOpen.toggle() }
+            if model.editorChromeShown {
+                TopBarIconButton(symbol: "sidebar.right", active: model.propertiesShown,
+                                 help: model.propertiesShown ? "Hide properties" : "Show properties") {
+                    model.toggleProperties()
+                }
                 .qaID("properties-toggle")
+            }
             tabMenu
         }
         .contentShape(Rectangle())
@@ -530,7 +541,8 @@ struct SidebarGroupLabel: View {
 }
 
 struct LeftColumn: View {
-    private static let headerHeight: CGFloat = 32
+    private static let headerHeight = Metric.control
+    private static let titlePadding: CGFloat = 4
     @ObservedObject var model: CanvasModel
     /// From RootView: the stored width clamped to the window; nil hides the panel.
     let panelWidth: CGFloat?
@@ -597,37 +609,43 @@ struct LeftColumn: View {
         let scrollKey = ScrollKey(file: model.currentFile, section: section)
         let loaded = listLoaded(section)
         return VStack(spacing: 0) {
-            HStack(spacing: 0) {
+            HStack(spacing: 4) {
                 Button {
                     if model.sidebarMenuOpen { dismissMenu() }
                     else { searchFocused = false; model.sidebarMenuOpen = true }
                 } label: {
                     HStack(spacing: 6) {
                         Text(section.rawValue).font(SidebarStyle.title)
+                            .foregroundStyle(Palette.fg)
                             .qaID("sidebar-section-title", label: section.rawValue)
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .medium))
                             .foregroundStyle(Palette.mutedFg)
                     }
-                    .padding(.trailing, 4)
-                    .frame(height: Self.headerHeight)
-                    .contentShape(Rectangle())
+                    .padding(.horizontal, Self.titlePadding)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ToolbarButtonStyle(active: model.sidebarMenuOpen, width: nil))
+                .help("Choose a sidebar section")
                 .accessibilityLabel(section.rawValue)
                 .accessibilityHint("Choose a sidebar section")
                 .qaID("sidebar-section-menu", label: section.rawValue)
                 Spacer(minLength: 0)
                 if section == .tokens {
-                    MiniButton(symbol: "magnifyingglass", help: searchPrompt) {
+                    Button {
                         model.sidebarMenuOpen = false
                         searchOpen = true
                         searchFocused = true
+                    } label: {
+                        Image(systemName: "magnifyingglass").glyph(GlyphSize.row)
                     }
+                    .buttonStyle(ToolbarButtonStyle(active: searchOpen))
+                    .help(searchPrompt)
+                    .accessibilityLabel(searchPrompt)
                     .qaID("sidebar-search")
                 }
             }
-            .padding(.leading, Metric.sidebarLabelInset)
-            .padding(.trailing, Metric.sidebarInset)
+            .frame(height: Self.headerHeight)
+            .padding(.leading, Metric.sidebarLabelInset - Self.titlePadding)
+            .padding(.trailing, Metric.sidebarInset + (Metric.sidebarRow - Metric.toolbarControl) / 2)
 
             VStack(spacing: 0) {
                 if section == .tokens && searchOpen {
@@ -675,7 +693,7 @@ struct LeftColumn: View {
                     }
                     .qaID("sidebar-section-popup")
                     .padding(.leading, Metric.sidebarLabelInset)
-                    .padding(.top, Self.headerHeight + 2)
+                    .padding(.top, Self.headerHeight)
                 }
             }
         }
@@ -940,7 +958,7 @@ extension CanvasModel {
 
 private struct ToolPalette: View {
     @ObservedObject var model: CanvasModel
-    let size: Size
+    let compact: Bool
     let tooltipClearance: CGFloat
     #if CANVAS_QA
     @AppStorage(QA.hoveredToolKey) private var qaHoveredTool = ""
@@ -948,17 +966,15 @@ private struct ToolPalette: View {
     private let qaHoveredTool = ""
     #endif
 
-    struct Size {
-        let width: CGFloat, height: CGFloat, padding: CGFloat, gap: CGFloat, divider: CGFloat, glyph: CGFloat
-        static let full = Size(width: 36, height: 36, padding: 6, gap: 2, divider: 9, glyph: 18)
-        static let compact = Size(width: 20, height: 26, padding: 4, gap: 1, divider: 5, glyph: 15)
+    private static let padding: CGFloat = 4
+    private static let gap: CGFloat = 4
+    private static let divider: CGFloat = 1
+    private static let rowSpacing = Metric.toolbarControl + gap
 
-        @MainActor func paletteWidth() -> CGFloat {
-            let count = ToolPalette.groups.reduce(0) { $0 + $1.count }
-            let dividers = max(0, ToolPalette.groups.count - 1)
-            return 2 * padding + CGFloat(count) * width + CGFloat(dividers) * divider
-                + CGFloat(max(0, count + dividers - 1)) * gap
-        }
+    static func width(compact: Bool) -> CGFloat {
+        let widths = groups.map { CGFloat($0.count) * Metric.toolbarControl + CGFloat($0.count - 1) * gap }
+        let content = compact ? widths.max() ?? 0 : widths.reduce(0, +) + CGFloat(widths.count - 1) * (2 * gap + divider)
+        return content + 2 * padding
     }
 
     private struct Item: Identifiable {
@@ -996,23 +1012,31 @@ private struct ToolPalette: View {
     }()
 
     static let bottomMargin: CGFloat = 14
-    /// Room kept free at the bottom, for the full size (the compact one is lower).
-    static let bottomClearance = bottomMargin + Size.full.height + 2 * Size.full.padding + Metric.islandGap
+    static func clearance(compact: Bool) -> CGFloat {
+        bottomMargin + Metric.toolbarControl + (compact ? CGFloat(groups.count - 1) * rowSpacing : 0)
+            + 2 * padding + Metric.islandGap
+    }
+
+    private func tooltipOffset(for index: Int) -> CGFloat {
+        let rowsAbove = compact ? CGFloat(index) * Self.rowSpacing : 0
+        let rowsBelow = compact ? CGFloat(Self.groups.count - index - 1) * Self.rowSpacing : 0
+        return max(Metric.toolbarControl + 8 + rowsAbove, tooltipClearance - Self.bottomMargin - Self.padding - rowsBelow)
+    }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 14)
-        HStack(spacing: size.gap) {
+        let shape = ToolbarButtonStyle.shape(outset: Self.padding)
+        let layout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: Self.gap))
+                             : AnyLayout(HStackLayout(spacing: Self.gap))
+        layout {
             ForEach(Self.groups.indices, id: \.self) { index in
-                if index > 0 {
-                    Rectangle().fill(Palette.fg.opacity(0.08))
-                        .frame(width: 1, height: size.height)
-                        .frame(width: size.divider)
-                        .accessibilityHidden(true)
-                }
-                HStack(spacing: size.gap) {
+                HStack(spacing: Self.gap) {
+                    if !compact && index > 0 {
+                        Rectangle().fill(Palette.fg.opacity(0.08))
+                            .frame(width: Self.divider, height: 20)
+                            .accessibilityHidden(true)
+                    }
                     ForEach(Self.groups[index]) { item in
-                        ToolButton(item: item, size: size,
-                                   tooltipOffset: max(size.height + 8, tooltipClearance - Self.bottomMargin - size.padding),
+                        ToolButton(item: item, tooltipOffset: tooltipOffset(for: index),
                                    selected: item.selected(in: model),
                                    qaHovered: qaHoveredTool == item.id) {
                             model.draw(item.tool)
@@ -1021,7 +1045,7 @@ private struct ToolPalette: View {
                 }
             }
         }
-        .padding(size.padding)
+        .padding(Self.padding)
         .contentShape(shape)
         .onTapGesture {}
         .glassBar(in: shape)
@@ -1031,7 +1055,6 @@ private struct ToolPalette: View {
 
     private struct ToolButton: View {
         let item: Item
-        let size: Size
         let tooltipOffset: CGFloat
         let selected: Bool
         let qaHovered: Bool
@@ -1040,30 +1063,21 @@ private struct ToolPalette: View {
         private var showsTooltip: Bool { hovering || qaHovered }
 
         var body: some View {
-            let shape = RoundedRectangle(cornerRadius: 10)
+            let glyph: CGFloat = 16
             Button(action: action) {
                 Group {
                     if let icon = item.icon {
-                        icon.stroke(style: StrokeStyle(lineWidth: size.glyph / 12, lineCap: .round, lineJoin: .round))
-                            .frame(width: size.glyph, height: size.glyph)
+                        icon.stroke(style: StrokeStyle(lineWidth: glyph / 12, lineCap: .round, lineJoin: .round))
+                            .frame(width: glyph, height: glyph)
                     } else if item.tool == .text {
-                        Text("T").font(.system(size: size.glyph, weight: .light))
+                        Text("T").font(.system(size: glyph, weight: .light))
                     } else {
-                        Image(systemName: item.tool.symbol).font(.system(size: size.glyph, weight: .medium))
+                        Image(systemName: item.tool.symbol).font(.system(size: glyph, weight: .medium))
                     }
                 }
-                .foregroundStyle(selected || showsTooltip ? Palette.fg : Palette.mutedFg)
-                .frame(width: size.width, height: size.height)
-                .background {
-                    if selected {
-                        shape.fill(Palette.fg.opacity(0.12)).qaID(item.mark + "-selected", label: item.tool.title)
-                    } else if showsTooltip {
-                        shape.fill(Palette.fg.opacity(0.07))
-                    }
-                }
-                .contentShape(shape)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ToolbarButtonStyle(active: selected, selectedMark: (item.mark + "-selected", item.tool.title),
+                                            forceHover: qaHovered))
             .onHover { hovering = $0 }
             .overlay(alignment: .bottom) {
                 if showsTooltip {
@@ -1153,6 +1167,7 @@ struct ZoomCorner: View {
 /// Handles tab presses explicitly so double and secondary clicks cannot become reorder drags.
 private struct TabPointer: NSViewRepresentable {
     let closeVisible: Bool
+    let onPress: (Bool) -> Void
     let onClick: () -> Void
     let onRename: () -> Void
     let onMenu: (NSView, CGPoint) -> Void
@@ -1161,6 +1176,7 @@ private struct TabPointer: NSViewRepresentable {
     func makeNSView(context: Context) -> Pointer { Pointer() }
     func updateNSView(_ v: Pointer, context: Context) {
         v.closeVisible = closeVisible
+        v.pressed = onPress
         v.click = onClick; v.rename = onRename; v.menuAction = onMenu; v.drag = onDrag; v.drop = onDrop
     }
     final class Pointer: NSView {
@@ -1168,6 +1184,7 @@ private struct TabPointer: NSViewRepresentable {
         var click: () -> Void = {}, rename: () -> Void = {}, drop: () -> Void = {}
         var menuAction: (NSView, CGPoint) -> Void = { _, _ in }
         var drag: (CGFloat) -> Void = { _ in }
+        var pressed: (Bool) -> Void = { _ in }
         private var start: CGFloat = 0
         private var press = TabPress()
         override var mouseDownCanMoveWindow: Bool { false }
@@ -1182,6 +1199,7 @@ private struct TabPointer: NSViewRepresentable {
         }
         override func mouseDown(with event: NSEvent) {
             if event.modifierFlags.contains(.control) { rightMouseDown(with: event); return }
+            if event.clickCount == 1 { pressed(true) }
             start = event.locationInWindow.x
             perform(press.down(button: event.buttonNumber, clicks: event.clickCount))
         }
@@ -1190,6 +1208,7 @@ private struct TabPointer: NSViewRepresentable {
             if press.drag(dx) { drag(dx) }
         }
         override func mouseUp(with event: NSEvent) {
+            pressed(false)
             perform(press.up())
         }
         private func perform(_ action: TabPress.Action) {
@@ -1202,6 +1221,7 @@ private struct TabPointer: NSViewRepresentable {
         }
         override func rightMouseDown(with event: NSEvent) {
             press.cancel()
+            pressed(false)
             menuAction(self, convert(event.locationInWindow, from: nil))
         }
     }

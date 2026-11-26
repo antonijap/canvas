@@ -94,10 +94,10 @@ extension View {
         padding(.trailing, controlWidth.map { Metric.sidebarInset + (Metric.sidebarRow - $0) / 2 - Metric.sidebarLabelInset } ?? 0)
     }
 
-    func sidebarHeader() -> some View {
+    func sidebarHeader(actionWidth: CGFloat = Metric.sidebarRow) -> some View {
         frame(height: Metric.control)
             .padding(.leading, Metric.sidebarLabelInset)
-            .padding(.trailing, Metric.sidebarInset)
+            .padding(.trailing, Metric.sidebarInset + (Metric.sidebarRow - actionWidth) / 2)
     }
 }
 
@@ -191,20 +191,34 @@ struct TopBarIconButton: View {
                 .glyph(Metric.icon)
                 .qaID("top-bar-icon", label: symbol)
         }
-        .buttonStyle(TopBarButtonStyle(symbol: symbol, active: active))
+        .buttonStyle(ToolbarButtonStyle(active: active, topBarSymbol: symbol))
         .chromeHelp(help, shortcut: shortcut)
         .accessibilityLabel(help)
         .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
-struct TopBarButtonStyle: ButtonStyle {
-    let symbol: String
+struct ToolbarButtonStyle: ButtonStyle {
+    static let topBarSlot = Metric.toolbarControl + 6
+
     var active = false
     var visible = true
-    var diameter: CGFloat = 26
-    var width = Metric.control
-    var height = Metric.topBar
+    var height = Metric.toolbarControl
+    var width: CGFloat? = Metric.toolbarControl
+    var tint: Color? = nil
+    var topBarSymbol: String? = nil
+    var selectedMark: (id: String, label: String)? = nil
+    var forceHover = false
+
+    static func shape(height: CGFloat = Metric.toolbarControl, outset: CGFloat = 0) -> RoundedRectangle {
+        RoundedRectangle(cornerRadius: Metric.toolbarRadius * height / Metric.toolbarControl + outset, style: .continuous)
+    }
+
+    static func fill(active: Bool, hovering: Bool, pressed: Bool) -> Color {
+        if pressed { return Palette.fg.opacity(0.18) }
+        if active { return hovering ? Palette.fg.opacity(0.15) : Palette.active }
+        return hovering ? Palette.hover : .clear
+    }
 
     func makeBody(configuration: Configuration) -> some View {
         Face(configuration: configuration, style: self)
@@ -212,27 +226,39 @@ struct TopBarButtonStyle: ButtonStyle {
 
     private struct Face: View {
         let configuration: Configuration
-        let style: TopBarButtonStyle
+        let style: ToolbarButtonStyle
         @State private var hovering = false
-
-        private var fill: Color {
-            if !style.visible { return .clear }
-            if configuration.isPressed { return Palette.fg.opacity(0.18) }
-            if style.active { return hovering ? Palette.fg.opacity(0.15) : Palette.active }
-            return hovering ? Palette.hover : .clear
-        }
+        @Environment(\.isEnabled) private var enabled
 
         var body: some View {
-            configuration.label
-                .foregroundStyle(style.active || hovering ? Palette.fg : Palette.mutedFg)
+            let hovered = enabled && (hovering || style.forceHover)
+            let shape = ToolbarButtonStyle.shape(height: style.height)
+            let fill = ToolbarButtonStyle.fill(active: style.active, hovering: hovered, pressed: enabled && configuration.isPressed)
+            let face = configuration.label
+                .foregroundStyle(style.active ? Palette.fg : style.tint ?? (hovered ? Palette.fg : Palette.mutedFg))
                 .opacity(style.visible ? 1 : 0)
-                .frame(width: style.diameter, height: style.diameter)
-                .background {
-                    Circle().fill(fill).qaID("top-bar-button-background", label: style.symbol)
-                }
                 .frame(width: style.width, height: style.height)
-                .contentShape(Rectangle())
-                .onHover { hovering = $0 }
+                .background {
+                    let background = shape.fill(style.visible ? fill : .clear)
+                    if let symbol = style.topBarSymbol {
+                        background.qaID("top-bar-button-background", label: symbol)
+                    } else if style.active, let mark = style.selectedMark {
+                        background.qaID(mark.id, label: mark.label)
+                    } else {
+                        background
+                    }
+                }
+                .contentShape(shape)
+                .opacity(enabled ? 1 : 0.45)
+            Group {
+                if style.topBarSymbol != nil && style.height == Metric.toolbarControl {
+                    face.frame(width: ToolbarButtonStyle.topBarSlot, height: Metric.topBar)
+                        .contentShape(Rectangle())
+                } else {
+                    face
+                }
+            }
+            .onHover { hovering = $0 }
         }
     }
 }
@@ -267,13 +293,13 @@ struct TabChip: View {
     private static let glyphWidth: CGFloat = 13
     private static let glyphGap: CGFloat = 6
     private static let titleInset: CGFloat = 4
-    private static let closeDiameter: CGFloat = 20
+    private static let closeSize: CGFloat = 20
     private static let closeInset: CGFloat = 4
-    static let chromeWidth = leadingInset + glyphWidth + glyphGap + titleInset + closeDiameter + closeInset
+    static let chromeWidth = leadingInset + glyphWidth + glyphGap + titleInset + closeSize + closeInset
 
     static func closeFrame(in bounds: CGRect) -> CGRect {
-        CGRect(x: bounds.maxX - closeInset - closeDiameter, y: bounds.midY - closeDiameter / 2,
-               width: closeDiameter, height: closeDiameter)
+        CGRect(x: bounds.maxX - closeInset - closeSize, y: bounds.midY - closeSize / 2,
+               width: closeSize, height: closeSize)
     }
 
     let title: String
@@ -281,6 +307,7 @@ struct TabChip: View {
     var active = false
     var width: CGFloat? = nil
     var hovering = false
+    var pressed = false
     /// The file is gone from disk: a warning glyph, a struck-through name, and "File not found" on hover.
     var missing = false
     let onClose: () -> Void
@@ -309,15 +336,20 @@ struct TabChip: View {
             Button(action: onClose) {
                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
             }
-            .buttonStyle(TopBarButtonStyle(symbol: "xmark", visible: showClose, diameter: Self.closeDiameter,
-                                           width: Self.closeDiameter, height: Self.closeDiameter))
+            .buttonStyle(ToolbarButtonStyle(visible: showClose, height: Self.closeSize, width: Self.closeSize))
             .chromeHelp("Close tab").accessibilityLabel("Close \(title)")
             .qaID("tab-close", label: title)
             .allowsHitTesting(showClose)
             .padding(.trailing, Self.closeInset)
         }
         .frame(width: width)
-        .background(active ? Palette.active : (hovering ? Palette.hover : .clear))
+        .background {
+            ToolbarButtonStyle.shape()
+                .fill(ToolbarButtonStyle.fill(active: active, hovering: hovering, pressed: pressed))
+                .frame(height: Metric.toolbarControl)
+                .qaID("file-tab-background", label: title)
+                .padding(.horizontal, 2)
+        }
     }
 }
 

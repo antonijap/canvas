@@ -120,6 +120,8 @@ export const METRICS = {
   pill: 40,
   pillPad: 4,
   control: 32,
+  toolbarControl: 28,
+  toolbarRadius: 6,
   icon: 15,
   row: 32,
   field: 28,

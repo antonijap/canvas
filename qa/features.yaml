@@ -552,10 +552,10 @@ features:
 
   # ------------------------------------------------------------ pages and layers panel
   - id: sidebar
-    name: Switch, hide and remember editor sidebar sections
+    name: Switch, hide and remember editor sidebar sections, with 28 pt header buttons and direct access to Properties
     area: sidebar
     driven: [page, native]
-    cases: [menu, scroll, restore, toggle, keyboard, previews]
+    cases: [menu, scroll, restore, toggle, keyboard, previews, properties]
   - id: pages
     name: Switch pages, move boards between pages
     area: pages
@@ -837,7 +837,7 @@ features:
     driven: [native]
     cases: [pinned, shortcut, recents, card-open, remove, first-launch, server, server-name, clouds, cloud-context-menu, thumbnail, alignment, $themes]
   - id: tabs
-    name: File tabs drag left and right to reorder (a short move is a click, Home stays first), the order is kept, and Shift+Cmd+[ and ] follow it
+    name: File tabs reorder by drag, keep Home first, and use rounded-rectangle toolbar buttons that clear the traffic lights
     area: chrome
     driven: [native]
     cases: [spacing, overflow, drag, threshold, home-pinned, saved, step, context-menu, rename-menu, rename-double-click, close-others, drag-after-rename, warm-switch, new-file, click-switch, reopen-recent]

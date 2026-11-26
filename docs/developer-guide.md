@@ -388,6 +388,8 @@ A file's comments can sync live through a Cloud: the team's own Cloudflare Worke
 
 ## Home
 
+The macOS top bar, editor sidebar headers and bottom tool palette use 28 pt rounded-rectangle controls with a 6 pt corner radius. SwiftUI draws a continuous corner, and the Comments and Conversations web headers use the same dimensions. File tab close buttons use a scaled 20 pt version. Readouts and text controls keep the same height. At 720 pt with both sidebars open, the tool palette stacks its two groups and keeps each button 28 pt square.
+
 Home is the pinned first tab (`apps/macos/Home.swift`; the logic, without views, is `HomeLogic.swift`, tested by `Tests/HomeLogicTests.swift`). It cannot be closed: with no file open it shows a house and "Home", with files open only the house. A click, Shift+Cmd+0 or Window > Home (`MenuSpec.window`, so it is also in Settings > Shortcuts) shows it. `CanvasModel.homeShown` swaps the screen: Home draws over the canvas web view, which is hidden (not removed), so every file tab's page stays alive and nothing else runs under it; Cmd+W with Home showing closes nothing. Opening a file by any route (`CanvasModel.open`) leaves Home. Closing the last file tab, or a launch with nothing to open, lands on Home.
 
 - **Recents**: the app's own list in UserDefaults (`canvas.recents`: path and last opened time, newest first, at most 50, one entry per path). An install from before Home starts from its open tabs. The file the app opens by itself on a first launch (the course) is not a recent until the person opens it from Home or its tab.

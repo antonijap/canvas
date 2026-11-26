@@ -87,7 +87,8 @@ if (host?.file) {
   host.on("render", editNewText);
   host.on("draw-tool", (type) => { if (!Object.hasOwn(names, type)) setTool(); });
   host.on("cmd", (c) => {
-    if (c.cmd === "draw") activate(c.type, document.activeElement);
+    // An explicit toolbar or menu action can take over from a web field. Typing still goes through the field guard.
+    if (c.cmd === "draw" && activate(c.type) && document.activeElement?.closest(field)) document.activeElement.blur();
     if (c.cmd === "cancelDraw") leave();
   });
   addEventListener("pagehide", leave);

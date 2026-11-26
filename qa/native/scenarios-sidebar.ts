@@ -60,7 +60,10 @@ sc("sidebar", "right panels dock and align with the Layers header", { covers: ["
   };
   const inspector = await t.mark({ id: "right-sidebar-panel" });
   docked(inspector, await t.mark({ id: "right-sidebar-header" }), "Inspector");
-  const trailingX = center(await t.mark({ id: "inspector-header-action" })).x;
+  const action = await t.mark({ id: "inspector-header-action" });
+  t.near(action.w, 28, 0.5, "the inspector action is 28 pt wide");
+  t.near(action.h, 28, 0.5, "the inspector action is 28 pt high");
+  const trailingX = center(action).x;
   const checkZoom = async (name: string) => {
     const zoom = await t.mark({ id: "zoom-island" });
     t.near(zoom.x + zoom.w, window.width - METRICS.propsWidth - METRICS.inset, 1, name + " leaves the normal gap before zoom");
@@ -79,6 +82,8 @@ sc("sidebar", "right panels dock and align with the Layers header", { covers: ["
       return { panel: rect('${panel}'), title: rect('${head}'), close: rect('${head} .right-sidebar-close') };
     `);
     docked(rects.panel, rects.title, name);
+    t.near(rects.close.w, 28, 0.5, name + " close is 28 pt wide");
+    t.near(rects.close.h, 28, 0.5, name + " close is 28 pt high");
     t.near(center(rects.close).x, trailingX, 1, name + " close aligns with the inspector action");
     await checkZoom(name);
   };
@@ -91,6 +96,26 @@ sc("sidebar", "right panels dock and align with the Layers header", { covers: ["
   await t.waitJs("document.querySelector('.cv-sidebar').hidden", "Conversations closes");
   await t.js(`document.querySelector('[aria-label^="Open comments"]').click(); return true;`);
   await checkWeb(".cm-sidebar", ".cm-sidebar-head", "Comments");
+});
+
+sc("sidebar", "Properties switches back from Conversations and Comments", { covers: ["sidebar:properties"] }, async (t: NT) => {
+  const properties = async () => center(await t.mark({ id: "properties-toggle" }));
+  if (!(await t.state()).inspectorOpen) await t.click(await properties());
+  await t.mark({ id: "right-sidebar-panel" });
+  await t.click(center(await t.mark({ id: "conversations-toggle" })));
+  await t.waitJs("!document.querySelector('.cv-sidebar').hidden", "Conversations opens");
+  await t.click(await properties());
+  await t.waitJs("document.querySelector('.cv-sidebar').hidden", "Properties closes Conversations", 3500);
+  await t.mark({ id: "right-sidebar-panel" });
+  await t.js(`document.querySelector('[aria-label^="Open comments"]').click(); return true;`);
+  await t.waitJs("!document.querySelector('.cm-sidebar').hidden", "Comments opens");
+  await t.click(await properties());
+  await t.waitJs("document.querySelector('.cm-sidebar').hidden", "Properties closes Comments", 3500);
+  await t.mark({ id: "right-sidebar-panel" });
+  await t.click(await properties());
+  await t.waitState(s => !s.inspectorOpen, "Properties can still hide its own panel");
+  await t.click(await properties());
+  await t.mark({ id: "right-sidebar-panel" });
 });
 
 sc("sidebar", "section menu switches panels and remembers the selection", {
@@ -125,7 +150,7 @@ sc("sidebar", "section menu switches panels and remembers the selection", {
   t.near(shown.y, 38, 0.5, "sidebar starts below the top bar");
   t.near(shown.w, METRICS.sidebarWidth, 0.5, "sidebar opens at its default width");
   t.near(shown.y + shown.h, (await t.state()).window.height, 1, "sidebar reaches the bottom of the window");
-  t.near((await header(t)).h, 32, 0.5, "header is 32 pt tall");
+  t.near((await header(t)).h, 28, 0.5, "section button is 28 pt tall");
 
   const open = await t.mark({ id: "sidebar-toggle", label: "Hide panel", exact: true });
   const w = await freeWidth(t);
@@ -144,7 +169,10 @@ sc("sidebar", "section menu switches panels and remembers the selection", {
   await t.mark({ label: "Button/Primary", exact: true });
   t.eq((await t.marks({ id: "sidebar-search" })).length, 0, "Assets has no search button");
   await t.section("Tokens");
-  await t.click(center(await t.mark({ id: "sidebar-search" })));
+  const search = await t.mark({ id: "sidebar-search" });
+  t.near(search.w, 28, 0.5, "the search button is 28 pt wide");
+  t.near(search.h, 28, 0.5, "the search button is 28 pt high");
+  await t.click(center(search));
   await t.mark({ label: "Search text styles", exact: true });
   await t.waitState(s => /FieldEditor|TextView/.test(s.window.firstResponder ?? ""), "the token search field to focus");
   await t.section("Widgets");

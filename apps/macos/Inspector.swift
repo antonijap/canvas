@@ -286,22 +286,29 @@ struct InspectorBody: View {
         return s.id
     }
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 4) {
             Image(systemName: headerSymbol).glyph(12).foregroundStyle(s.isComponent ? Palette.component : Palette.mutedFg)
+                .padding(.trailing, 4)
             Text(layerTitle).font(SidebarStyle.title).foregroundStyle(Palette.fg).lineLimit(1)
             Spacer(minLength: 0)
             if ContextMenuLayout.canCreateComponent(type: str(n["type"]), reusable: n["reusable"] as? Bool == true, path: s.isPath, inInstance: s.inInstance), !s.id.hasPrefix("widget:") {
-                MiniButton(symbol: "diamond", help: "Create Component") { model.run("{cmd:'shortcut',op:'component'}") }
-                    .qaID("create-component", label: "Create Component").disabled(model.cloudReadOnly)
+                Button { model.run("{cmd:'shortcut',op:'component'}") } label: {
+                    Image(systemName: "diamond").glyph(GlyphSize.row)
+                }
+                .buttonStyle(ToolbarButtonStyle())
+                .chromeHelp("Create Component", shortcut: "\u{2325}\u{2318}K")
+                .accessibilityLabel("Create Component")
+                .qaID("create-component", label: "Create Component")
+                .disabled(model.cloudReadOnly)
             }
             Menu { nodeMenu } label: {
-                Image(systemName: "ellipsis").glyph(GlyphSize.row).foregroundStyle(Palette.mutedFg)
-                    .frame(width: Metric.sidebarRow, height: Metric.sidebarRow).contentShape(Circle())
+                Image(systemName: "ellipsis").glyph(GlyphSize.row)
             }
-            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize().help("More actions")
+            .menuStyle(.button).buttonStyle(ToolbarButtonStyle()).menuIndicator(.hidden).fixedSize().help("More actions")
+            .accessibilityLabel("More actions")
             .qaID("inspector-header-action")
         }
-        .sidebarHeader()
+        .sidebarHeader(actionWidth: Metric.toolbarControl)
         .qaID("right-sidebar-header")
         .contextMenu { nodeMenu }
     }

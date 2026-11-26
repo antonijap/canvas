@@ -840,7 +840,7 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   /// View > Layout Guides (Control+G, the page's key): frames' grids, columns and rows (src/page/navigate.js).
   @objc func layoutGuides(_ s: Any?) { model.run("{cmd:'nav',op:'layoutGuides'}") }
   @objc func toggleUI(_ s: Any?) { model.uiHidden.toggle() }
-  @objc func toggleProperties(_ s: Any?) { model.inspectorOpen.toggle() }
+  @objc func toggleProperties(_ s: Any?) { model.toggleProperties() }
   /// Cmd+R: the selected layer's name opens for editing in the Layers panel.
   @objc func rename(_ s: Any?) { model.renameSelection() }
   /// Option+L (collapse layers): every open row in the Layers panel closes.
@@ -881,8 +881,8 @@ final class MenuActions: NSObject, NSMenuItemValidation {
       // Shift+R is the page's key on the canvas, and an "R" typed in a field is text.
       return model.currentFile != nil && !(key && (webHasFocus || nativeText))
     case #selector(toggleProperties(_:)):
-      item.title = model.inspectorOpen ? "Hide Properties" : "Show Properties"
-      return true
+      item.title = model.propertiesShown ? "Hide Properties" : "Show Properties"
+      return model.editorChromeShown
     case #selector(toggleUI(_:)):
       item.title = model.uiHidden ? "Show UI" : "Hide UI"
       return true

@@ -57,7 +57,7 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   t.eq(st.homeShown, false, "a file is showing, not Home");
   const tab = await t.mark({ id: "home-tab" });
   const icon = await t.mark({ id: "top-bar-icon", label: "house", exact: true });
-  t.near(tab.w, METRICS.control, 0.6, "Home uses one icon slot");
+  t.near(tab.w, METRICS.toolbarControl + 6, 0.6, "Home uses one toolbar icon slot");
   t.near(tab.h, 38, 0.6, "Home fills the strip height");
   t.near(midX(icon), midX(tab), 0.6, "the house is centred across the tab");
   t.near(midY(icon), midY(tab), 0.6, "the house is centred down the tab");
@@ -117,23 +117,35 @@ sc("tabs", "Top bar aligns controls and clears the traffic lights", { covers: ["
     t.ok(Number.isFinite(zoomRight) && gap >= 12, "the first control clears the green button by at least 12 pt");
     t.near(leftInset, rightInset, 0.5, "+ is equally inset after the separator and before the drag area");
     t.ok(leftInset >= 3, "the + background clears the separator by at least 3 pt");
-    const symbols = ["house", "chevron.down", "magnifyingglass", "sidebar.right"];
+    const symbols = ["house", "chevron.down", "magnifyingglass"];
     if (toggleShown) {
       t.near(first.w, home.w, 0.5, "the toggle and Home have matching widths");
       t.near(first.h, home.h, 0.5, "the toggle and Home have matching heights");
       t.near(first.x + first.w, home.x, 0.5, "the toggle and Home sit side by side");
-      symbols.push("sidebar.left", "sparkles.2");
+      symbols.push("sidebar.left", "sparkles.2", "sidebar.right");
       const close = await t.mark({ id: "tab-close", label: last.label!, exact: true });
       t.near(close.w, 20, 0.5, "the close target is 20 pt wide");
       t.near(close.h, close.w, 0.5, "the close target has equal sides");
       t.near(midY(close), midY(title), 0.5, "the close target shares the tab title's vertical center");
     }
     t.near(tabs[0].x - (home.x + home.w), 1, 0.5, "one separator follows Home");
+    t.near((await t.mark({ id: "file-tab-background", label: last.label!, exact: true })).h, 28, 0.5, "file tab fill is 28 pt high");
     for (const r of [fill, ...await Promise.all(symbols.map(background))]) {
-      t.near(r.w, 26, 0.5, r.label + " background is 26 pt wide");
+      t.near(r.w, 28, 0.5, r.label + " background is 28 pt wide");
       t.near(r.h, r.w, 0.5, r.label + " background has equal sides");
       t.near(midY(r), midY(title), 0.5, r.label + " shares the tab title's vertical center");
     }
+    const selected = await background(toggleShown ? "sidebar.left" : "house");
+    const raw = await t.cmd<{ data: string }>("qa.shot");
+    const img = decodePng(Buffer.from(raw.data, "base64"));
+    const scale = img.width / (await t.state()).window.width;
+    const pixel = (x: number, y: number) => {
+      const i = (Math.floor((selected.y + y) * scale) * img.width + Math.floor((selected.x + x) * scale)) * 4;
+      return img.data[i];
+    };
+    t.ok(Math.abs(pixel(4, 14) - pixel(0.5, -1)) > 8, "the selected control has a visible fill");
+    t.near(pixel(4, 4), pixel(4, 14), 3, "selected fill reaches the rounded rectangle's shoulders");
+    t.near(pixel(0.5, 0.5), pixel(0.5, -1), 3, "selected fill leaves the very corner clear");
   };
   const capture = async (name: string, hoverID: string) => {
     if (!process.env.CANVAS_TOPBAR_SHOTS) return;
@@ -158,6 +170,7 @@ sc("tabs", "Top bar aligns controls and clears the traffic lights", { covers: ["
     await t.click(center(await mark("home-tab")));
     await t.waitState(s => s.homeShown, "Home to show without the sidebar toggle");
     t.eq((await t.marks({ id: "sidebar-toggle" })).length, 0, "the toggle is hidden on Home");
+    t.eq((await t.marks({ id: "properties-toggle" })).length, 0, "Properties is hidden on Home");
     await check(false);
     await capture("without-toggle", "tab-list");
   } finally {
@@ -569,7 +582,7 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
     t.eq((await t.state()).openFiles, files, "overflow tabs start in file order");
     const home = await t.mark({ id: "home-tab" });
     const plus = await t.mark({ id: "tab-new" });
-    t.near(home.w, METRICS.control, 0.5, "Home uses one icon slot");
+    t.near(home.w, plus.w, 0.5, "Home and New use the same icon slot");
     const actions = await t.mark({ id: "top-bar-actions" });
     t.ok(actions.x - plus.x - plus.w >= 24, "overflow leaves at least 24 points to drag the window");
     t.ok([...single.values()].reduce((a, b) => a + b, 0) > plus.x - home.x - home.w,

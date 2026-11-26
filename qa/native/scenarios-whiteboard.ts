@@ -15,6 +15,11 @@ sc("vote", "Vote and timer palette controls and panels fit at 720 pt", { covers:
     await t.showPage("layout");
     await t.settle();
     const vote = await t.mark({ id: "vote-tool" });
+    const timer = await t.mark({ id: "timer-tool" });
+    for (const button of [vote, timer]) {
+      t.near(button.w, 28, 0.5, button.label + " is 28 pt wide");
+      t.near(button.h, 28, 0.5, button.label + " is 28 pt high");
+    }
     const palette = await t.mark({ id: "tool-palette" });
     const { webFrame } = await t.state();
     const { l, t: top, r, b } = await t.js<{ l: number; t: number; r: number; b: number }>("return window.canvasHost.insets");
@@ -39,7 +44,7 @@ sc("vote", "Vote and timer palette controls and panels fit at 720 pt", { covers:
     };
     const selected = (on: boolean) => t.waitFor(async () =>
       (await t.marks({ id: "vote-tool-selected" })).length === (on ? 1 : 0), on ? "Vote highlighted" : "Vote highlight cleared");
-    await t.click(center(await t.mark({ id: "timer-tool" })));
+    await t.click(center(timer));
     await panel("[data-timer-sheet]");
     await click("[data-timer-start]");
     await panel("[data-timer-bar]");

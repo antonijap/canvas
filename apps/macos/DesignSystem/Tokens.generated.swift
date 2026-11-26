@@ -65,6 +65,8 @@ enum Metric {
     static let pill: CGFloat = 40
     static let pillPad: CGFloat = 4
     static let control: CGFloat = 32
+    static let toolbarControl: CGFloat = 28
+    static let toolbarRadius: CGFloat = 6
     static let icon: CGFloat = 15
     static let row: CGFloat = 32
     static let field: CGFloat = 28

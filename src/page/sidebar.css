@@ -204,6 +204,21 @@ body:is(.cm-sidebar-open, .cv-open) #props { visibility: hidden; }
   cursor: pointer;
 }
 .right-sidebar-close:hover { background: var(--c-hover); color: var(--c-fg); }
+.native .right-sidebar-header :is(.right-sidebar-close, .cm-read-all) {
+  height: var(--c-toolbar-control);
+  border-radius: var(--c-toolbar-radius);
+}
+.native .right-sidebar-header .right-sidebar-close {
+  width: var(--c-toolbar-control);
+  margin-inline-end: calc((var(--c-sidebar-row) - var(--c-toolbar-control)) / 2);
+}
+.native .right-sidebar-header :is(.right-sidebar-close, .cm-read-all):hover {
+  background: var(--c-hover);
+  color: var(--c-fg);
+}
+.native .right-sidebar-header :is(.right-sidebar-close, .cm-read-all):active {
+  background: color-mix(in srgb, var(--c-fg) 18%, transparent);
+}
 .right-sidebar-close::before,
 .right-sidebar-close::after {
   content: "";

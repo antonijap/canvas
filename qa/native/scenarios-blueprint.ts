@@ -59,12 +59,15 @@ sc("tools", "bottom tool palette geometry, sticky flyouts, selection and Hide UI
     const { webFrame } = await t.state();
     const { l, r, b } = await t.js<{ l: number; r: number; b: number }>("return window.canvasHost.insets");
     t.near(webFrame.w, 720, 1, `minimum window width (insets ${l}/${r}, palette ${bar.w}x${bar.h})`);
-    t.near(bar.h, 34, 1, "compact palette height when both sidebars leave little room");
+    t.near(bar.h, 68, 1, "the two palette rows keep their full button height");
     t.near(webFrame.y + webFrame.h - bar.y - bar.h, 14, 1, "palette bottom margin");
     t.near(center(bar).x, webFrame.x + (webFrame.w + l - r) / 2, 1, "palette centered in the free canvas");
     t.ok(l >= 224 && r >= 284, `both sidebars are open (insets ${l}/${r})`);
     t.ok(bar.x >= webFrame.x + l && bar.x + bar.w <= webFrame.x + webFrame.w - r, "palette fits between both sidebars");
-    t.ok(bar.w + (await toolButton("Text")).w + 1 <= webFrame.w - l - r, "the compact palette leaves room for a timer");
+    const frame = await toolButton("Frame");
+    const sticky = await toolButton("Sticky");
+    t.near(frame.x, sticky.x, 1, "both groups start at the same x in the compact palette");
+    t.near(sticky.y - frame.y, 32, 1, "the second row keeps the same gap as the buttons");
     t.ok(b > bar.h + 14, "fit reserves room above the palette");
     await t.cmd("qa.hovertool", { tool: "text" });
     try {
@@ -94,7 +97,8 @@ sc("tools", "bottom tool palette geometry, sticky flyouts, selection and Hide UI
       ["Sticky", "s", []], ["Sticker", "s", ["shift"]],
     ] as const) {
       const button = await toolButton(label);
-      t.near(button.h, 26, 1, label + " height");
+      t.near(button.w, 28, 1, label + " width");
+      t.near(button.h, 28, 1, label + " height");
       t.ok(button.x >= bar.x && button.x + button.w <= bar.x + bar.w, label + " fits inside the palette");
       await t.click(center(button));
       await expectSelected(label);
@@ -247,6 +251,25 @@ sc("tools", "bottom tool palette geometry, sticky flyouts, selection and Hide UI
       await t.click(center(await t.mark({ id: "properties-toggle" })));
     if ((await t.state()).panelOpen !== initial.panelOpen) await t.click(await t.sidebarToggle());
   }
+});
+
+sc("draw", "native draw palette can leave a focused comment draft", { covers: ["draw:palette"] }, async (t: NT) => {
+  await t.showPage("layout");
+  await t.settle();
+  const { webFrame } = await t.state();
+  const left = await t.js<number>("return window.canvasHost.insets.l;");
+  await t.key("c");
+  await t.click({ x: webFrame.x + left + 70, y: webFrame.y + 200 });
+  const field = "document.querySelector('.cm-comp .cm-field')";
+  await t.waitJs(`${field} === document.activeElement`, "comment composer takes focus");
+  await t.type("Draft note");
+  await t.key("r");
+  t.eq(await t.js(`return ${field}.value;`), "Draft noter", "the draw shortcut still types in the comment");
+  await t.click(center(await t.mark({ id: "draw-tool", label: "Rectangle" })));
+  await t.mark({ id: "draw-tool-selected", label: "Rectangle" }, 3500);
+  t.eq(await t.js(`return {draft: ${field}.value, focused: ${field} === document.activeElement,
+    commenting: document.getElementById('view').classList.contains('cm-mode')};`),
+    { draft: "Draft noter", focused: false, commenting: false }, "the tool takes over the canvas and keeps the draft");
 });
 
 sc("draw", "draw tools from the native palette and commands", { covers: ["draw:tool-palette", "draw:menu", "draw:palette"] }, async (t) => {
