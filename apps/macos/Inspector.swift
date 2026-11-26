@@ -7,6 +7,7 @@ import SwiftUI
 struct Inspector: View {
     @ObservedObject var model: CanvasModel
     @ObservedObject var fonts: FontCatalog
+    @State private var pageStyles: PageStylesResult?
 
     var body: some View {
         if model.currentFile != nil {
@@ -19,9 +20,9 @@ struct Inspector: View {
                         InspectorBody(model: model, fonts: fonts, s: s)
                             .environment(\.editTarget, ([model.currentFile ?? "", s.id] + s.ids).joined(separator: "\u{1F}"))
                     } else if let page = model.pages.first(where: { $0.id == model.activePage }) {
-                        PageInspector(model: model, page: page)
+                        PageInspector(model: model, page: page, result: $pageStyles)
                             .environment(\.editTarget, (model.currentFile ?? "") + "\u{1F}page:" + page.id)
-                            .id((model.currentFile ?? "") + page.id)
+                            .id((model.currentFile ?? "") + "\u{1F}" + page.id)
                     }
                 }
                 .padding(.bottom, Metric.sidebarLabelInset)
@@ -38,9 +39,22 @@ struct Inspector: View {
     }
 }
 
+private struct PageStylesRequest: Equatable {
+    let file: String?
+    let page: String
+    let revision: String
+    let boards: [String]
+}
+
+private struct PageStylesResult {
+    let request: PageStylesRequest
+    let styles: PageStyles
+}
+
 private struct PageInspector: View {
     @ObservedObject var model: CanvasModel
     let page: PageInfo
+    @Binding var result: PageStylesResult?
     @Environment(\.colorScheme) private var scheme
     @State private var opacityDraft: Double?
 
@@ -128,12 +142,31 @@ private struct PageInspector: View {
     }
 
     var body: some View {
+        let request = PageStylesRequest(file: model.currentFile, page: page.id, revision: model.revision, boards: model.boards.map(\.id))
+        let styles = result.flatMap {
+            $0.request.file == request.file && $0.request.page == request.page && $0.request.boards == request.boards ? $0.styles : nil
+        }
         VStack(spacing: 0) {
             Text("Page").font(SidebarStyle.title).qaText("Page")
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .sidebarHeader()
                 .qaID("right-sidebar-header")
             backgroundSection
+            PageInspectorStyles(model: model, page: page.id, styles: styles)
+            if !request.boards.isEmpty, let file = request.file {
+                PageInspectorExport(model: model, file: file)
+                    .id(file)
+            }
+        }
+        .task(id: request) {
+            guard result?.request != request, !request.revision.isEmpty,
+                  let url = model.widgetURL("api/page-styles", query: [URLQueryItem(name: "page", value: request.page)]) else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(160))
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard !Task.isCancelled, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+                result = PageStylesResult(request: request, styles: try JSONDecoder().decode(PageStyles.self, from: data))
+            } catch { /* canceled or unavailable; keep the last read */ }
         }
     }
 

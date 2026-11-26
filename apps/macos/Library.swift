@@ -501,22 +501,37 @@ extension CanvasModel {
         Task { @MainActor in
             let nodes = await self.nodes(file: file, ids: ids)
             let items = ExportSettings.items(ids.map { id in (id, nodes[id] ?? [:]) })
-            let panel = NSOpenPanel()
-            panel.title = "Export"
-            panel.message = items.count == 1 ? "Choose a folder for 1 file." : "Choose a folder for \(items.count) files, named after the layers."
-            panel.prompt = "Export"
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = false
-            panel.canCreateDirectories = true
-            let key = "canvas.exportFolder"
-            if let last = UserDefaults.standard.string(forKey: key), FileManager.default.fileExists(atPath: last) { panel.directoryURL = URL(fileURLWithPath: last, isDirectory: true) }
-            #if CANVAS_QA
-            if let dir = QA.exportFolder { self.postExport(["file": file, "items": items, "dir": dir]); return }
-            #endif
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            UserDefaults.standard.set(url.path, forKey: key)
-            self.postExport(["file": file, "items": items, "dir": url.path])
+            let message = items.count == 1 ? "Choose a folder for 1 file." : "Choose a folder for \(items.count) files, named after the layers."
+            if let dir = self.chooseExportFolder(message: message) { self.postExport(["file": file, "items": items, "dir": dir]) }
         }
+    }
+
+    func exportPageBoards(_ settings: PageExportSettings) {
+        let count = boards.count
+        guard let file = currentFile, let page = activePage, count > 0 else { return }
+        let message = count == 1 ? "Choose a folder for 1 file." : "Choose a folder for \(count) files, named after the boards."
+        guard let dir = chooseExportFolder(message: message) else { return }
+        postExport(["file": file, "page": page, "format": settings.format, "scale": settings.effectiveScale, "dir": dir])
+    }
+
+    private func chooseExportFolder(message: String) -> String? {
+        #if CANVAS_QA
+        if let dir = QA.exportFolder { return dir }
+        #endif
+        let panel = NSOpenPanel()
+        panel.title = "Export"
+        panel.message = message
+        panel.prompt = "Export"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        let key = "canvas.exportFolder"
+        if let last = UserDefaults.standard.string(forKey: key), FileManager.default.fileExists(atPath: last) {
+            panel.directoryURL = URL(fileURLWithPath: last, isDirectory: true)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        UserDefaults.standard.set(url.path, forKey: key)
+        return url.path
     }
 
     /// The file's own props of some layers (GET /api/node per id), for their export settings.

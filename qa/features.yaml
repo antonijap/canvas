@@ -566,6 +566,11 @@ features:
     area: page background
     driven: [page, native, mcp]
     cases: [set, reset, themes, undo, persistence, empty-selection, cloud]
+  - id: page-styles
+    name: Inspect colors and text styles in use, select their layers, replace a color and export page boards
+    area: page background
+    driven: [page, mcp]
+    cases: [colors, text, selection, replace, undo, export]
   - id: page-crud
     name: Create, rename, reorder, duplicate and delete pages with their boards
     area: pages

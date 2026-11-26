@@ -1230,6 +1230,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     private struct PendingWrite {
         var file: String; var id: String; var ids: [String]? = nil; var props: [String: Any]; var remove: [String]; var gesture: String?; var op: Int
         var each: [String: [String: Any]]? = nil
+        var pageColor: [String: String]? = nil
         /// Keys changed from the layer's own value ({key: {op, by}}): Edit > Repeat does the same change (src/repeat.ts).
         var rel: [String: Any]? = nil
         var drawn = true
@@ -1330,7 +1331,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
 
     private func sendWrite(_ key: String, _ w: PendingWrite) {
-        var req = URLRequest(url: base.appendingPathComponent("api/update"))
+        var req = URLRequest(url: base.appendingPathComponent(w.pageColor == nil ? "api/update" : "api/page-styles"))
         req.httpMethod = "POST"
         req.setValue("1", forHTTPHeaderField: "X-Canvas")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -1340,6 +1341,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         if let r = w.rel, !r.isEmpty { body["rel"] = r }
         // A scrub's writes share a gesture id, so the server keeps the whole drag as one undo step.
         if let g = w.gesture { body["gesture"] = g }
+        if let color = w.pageColor {
+            body = color
+            body["file"] = w.file
+        }
         req.httpBody = try? JSONSerialization.data(withJSONObject: body)
         URLSession.shared.dataTask(with: req) { data, response, _ in
             let ok = (response as? HTTPURLResponse)?.statusCode == 200
@@ -1369,6 +1374,15 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         editOp += 1
         queueWrite(PendingWrite(file: file, id: ids.joined(separator: "\u{1E}"), ids: ids, props: props, remove: remove, gesture: nil, op: editOp,
                                 each: each, drawn: false, failed: [failed]))
+    }
+
+    /// A committed picker value uses the inspector write queue so Undo waits for the page-wide edit.
+    func replacePageColor(page: String, rev: String, row: PageStyles.ColorRow, to: String) {
+        guard !cloudReadOnly, row.editable, activePage == page, selectionKey == nil,
+              rev == revision, let file = currentFile, row.id != to else { return }
+        editOp += 1
+        queueWrite(PendingWrite(file: file, id: "page-color:\(editOp)", ids: row.ids, props: [:], remove: [],
+                                gesture: nil, op: editOp, pageColor: ["page": page, "rev": rev, "from": row.id, "to": to], drawn: false))
     }
 
     /// Run `f` once no inspector write is waiting or in flight (undo must not overtake the edit it should undo).

@@ -14,6 +14,7 @@
 // POST /api/export {file, ids, format, scale?, preset?, path?, dir?} or {file, items: [{id, format, scale?, preset?,
 // suffix?}], dir} -> {files: [{id, name, path, width, height, bytes}], warnings}. `path`: the file to write (one
 // layer). `dir`: a folder, files named after the layers ("Home@2x.png"). Writes need x-canvas: 1.
+// Pass `page` in place of `ids` to export the top-level boards of one page into `dir`.
 // POST /api/copy-as {file, ids, format: "png"|"svg"|"css"|"swiftui"|"text", scale?} -> what Copy as puts on the
 // clipboard (src/copy-as.ts): {mime, data (base64) | text, width?, height?}. Nothing is written to disk.
 
@@ -303,7 +304,7 @@ export function checkItem(it: Record<string, unknown>, bad: (m: string) => Error
 }
 
 /** Check an export request's shape; throws ExportError 400/422 with what is wrong. */
-export function validateExport(b: Record<string, unknown>): ExportRequest {
+export function validateExport(b: Record<string, unknown>, pageBoards?: string[]): ExportRequest {
   const bad = (m: string) => new ExportError(422, "invalid", m);
   if (typeof b.file !== "string" || !b.file) throw bad("file is required");
   let items: ExportItem[];
@@ -312,8 +313,9 @@ export function validateExport(b: Record<string, unknown>): ExportRequest {
     items = (b.items as Record<string, unknown>[]).filter((it) => !(it && typeof it.id === "string" && it.id.startsWith("widget:"))).map((it) => checkItem(it && typeof it === "object" ? it : {}, bad));
     if (!items.length) throw bad("only layers and boards export; cards do not");
   } else {
-    if (!Array.isArray(b.ids) || !b.ids.length || b.ids.length > 500 || b.ids.some((x) => typeof x !== "string" || !x)) throw bad("ids must be 1 to 500 node ids");
-    const ids = (b.ids as string[]).filter((x) => !x.startsWith("widget:"));
+    const requested = pageBoards ?? b.ids;
+    if (!Array.isArray(requested) || !requested.length || (!pageBoards && requested.length > 500) || requested.some((x) => typeof x !== "string" || !x)) throw bad("ids must be 1 to 500 node ids");
+    const ids = requested.filter((x) => !x.startsWith("widget:"));
     if (!ids.length) throw bad("only layers and boards export; cards do not");
     items = ids.map((id) => checkItem({ id, format: b.format, scale: b.scale, preset: b.preset }, bad));
   }
@@ -376,7 +378,9 @@ function runOne(port: number, docFile: string, req: ExportRequest, timeoutMs: nu
 
 export type ExportDeps = { prime: (file: string) => Promise<void>; docFileOf: (file: string) => string; port: () => number };
 
-export async function handleExportRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, deps: ExportDeps): Promise<boolean> {
+export async function handleExportRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, deps: ExportDeps & {
+  pageBoards: (file: string, page: string) => string[] | undefined;
+}): Promise<boolean> {
   if (url.pathname !== "/api/export") return false;
   const reply = (status: number, v: unknown) => {
     res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", "x-content-type-options": "nosniff" });
@@ -398,8 +402,19 @@ export async function handleExportRoute(req: http.IncomingMessage, res: http.Ser
     } catch {
       return reply(400, { error: "The request body must be JSON", code: "invalid" }), true;
     }
-    const r = validateExport(b);
-    await deps.prime(r.file);
+    let boards: string[] | undefined;
+    if (b?.page !== undefined) {
+      if (typeof b.file !== "string" || !b.file || typeof b.page !== "string" || !b.page || b.ids !== undefined ||
+          b.items !== undefined || b.path !== undefined || b.inline === true || typeof b.dir !== "string") {
+        throw new ExportError(422, "invalid", "Page export requires file, page and dir");
+      }
+      await deps.prime(b.file);
+      boards = deps.pageBoards(deps.docFileOf(b.file), b.page);
+      if (!boards) throw new ExportError(404, "not_found", "Page not found");
+      if (!boards.length) throw new ExportError(422, "invalid", "The page has no boards to export");
+    }
+    const r = validateExport(b, boards);
+    if (!boards) await deps.prime(r.file);
     const docFile = deps.docFileOf(r.file);
     const target = r.path ? path.dirname(r.path) : r.dir!;
     if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) throw new ExportError(404, "not_found", `No folder ${target}`);

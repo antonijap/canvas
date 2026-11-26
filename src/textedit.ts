@@ -52,8 +52,7 @@ function replacementOwner(stored: Map<string, DocNode>, id: string): string | un
 }
 
 /** Where the content of scene id `id` is stored, or undefined when Canvas cannot say (edit the component). */
-export function textTarget(doc: CanvasDoc, id: string): TextTarget | undefined {
-  const stored = storedIndex(doc);
+export function textTarget(doc: CanvasDoc, id: string, stored = storedIndex(doc)): TextTarget | undefined {
   if (!id.includes("/")) {
     if (stored.has(id)) return { kind: "node", id };
     const inst = replacementOwner(stored, id);

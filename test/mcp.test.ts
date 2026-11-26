@@ -104,7 +104,7 @@ const TOOLS = [
   "list_shaders", "list_shader_presets", "create_shader", "update_shader", "export_shader",
   "list_videos", "add_video", "video_frame",
   "notify_user", "finish_work",
-  "list_pages", "set_page_background", "set_page_pattern", "create_page", "rename_page", "duplicate_page", "delete_page", "move_boards_to_page", "set_active_page",
+  "list_pages", "get_page_styles", "set_page_background", "set_page_pattern", "create_page", "rename_page", "duplicate_page", "delete_page", "move_boards_to_page", "set_active_page",
   "make_variations", "list_variations", "keep_variation", "discard_variations", "get_product_brief", "set_product_brief", "get_design_context", "check_variation", "mark_variation",
   "resolve_link",
   "list_comments", "add_comment", "reply_comment", "resolve_comment",
@@ -119,6 +119,7 @@ describe("tools", () => {
       assert.equal(t.inputSchema.type, "object", t.name);
     }
     const by = Object.fromEntries(tools.map((t) => [t.name, t]));
+    assert.equal(by.get_page_styles.annotations?.readOnlyHint, true);
     assert.deepEqual(by.set_node_props.inputSchema.required, ["props"]);
     assert.ok("expectedRevision" in (by.set_node_props.inputSchema.properties as object));
     assert.equal((by.wait_for_selection.inputSchema.properties as any).timeoutMs.maximum, 55000);
@@ -808,6 +809,10 @@ describe("pages", () => {
     assert.equal(c.isError, false, c.text);
     const pid = c.json.pages[1].id;
     assert.deepEqual(c.json.pages.map((p: any) => [p.name, p.boards]), [["Page 1", ["Scr01"]], ["Proposal", ["Scr02"]]]);
+    const styles = await call("get_page_styles", { file, page: pid });
+    assert.equal(styles.isError, false, styles.text);
+    assert.deepEqual(styles.json.colors.flatMap((row: any) => row.ids), ["Scr02"]);
+    assert.deepEqual(styles.json.text, []);
     const r = await call("rename_page", { file, id: pid, name: "Proposals", index: 0 });
     assert.deepEqual(r.json.pages.map((p: any) => p.name), ["Proposals", "Page 1"]);
     const down = await call("rename_page", { file, id: pid, index: 1 });

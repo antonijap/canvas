@@ -32,6 +32,14 @@ export function register(server: McpServer) {
     return { ...r, pages: r.pages.map((p: any) => ({ ...p, background: p.background ?? null, pattern: p.pattern ?? null })), active: await activeFor(file) };
   }, { readOnlyHint: true });
 
+  tool(server, "get_page_styles", "List solid colors and text styles used on a page, with layer counts and selectable ids. Uses the active page, or the first page if there is no open canvas.", { file: S.file, page: pageId.optional() }, async (a) => {
+    await ensureServer();
+    const file = await resolveFile(a.file);
+    const query = `?file=${enc(file)}`;
+    const page = a.page ?? await activeFor(file) ?? (await api<{ pages: { id: string }[] }>("GET", "/api/pages" + query)).pages[0].id;
+    return api("GET", "/api/page-styles" + query + "&page=" + enc(page));
+  }, { readOnlyHint: true });
+
   tool(server, "create_page", "Add a page. name defaults to \"Page N\"; index places it (default last); boards moves those boards onto it.", {
     file: S.file,
     name: z.string().min(1).max(120).optional(),

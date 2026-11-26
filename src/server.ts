@@ -11,6 +11,7 @@ import { updateVariables, variableEditBody } from "./doc/variables.ts";
 // click a node to see its properties, left sidebar lists boards, components, text styles and variables.
 
 import { asOneAction, withActionAgent } from "./cloud-files-ops.ts";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -41,7 +42,8 @@ import { handleVotesRoute, syncVoteConclusions } from "./votes.ts";
 import { commentReads } from "./comment-reads.ts";
 import { legacyVoteDesignChanged, handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
 import { scrubSecrets } from "./cloud-secrets.ts";
-import { handlePagesRoute, readPagePattern, resolvePages } from "./pages.ts";
+import { handlePagesRoute, listPages, readPagePattern, resolvePages } from "./pages.ts";
+import { pageStyles, replacePageColor } from "./page-styles.ts";
 import { handleShaderRoute, settleShaderSources } from "./shaders.ts";
 import { handleImageRoute } from "./images.ts";
 import { assetTag, jpegPreviews, packPreviews, PREVIEW_BATCH } from "./image-previews.ts";
@@ -61,7 +63,7 @@ import { handleLayoutRoute, runLayout, withoutPlacedXY } from "./autolayout.ts";
 import { handleTextRoute } from "./textedit.ts";
 import { fromNudge, fromUpdate, lastEdit, noteEdit, onRepeat, planRepeat, repeatInfo, repeatToast } from "./repeat.ts";
 import { followRename, handleOverrideRoute, OverrideError, overrideInfo, renameFollowers, updateWithOverrides } from "./overrides.ts";
-import { replaceEach, selectionColors } from "./selection-colors.ts";
+import { normColor, replaceEach, selectionColors } from "./selection-colors.ts";
 import { nodeDepth } from "./doc/tree.ts";
 import { buildIndex, defaultTheme, expand, findNode, FIT_SCRIPT, resolveDocPath, resolveVariable, StaleFileError, updateNode, type Json, type CanvasDoc, type DocNode } from "./engine.ts";
 import { readBodyText, cacheBody } from "./body.ts";
@@ -348,6 +350,10 @@ function nodeAt(s: Snapshot, id: string, depth = 4): { node: DocNode; parentId: 
 
 const bridgeCtx: BridgeCtx = { snapOf: (file) => watched(resolveDocPath(file)), nodeAt, prime };
 
+function boardsOnPage(snap: Snapshot, id: string): string[] | undefined {
+  return listPages(snap.path, () => snap.boards.map((board) => board.id)).pages.find((page) => page.id === id)?.boards;
+}
+
 const SKIP_DIRS = new Set(["node_modules", "worktrees", "Library", "dist", "build", "Pods", "DerivedData", ".git", "target", ".build", "vendor", "vendor.bundle"]);
 
 type FileEntry = { file: string; name: string; modified: string };
@@ -419,7 +425,7 @@ type UpdateBody = { file?: string; id?: string; ids?: string[]; props?: Record<s
  * Several layers in one write and one undo step: `props` on each, a layer's own `each` values on top (a Mixed field
  * stepped from each layer's value, a repeat). The inspector's "N selected" and Repeat (src/repeat.ts) write here.
  */
-async function updateMany(file: string, b: UpdateBody & { ids: string[] }, by: "mcp" | "inspector", session?: string): Promise<{ revision?: string; changed: boolean }> {
+async function updateMany(file: string, b: UpdateBody & { ids: string[] }, by: "mcp" | "inspector", session?: string, label?: string): Promise<{ revision?: string; changed: boolean }> {
   const metrics = await Promise.all(b.ids.map((id) => prepareAutoTracking(watched(file).doc, id, { ...(b.props ?? {}), ...(b.each?.[id] ?? {}) }, b.remove ?? [])));
   let ops: NodeOp[] = [];
   const { write } = await editDoc(file, { expectedRevision: b.expectedRevision, touches: b.ids }, (doc) => {
@@ -433,7 +439,7 @@ async function updateMany(file: string, b: UpdateBody & { ids: string[] }, by: "
     });
   });
   const keys = [...new Set([...Object.keys(b.props ?? {}), ...Object.values(b.each ?? {}).flatMap((p) => Object.keys(p ?? {})), ...(b.remove ?? [])])].sort();
-  record(file, ops, { label: nodeLabel(keys), source: by === "mcp" ? "mcp" : "user", session, ...updateMerge(b, `nodes:${[...b.ids].sort().join(",")}:${keys.join(",")}`), edit: write.edit, ...write.history }, write.revision);
+  record(file, ops, { label: label ?? nodeLabel(keys), source: by === "mcp" ? "mcp" : "user", session, ...updateMerge(b, `nodes:${[...b.ids].sort().join(",")}:${keys.join(",")}`), edit: write.edit, ...write.history }, write.revision);
   if (write.revision) docChanged(file, write.revision, by, { id: b.ids[0] });
   if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: b.ids[0], ids: b.ids, props: keys.filter((k) => !(b.remove ?? []).includes(k)), remove: b.remove ?? [] });
   return { revision: write.revision, changed: ops.some((o) => Object.keys(o.props).length > 0) };
@@ -675,6 +681,43 @@ try {
         if (by !== "mcp") bridgeEmit("user_edit", { file: displayPath(docFile), id: null, ids: boards, structure: "Delete", props: [], remove: [] });
         return boards.length;
       }, copyPageBoards)) return;
+      if (url.pathname === "/api/page-styles") {
+        const get = req.method === "GET";
+        if (!get && (req.method !== "POST" || req.headers["x-canvas"] !== "1")) return json(res, { error: "forbidden" }, 403);
+        const raw = get ? undefined : await readBodyText(req, 32_000);
+        if (raw === null) return json(res, { error: "too large" }, 413);
+        let b;
+        try { b = raw ? JSON.parse(raw) : {}; }
+        catch { return json(res, { error: "The request body must be JSON" }, 400); }
+        const page = get ? url.searchParams.get("page") : b?.page;
+        if (!fileQ || typeof page !== "string" || !page) return json(res, { error: "file and page are required" }, 400);
+        const file = resolveDocPath(fileQ);
+        const snap = watched(file);
+        const boards = boardsOnPage(snap, page);
+        if (!boards) return json(res, { error: "Page not found" }, 404);
+        if (get) return json(res, pageStyles(snap, boards));
+
+        const from = normColor(b.from), to = normColor(b.to);
+        if (!from || !to || typeof b.rev !== "string" || !b.rev) return json(res, { error: "from, to and rev are required" }, 400);
+        if (b.rev !== snap.revision) return json(res, { error: "The document changed. Pick the color again.", code: "stale_revision" }, 409);
+        try {
+          const { ids, each, overrides } = replacePageColor(snap.doc, boards, from, to);
+          if (!ids.length) return json(res, { ok: true, revision: snap.revision, ids });
+          const update = { ids, each, props: {}, expectedRevision: b.rev, gesture: `page-color-${randomUUID()}` };
+          if (!overrides) {
+            const { revision } = await updateMany(file, update, "inspector", undefined, "Replace Page Color");
+            return json(res, { ok: true, revision, ids });
+          }
+          const { revision } = await updateWithOverrides(file, update, { source: "user", label: "Replace Page Color" });
+          if (revision) docChanged(file, revision, "inspector", { id: ids[0] });
+          bridgeEmit("user_edit", { file: displayPath(file), id: ids[0], ids, props: [...new Set(Object.values(each).flatMap(Object.keys))], remove: [] });
+          return json(res, { ok: true, revision, ids });
+        } catch (e) {
+          if (e instanceof StaleFileError) return json(res, { error: e.message, code: "stale_revision" }, 409);
+          if (e instanceof OverrideError) return json(res, { error: e.message, code: e.code }, e.status);
+          return json(res, { error: (e as Error).message }, 422);
+        }
+      }
       if (await handleHistoryRoute(req, res, url, (f) => resolveDocPath(f), { docWritten: (docFile, rev) => docChanged(docFile, rev, "inspector", { undo: true }) })) return;
       // Board drags, arrow-key nudges and the MCP's move_board (src/move.ts).
       if (await handleMoveRoute(req, res, url, {
@@ -708,7 +751,8 @@ try {
         },
       })) return;
       // Export as PNG / SVG (src/export.ts), in a child process: the renderer blocks while Chrome works.
-      if (await handleExportRoute(req, res, url, { prime, docFileOf: (f) => resolveDocPath(f), port: () => (server.address() as { port: number }).port })) return;
+      if (await handleExportRoute(req, res, url, { prime, docFileOf: (f) => resolveDocPath(f),
+        pageBoards: (file, page) => boardsOnPage(watched(file), page), port: () => (server.address() as { port: number }).port })) return;
       if (await handleCopyAsRoute(req, res, url, { prime, docFileOf: (f) => resolveDocPath(f), port: () => (server.address() as { port: number }).port })) return;
       // Delete, duplicate, copy/cut/paste, group, ungroup, reorder (src/structure.ts): one write, one undo step each.
       if (await handleStructureRoute(req, res, url, {
