@@ -58,6 +58,9 @@ func probeServer() -> (answered: Bool, health: ServerCode.Health?) {
 /// running, then an update replaced the files), stop it (POST /quit: it saves every edit first) and start ours, so a
 /// new app never runs old server code. Another copy of Canvas, or anything that is not Canvas, is never stopped.
 func startOrReplaceServer() {
+  serverLock.lock()
+  defer { serverLock.unlock() }
+  guard !stoppingServer else { return }
   let probe = probeServer()
   let src = (serverScript as NSString).deletingLastPathComponent
   let own = probe.answered ? ServerCode.version(srcDir: src).map { ServerCode.Health(version: $0, root: ServerCode.rootId(srcDir: src)) } : nil
@@ -65,7 +68,7 @@ func startOrReplaceServer() {
   case .start:
     startServer()
   case .reuse:
-    break
+    if let own, probe.health == own { reusedServer = own }
   case .otherCopy:
     NSLog("canvas: port \(port) is served by another copy of Canvas (root \(probe.health?.root ?? "?"), ours \(own?.root ?? "?")): using it, not stopping it")
     if probe.health?.version != own?.version {
@@ -75,17 +78,17 @@ func startOrReplaceServer() {
     reportServerProblem("Another program is using port \(port), so Canvas cannot start its server. Quit that program and open Canvas again.")
   case .replace:
     NSLog("canvas: the server on port \(port) runs older code of this copy (\(probe.health?.version ?? "?"), ours \(own?.version ?? "?")): replacing it")
-    stoppingServer = true
     let stopped = Updater.stopServer(base)
-    stoppingServer = false
     if stopped { startServer() } else {
       reportServerProblem("An older Canvas server is still running and did not stop. Quit Canvas and open it again.")
     }
   }
 }
 
-let serverLock = NSLock()
-var serverProc: Process?
+private let serverLock = NSLock()
+private var serverProc: Process?
+private var reusedServer: ServerCode.Health?
+private var stoppingServer = false
 /// Starts that did not bring the server up, in a row. After a few, the window says why instead of retrying silently.
 var serverFailures = 0
 var serverProblemShown = false
@@ -107,9 +110,8 @@ func reportServerProblem(_ text: String) {
   }
 }
 
-func startServer() {
-  serverLock.lock()
-  defer { serverLock.unlock() }
+// Called with serverLock held.
+private func startServer() {
   if let p = serverProc, p.isRunning { return }
   // Finder starts apps with PATH=/usr/bin:/bin, where `env node` finds nothing: look node up directly.
   let bundledNode = Bundle.main.resourceURL.map { $0.appendingPathComponent("node/bin/node").path }
@@ -123,6 +125,7 @@ func startServer() {
   p.arguments = [serverScript]
   // The tunnel helper a hosted Cloud is reached through (src/cloud-tunnel.ts), when this build has one.
   var env = ProcessInfo.processInfo.environment
+  env["CANVAS_PARENT_PID"] = String(getpid())
   if env["CANVAS_TUNNEL_BIN"] == nil, let helper = Bundle.main.resourceURL?.appendingPathComponent("canvas-tunnel").path,
      FileManager.default.isExecutableFile(atPath: helper) { env["CANVAS_TUNNEL_BIN"] = helper }
   if env["CANVAS_IMAGE_PREVIEWS_BIN"] == nil, let helper = Bundle.main.resourceURL?.appendingPathComponent("canvas-image-previews").path,
@@ -134,6 +137,7 @@ func startServer() {
   do {
     try p.run()
     serverProc = p
+    reusedServer = nil
   } catch {
     reportServerProblem("Canvas could not start its server (\(node)): \(error.localizedDescription)")
   }
@@ -141,11 +145,43 @@ func startServer() {
 
 /// Starts the server when it is down, and counts the starts that did not take.
 func keepServerUp() {
-  if stoppingServer { return } // a quit is stopping it to install an update
+  serverLock.lock()
+  defer { serverLock.unlock() }
+  if stoppingServer { return }
   if serverUp() { serverFailures = 0; return }
   startServer()
   serverFailures += 1
   if serverFailures >= 3 { reportServerProblem("Canvas\u{2019}s server will not start. Details in ~/Library/Logs/Canvas/server.log.") }
+}
+
+/// Stops the server after the shell has flushed its edits. The watchdog stays paused until the app exits
+/// or an update cancels the quit. Only our child can receive a signal.
+func stopServerForQuit() -> Bool {
+  serverLock.lock()
+  defer { serverLock.unlock() }
+  stoppingServer = true
+  let child = serverProc.flatMap { $0.isRunning ? $0 : nil }
+  let choice: ServerCode.Choice = reusedServer == nil ? .start : .reuse
+  guard ServerCode.stopOnQuit(choice: choice, startedByUs: child != nil) else { return true }
+
+  // Check what is answering now, in case the process we adopted left and another program took its port.
+  let probe = probeServer()
+  let src = (serverScript as NSString).deletingLastPathComponent
+  let root = ServerCode.rootId(srcDir: src)
+  let matches = probe.health.map { $0 == reusedServer || (child?.isRunning == true && $0.root == root) } ?? false
+  let stopped = matches ? Updater.stopServer(base) : !probe.answered
+  guard let child else { return stopped }
+  if child.isRunning { child.terminate() }
+  for _ in 0..<30 where child.isRunning { usleep(100_000) }
+  if child.isRunning { kill(child.processIdentifier, SIGKILL) }
+  child.waitUntilExit()
+  return true
+}
+
+func resumeServerRestarts() {
+  serverLock.lock()
+  stoppingServer = false
+  serverLock.unlock()
 }
 
 /// The symbols the canvas page draws as masks (src/agent-run.ts serves them), drawn here from the Mac's own symbols
@@ -273,6 +309,7 @@ var openedFromFinder = false
 var serverReady = false
 var pendingFinderFile: String?
 class AppDelegate: NSObject, NSApplicationDelegate {
+  private var quitPending = false
   func application(_ application: NSApplication, open urls: [URL]) {
     // A canvas:// link (Edit > Copy Link, pasted into an agent's chat and clicked): its file, page and nodes.
     if let url = urls.first(where: { $0.scheme?.lowercased() == "canvas" }) { openCanvasLink(url); return }
@@ -288,11 +325,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }
   // Quit waits for the text being typed on the canvas (the page writes it first) and the inspector's queued
   // writes: an edit that exists only in the page's editor or the shell's queue would be lost. A write that fails
-  // (or a server that does not answer) keeps the app open, with the edit still on screen. With every edit saved and
-  // an update ready, the updater stops the server and starts its helper before the app goes (Updater.beforeQuit).
+  // (or a server that does not answer) keeps the app open, with the edit still on screen. Once saved, stop the server
+  // and start the updater's helper if needed (Updater.beforeQuit).
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard !quitPending else { return .terminateLater }
+    quitPending = true
     finishQuit()
     return .terminateLater
+  }
+  private func replyToQuit(_ go: Bool) {
+    quitPending = false
+    NSApp.reply(toApplicationShouldTerminate: go)
   }
   func finishQuit() {
     model.flushTextEdit { textOK in
@@ -303,13 +346,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
           let continueQuit = {
             guard !photographed else { return }
             photographed = true
-            MainActor.assumeIsolated { Updater.shared.beforeQuit { go in NSApp.reply(toApplicationShouldTerminate: go) } }
+            MainActor.assumeIsolated { Updater.shared.beforeQuit(self.replyToQuit) }
           }
           DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: continueQuit)
           model.snapshotShown(then: continueQuit)
+        } else if quitAnyway {
+          MainActor.assumeIsolated { Updater.shared.beforeQuit(allowUpdate: false, self.replyToQuit) }
         } else {
-          if !quitAnyway { MainActor.assumeIsolated { Updater.shared.quitCancelled() } }
-          NSApp.reply(toApplicationShouldTerminate: quitAnyway)
+          MainActor.assumeIsolated { Updater.shared.quitCancelled() }
+          self.replyToQuit(false)
         }
         quitAnyway = !ok
       }

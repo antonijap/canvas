@@ -41,7 +41,9 @@ import { attachWidgetClient, handleWidgetRoute, widgetHooks } from "./widgets.ts
 import { handleCommentsRoute } from "./comments.ts";
 import { handleVotesRoute, syncVoteConclusions } from "./votes.ts";
 import { commentReads } from "./comment-reads.ts";
-import { legacyVoteDesignChanged, handleCloudRoute, onChanged as onCloudChanged } from "./cloud.ts";
+import { legacyVoteDesignChanged, handleCloudRoute, onChanged as onCloudChanged, stopAll as stopCloudSessions } from "./cloud.ts";
+import { shutdownCloudHosts } from "./cloud-host.ts";
+import { shutdownHelpers } from "./cloud-tunnel.ts";
 import { scrubSecrets } from "./cloud-secrets.ts";
 import { handlePagesRoute, listPages, readPagePattern, resolvePages } from "./pages.ts";
 import { pageStyles, replacePageColor } from "./page-styles.ts";
@@ -148,12 +150,14 @@ function quitSafely(code: number): void {
   if (quitting) return;
   quitting = true;
   void finishWrites(5000).then(
-    ({ problems, kept }) => {
+    async ({ problems, kept }) => {
       if (!kept) {
         quitting = false;
         logLine("[canvas] not quitting: some edits could not be saved anywhere and exist only in memory");
         return;
       }
+      stopCloudSessions();
+      await Promise.all([shutdownCloudHosts(), shutdownHelpers()]);
       setTimeout(() => process.exit(problems.length ? code || 1 : code), problems.length ? 300 : 50);
     },
     (e) => {
@@ -1194,8 +1198,17 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     } catch {}
     process.exit(1);
   });
-  // Quitting the app sends SIGTERM: edits still being written land first (at most 5 s, then a recovery copy), then the usual exit code.
+  // Signals also take the save-and-exit path, including the app's fallback if POST /quit did not stop us.
   for (const [sig, code] of [["SIGTERM", 143], ["SIGINT", 130]] as const) process.once(sig, () => quitSafely(code));
+  const parentPid = Number(process.env.CANVAS_PARENT_PID);
+  delete process.env.CANVAS_PARENT_PID; // The app set it for this process only.
+  if (Number.isSafeInteger(parentPid) && parentPid > 1) {
+    const watch = setInterval(() => {
+      if (process.ppid === parentPid) return;
+      clearInterval(watch);
+      quitSafely(0);
+    }, 250).unref();
+  }
   // Usage counts (src/usage-counts.ts): written on the way out, sent once a day by a release build.
   process.on("exit", () => usage.flush());
   usage.start();

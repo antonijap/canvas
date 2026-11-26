@@ -25,6 +25,7 @@
 
 import { fork, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import fs from "node:fs";
 import net from "node:net";
 import { DatabaseSync } from "node:sqlite";
@@ -214,14 +215,17 @@ class HostedCloud {
       const known = this.knownHostId();
       const expected = bin && this.keys ? hostIdFor(this.keys.enrol.public) : known;
       if (known && expected !== known) throw new Error(hostIdentityError);
+      if (closingHosts) throw new Error("Canvas is quitting");
       const env = { ...process.env, CANVAS_CLOUD_HOST_DIR: dirOf(this.slot), CANVAS_CLOUD_HOST_PORT: String(port), CANVAS_CLOUD_HOST_ID: expected ?? "" };
       const c = fork(MAIN, [], { env, stdio: ["ignore", "ignore", "ignore", "ipc"], execArgv: [] });
+      hostChildren.add(c);
       this.child = c;
       c.on("message", (m: any) => {
         if (m?.id && this.pending.has(m.id)) { const f = this.pending.get(m.id)!; this.pending.delete(m.id); f(m); return; }
         if (m?.event === "people") void this.follow().catch(() => {});
       });
       c.on("exit", () => {
+        hostChildren.delete(c);
         if (this.child !== c) return;
         this.child = null; this.ownerToken = ""; this.port = 0;
         this.member?.helper.stop(); this.member = null; this.enrol?.stop(); this.enrol = null;
@@ -289,6 +293,8 @@ async function freePort(): Promise<number> {
 
 /** The hosted Clouds this process knows, by slot. */
 const clouds = new Map<string, HostedCloud>();
+const hostChildren = new Set<ChildProcess>();
+let closingHosts = false;
 const cloudOf = (slot: string) => { let c = clouds.get(slot); if (!c) { c = new HostedCloud(slot); clouds.set(slot, c); } return c; };
 
 /** Read a kept identity without creating a database. */
@@ -431,6 +437,14 @@ export function stopHosting(hostId?: string | null): Promise<void> {
       c.tunnelError = "";
     }
   });
+}
+
+/** Shut down workers through IPC disconnect so their databases close and device tokens stay valid on restart. */
+export async function shutdownCloudHosts(): Promise<void> {
+  closingHosts = true;
+  const exits = [...hostChildren].map(child => once(child, "exit"));
+  for (const cloud of clouds.values()) cloud.stopChild();
+  await Promise.allSettled(exits);
 }
 
 /**

@@ -462,6 +462,11 @@ struct ShellLogicTests {
         check(S.choice(answered: true, running: .init(version: "bbbbbbbbbbbb", root: "eeeeeeeeeeee"), own: own) == .otherCopy, "another copy (a checkout, another account) with other code: never stopped")
         check(S.choice(answered: true, running: nil, own: own) == .notCanvas, "something else answers: never stopped")
         check(S.choice(answered: true, running: .init(version: "bbbbbbbbbbbb", root: own.root), own: nil) == .reuse, "our own code unreadable: keep what runs")
+        check(S.stopOnQuit(choice: .start, startedByUs: true), "quit stops our child")
+        check(S.stopOnQuit(choice: .reuse, startedByUs: false), "quit stops a reused server from this copy")
+        for choice in [S.Choice.start, .replace, .otherCopy, .notCanvas] {
+            check(!S.stopOnQuit(choice: choice, startedByUs: false), "quit leaves the unowned server alone (\(choice))")
+        }
         let h = S.health(Data(#"{"ok":true,"app":"canvas","version":"0123456789ab","root":"ba9876543210"}"#.utf8))
         check(h == S.Health(version: "0123456789ab", root: "ba9876543210"), "a Canvas /health is read")
         check(S.health(Data(#"{"ok":true,"version":"0123456789ab","root":"ba9876543210"}"#.utf8)) == h, "a Canvas server from before app was in /health: its exact answer")

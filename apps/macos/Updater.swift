@@ -254,29 +254,37 @@ final class Updater: ObservableObject {
   /// The quit did not happen (an edit could not be saved): a later plain quit is not a restart.
   func quitCancelled() { restartRequested = false }
 
-  /// Called by applicationShouldTerminate once every edit is saved. With an update ready (Restart to Update, or a
-  /// plain quit while Update automatically is on): the server stops (it runs from inside the app being replaced),
-  /// then the helper starts and waits for this process to exit. `done(false)` keeps the app open.
-  func beforeQuit(_ done: @escaping (Bool) -> Void) {
-    let restart = restartRequested
+  /// Stops the app's server on quit, then starts any update helper. The helper waits for the app to exit.
+  /// `done(false)` keeps the app open.
+  func beforeQuit(allowUpdate: Bool = true, _ done: @escaping (Bool) -> Void) {
+    let restart = allowUpdate && restartRequested
     restartRequested = false
-    guard let r = ready, restart || automatic, FileManager.default.fileExists(atPath: r.app.path) else { done(true); return }
-    log("quitting with \(r.version) ready: stopping the server")
-    if case .manual(let why) = installMode() {
+    var candidate = allowUpdate && (restart || automatic) ? ready : nil
+    if let r = candidate, !FileManager.default.fileExists(atPath: r.app.path) { candidate = nil }
+    if let r = candidate, case .manual(let why) = installMode() {
       log("not installing \(r.version): \(why)")
-      if restart { openDownloadPage(); model?.flash("Canvas \(r.version) is out. \(why)"); done(false) } else { done(true) }
-      return
+      if restart {
+        openDownloadPage()
+        model?.flash("Canvas \(r.version) is out. \(why)")
+        done(false)
+        return
+      }
+      candidate = nil
     }
-    stoppingServer = true
-    let base = self.base
+    let update = candidate
+    if let update { log("quitting with \(update.version) ready: stopping the server") }
     DispatchQueue.global(qos: .userInitiated).async {
-      let stopped = Updater.stopServer(base)
+      let stopped = stopServerForQuit()
       DispatchQueue.main.async { MainActor.assumeIsolated {
+        guard let r = update else { done(true); return }
         let u = Updater.shared
         guard stopped else {
-          stoppingServer = false
           u.log("not installing \(r.version): the server did not stop")
-          if restart { u.model?.flash("Canvas could not stop its server to update. Try again in a moment."); done(false) } else { done(true) }
+          if restart {
+            resumeServerRestarts()
+            u.model?.flash("Canvas could not stop its server to update. Try again in a moment.")
+            done(false)
+          } else { done(true) }
           return
         }
         done(u.launchHelper(r, relaunch: restart))
@@ -399,6 +407,3 @@ final class Updater: ObservableObject {
     return false
   }
 }
-
-/// True while a quit stops the server for an update: keepServerUp must not start it again.
-var stoppingServer = false

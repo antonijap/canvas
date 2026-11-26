@@ -756,6 +756,10 @@ enum ServerCode {
         return running.version == own.version ? .reuse : .replace
     }
 
+    static func stopOnQuit(choice: Choice, startedByUs: Bool) -> Bool {
+        startedByUs || choice == .reuse
+    }
+
     private static func isId(_ v: Any?) -> Bool {
         guard let s = v as? String, s.count == 12 else { return false }
         return s.allSatisfy { $0.isHexDigit && !$0.isUppercase }

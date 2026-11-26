@@ -15,6 +15,7 @@
 // to it: the listening socket must belong to the helper Canvas started (ownsPort), not to some other program.
 
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -38,6 +39,7 @@ export class Helper {
   private buf = "";
   private readonly waiters: ((e: HelperEvent) => void)[] = [];
   private exited = false;
+  private stopping = false;
   /** The latest event of each kind (a forward says now and then whether its path is direct: "path"). */
   readonly last = new Map<string, HelperEvent>();
   onExit: (code: number | null) => void = () => {};
@@ -72,6 +74,7 @@ export class Helper {
   private end(code: number | null) {
     if (this.exited) return;
     this.exited = true;
+    live.delete(this);
     for (const w of this.waiters.splice(0)) w({ event: "error", message: "The tunnel helper stopped" });
     this.onExit(code);
   }
@@ -90,7 +93,8 @@ export class Helper {
 
   /** Ends the helper: its stdin closes (it quits), and a kill follows if it lingers. */
   stop(): void {
-    if (this.exited) return;
+    if (this.exited || this.stopping) return;
+    this.stopping = true;
     try { this.child.stdin!.end(); } catch { /* closed */ }
     const pid = this.child.pid;
     setTimeout(() => { if (!this.exited && pid) { try { process.kill(pid, "SIGKILL"); } catch { /* gone */ } } }, 1500).unref?.();
@@ -99,13 +103,13 @@ export class Helper {
 }
 
 const live = new Set<Helper>();
+let closingHelpers = false;
 process.once("exit", () => { for (const h of live) { try { h.child.kill("SIGKILL"); } catch { /* gone */ } } });
 
 function run(bin: string, order: Record<string, unknown>): Helper {
+  if (closingHelpers) throw new Error("Canvas is quitting");
   const h = new Helper(bin, order);
   live.add(h);
-  const prev = h.onExit;
-  h.onExit = (c) => { live.delete(h); prev(c); };
   return h;
 }
 
@@ -172,5 +176,12 @@ export async function fingerprint(addr: string): Promise<string> {
 /** The fake helper tests and QA use (test/fixtures/fake-tunnel.ts): same orders, a local TCP relay in place of WireGuard. */
 export const FAKE_HELPER = path.join(import.meta.dirname, "..", "test", "fixtures", "fake-tunnel.sh");
 
-/** Stops every helper (Canvas quitting, or a test ending). */
+/** Stops every helper, for tests that may start helpers again. */
 export function stopHelpers(): void { for (const h of [...live]) h.stop(); }
+
+export async function shutdownHelpers(): Promise<void> {
+  closingHelpers = true;
+  const exits = [...live].map(h => once(h.child, "exit"));
+  stopHelpers();
+  await Promise.allSettled(exits);
+}
