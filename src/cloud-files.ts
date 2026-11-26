@@ -8,7 +8,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type http from 'node:http';
 import { target } from './cloud.ts';
 import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump, hostedId, waitForShellCloudList } from './cloud-config.ts';
-import { FileStateStore } from './cloud-files-store.ts';
+import { FileStateStore, isOlderMotionRefusal } from './cloud-files-store.ts';
+import { UPDATE_MOTION_HOST } from '../cloud/core/motion.ts';
 import { DocTree } from './cloud-files-tree.ts';
 import { documentOf, envelopeOf } from '../cloud/core/files/state.ts';
 import { cloudFileHooks } from './cloud-files-runtime.ts';
@@ -215,6 +216,20 @@ function waitingForHost(s: Session) {
         ? 'Edits are waiting for the Cloud host to update Canvas.' : undefined;
 }
 export function fileInfo(file: string, open = true) { const s = open ? fileSession(file) : sessions.get(docFile(file)); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, whiteboard: s.whiteboard === true, voting: s.voting, serverTime: voteServerTime(s.voteClock), leasedConclusions: s.leasedConclusions, updateMessage: s.updateMessage, assetNotice: s.assetNotice, waitingForHost: waitingForHost(s), pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
+
+/** Give a connected host time to answer an agent's motion edit. Offline edits still use the durable outbox. */
+export async function checkCloudMotionWrite(file: string, actionId: string | 0 | undefined) {
+    const s = actionId && sessions.get(docFile(file));
+    if (!s) return;
+    const deadline = performance.now() + 2000;
+    for (;;) {
+        const { pending, refused } = s.store.replica;
+        if (refused.some(r => r.action.id === actionId && r.message === UPDATE_MOTION_HOST)) fail(426, 'update_host', UPDATE_MOTION_HOST);
+        if (!pending.some(p => p.action.id === actionId)) return;
+        if (s.stopped || s.status !== 'connected' || performance.now() >= deadline) return { actionId, status: 'pending' as const };
+        await delay(25);
+    }
+}
 class CloudHttpError extends Error {
     readonly status: number;
     readonly code: string;
@@ -535,10 +550,14 @@ export async function receive(s: Session, m: any) {
         fileEvents.comments?.(path.join(s.store.pkg, 'document.json'));
         return;
     }
-    if ((m.type === 'reject' && m.code !== 'quota' && s.store.replica.pending.some(p => p.action.id === m.id)) || (m.type === 'reset' && s.store.replica.pending.length)) {
+    const pendingRejection = m.type === 'reject' && s.store.replica.pending.some(p => p.action.id === m.id);
+    if ((pendingRejection && m.code !== 'quota') || (m.type === 'reset' && s.store.replica.pending.length)) {
         recoverDrafts(s);
     }
     const result = await s.store.receive(m as FileServerMessage, objects(s.store.meta.cloud, s.store.meta.file));
+    if (pendingRejection && s.store.replica.refused.some(r => r.action.id === m.id && r.message === UPDATE_MOTION_HOST)) {
+        fileEvents.update?.(path.join(s.store.pkg, 'document.json'), UPDATE_MOTION_HOST);
+    }
     if (s.recovery) recoverDrafts(s);
     if(m.type==='applied') for(const a of m.actions) {
         if(!a.by.agent || a.by.id===s.store.meta.author.id)continue;

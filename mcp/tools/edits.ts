@@ -33,7 +33,7 @@ export function register(server: McpServer) {
       const r = await api<any>("POST", "/api/update", { file, id, props: a.props, remove: a.remove, expectedRevision: a.expectedRevision });
       const warnings: string[] = [];
       if (a.props.motion !== undefined) checkMotion(a.props.motion, `node ${id}`, [], warnings);
-      return { id, revision: r.revision, node: r.node, ...(warnings.length ? { warnings } : {}) };
+      return { id, revision: r.revision, node: r.node, cloud: r.cloud, ...(warnings.length ? { warnings } : {}) };
     } catch (e) {
       if (e instanceof ToolError && e.code === "stale_revision") throw new ToolError("stale_revision", e.message, "Read again (get_selection or inspect_node), then redo the change with the new revision.");
       throw e;

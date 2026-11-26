@@ -41,3 +41,31 @@ test("whole override resets and per-path writes share writer preconditions", () 
   assert.equal(tree.ver("n:instance:descendants/label"), reset.id);
   assert.ok(isReject(send(tree, [{ k: "set", id: "instance", props: { "descendants/label": { v: { content: "Two" } } }, if: { "descendants/label": path.id } }])));
 });
+
+test("Cloud checks nested override motion on writes and accepts old log entries on replay", () => {
+  const override = { descendants: { inner: { children: [{ id: "replacement", type: "rectangle", motion: [{}] }] } } };
+  const flat = { motion: [{}] };
+  const ops: FileOp[] = [
+    { k: "set", id: "instance", props: { "descendants/child": { v: override } } },
+    { k: "set", id: "instance", props: { descendants: { v: { child: override } } } },
+    { k: "insert", parent: "board", after: null, node: { id: "another", type: "ref", ref: "component", descendants: { child: override } } },
+    { k: "set", id: "instance", props: { "descendants/child": { v: flat } } },
+    { k: "set", id: "instance", props: { descendants: { v: { child: flat } } } },
+  ];
+  for (const op of ops) {
+    const tree = seed(), action = makeAction([op]);
+    const result = applyAction(tree, action);
+    assert.ok(isReject(result), JSON.stringify(op));
+    assert.match(result.message, /descendants\/child.*\.motion/);
+  }
+  for (const op of ops) assert.ok(!isReject(applyAction(seed(), makeAction([op]), { replay: true })), JSON.stringify(op));
+});
+
+test("future animation fields on an override stay opaque to Cloud component checks", () => {
+  const tree = seed();
+  const motion = [{ id: "fade", on: "boardHover", ref: "future-value", tracks: [{ prop: "opacity", to: 0.5 }] }];
+  const descendants = { child: { motion } };
+  const result = send(tree, [{ k: "set", id: "instance", props: { "descendants/child": { v: descendants.child } } }]);
+  assert.ok(!isReject(result), JSON.stringify(result));
+  assert.deepEqual(tree.node("instance")?.props.descendants, descendants);
+});

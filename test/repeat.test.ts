@@ -71,6 +71,14 @@ describe("planRepeat", () => {
     assert.deepEqual(p.each, { a: { width: 110 }, b: { width: 47.5 } });
     assert.deepEqual(p.skipped, ["hug"]);
   });
+  test("a fill repeats on an instance along with an ordinary layer", () => {
+    const p = planRepeat(abs, new Map([
+      ["shape", { type: "rectangle", fill: "#000" }],
+      ["instance", { type: "ref", ref: "master", fill: "#000" }],
+    ]));
+    assert.deepEqual(p.each, { shape: { fill: "#F00" }, instance: { fill: "#F00" } });
+    assert.deepEqual(p.skipped, []);
+  });
   test("relative results stay in range; a missing key counts from the file's default", () => {
     const op: RepeatEdit = { ...rel, rel: { opacity: { op: "+", by: 0.3 }, rotation: { op: "+", by: 200 } } };
     const p = planRepeat(op, new Map<string, any>([["a", { opacity: 0.9 }]]));

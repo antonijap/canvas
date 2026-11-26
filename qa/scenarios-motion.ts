@@ -41,8 +41,25 @@ sc("hover-motion", "sprite playback preserves tiles, clip, paint order and rest 
   const atRest = await pixel(32, 32);
   t.eq(atRest, [255, 128, 64], "the original layer shows at rest");
   const point = await t.center("qa_motion");
+  await t.ev(`(() => {
+    const h = window.canvasHost, ev = h.engineView, frame = ev.frame, motion = h.motion, after = motion.afterFrame;
+    let held = 0;
+    const before = window.__motion.poses;
+    ev.frame = function (...args) {
+      if (window.__motion.sprites && held < 2) { held++; return false; }
+      return frame.apply(this, args);
+    };
+    motion.afterFrame = function () {
+      after.call(this);
+      if (held < 2) return;
+      ev.frame = frame;
+      motion.afterFrame = after;
+      window.__posesWithoutFrame = window.__motion.poses - before;
+    };
+  })()`);
   await t.io.move(point.x, point.y);
   await t.waitFor("window.__motion.poses >= 4", "sprites composited");
+  t.eq(await t.ev("window.__posesWithoutFrame"), 0, "transform changes count only when the engine presents a sprite");
   t.eq(await t.ev("({ sprites: window.__motion.sprites, skipped: window.__motion.skipped })"), { sprites: 4, skipped: [{ id: "qa_blocked", reason: "overlaps later paint" }] }, "one blocked sprite");
   const first = await metrics();
   await sleep(160);
@@ -65,8 +82,105 @@ sc("hover-motion", "sprite playback preserves tiles, clip, paint order and rest 
   t.eq(await t.ev("window.__motion.poses"), prior + 1, "reduced motion presents one pose");
   await t.io.move(6, 90);
   await t.waitFor("window.__motion.sprites === 0", "reduced motion restores rest immediately");
+  await reduce("no-preference");
+  await t.io.move(point.x, point.y);
+  await t.waitFor("window.__motion.poses > " + (prior + 1), "full motion resumes");
+  await sleep(300);
+  await t.io.move(6, 90);
+  await t.waitFor("window.__motion.sprites > 0", "the reverse is in flight");
+  await reduce("reduce");
+  await t.ev("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+  t.eq(await t.ev("window.__motion.sprites"), 0, "enabling reduced motion stops an in-flight reverse");
+  t.eq(await pixel(32, 32), atRest, "enabling reduced motion off-board restores the original pixels");
   await t.ev(`window.canvasCmd({cmd:"prefs",prefs:{playHoverMotion:false}})`);
   await t.io.move(point.x, point.y);
   await sleep(150);
   t.eq(await t.ev("window.__motion.sprites"), 0, "disabled hover adds no sprites");
+});
+
+sc("hover-motion", "held sprites follow the owner's pixel-fitted clip and restore on cancellation", {
+  covers: ["hover-motion:composite", "hover-motion:rest"],
+  skip: { visual: "Samples the fitted clip edge at device-pixel resolution." },
+}, async (t: T) => {
+  const dpr = await t.ev<number>("devicePixelRatio");
+  const u = (devicePx: number) => devicePx / dpr;
+  const reduce = (value: string) => t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value }] });
+  await reduce("no-preference");
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [{
+    type: "frame", id: "qa_motion_clip", x: 10000 + u(0.4), y: 10000, width: u(220), height: u(130), layout: "none", fill: "#203040",
+    children: [{
+      type: "frame", id: "qa_clip_inner", x: 0, y: 0, width: u(70.2), height: u(60), layout: "none", clip: true,
+      children: [{
+        type: "rectangle", id: "qa_clip_sprite", x: u(40), y: u(20), width: u(20), height: u(20), fill: "#FF8040",
+        motion: [{ id: "slide", on: "boardHover", leave: "hold", tracks: [{ prop: "translateX", to: u(25), duration: 150 }] }],
+      }],
+    }],
+  }] });
+  await t.waitFor("window.canvasHost.boards.has('qa_motion_clip')", "the fractional board");
+  await t.focus("qa_motion_clip");
+  const point = await t.center("qa_motion_clip");
+  await t.io.move(point.x, point.y);
+  const pixel = (x: number) => t.ev<number[]>(`(() => {
+    const h = window.canvasHost, ev = h.engineView, r = h.worldRectOf("qa_motion_clip"), d = devicePixelRatio;
+    const sx = Math.round(r.x * d) + Math.round(h.cam.x * d) + ${x};
+    const sy = Math.round(r.y * d) + Math.round(h.cam.y * d) + 30;
+    return Array.from(ev.capture([{ sx, sy, sw: 1, sh: 1, w: 1, h: 1 }])[0]
+      .getContext("2d").getImageData(0, 0, 1, 1).data).slice(0, 3);
+  })()`);
+  await t.waitFor("window.__motion.sprites === 1", "the clipped sprite");
+  await sleep(220);
+  t.eq(await pixel(69), [255, 128, 64], "the last pixel inside the fitted clip shows the sprite");
+  t.eq(await pixel(70), [32, 48, 64], "the first pixel outside the fitted clip shows the owner");
+  await t.io.move(6, 90);
+  await sleep(80);
+  t.eq(await pixel(69), [255, 128, 64], "hold keeps the visible pose on ordinary exit");
+  await reduce("reduce");
+  await t.waitFor("window.__motion.sprites === 0", "turning on reduced motion clears a held pose");
+  t.eq(await pixel(50), [255, 128, 64], "the original layer returns");
+  await reduce("no-preference");
+  await t.io.move(point.x, point.y);
+  await t.waitFor("window.__motion.sprites === 1", "a new hover");
+  await sleep(220);
+  await t.io.move(6, 90);
+  await t.ev(`window.canvasCmd({cmd:"prefs",prefs:{playHoverMotion:false}})`);
+  await t.waitFor("window.__motion.sprites === 0", "turning playback off clears a held pose");
+  await t.ev("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+  t.eq(await pixel(50), [255, 128, 64], "disabling playback restores the original layer");
+});
+
+sc("hover-motion", "first frame paints sprites that fall outside the batch atlas", {
+  covers: ["hover-motion:composite"],
+  skip: { visual: "Samples the actual first engine frame." },
+}, async (t: T) => {
+  const fill = "#FF8040";
+  const size = 344 / await t.ev<number>("devicePixelRatio");
+  const step = size + 12;
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [{
+    type: "frame", id: "qa_motion_batch", x: 10000, y: 10000, width: 8 * step, height: 5 * step, layout: "none", fill: "#203040",
+    children: Array.from({ length: 40 }, (_, i) => ({
+      type: "rectangle", id: "qa_motion_batch_" + i, x: (i % 8) * step, y: Math.floor(i / 8) * step,
+      width: size, height: size, fill,
+      motion: [{ id: "fade", on: "boardHover", tracks: [{ prop: "opacity", to: 0.9, delay: 500, duration: 500 }] }],
+    })),
+  }] });
+  await t.waitFor("window.canvasHost.boards.has('qa_motion_batch')", "the batch board");
+  await t.focus("qa_motion_batch");
+  await t.io.move(6, 90);
+  await t.settle();
+  const rect = await t.rect("qa_motion_batch");
+  const point = { x: rect.x + 100, y: rect.y + 100 };
+  await t.ev(`(() => {
+    const h = window.canvasHost, e = h.engineView.engine, m = h.motion, original = m.afterFrame;
+    const before = e.stats().tilesBatched;
+    m.afterFrame = function () {
+      original.call(this);
+      if (window.__motion.sprites !== 40) return;
+      m.afterFrame = original;
+      window.__batchFirstFrame = { batched: e.stats().tilesBatched - before, missing: h.engineView.pictureState().missing };
+    };
+  })()`);
+  await t.io.move(point.x, point.y);
+  const first = await t.waitFor("window.__batchFirstFrame", "the first sprite frame") as { batched: number; missing: number };
+  t.ok(first.batched > 0 && first.batched < 40, "some urgent sprite tiles overflowed the atlas");
+  t.eq(first.missing, 0, "every sprite tile was ready when the rest layers were hidden");
 });

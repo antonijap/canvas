@@ -107,7 +107,8 @@ export function motionPose(motion, elapsed, { leave, enter, end } = {}) {
       progress[prop] = 1;
     } else if (leave) {
       const start = leave.values[prop] ?? rest;
-      const time = duration * (leave.progress[prop] ?? 1);
+      const displayedProgress = leave.progress[prop] || 1;
+      const time = start === rest ? 0 : Math.max(1, duration * displayedProgress);
       const p = time > 0 ? clamp(elapsed / time) : 1;
       if (track.leave === "hold") {
         values[prop] = start;

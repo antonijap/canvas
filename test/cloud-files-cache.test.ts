@@ -9,7 +9,7 @@ import type {IncomingMessage, ServerResponse} from 'node:http';
 import {writeBoardCheckpoint,evictClosedPackages} from '../src/cloud-files-cache.ts';
 import {FileStateStore} from '../src/cloud-files-store.ts';
 import {stateFromFiles} from '../cloud/core/files/state.ts';
-import {cloudFiles, cloudKey, fileEvents, fileSession, openCloudFile} from '../src/cloud-files.ts';
+import {checkCloudMotionWrite, cloudFiles, cloudKey, fileEvents, fileSession, openCloudFile} from '../src/cloud-files.ts';
 import {closeTunnel, setToken} from '../src/cloud.ts';
 import {cloudFileHooks} from '../src/cloud-files-runtime.ts';
 import {hostedUrl, resetCloudConfig, setCloudConfig} from '../src/cloud-config.ts';
@@ -402,6 +402,26 @@ test('a legacy host leaves ordinary edits enabled and refuses whiteboard inserts
     assert.equal(fileInfo(file)?.waitingForHost, undefined);
     assert.deepEqual(session.store.replica.pending.map(p => p.action.id), ids);
 
+    const motion = [{ id: 'fade', on: 'boardHover', tracks: [{ prop: 'opacity', to: 0.5 }] }];
+    deliverOps(file, [{ k: 'set', id: 'board', props: { motion: { v: motion } } }]);
+    const actionId = session.store.replica.pending.at(-1)!.action.id;
+    const previousNotice = fileEvents.update;
+    const notices: { file: string; message: string }[] = [];
+    fileEvents.update = (file, message) => notices.push({ file, message });
+    t.after(() => { fileEvents.update = previousNotice; });
+    const agent = assert.rejects(checkCloudMotionWrite(file, actionId), { code: 'update_host', message: /older Canvas and must be updated/ });
+    await receive(session, { type: 'reject', id: actionId, code: 'invalid', message: 'set on "board": "motion" is not a frame property' });
+    await agent;
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0].file, fs.realpathSync(file));
+    assert.match(notices[0].message, /older Canvas and must be updated/);
+    assert.equal(fileInfo(file)?.refused.at(-1)?.id, actionId);
+    assert.deepEqual(session.store.replica.pending.map(p => p.action.id), ids);
+
+    session.status = 'offline';
+    deliverOps(file, [{ k: 'set', id: 'board', props: { motion: { v: motion } } }]);
+    const offlineAction = session.store.replica.pending.at(-1)!.action.id;
+    assert.deepEqual(await checkCloudMotionWrite(file, offlineAction), { actionId: offlineAction, status: 'pending' });
 });
 
 test('nested asset edits require support from the live file host', async t => {

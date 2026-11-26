@@ -244,7 +244,7 @@ export function followRename(doc: CanvasDoc, ids: string[]): NodeOp[] {
 export type UpdateBody = { file?: string; id?: string; ids?: string[]; props?: Record<string, Json>; each?: Record<string, Record<string, Json>>; remove?: string[]; expectedRevision?: string; gesture?: string };
 
 /** One write and one undo step for an update that names a layer inside an instance (plain ids may come along). */
-export async function updateWithOverrides(docFile: string, b: UpdateBody, who: { source: "user" | "mcp"; session?: string; label?: string }): Promise<{ revision?: string; ids: string[] }> {
+export async function updateWithOverrides(docFile: string, b: UpdateBody, who: { source: "user" | "mcp"; session?: string; label?: string }): Promise<{ revision?: string; ids: string[]; actionId?: string | 0 }> {
   const ids = (b.id ? [b.id] : (b.ids ?? [])).filter((i) => typeof i === "string" && i && !i.startsWith("widget:"));
   if (!ids.length || !isObj(b.props)) throw new OverrideError(400, "invalid", "file, ids and props are required");
   const props = b.props as Record<string, Json>, remove = Array.isArray(b.remove) ? b.remove : [];
@@ -269,7 +269,7 @@ export async function updateWithOverrides(docFile: string, b: UpdateBody, who: {
   });
   const keys = [...new Set([...Object.keys(props), ...Object.values(b.each ?? {}).flatMap((p) => Object.keys(p ?? {})), ...remove])].sort();
   if (ops.length) record(docFile, ops, { label: who.label ?? nodeLabel(keys), source: who.source, session: who.session, mergeKey: `nodes:${[...ids].sort().join(",")}:${keys.join(",")}${typeof b.gesture === "string" && b.gesture ? `#gesture:${b.gesture.slice(0, 64)}` : ""}`, ...(b.gesture ? { mergeMs: 60_000 } : {}), edit: write.edit, ...write.history }, write.revision);
-  return { revision: write.revision, ids };
+  return { revision: write.revision, ids, actionId: ops.length ? Object.values(write.history?.writers ?? {})[0] : undefined };
 }
 
 /** Reset overrides: one write, one undo step ("Reset Overrides"). No overrides: no write. */

@@ -52,7 +52,9 @@ export async function idleMotion(tab: Tab, cpu = false): Promise<Idle> {
   await sleep(2000);
   const after = await counter();
   const idle = { engineFrames: after.frames - before.frames, wakes: after.wakes - before.wakes, evaluations: after.evaluations - before.evaluations, rendererCpuMs: await task() - t };
-  if (idle.wakes || idle.evaluations) throw new Error(`Idle motion woke ${idle.wakes} times and evaluated ${idle.evaluations} tracks`);
+  if (idle.engineFrames || idle.wakes || idle.evaluations) {
+    throw new Error(`Idle motion drew ${idle.engineFrames} engine frames, woke ${idle.wakes} times and evaluated ${idle.evaluations} tracks`);
+  }
   return idle;
 }
 
@@ -68,6 +70,9 @@ export async function hoverMotion(tab: Tab): Promise<Hover> {
   })()`);
   if (frames.length < 10 || sprites !== 256 || skipped !== 44) {
     throw new Error(`Hover presented ${frames.length} poses with ${sprites} sprites and ${skipped} skipped. Engine errors ${JSON.stringify(errors)}`);
+  }
+  if (!Number.isFinite(firstMs) || firstMs > 100) {
+    throw new Error(`Hover to first presented pose was ${firstMs ?? "unmeasured"} ms (limit 100 ms)`);
   }
   const gaps = frames.slice(1).map((t: number, i: number) => t - frames[i]);
   const { p95 } = stats(gaps);

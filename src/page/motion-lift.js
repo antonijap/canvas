@@ -86,6 +86,23 @@ export function planMotion(root, geometry, { scale = 1, budget = Infinity } = {}
     if (!boxes.has(n)) boxes.set(n, geometry(n));
     return boxes.get(n);
   };
+  const samples = new Map();
+  const backdropSamples = n => {
+    if (samples.has(n)) return samples.get(n);
+    const bounds = [];
+    if (n.enabled !== false) {
+      const blur = parts(n.effect).find(e => e?.type === "background_blur" && e.enabled !== false);
+      const reach = blur?.radius * 1.5; // The engine uses three sigma, with sigma = radius / 2.
+      if (reach > 0) {
+        const geometry = rect(n);
+        const box = geometry?.bounds ?? geometry?.box;
+        if (positive(box)) bounds.push({ x: box.x - reach, y: box.y - reach, w: box.w + 2 * reach, h: box.h + 2 * reach });
+      }
+      for (const child of kids(n)) bounds.push(...backdropSamples(child));
+    }
+    samples.set(n, bounds);
+    return bounds;
+  };
   const hasComplexPaint = n => dependent(n) || kids(n).some(hasComplexPaint);
   const walk = (n, ancestors, later, parentMask, lifted) => {
     const compiled = hasMotion(n) ? compileMotion(n.motion, n.opacity) : null;
@@ -109,7 +126,8 @@ export function planMotion(root, geometry, { scale = 1, budget = Infinity } = {}
         else if (![envelope.x, envelope.y, envelope.w, envelope.h].every(Number.isFinite)) reason = "motion bounds exceed the renderer range";
         else if (later.some(sibling => {
           const r = rect(sibling)?.ink;
-          return positive(r) && positive(intersect(r, envelope));
+          return (positive(r) && positive(intersect(r, envelope)))
+            || backdropSamples(sibling).some(sample => positive(intersect(sample, envelope)));
         })) reason = "overlaps later paint";
         else for (const a of ancestors) {
           if (!a.clip) continue;
@@ -128,7 +146,11 @@ export function planMotion(root, geometry, { scale = 1, budget = Infinity } = {}
         bytes += size;
       }
     }
-    const children = n.canvasLayout?.stacking === "first" ? kids(n).slice().reverse() : kids(n);
+    let children = kids(n);
+    if (n.canvasLayout?.stacking === "first" && n.type === "frame" && n.layout !== "none") {
+      const absolute = k => k.layoutPosition === "absolute";
+      children = children.filter(k => !absolute(k)).reverse().concat(children.filter(absolute));
+    }
     let masked = parentMask;
     children.forEach((k, i) => {
       walk(k, [...ancestors, n], [...children.slice(i + 1), ...later], masked, lifted || promoted);

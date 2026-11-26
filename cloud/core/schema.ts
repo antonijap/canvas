@@ -3,7 +3,7 @@
 // Pure (no Node APIs): the Canvas server (src/doc/schema.ts re-exports it) and a Cloud's shared apply
 // (cloud/core/files/apply.ts) use the same rules. The span and list checks are the page's own pure modules.
 
-import { checkMotion, checkMotionOverrides } from "./motion.ts";
+import { checkMotion, checkMotionOverride, checkMotionOverrides } from "./motion.ts";
 import { spanErrors } from "../../src/page/text-spans.js";
 import { listErrors, paragraphCount } from "../../src/page/text-paras.js";
 
@@ -36,7 +36,7 @@ export const NODE_KEYS: Record<string, Set<string>> = {
   icon: new Set([...ENTITY, ...SIZE, "effect", "library", "icon", "weight", "fill"]),
   script: new Set([...ENTITY, ...SIZE, "clip", "scriptUri", "inputs"]),
   browser: new Set([...ENTITY, ...SIZE, "effect", ...STROKE, "url", "deviceId", "zoom", "scrollX", "scrollY", "cornerRadius"]),
-  ref: new Set(["motion"]), // instances accept any property override
+  ref: new Set(), // instances accept any property override
 };
 
 export const NODE_TYPES = Object.keys(NODE_KEYS);
@@ -130,7 +130,7 @@ function checkFill(v: Json, where: string, errs: string[]) {
 }
 
 /** Validate one node (and its children). `full` = check every key (new node); otherwise only `keys`. */
-export function validateNode(node: DocNode, opts: { keys?: string[]; path?: string; required?: boolean } = {}): string[] {
+export function validateNode(node: DocNode, opts: { keys?: string[]; path?: string; required?: boolean; replay?: boolean } = {}): string[] {
   const errs: string[] = [];
   const where = opts.path ?? (node.id ? `node ${node.id}` : "node");
   if (!node || typeof node !== "object" || Array.isArray(node)) return [`${where}: must be an object`];
@@ -164,8 +164,10 @@ export function validateNode(node: DocNode, opts: { keys?: string[]; path?: stri
       errs.push(`${where}: ${k} must be a number, $variable, "fit_content", "fill_container" (optionally with a fallback like "fill_container(320)")`);
     }
     if (k === "motion") checkMotion(v, where, errs);
-    if (type === "ref" && k === "descendants") checkMotionOverrides(v, where, errs);
-    if (type === "ref" && k.startsWith("descendants/") && v && typeof v === "object" && !Array.isArray(v) && v.motion !== undefined) checkMotion(v.motion, `${where}.${k}`, errs);
+    if (type === "ref" && !opts.replay) {
+      if (k === "descendants") checkMotionOverrides(v, where, errs);
+      else if (k.startsWith("descendants/")) checkMotionOverride(v, `${where}.${k}`, errs);
+    }
     if (k === "fill" || k === "stroke") checkFill(v, `${where}.${k}`, errs);
     if (k === "padding" && !(numOrVar(v) || (Array.isArray(v) && (v.length === 2 || v.length === 4) && v.every(numOrVar)))) {
       errs.push(`${where}: padding must be a number, [vertical, horizontal] or [top, right, bottom, left]`);
@@ -200,7 +202,7 @@ export function validateNode(node: DocNode, opts: { keys?: string[]; path?: stri
     if (k === "children") {
       if (!CONTAINER_TYPES.has(type)) errs.push(`${where}: a ${type} cannot have children (only frame and group)`);
       else if (!Array.isArray(v)) errs.push(`${where}: children must be an array`);
-      else (v as DocNode[]).forEach((c, i) => errs.push(...validateNode(c, { path: `${where}.children[${i}]` })));
+      else (v as DocNode[]).forEach((c, i) => errs.push(...validateNode(c, { path: `${where}.children[${i}]`, replay: opts.replay })));
     }
   }
   if (type === "ref" && keys.includes("ref") && (typeof node.ref !== "string" || !node.ref)) errs.push(`${where}: ref must be the id of a reusable component`);

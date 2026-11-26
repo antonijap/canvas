@@ -8,12 +8,18 @@ import { createHash } from 'node:crypto';
 import { Replica, type ReplicaDurable } from '../cloud/core/files/replica.ts';
 import { materialize, type FileState } from '../cloud/core/files/state.ts';
 import { applyAction, isReject } from '../cloud/core/files/apply.ts';
+import { UPDATE_MOTION_HOST } from '../cloud/core/motion.ts';
 import { actionSha, type Action, type Author, type FileOp, type FileServerMessage, type Role } from '../cloud/protocol-files.ts';
 import type { ObjectStore } from '../cloud/core/files/objects.ts';
 import { shift } from './page/text-spans.js';
 import { shiftLists, type ListItem } from './page/text-paras.js';
 const viewHash = (document: string | Buffer, widgets: string | Buffer) =>
     createHash('sha256').update(document).update('\0').update(widgets).digest('hex');
+
+export function isOlderMotionRefusal(code: string, message: string): boolean {
+    // Older hosts reject a set of a property outside the layer's allowlist.
+    return code === 'invalid' && /"motion" is not an? [\w-]+ property\b/.test(message);
+}
 
 export interface FileMeta {
     cloud: string;
@@ -150,6 +156,11 @@ export class FileStateStore {
             if (msg.type === 'welcome') {
                 this.meta.role = msg.role;
                 this.meta.author = msg.me;
+            }
+            if (msg.type === 'reject' && isOlderMotionRefusal(msg.code, msg.message)) {
+                const { id } = msg;
+                const action = this.replica.pending.find(p => p.action.id === id)?.action;
+                if (action?.ops.some(op => op.k === 'set' && op.props.motion != null)) msg = { ...msg, message: UPDATE_MOTION_HOST };
             }
             // joined is transport state, deliberately not restored after a process restart.
             const result = await this.replica.receive(msg, objects);

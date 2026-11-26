@@ -96,10 +96,10 @@
         },
         "hover-motion-frames": {
           "value": 17.5,
-          "spread": 0.045714285714285756,
-          "tolerance": 0.09142857142857151,
+          "spread": 0.011428571428571592,
+          "tolerance": 0.05,
           "date": "2026-11-26",
-          "commit": "6c58eef53c56ec97f9272210dcb77e26e442dbe6"
+          "commit": "dae13f5aa8e91fabe83bf9f3f484fdd8ffad567e"
         }
       }
     }

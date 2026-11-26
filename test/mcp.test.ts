@@ -1092,6 +1092,11 @@ test("motion tools replace, stagger, warn and render through the shared edit pat
   }
   const duplicate = await call("set_motion", { file: motionFile, nodeIds: ["marker-left"], animations: [...animations, ...animations] });
   assert.equal(duplicate.isError, true);
+  const future = [{ ...animations[0], leave: "futureLeave", futureAnimation: true, tracks: [{ prop: "futureProp", ease: "futureEase" }] }];
+  const kept = await call("set_motion", { file: motionFile, nodeIds: ["marker-left"], animations: future });
+  assert.equal(kept.isError, false, kept.text);
+  assert.equal(kept.json.warnings.length, 4);
+  assert.deepEqual((await call("get_motion", { file: motionFile, nodeId: "marker-left" })).json.nodes[0].animations, future);
   await call("finish_work", { file: motionFile, sound: false });
   const removed = await call("set_motion", { file: motionFile, nodeIds: ["marker-left", "marker-right"], remove: ["slide"] });
   assert.deepEqual(removed.json.counts, [0, 0], removed.text);

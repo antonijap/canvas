@@ -1,14 +1,18 @@
 import { motionProps } from "../../src/page/motion-logic.js";
 
+export const UPDATE_MOTION_HOST = "The Cloud host runs an older Canvas and must be updated to save motion.";
+
 const props = new Set<string>(motionProps);
+const animationKeys = new Set(["id", "on", "leave", "origin", "tracks"]);
 const trackKeys = new Set(["prop", "from", "to", "duration", "delay", "ease", "repeat", "alternate"]);
 const triggers = new Set(["boardHover", "hover", "press", "appear"]);
 const eases = new Set(["linear", "ease", "easeIn", "easeOut", "easeInOut"]);
+const leaves = new Set(["reverse", "reset", "hold"]);
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const number = (v: unknown, min = -Infinity, max = Infinity): v is number => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
 
 function validEase(v: unknown): boolean {
-  if (typeof v === "string") return eases.has(v);
+  if (typeof v === "string") return !!v.trim();
   if (Array.isArray(v)) return v.length === 4 && number(v[0], 0, 1) && number(v[1]) && number(v[2], 0, 1) && number(v[3]);
   if (!object(v) || Object.keys(v).length !== 1 || !object(v.spring)) return false;
   const s = v.spring, n = Object.keys(s).length;
@@ -30,14 +34,20 @@ export function checkMotion(value: unknown, where: string, errors: string[], war
     else ids.add(a.id);
     if (typeof a.on !== "string" || !a.on.trim()) errors.push(`${at}: on must be a trigger name`);
     else if (!triggers.has(a.on)) warnings?.push(`${at}: unknown trigger "${a.on}", kept as it is`);
-    if (a.leave !== undefined && a.leave !== "reverse" && a.leave !== "reset" && a.leave !== "hold") errors.push(`${at}: leave must be reverse, reset or hold`);
+    if (a.leave !== undefined) {
+      if (typeof a.leave !== "string" || !a.leave.trim()) errors.push(`${at}: leave must be a name`);
+      else if (!leaves.has(a.leave)) warnings?.push(`${at}: unknown leave "${a.leave}", kept as it is`);
+    }
     if (a.origin !== undefined && !(Array.isArray(a.origin) && a.origin.length === 2 && a.origin.every(v => number(v, 0, 1)))) errors.push(`${at}: origin must be two fractions from 0 to 1`);
+    if (warnings) for (const k of Object.keys(a)) if (!animationKeys.has(k)) warnings.push(`${at}: unknown field "${k}", kept as it is`);
     if (!Array.isArray(a.tracks) || !a.tracks.length || a.tracks.length > 8) { errors.push(`${at}: tracks must contain 1 to 8 tracks`); continue; }
     const used = new Set<string>();
     for (const [j, t] of a.tracks.entries()) {
       const loc = `${at}.tracks[${j}]`;
       if (!object(t)) { errors.push(`${loc}: expected a track object`); continue; }
-      if (typeof t.prop !== "string" || !props.has(t.prop) || used.has(t.prop)) errors.push(`${loc}: use each supported prop at most once (${motionProps.join(", ")})`);
+      if (typeof t.prop !== "string" || !t.prop.trim()) errors.push(`${loc}: prop must be a property name`);
+      else if (!props.has(t.prop)) warnings?.push(`${loc}: unknown prop "${t.prop}", kept as it is`);
+      else if (used.has(t.prop)) errors.push(`${loc}: use each supported prop at most once (${motionProps.join(", ")})`);
       else used.add(t.prop);
       const valueOK = (v: unknown) => t.prop === "opacity" ? number(v, 0, 1) : number(v);
       if ((t.to !== undefined && !valueOK(t.to)) || (t.from !== undefined && !valueOK(t.from))) errors.push(`${loc}: to and from must be finite numbers (opacity 0 to 1)`);
@@ -46,6 +56,7 @@ export function checkMotion(value: unknown, where: string, errors: string[], war
       if (t.repeat !== undefined && t.repeat !== "infinite" && !(Number.isSafeInteger(t.repeat) && number(t.repeat, 0))) errors.push(`${loc}: repeat must be a non-negative integer or "infinite"`);
       if (t.alternate !== undefined && typeof t.alternate !== "boolean") errors.push(`${loc}: alternate must be boolean`);
       if (t.ease !== undefined && !validEase(t.ease)) errors.push(`${loc}: ease must be a named ease, a cubic bezier or a spring`);
+      else if (typeof t.ease === "string" && !eases.has(t.ease)) warnings?.push(`${loc}: unknown ease "${t.ease}", kept as it is`);
       if (warnings) for (const k of Object.keys(t)) if (!trackKeys.has(k)) warnings.push(`${loc}: unknown field "${k}", kept as it is`);
     }
   }
@@ -53,7 +64,14 @@ export function checkMotion(value: unknown, where: string, errors: string[], war
 
 export function checkMotionOverrides(descendants: unknown, where: string, errors: string[], warnings?: string[]) {
   if (!object(descendants)) return;
-  for (const [id, props] of Object.entries(descendants)) {
-    if (object(props) && props.motion !== undefined) checkMotion(props.motion, `${where}.descendants/${id}`, errors, warnings);
+  for (const [id, props] of Object.entries(descendants)) checkMotionOverride(props, `${where}.descendants/${id}`, errors, warnings);
+}
+
+export function checkMotionOverride(props: unknown, where: string, errors: string[], warnings?: string[]) {
+  if (!object(props)) return;
+  if (props.motion !== undefined) checkMotion(props.motion, where, errors, warnings);
+  checkMotionOverrides(props.descendants, where, errors, warnings);
+  if (Array.isArray(props.children)) {
+    props.children.forEach((child, i) => checkMotionOverride(child, `${where}.children[${i}]`, errors, warnings));
   }
 }

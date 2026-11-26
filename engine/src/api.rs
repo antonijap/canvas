@@ -217,6 +217,7 @@ pub struct Engine {
     stretch: f64,
     was_zooming: bool,
     frames: u64,
+    sprite_frame: u64,
     errors: Vec<String>,
     // ---- shader cards (outside the tile cache; see shaders.rs / shade.rs)
     shader_gpu: Option<ShaderGpu>,
@@ -336,6 +337,7 @@ impl Engine {
             stretch: crate::cache::STRETCH_UNSEEN,
             was_zooming: false,
             frames: 0,
+            sprite_frame: 0,
             errors: Vec::new(),
             shader_gpu: None,
             cards: Vec::new(),
@@ -1455,8 +1457,8 @@ impl Engine {
                 }
             }
             // A small tile joins the frame's batch render when it renders in one part and the batch has room
-            // (atlas space, vello's buffers, the image atlas). One that joined skipped the GPU admission: if it
-            // does not fit, it waits for the next frame rather than rendering on its own.
+            // (atlas space, vello's buffers, the image atlas). A tile that was joining skipped GPU admission.
+            // If rejected it waits, except for urgent sprites whose owner already gave up their layers.
             if small {
                 let sc = if is_base { (ts, ts) } else { (ts * fits[bi].k.0, ts * fits[bi].k.1) };
                 let est = self.gpu.small_tile_estimate(b, &t, sc);
@@ -1468,9 +1470,11 @@ impl Engine {
                 }
                 if joining {
                     st.batch_stop = if est.is_none() { 7 } else { batch.refused };
-                    if is_ahead { ahead_left += 1 } else { deferred += 1 }
-                    blocked = true;
-                    continue;
+                    if !force {
+                        if is_ahead { ahead_left += 1 } else { deferred += 1 }
+                        blocked = true;
+                        continue;
+                    }
                 }
             }
             let b = &self.boards[bi];
@@ -1615,6 +1619,7 @@ impl Engine {
         // Insert each sprite after its owner and before any board that paints above it.
         let mut stacked: Vec<&SlotDraw> = Vec::new();
         let uses_sprites = self.boards.iter().any(|b| b.sprite.is_some());
+        let mut sprite_drawn = false;
         if uses_sprites {
             stacked.extend(&slots);
             stacked.sort_by_key(|sd| self.boards[sd.bi].sprite.as_ref()
@@ -1632,10 +1637,13 @@ impl Engine {
                 let (x, y) = cam_dev;
                 (Some([a, b, c, d, e * s_exact + (1. - a) * x - c * y, f * s_exact - b * x + (1. - d) * y].map(|v| v as f32)), [alpha; 4])
             });
-            let clip = b.sprite.as_ref().and_then(|(_, clip)| *clip).map(|clip| {
-                scissor_px(Rect::new(clip.x0 * s_exact + cam_dev.0, clip.y0 * s_exact + cam_dev.1,
-                    clip.x1 * s_exact + cam_dev.0, clip.y1 * s_exact + cam_dev.1), dw, dh).unwrap_or([0; 4])
+            let clip = b.sprite.as_ref().and_then(|(parent, clip)| {
+                let pi = self.pos_of(parent)?;
+                let owner = &self.boards[pi];
+                let local = (*clip)? - kurbo::Vec2::new(owner.x, owner.y);
+                Some(scissor_px(fits[pi].device(local, s_exact, cam_dev), dw, dh).unwrap_or([0; 4]))
             });
+            let sprite_visible = b.sprite.is_some() && clip != Some([0; 4]);
             let slot_dev = dev(sd.t.rect);
             let mut fresh_now = is_fresh(&self.gpu.tiles, &sd.key, b.generation);
             // A lowres texture at rest is still the best picture of its slot while it renders again.
@@ -1678,6 +1686,7 @@ impl Engine {
                     self.gpu.tiles.touch(k, frame);
                     st.fallbacks += 1;
                     st.board_pixels = true;
+                    sprite_drawn |= sprite_visible;
                     quads.push((Source::Tile(*k), Quad { rect: r32(d), uv, tint, scissor, extra: [0.0; 4], transform }));
                     if self.debug & DEBUG_TILES != 0 {
                         outline(&mut quads, d, [0.9, 0.6, 0.0, 0.9]);
@@ -1712,6 +1721,7 @@ impl Engine {
                     d = Rect::new(x0, y0, x0 + f64::from(px.0), y0 + f64::from(px.1));
                 }
                 st.board_pixels = true;
+                sprite_drawn |= sprite_visible;
                 quads.push((Source::Tile(sd.key), Quad { rect: r32(d), uv: interior_uv(px), tint, scissor: clip, extra: [0.0; 4], transform }));
                 if self.debug & DEBUG_TILES != 0 {
                     outline(&mut quads, d, if zooming { [0.0, 0.3, 0.9, 0.9] } else { [0.9, 0.1, 0.1, 0.9] });
@@ -1734,6 +1744,8 @@ impl Engine {
         if let Err(e) = self.gpu.composite(&quads, t0, mpx, shader_ms) {
             self.push_error(e);
             st.board_pixels = false;
+        } else if raf && sprite_drawn {
+            self.sprite_frame = frame;
         }
         // 4. Stay under the texture budgets.
         let info: HashMap<u64, (u64, ScaleKey)> = self.boards.iter().map(|b| (b.uid, (b.generation, base_scale_at(b.world_ink(), base_px)))).collect();
@@ -2848,6 +2860,10 @@ impl Engine {
     pub fn picture_state(&self) -> Vec<f64> {
         vec![f64::from(self.last.missing), f64::from(self.last.blank), if self.last.exact { 1.0 } else { 0.0 }, if self.last.board_pixels { 1.0 } else { 0.0 }]
     }
+
+    /// Display frame number of the last successful composite containing a sprite tile.
+    #[wasm_bindgen(js_name = spriteFrame)]
+    pub fn sprite_frame(&self) -> f64 { self.sprite_frame as f64 }
 
     /// Timings and cache sizes of the last frame.
     pub fn stats(&self) -> JsValue {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { reconnectingStream } from "./event-stream.ts";
 import { forgetStore } from "./widgets/store.ts";
-import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers, waitForCachedCloudSettings } from "./cloud-files.ts";
+import { checkCloudMotionWrite, handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers, waitForCachedCloudSettings } from "./cloud-files.ts";
 import { movePackagePath, recoverMoveStages } from "./cloud-files-move.ts";
 import { readOnlyRoute } from "./cloud-files-gate.ts";
 import { applyView, docKeysEffect } from "./docwriter.ts";
@@ -432,11 +432,13 @@ async function listFiles(recover = false): Promise<FileEntry[]> {
 /** POST /api/update's body. */
 type UpdateBody = { file?: string; id?: string; ids?: string[]; props?: Record<string, Json>; remove?: string[]; expectedRevision?: string; gesture?: string; merge?: string; each?: Record<string, Record<string, Json>>; rel?: unknown };
 
+const writesMotion = (b: UpdateBody) => b.props?.motion !== undefined || Object.values(b.each ?? {}).some(p => p?.motion !== undefined);
+
 /**
  * Several layers in one write and one undo step: `props` on each, a layer's own `each` values on top (a Mixed field
  * stepped from each layer's value, a repeat). The inspector's "N selected" and Repeat (src/repeat.ts) write here.
  */
-async function updateMany(file: string, b: UpdateBody & { ids: string[] }, by: "mcp" | "inspector", session?: string, label?: string): Promise<{ revision?: string; changed: boolean }> {
+async function updateMany(file: string, b: UpdateBody & { ids: string[] }, by: "mcp" | "inspector", session?: string, label?: string): Promise<{ revision?: string; changed: boolean; actionId?: string | 0 }> {
   const metrics = await Promise.all(b.ids.map((id) => prepareAutoTracking(watched(file).doc, id, { ...(b.props ?? {}), ...(b.each?.[id] ?? {}) }, b.remove ?? [])));
   let ops: NodeOp[] = [];
   const { write } = await editDoc(file, { expectedRevision: b.expectedRevision, touches: b.ids }, (doc) => {
@@ -453,7 +455,8 @@ async function updateMany(file: string, b: UpdateBody & { ids: string[] }, by: "
   record(file, ops, { label: label ?? nodeLabel(keys), source: by === "mcp" ? "mcp" : "user", session, ...updateMerge(b, `nodes:${[...b.ids].sort().join(",")}:${keys.join(",")}`), edit: write.edit, ...write.history }, write.revision);
   if (write.revision) docChanged(file, write.revision, by, { id: b.ids[0] });
   if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: b.ids[0], ids: b.ids, props: keys.filter((k) => !(b.remove ?? []).includes(k)), remove: b.remove ?? [] });
-  return { revision: write.revision, changed: ops.some((o) => Object.keys(o.props).length > 0) };
+  const changed = ops.some(o => Object.keys(o.props).length > 0);
+  return { revision: write.revision, changed, actionId: changed ? Object.values(write.history?.writers ?? {})[0] : undefined };
 }
 
 /**
@@ -918,8 +921,10 @@ try {
             noteEdit(file, fromUpdate(b));
             if (r.revision) docChanged(file, r.revision, by, { id: r.ids[0] });
             if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: r.ids[0], ids: r.ids, props: Object.keys(b.props ?? {}), remove: b.remove ?? [] });
-            return json(res, { ok: true, revision: r.revision, ids: r.ids });
+            const cloud = by === "mcp" && writesMotion(b) ? await checkCloudMotionWrite(file, r.actionId) : undefined;
+            return json(res, { ok: true, revision: r.revision, ids: r.ids, cloud });
           } catch (e) {
+            if ((e as { code?: string }).code === "update_host") return json(res, { error: (e as Error).message, code: "update_host" }, 426);
             if (e instanceof OverrideError) return json(res, { error: e.message, code: e.code }, e.status);
             if (e instanceof StaleFileError) return json(res, { error: (e as Error).message, code: "stale_revision" }, 409);
             return json(res, { error: (e as Error).message }, 422);
@@ -937,8 +942,10 @@ try {
             const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
             const r = await updateMany(file, b as UpdateBody & { ids: string[] }, by, String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined);
             noteEdit(file, fromUpdate(b));
-            return json(res, { ok: true, revision: r.revision, ids: b.ids });
+            const cloud = by === "mcp" && writesMotion(b) ? await checkCloudMotionWrite(file, r.actionId) : undefined;
+            return json(res, { ok: true, revision: r.revision, ids: b.ids, cloud });
           } catch (e) {
+            if ((e as { code?: string }).code === "update_host") return json(res, { error: (e as Error).message, code: "update_host" }, 426);
             if (e instanceof StaleFileError) return json(res, { error: (e as Error).message, code: "stale_revision" }, 409);
             return json(res, { error: (e as Error).message }, 422);
           }
@@ -976,8 +983,10 @@ try {
           if (write.revision) docChanged(file, write.revision, by, { id: b.id });
           if (by === "mcp") trackChange(file, b.id, bridgeCtx);
           if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: b.id, props: Object.keys(b.props ?? {}), remove: b.remove ?? [] });
-          return json(res, { ok: true, revision: write.revision, node: result });
+          const cloud = by === "mcp" && op?.props.motion && writesMotion(b) ? await checkCloudMotionWrite(file, Object.values(write.history?.writers ?? {})[0]) : undefined;
+          return json(res, { ok: true, revision: write.revision, node: result, cloud });
         } catch (e) {
+          if ((e as { code?: string }).code === "update_host") return json(res, { error: (e as Error).message, code: "update_host" }, 426);
           if (e instanceof StaleFileError) return json(res, { error: (e as Error).message, code: "stale_revision" }, 409);
           return json(res, { error: (e as Error).message }, 422);
         }

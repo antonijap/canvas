@@ -5,7 +5,8 @@ const host = window.canvasHost;
 if (host) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
   const stats = { evaluations: 0, wakes: 0, sprites: 0, skipped: [], hoverToFirstPoseMs: null, poses: 0 };
-  let desired = null, entered = 0, active = null, preview = false, advanced = false, playing = false, trace = null;
+  let desired = null, entered = 0, active = null, preview = false, playing = false, trace = null;
+  let reduceChanged = false;
   const wake = () => { stats.wakes++; host.requestFrame(); };
 
   function stop() {
@@ -36,7 +37,7 @@ if (host) {
     const { sprites, skipped } = planMotion(scene.root, n => {
       const placement = e.nodeMotionRect(board, n.id);
       const box = n.type === "group" ? e.nodeRectIn(board, n.id) : placement;
-      return { box, placement, ink: e.nodeInkIn(board, n.id) };
+      return { box, placement, ink: e.nodeInkIn(board, n.id), get bounds() { return e.nodeRectIn(board, n.id); } };
     }, { scale: z * devicePixelRatio, budget: e.textureBudget() * 0.25 });
     stats.skipped = skipped;
     stats.hoverToFirstPoseMs = null;
@@ -55,7 +56,7 @@ if (host) {
         // Keep the board's registered resources. Only the subtree's paint refers to them.
         ev.motionBoard(id, r.x, r.y, { ...scene, id, root });
         const restAlpha = animateOpacity ? (sprite.compiled.tracks.find(t => t.prop === "opacity")?.rest ?? 1) : 1;
-        const entry = { ...sprite, id, rest: poseAffine({ opacity: restAlpha }, sprite.pivot), last: null, pose: null, basis: null, parent: parents.get(sprite.parent) };
+        const entry = { ...sprite, id, rest: poseAffine({ opacity: restAlpha }, sprite.pivot), last: null, pose: null, presentedPose: null, basis: null, parent: parents.get(sprite.parent) };
         made.push(entry);
         if (node.children?.length) parents.set(sprite, entry);
         if (!e.setBoardSprite(id, board, new Float64Array(clip ? [clip.x, clip.y, clip.w, clip.h] : []))) throw new Error("Could not attach motion sprite");
@@ -76,11 +77,13 @@ if (host) {
   function phase(name, now) {
     active.phase = name;
     active.at = now;
-    for (const s of active.sprites) s.basis = s.pose;
+    for (const s of active.sprites) s.basis = s.presentedPose;
   }
 
   function tick() {
-    advanced = playing = false;
+    playing = false;
+    const preferenceChanged = reduceChanged;
+    reduceChanged = false;
     if (!active && !desired) return;
     if (host.motionBlocked()) {
       desired = null; preview = false;
@@ -95,9 +98,18 @@ if (host) {
     if (active && desired && (active.board !== desired || (preview && !active.preview))) stop();
     if (!active && desired) start(desired, now);
     if (!active) return;
+    if (reduce.matches && preferenceChanged) {
+      if (!desired) { stop(); return; }
+      phase("enter", now);
+    }
+    active.frame = active.ev.engine.spriteFrame?.();
     if (desired && (active.phase === "leave" || active.phase === "still") && !active.preview) phase("enter", now);
     if (!desired && (active.phase === "enter" || active.phase === "settled") && !active.preview) {
-      if (reduce.matches) { stop(); return; }
+      if (reduce.matches || !active.presented) { stop(); return; }
+      phase("leave", now);
+    }
+    if (active.phase === "preview-end") {
+      if (!active.presented) { stop(); return; }
       phase("leave", now);
     }
     if (active.phase === "still" || active.phase === "settled") return;
@@ -109,22 +121,23 @@ if (host) {
       const options = { end: reduce.matches && active.phase === "enter" };
       if (active.phase === "leave") options.leave = s.basis;
       else options.enter = s.basis;
-      s.pose = motionPose(compiled, elapsed, options);
+      const pose = motionPose(compiled, elapsed, options);
       stats.evaluations++;
-      const local = poseAffine(s.pose.values, s.pivot, compiled.origins);
+      const local = poseAffine(pose.values, s.pivot, compiled.origins);
       const affine = s.parent ? composeAffine(s.parent.last ?? s.parent.rest, local) : local;
       const prior = s.last ?? s.rest;
       const changed = affine.some((v, i) => v !== prior[i]);
-      if ((!s.last || changed) && active.ev.engine.setBoardTransform(s.id, ...affine)) {
-        advanced ||= changed;
+      if ((s.last && !changed) || active.ev.engine.setBoardTransform(s.id, ...affine)) {
+        active.posePending ||= changed;
         s.last = affine;
+        s.pose = pose;
       }
-      done &&= s.pose.done;
-      held ||= s.pose.held;
+      done &&= pose.done;
+      held ||= pose.held;
     }
     if (done && active.phase === "leave") {
       if (held && !active.preview) active.phase = "still";
-      else { stop(); advanced = false; }
+      else stop();
     } else if (done && active.preview) {
       desired = null; preview = false;
       if (reduce.matches) {
@@ -133,7 +146,7 @@ if (host) {
         const run = active;
         setTimeout(() => { if (active === run && stop()) wake(); }, 500);
       } else {
-        phase("leave", now);
+        active.phase = "preview-end";
         playing = true;
       }
     } else if (done) active.phase = "settled";
@@ -153,7 +166,7 @@ if (host) {
   host.motion = {
     hover: setHover,
     get active() { return !!active; },
-    invalidate(id) { if (active?.board === id) this.cancel(); },
+    invalidate(id) { if (active?.board === id || desired === id) this.cancel(); },
     cancel() { desired = null; preview = false; if (stop()) wake(); },
     preview(id) {
       const ev = host.engineView, board = host.boards.has(id) ? id : ev?.boardOf(id);
@@ -164,11 +177,16 @@ if (host) {
     },
     // Only wake the existing frame loop when a pose can still advance.
     afterFrame() {
-      if (advanced) {
-        const now = performance.now();
-        stats.poses++;
-        if (stats.hoverToFirstPoseMs === null) stats.hoverToFirstPoseMs = now - entered;
-        if (trace && trace.length < 2000) trace.push(now);
+      if (active && active.ev.engine.spriteFrame?.() !== active.frame) {
+        active.presented = true;
+        for (const s of active.sprites) s.presentedPose = s.pose;
+        if (active.posePending) {
+          active.posePending = false;
+          const now = performance.now();
+          stats.poses++;
+          if (stats.hoverToFirstPoseMs === null) stats.hoverToFirstPoseMs = now - entered;
+          if (trace && trace.length < 2000) trace.push(now);
+        }
       }
       if (playing && !document.hidden) wake();
     },
@@ -178,7 +196,9 @@ if (host) {
   host.on("prefs", p => { if (!p.playHoverMotion) cancel(); });
   host.on("cmd", c => { if (c.cmd === "motionPreview") host.motion.preview(c.id); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) cancel(); });
-  reduce.addEventListener("change", () => { if (active) { if (active.phase === "settled") active.phase = "enter"; wake(); } });
+  reduce.addEventListener("change", () => {
+    if (reduce.matches && active) { reduceChanged = true; wake(); }
+  });
   host.view.addEventListener("pointerdown", cancel, true);
   host.view.addEventListener("pointerleave", () => setHover(null));
   window.__motion = Object.assign(stats, {

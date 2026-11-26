@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { checkMotion } from "../../cloud/core/motion.ts";
+import { checkMotion, UPDATE_MOTION_HOST } from "../../cloud/core/motion.ts";
 import { buildIndex, expand, findNode, loadDoc, resolveDocPath, revisionOf, stateHashOf, type DocNode, type Json } from "../../src/engine.ts";
 import { api, ensureServer, resolveFile, ToolError } from "../client.ts";
 import { renderNode } from "../render.ts";
@@ -49,10 +49,10 @@ export function register(server: McpServer) {
       each[id] = { motion: values as unknown as Json };
     }
     if (errors.length) throw new ToolError("invalid", errors.join("; "));
-    const r = await api<{ revision: string }>("POST", "/api/update", { file, ids, props: {}, each, expectedRevision: revision });
-    return { nodeIds: ids, revision: r.revision, counts: ids.map(id => (each[id].motion as Json[]).length), ...(warnings.length ? { warnings } : {}) };
+    const r = await api<{ revision: string; cloud?: { actionId: string; status: "pending" } }>("POST", "/api/update", { file, ids, props: {}, each, expectedRevision: revision });
+    return { nodeIds: ids, revision: r.revision, counts: ids.map(id => (each[id].motion as Json[]).length), cloud: r.cloud, ...(warnings.length ? { warnings } : {}) };
   });
-  tool(server, "get_motion", "List animations on a layer or, for a board, on every animated layer inside it. Includes reserved triggers.", {
+  tool(server, "get_motion", "List animations on a layer or, for a board, on every animated layer inside it. Includes reserved triggers and any older-host motion refusals for the file.", {
     file: S.file,
     nodeId: z.string().min(1),
   }, async a => {
@@ -85,7 +85,10 @@ export function register(server: McpServer) {
       if (board) n.children?.forEach(visit);
     };
     visit(node);
-    return { nodeId: id, revision: fileRevision, nodes, count: nodes.reduce((n, r) => n + r.animations.length, 0), ...(warnings.length ? { warnings } : {}) };
+    const info = await api<{ refused: { id: string; message: string }[] } | null>("GET", `/api/cloud/files/info?file=${enc(file)}`);
+    const cloudRefusals = info?.refused.filter(r => r.message === UPDATE_MOTION_HOST);
+    return { nodeId: id, revision: fileRevision, nodes, count: nodes.reduce((n, r) => n + r.animations.length, 0), ...(warnings.length ? { warnings } : {}),
+      ...(cloudRefusals?.length ? { cloudRefusals } : {}) };
   }, { readOnlyHint: true });
   tool(server, "render_motion", "Render a motion filmstrip as PNG using explicit times in milliseconds. Fits layout once and then poses each frame. Uses the selected node's resting box as the crop.", {
     file: S.file,

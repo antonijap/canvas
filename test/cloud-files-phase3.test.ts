@@ -55,6 +55,24 @@ test('state.sqlite keeps confirmed, pending and refused across a damaged view an
         fs.rmSync(pkg, { recursive: true, force: true });
     }
 });
+test('an older host refusing a motion write leaves an actionable error in the replica', async () => {
+    const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-motion-refusal-'));
+    const store = new FileStateStore(pkg, { cloud: 'mac://studio', file: crypto.randomUUID(), name: 'Design', role: 'editor', author, state: stateFromFiles(doc) });
+    try {
+        const a = store.propose([{ k: 'set', id: 'Title', props: { motion: { v: [{ id: 'fade', on: 'boardHover', tracks: [{ prop: 'opacity', to: 0.5 }] }] } } }]);
+        assert.ok(!('reject' in a));
+        await store.receive({ type: 'reject', id: a.id, code: 'invalid', message: 'set on "Title": "motion" is not a text property' }, new MemoryObjects());
+        assert.match(store.replica.refused.at(-1)!.message, /Cloud host runs an older Canvas and must be updated/);
+        assert.equal(store.replica.view().node('Title')?.props.motion, undefined);
+        const b = store.propose([{ k: 'set', id: 'Title', props: { motion: { v: [] } } }]);
+        assert.ok(!('reject' in b));
+        await store.receive({ type: 'reject', id: b.id, code: 'conflict', message: 'The layer changed' }, new MemoryObjects());
+        assert.equal(store.replica.refused.at(-1)!.message, 'The layer changed');
+    } finally {
+        store.close();
+        fs.rmSync(pkg, { recursive: true, force: true });
+    }
+});
 test('read-only gate covers all mutation families and permits reads and comments', () => {
     for (const p of ['/api/update', '/api/structure', '/api/move', '/api/resize', '/api/scale', '/api/text', '/api/replace', '/api/layout', '/api/overrides', '/api/pages', '/api/widgets', '/api/shaders', '/api/videos', '/api/images', '/api/history/undo', '/api/variations', '/api/agent/run']) {
         assert.ok(readOnlyRoute('POST', p), p);

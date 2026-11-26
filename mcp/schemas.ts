@@ -17,7 +17,7 @@ export const toastLevel = z.enum(["info", "success", "warn", "error"]);
 export const motionAnimations = z.array(z.object({
   id: z.string().min(1),
   on: z.string().min(1),
-  leave: z.enum(["reverse", "reset", "hold"]).optional(),
+  leave: z.string().min(1).optional().describe("reverse, reset or hold. Future names are kept with a warning."),
   origin: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]).optional(),
   tracks: z.array(z.object({ prop: z.string(), to: z.number().optional() }).passthrough()).min(1).max(8),
 }).passthrough()).max(4);

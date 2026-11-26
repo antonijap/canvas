@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { Tab } from "../bench/latency.ts";
+import { hoverMotion, idleMotion } from "../bench/motion.ts";
 import { compare, findMachine, parseBudgets, recordBudget, summarize, type Budget, type Machine } from "../bench/perf-budgets.ts";
 
 const commit = "a".repeat(40);
@@ -62,4 +64,21 @@ test("uses the middle of five samples and divides the full range by the median",
   assert.deepEqual(summarize([102, 97, 100, 99, 101]), { median: 100, spread: 0.05 });
   assert.throws(() => summarize([100, NaN, 101, 102, 103]));
   assert.throws(() => summarize([100, 101]));
+});
+
+test("the hover motion gate rejects idle engine frames and late first poses", async () => {
+  let reads = 0;
+  const idle = { ev: async () => ({ frames: reads++, wakes: 0, evaluations: 0 }) } as unknown as Tab;
+  const hovering = (firstMs: number) => ({
+    screenRect: async () => ({ x: 10, y: 10, w: 100, h: 100 }),
+    move: async () => {},
+    ev: async (js: string) => js.includes(".recorded()") ? {
+      frames: Array.from({ length: 20 }, (_, i) => i * 17), firstMs, sprites: 256, skipped: 44,
+    } : undefined,
+  }) as unknown as Tab;
+  await Promise.all([
+    assert.rejects(idleMotion(idle), /1 engine frames/),
+    assert.rejects(hoverMotion(hovering(101)), /101 ms \(limit 100 ms\)/),
+    hoverMotion(hovering(100)).then(result => assert.equal(result.firstMs, 100)),
+  ]);
 });
