@@ -692,6 +692,36 @@ struct LeadTrailThrottle {
     mutating func sent(now: Double) { scheduled = false; lastSent = now }
 }
 
+/// The bottom islands and the space they leave for canvas content and notices.
+struct BottomBarLayout {
+    static let bottomMargin: CGFloat = 14
+
+    /// Frames use the bottom of the window as y = 0, with negative y above it.
+    let palette: CGRect?
+    let zoom: CGRect?
+    let zoomAboveTools: Bool
+    let clearance: CGFloat
+
+    init(windowWidth: CGFloat, leftInset: CGFloat, rightInset: CGFloat, zoomRightInset: CGFloat,
+         paletteWidth: CGFloat?, zoomWidth: CGFloat?, height: CGFloat, gap: CGFloat) {
+        let bottom = -Self.bottomMargin
+        let centerX = (windowWidth + leftInset - rightInset) / 2
+        let zoomRight = windowWidth - zoomRightInset
+        let paletteFrame = paletteWidth.map { CGRect(x: centerX - $0 / 2, y: bottom - height, width: $0, height: height) }
+        let raised: Bool
+        if let paletteFrame, let zoomWidth, windowWidth > 0 {
+            raised = paletteFrame.maxX + gap > zoomRight - zoomWidth
+        } else {
+            raised = false
+        }
+        let zoomBottom = raised ? bottom - height - gap : bottom
+        palette = paletteFrame
+        zoom = zoomWidth.map { CGRect(x: zoomRight - $0, y: zoomBottom - height, width: $0, height: height) }
+        zoomAboveTools = raised
+        clearance = paletteFrame == nil ? 0 : -zoomBottom + height + gap
+    }
+}
+
 /// The space that keeps the canvas clear of the sidebars and bottom controls.
 enum CanvasInsets {
     static func rightInset(rightSidebar: Bool, inset: CGFloat, gap: CGFloat, props: CGFloat) -> CGFloat {

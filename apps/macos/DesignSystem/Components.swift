@@ -496,12 +496,34 @@ struct KeyValueRow: View {
 
 // MARK: Compound islands
 
+enum BottomBarStyle {
+    static let padding = Metric.pillPad
+    static let spacing = ToolbarButtonStyle.chipGap
+    static let rowSpacing = Metric.toolbarControl + spacing
+    static let iconFont = Font.system(size: 16, weight: .medium)
+
+    static func height(rows: Int = 1) -> CGFloat {
+        Metric.toolbarControl + CGFloat(rows - 1) * rowSpacing + 2 * padding
+    }
+}
+
+extension View {
+    func bottomBar(height: CGFloat) -> some View {
+        let shape = ToolbarButtonStyle.shape(outset: BottomBarStyle.padding)
+        return padding(.horizontal, BottomBarStyle.padding)
+            .frame(height: height)
+            .contentShape(shape)
+            .onTapGesture {}
+            .glassBar(in: shape)
+    }
+}
+
 struct ZoomPill: View {
     private static let percentWidth: CGFloat = 52
-    static let width = 2 * Metric.toolbarControl + percentWidth + 2 * Metric.pillPad
-    static let height = Metric.toolbarControl + 2 * Metric.pillPad
+    static let width = 2 * Metric.toolbarControl + percentWidth + 2 * (BottomBarStyle.padding + BottomBarStyle.spacing)
 
     let percent: Int
+    let height: CGFloat
     let zoomOut: () -> Void
     let zoomIn: () -> Void
     let reset: () -> Void
@@ -513,30 +535,31 @@ struct ZoomPill: View {
     @Binding var open: Bool
 
     var body: some View {
-        GlassIsland(radius: Metric.toolbarRadius + Metric.pillPad, padding: Metric.pillPad) {
-            HStack(spacing: 0) {
-                zoomButton("minus", help: "Zoom out", shortcut: "\u{21E7}\u{2212}", action: zoomOut)
-                // The percentage opens a zoom field (type 150 and Return) over the zoom choices.
-                Button { open.toggle() } label: {
-                    Text("\(percent)%").font(Typography.numeric)
-                }
-                .buttonStyle(ToolbarButtonStyle(active: open, width: Self.percentWidth, tint: Palette.fg))
-                .help("Zoom: type a percentage, or pick a zoom")
-                .accessibilityLabel("Zoom \(percent) percent")
-                .qaID("zoom-pill", label: "\(percent)%")
-                .modifier(QAFrame(id: "zoom.percent"))
-                .popover(isPresented: $open, arrowEdge: .top) {
-                    ZoomField(percent: percent, zoomTo: { zoomTo($0); open = false },
-                              choices: [("Zoom to Fit Page", "\u{21E7}1", fitPage), ("Zoom to Selection", "\u{21E7}2", fitSelection), ("Zoom to 100%", "\u{21E7}0", reset)],
-                              close: { open = false })
-                }
-                zoomButton("plus", help: "Zoom in", shortcut: "\u{21E7}+", action: zoomIn)
+        HStack(spacing: BottomBarStyle.spacing) {
+            zoomButton("minus", help: "Zoom out", shortcut: "\u{21E7}\u{2212}", action: zoomOut)
+            // The percentage opens a zoom field (type 150 and Return) over the zoom choices.
+            Button { open.toggle() } label: {
+                Text("\(percent)%").font(Typography.label).monospacedDigit()
             }
+            .buttonStyle(ToolbarButtonStyle(active: open, width: Self.percentWidth, tint: Palette.fg))
+            .help("Zoom: type a percentage, or pick a zoom")
+            .accessibilityLabel("Zoom \(percent) percent")
+            .qaID("zoom-pill", label: "\(percent)%")
+            .modifier(QAFrame(id: "zoom.percent"))
+            .popover(isPresented: $open, arrowEdge: .top) {
+                ZoomField(percent: percent, zoomTo: { zoomTo($0); open = false },
+                          choices: [("Zoom to Fit Page", "\u{21E7}1", fitPage), ("Zoom to Selection", "\u{21E7}2", fitSelection), ("Zoom to 100%", "\u{21E7}0", reset)],
+                          close: { open = false })
+            }
+            zoomButton("plus", help: "Zoom in", shortcut: "\u{21E7}+", action: zoomIn)
         }
+        .bottomBar(height: height)
     }
 
     private func zoomButton(_ symbol: String, help: String, shortcut: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).glyph(Metric.icon) }
+        Button(action: action) {
+            Image(systemName: symbol).symbolRenderingMode(.monochrome).font(BottomBarStyle.iconFont)
+        }
             .buttonStyle(ToolbarButtonStyle())
             .chromeHelp(help, shortcut: shortcut)
             .accessibilityLabel(help)

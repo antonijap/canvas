@@ -19,7 +19,7 @@ struct ShellLogicTests {
         docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); serverCode(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); drawToolPalette(); panelMemory(); tabPool(); sidebarPeek(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
-        sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
+        bottomBars(); sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
         updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress(); tabRenameFocus(); recentlyClosedTabs()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
@@ -533,6 +533,50 @@ struct ShellLogicTests {
         let tools = CanvasInsets.compute(panel: 226, rightSidebar: true, inset: 10, gap: 10,
                                          pill: 40, props: 284, bottomClearance: 72)
         check(tools.b == 72 && tools.t == 60, "fit clears the tool palette")
+    }
+
+    static func bottomBars() {
+        let inset: CGFloat = 10, gap: CGFloat = 10, props: CGFloat = 284
+        for width in [720, 721, 800, 900, 1440].map(CGFloat.init) {
+            for inspector in [false, true] {
+                for sidebar in [false, true] {
+                    let panel = sidebar ? ShellLayout.sidebarWidth(window: width, stored: 420, rightSidebar: inspector,
+                        inset: inset, gap: gap, props: props, minWidth: 224, minimumCanvas: 136) : nil
+                    let i = CanvasInsets.compute(panel: panel, rightSidebar: inspector, inset: inset, gap: gap, pill: 40, props: props)
+                    let compact = width - i.l - i.r < 265 + 8
+                    let bars = BottomBarLayout(windowWidth: width, leftInset: i.l, rightInset: i.r,
+                        zoomRightInset: inset + (inspector ? props : 0),
+                        paletteWidth: compact ? 132 : 265, zoomWidth: 124, height: compact ? 68 : 36, gap: gap)
+                    let label = "\(width) pt, inspector \(inspector), sidebar \(sidebar)"
+                    guard let palette = bars.palette, let zoom = bars.zoom else {
+                        check(false, "both bars exist at \(label)")
+                        continue
+                    }
+                    check(zoom.height == palette.height, "same outer height at \(label)")
+                    check(palette.midX == (width + i.l - i.r) / 2, "palette centered between panels at \(label)")
+                    check(width - (inspector ? props : 0) - zoom.maxX == inset, "zoom's right gap equals the panel inset at \(label)")
+                    check(palette.minX >= i.l && zoom.minX >= i.l, "bars stay clear of the left panel at \(label)")
+                    check(!palette.intersects(zoom), "bars never overlap at \(label)")
+                    if bars.zoomAboveTools {
+                        check(zoom.maxY == palette.minY - gap, "raised zoom maintains a vertical gap at \(label)")
+                    } else {
+                        check(zoom.midY == palette.midY && zoom.maxY == -14, "bars share the palette centerline at \(label)")
+                        check(palette.maxX + gap <= zoom.minX, "aligned bars maintain a horizontal gap at \(label)")
+                    }
+                    check(bars.clearance == -min(palette.minY, zoom.minY) + gap, "notices clear both bars at \(label)")
+                    if width == 1440 { check(!bars.zoomAboveTools, "wide bars align at \(label)") }
+                    if width == 720 && sidebar && inspector { check(bars.zoomAboveTools, "narrow bars stack at \(label)") }
+                }
+            }
+        }
+
+        let viewer = BottomBarLayout(windowWidth: 720, leftInset: 0, rightInset: inset, zoomRightInset: inset,
+            paletteWidth: nil, zoomWidth: 124, height: 36, gap: gap)
+        check(viewer.palette == nil && viewer.zoom == CGRect(x: 586, y: -50, width: 124, height: 36)
+            && viewer.clearance == 0, "zoom alone anchors to the bottom right without toolbar clearance")
+        let empty = BottomBarLayout(windowWidth: 720, leftInset: 0, rightInset: inset, zoomRightInset: inset,
+            paletteWidth: 265, zoomWidth: nil, height: 36, gap: gap)
+        check(empty.zoom == nil && empty.clearance == 60, "palette alone leaves room for notices")
     }
 
     // Sweep S1: the titlebar's own tooltips never show, so the toolbar draws its own; it must stay on screen.

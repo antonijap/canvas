@@ -204,27 +204,16 @@ struct RootView: View {
         return min(Metric.sidebarMax, room)
     }
 
-    private var zoomAboveTools: Bool {
-        guard toolPaletteShown, zoomShown, windowWidth > 0 else { return false }
-        let i = canvasInsets()
-        let toolsRight = (windowWidth + i.l - i.r + ToolPalette.width(compact: compactTools)) / 2
-        return toolsRight + Metric.islandGap > windowWidth - i.r - ZoomPill.width
-    }
-
-    /// Full size, or compact when the room between the sidebars is too narrow for every group.
-    private var compactTools: Bool {
-        let i = canvasInsets()
-        return windowWidth > 0 && windowWidth - i.l - i.r < ToolPalette.width(compact: false) + 8
-    }
-
-    private var toolClearance: CGFloat { ToolPalette.clearance(compact: compactTools) }
-
-    private var bottomClearance: CGFloat {
-        guard toolPaletteShown else { return 0 }
-        return toolClearance + (zoomAboveTools ? ZoomPill.height + Metric.islandGap : 0)
-    }
-
     var body: some View {
+        let i = canvasInsets()
+        let compactTools = toolPaletteShown && windowWidth > 0 && windowWidth - i.l - i.r < ToolPalette.width(compact: false) + 8
+        let zoomRightInset = Metric.inset + (rightSidebarShown ? Self.propsReserve : 0)
+        let bottomBars = BottomBarLayout(windowWidth: windowWidth, leftInset: i.l, rightInset: i.r,
+            zoomRightInset: zoomRightInset,
+            paletteWidth: toolPaletteShown ? ToolPalette.width(compact: compactTools) : nil,
+            zoomWidth: zoomShown ? ZoomPill.width : nil, height: ToolPalette.height(compact: compactTools), gap: Metric.islandGap)
+        let insets = insets(bottomClearance: bottomBars.clearance)
+
         ZStack(alignment: .topLeading) {
             WebCanvas(host: model.tabHost).ignoresSafeArea()
                 .background(GeometryReader { g in
@@ -262,14 +251,20 @@ struct RootView: View {
 
             if inspectorShown { Inspector(model: model, fonts: model.fonts).disabled(model.cloudReadOnly) }
 
+            ZStack {
+                // Nothing to zoom on an empty page: the pill comes back with the first board.
+                if let zoom = bottomBars.zoom {
+                    ZoomCorner(model: model, height: zoom.height)
+                        .padding(.trailing, zoomRightInset)
+                        .padding(.bottom, -zoom.maxY)
+                }
+            }
+            .transaction { if model.resizingSidebar { $0.animation = nil } }
+            .animation(Motion.island, value: model.uiHidden)
+            .ignoresSafeArea()
+
             GlassEffectContainer(spacing: Metric.islandGap) {
                 ZStack(alignment: .topLeading) {
-                    // Nothing to zoom on an empty page: the pill comes back with the first board.
-                    if zoomShown {
-                        ZoomCorner(model: model)
-                            .padding(.trailing, rightSidebarShown ? Self.propsReserve : 0)
-                            .padding(.bottom, zoomAboveTools ? toolClearance - Metric.inset : 0)
-                    }
                     if let t = model.toast {
                         Toast(text: t, kind: model.toastKind, actions: model.toastActions,
                               onCopy: model.toastCopy == nil ? nil : { model.copyToast() }, onHover: { model.toastHovered = $0 })
@@ -284,13 +279,14 @@ struct RootView: View {
             .padding(Metric.inset)
             .ignoresSafeArea()
 
-            if toolPaletteShown {
+            if let palette = bottomBars.palette {
                 // An overlay never sizes its parent: the palette cannot widen the window.
                 Color.clear.allowsHitTesting(false)
                     .overlay(alignment: .bottom) {
-                        ToolPalette(model: model, compact: compactTools, tooltipClearance: zoomAboveTools ? bottomClearance : 0)
+                        ToolPalette(model: model, compact: compactTools,
+                                    tooltipClearance: bottomBars.zoomAboveTools ? bottomBars.clearance : 0)
                             .fixedSize()
-                            .offset(x: (insets.l - insets.r) / 2, y: -ToolPalette.bottomMargin)
+                            .offset(x: palette.midX - windowWidth / 2, y: palette.maxY)
                     }
                     .ignoresSafeArea()
             }
@@ -324,10 +320,9 @@ struct RootView: View {
     }
 
     /// The free rectangle the canvas should fit into, so boards never hide under an island.
-    private var insets: Insets {
-        let clearance = bottomClearance
-        let i = canvasInsets(bottomClearance: clearance)
-        return Insets(l: i.l, t: i.t, r: i.r, b: i.b, bottomClearance: clearance)
+    private func insets(bottomClearance: CGFloat) -> Insets {
+        let i = canvasInsets(bottomClearance: bottomClearance)
+        return Insets(l: i.l, t: i.t, r: i.r, b: i.b, bottomClearance: bottomClearance)
     }
 }
 
@@ -1159,15 +1154,13 @@ private struct ToolPalette: View {
     private let qaHoveredTool = ""
     #endif
 
-    private static let padding: CGFloat = 4
-    private static let gap: CGFloat = 4
+    private static let gap = BottomBarStyle.spacing
     private static let divider: CGFloat = 1
-    private static let rowSpacing = Metric.toolbarControl + gap
 
     static func width(compact: Bool) -> CGFloat {
         let widths = groups.map { CGFloat($0.count) * Metric.toolbarControl + CGFloat($0.count - 1) * gap }
         let content = compact ? widths.max() ?? 0 : widths.reduce(0, +) + CGFloat(widths.count - 1) * (2 * gap + divider)
-        return content + 2 * padding
+        return content + 2 * BottomBarStyle.padding
     }
 
     private struct Item: Identifiable {
@@ -1195,20 +1188,18 @@ private struct ToolPalette: View {
         return groups
     }()
 
-    static let bottomMargin: CGFloat = 14
-    static func clearance(compact: Bool) -> CGFloat {
-        bottomMargin + Metric.toolbarControl + (compact ? CGFloat(groups.count - 1) * rowSpacing : 0)
-            + 2 * padding + Metric.islandGap
+    static func height(compact: Bool) -> CGFloat {
+        BottomBarStyle.height(rows: compact ? groups.count : 1)
     }
 
     private func tooltipOffset(for index: Int) -> CGFloat {
-        let rowsAbove = compact ? CGFloat(index) * Self.rowSpacing : 0
-        let rowsBelow = compact ? CGFloat(Self.groups.count - index - 1) * Self.rowSpacing : 0
-        return max(Metric.toolbarControl + 8 + rowsAbove, tooltipClearance - Self.bottomMargin - Self.padding - rowsBelow)
+        let rowsAbove = compact ? CGFloat(index) * BottomBarStyle.rowSpacing : 0
+        let rowsBelow = compact ? CGFloat(Self.groups.count - index - 1) * BottomBarStyle.rowSpacing : 0
+        let clearance = tooltipClearance - BottomBarLayout.bottomMargin - BottomBarStyle.padding - rowsBelow
+        return max(Metric.toolbarControl + 8 + rowsAbove, clearance)
     }
 
     var body: some View {
-        let shape = ToolbarButtonStyle.shape(outset: Self.padding)
         let layout = compact ? AnyLayout(VStackLayout(alignment: .leading, spacing: Self.gap))
                              : AnyLayout(HStackLayout(spacing: Self.gap))
         layout {
@@ -1229,10 +1220,7 @@ private struct ToolPalette: View {
                 }
             }
         }
-        .padding(Self.padding)
-        .contentShape(shape)
-        .onTapGesture {}
-        .glassBar(in: shape)
+        .bottomBar(height: Self.height(compact: compact))
         .disabled(!model.canDraw)
         .qaID("tool-palette")
     }
@@ -1256,7 +1244,7 @@ private struct ToolPalette: View {
                             .symbolRenderingMode(.monochrome)
                     }
                 }
-                .font(.system(size: 16, weight: .medium))
+                .font(BottomBarStyle.iconFont)
             }
             .buttonStyle(ToolbarButtonStyle(active: selected, selectedMark: (item.mark + "-selected", item.tool.title),
                                             forceHover: qaHovered))
@@ -1292,10 +1280,12 @@ private struct ToolPalette: View {
 
 struct ZoomCorner: View {
     @ObservedObject var model: CanvasModel
+    let height: CGFloat
     var body: some View {
-        ZoomPill(percent: model.zoom, zoomOut: { model.zoomBy(0.8) }, zoomIn: { model.zoomBy(1.25) },
+        ZoomPill(percent: model.zoom, height: height, zoomOut: { model.zoomBy(0.8) }, zoomIn: { model.zoomBy(1.25) },
                  reset: { model.zoomReset() }, fitPage: { model.fitPage() }, fitSelection: { model.fit() },
                  zoomTo: { model.zoomTo($0); model.focusCanvas() }, open: $model.zoomFieldOpen)
+            .fixedSize()
             .qaID("zoom-island")
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named("canvas")) } action: { model.setZoomCorner(frame: $0) }
             .onDisappear { model.setZoomCorner(frame: .zero) }

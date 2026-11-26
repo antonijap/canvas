@@ -18,6 +18,18 @@ test('bottom overlays clear the tool palette even when zoom stays at the window 
   assert.equal(area.y + 20, 728);
 });
 
+test('bottom overlays clear the taller raised zoom island and center beside zoom when it is alone', () => {
+  const zoom = { left: 302, bottom: 328, height: 68 };
+  const stacked = bottomOverlayArea(720, 420, { l: 258, r: 294 }, zoom, 40, 10, 10, 170);
+  assert.equal(stacked.y + 20, zoom.bottom - zoom.height - 10);
+  assert.equal(stacked.aboveZoom, true);
+
+  const viewerZoom = { left: 586, bottom: 406, height: 36 };
+  const viewer = bottomOverlayArea(720, 420, { l: 0, r: 10 }, viewerZoom, 40);
+  assert.equal(viewer.y, viewerZoom.bottom - viewerZoom.height / 2);
+  assert.equal(viewer.x + viewer.width / 2, viewerZoom.left - 10);
+});
+
 test('native overlay listener requests geometry after it is ready', async () => {
   const { readFileSync } = await import('node:fs');
   const { runInNewContext } = await import('node:vm');
