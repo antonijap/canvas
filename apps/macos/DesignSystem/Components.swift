@@ -307,7 +307,7 @@ struct PillButton: View {
 // MARK: Tabs
 
 struct TabChip: View {
-    private static let leadingInset: CGFloat = 12
+    private static let leadingInset: CGFloat = 8 // (28 pt chip - 12 pt glyph) / 2: the same space as above and below the icon
     private static let glyphWidth: CGFloat = 13
     private static let glyphGap: CGFloat = 6
     private static let titleInset: CGFloat = 4
