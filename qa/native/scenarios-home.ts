@@ -57,8 +57,8 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   t.eq(st.homeShown, false, "a file is showing, not Home");
   const tab = await t.mark({ id: "home-tab" });
   const icon = await t.mark({ id: "top-bar-icon", label: "house", exact: true });
-  t.near(tab.w, METRICS.toolbarControl + 6, 0.6, "Home uses one toolbar icon slot");
-  t.near(tab.h, 38, 0.6, "Home fills the strip height");
+  t.near(tab.w, METRICS.toolbarControl, 0.6, "Home uses one toolbar chip");
+  t.near(tab.h, METRICS.toolbarControl, 0.6, "Home is 28 pt high");
   t.near(midX(icon), midX(tab), 0.6, "the house is centred across the tab");
   t.near(midY(icon), midY(tab), 0.6, "the house is centred down the tab");
   t.ok(tab.x < (await t.marks({ id: "file-tab" }))[0].x, "Home comes before every file tab");
@@ -98,84 +98,163 @@ sc("home", "Home is the first tab, never closes, and Shift+Cmd+0 and Window > Ho
   await t.waitState((s) => s.file === t.file && !s.homeShown, "the file to open again");
 });
 
-sc("tabs", "Top bar aligns controls and clears the traffic lights", { covers: ["tabs:spacing"] }, async (t: NT) => {
+sc("tabs", "Top bar chips align and show selected and hover fills", { covers: ["tabs:spacing", "tabs:fills"] }, async (t: NT) => {
   const mark = (id: string) => t.mark({ id });
   const background = (label: string) => t.mark({ id: "top-bar-button-background", label, exact: true });
-  const check = async (toggleShown: boolean) => {
-    const first = await mark(toggleShown ? "sidebar-toggle" : "home-tab");
-    const home = await mark("home-tab");
-    const plus = await mark("tab-new");
-    const fill = await background("plus");
-    const tabs = (await t.marks({ id: "file-tab" })).sort((a, b) => a.x - b.x);
-    const last = tabs[tabs.length - 1];
-    const title = await t.mark({ id: "tab-title", label: last.label!, exact: true });
-    const zoomRight = (await t.state()).window.zoomButtonRight;
-    const gap = first.x - zoomRight;
-    const leftInset = fill.x - (last.x + last.w + 1);
-    const rightInset = plus.x + plus.w - (fill.x + fill.w);
-    t.note(`toggle ${toggleShown ? "shown" : "hidden"}: traffic light gap ${gap} pt, + insets ${leftInset}/${rightInset} pt`);
-    t.ok(Number.isFinite(zoomRight) && gap >= 12, "the first control clears the green button by at least 12 pt");
-    t.near(leftInset, rightInset, 0.5, "+ is equally inset after the separator and before the drag area");
-    t.ok(leftInset >= 3, "the + background clears the separator by at least 3 pt");
-    const symbols = ["house", "chevron.down", "magnifyingglass"];
-    if (toggleShown) {
-      t.near(first.w, home.w, 0.5, "the toggle and Home have matching widths");
-      t.near(first.h, home.h, 0.5, "the toggle and Home have matching heights");
-      t.near(first.x + first.w, home.x, 0.5, "the toggle and Home sit side by side");
-      symbols.push("sidebar.left", "sparkles.2", "sidebar.right");
-      const close = await t.mark({ id: "tab-close", label: last.label!, exact: true });
-      t.near(close.w, 20, 0.5, "the close target is 20 pt wide");
-      t.near(close.h, close.w, 0.5, "the close target has equal sides");
-      t.near(midY(close), midY(title), 0.5, "the close target shares the tab title's vertical center");
-    }
-    t.near(tabs[0].x - (home.x + home.w), 1, 0.5, "one separator follows Home");
-    t.near((await t.mark({ id: "file-tab-background", label: last.label!, exact: true })).h, 28, 0.5, "file tab fill is 28 pt high");
-    for (const r of [fill, ...await Promise.all(symbols.map(background))]) {
-      t.near(r.w, 28, 0.5, r.label + " background is 28 pt wide");
-      t.near(r.h, r.w, 0.5, r.label + " background has equal sides");
-      t.near(midY(r), midY(title), 0.5, r.label + " shares the tab title's vertical center");
-    }
-    const selected = await background(toggleShown ? "sidebar.left" : "house");
+  const tab = (label: string) => t.mark({ id: "file-tab", label, exact: true });
+  const files = ["Studio", "Notes"].map(name => path.join(t.app.docs, name + ".canvas"));
+  const initial = await t.state();
+  const closeResources = async () => {
+    if (!(await t.state()).popoverShown) return;
+    await t.click(center(await mark("resource-readout")));
+    await t.waitState(s => !s.popoverShown, "Resources popover closes");
+  };
+  const pixelReader = async () => {
     const raw = await t.cmd<{ data: string }>("qa.shot");
     const img = decodePng(Buffer.from(raw.data, "base64"));
     const scale = img.width / (await t.state()).window.width;
-    const pixel = (x: number, y: number) => {
-      const i = (Math.floor((selected.y + y) * scale) * img.width + Math.floor((selected.x + x) * scale)) * 4;
-      return img.data[i];
-    };
-    t.ok(Math.abs(pixel(4, 14) - pixel(0.5, -1)) > 8, "the selected control has a visible fill");
-    t.near(pixel(4, 4), pixel(4, 14), 3, "selected fill reaches the rounded rectangle's shoulders");
-    t.near(pixel(0.5, 0.5), pixel(0.5, -1), 3, "selected fill leaves the very corner clear");
+    return (x: number, y: number) => img.data[(Math.floor(y * scale) * img.width + Math.floor(x * scale)) * 4];
   };
-  const capture = async (name: string, hoverID: string) => {
-    if (!process.env.CANVAS_TOPBAR_SHOTS) return;
-    await t.move(center(await mark(hoverID)));
-    const shot = await t.cmd<{ data: string; width: number }>("qa.shot");
-    const img = decodePng(Buffer.from(shot.data, "base64"));
-    const scale = shot.width / (await t.state()).window.width;
-    const bar = { x: 0, y: 0, w: img.width, h: 38 * scale };
-    fs.writeFileSync(path.join(OUT, "..", `topbar-${name}.png`), encodePng(crop(img, bar, 2)));
+  const check = async (homeShown: boolean) => {
+    const home = await mark("home-tab");
+    const studio = await tab("Studio");
+    const notes = await tab("Notes");
+    const plus = await mark("tab-new");
+    const leading = [...(homeShown ? [] : [await mark("sidebar-toggle")]), home, studio, notes, plus];
+    const trailing = await Promise.all([
+      mark("resource-readout"), background("magnifyingglass"),
+      ...(homeShown ? [] : [background("sparkles.2"), mark("properties-toggle")]), mark("tab-list"),
+    ]);
+    const chips = [...leading, ...trailing];
+    for (const chip of chips) {
+      t.near(chip.h, METRICS.toolbarControl, 0.5, (chip.label ?? chip.id) + " chip height");
+      t.near(midY(chip), midY(home), 0.5, (chip.label ?? chip.id) + " chip sits on the row center");
+    }
+    const first = leading[0];
+    const { zoomButtonRight, width } = (await t.state()).window;
+    t.eq(width, 720, "the window is 720 pt wide");
+    t.ok(Number.isFinite(zoomButtonRight) && first.x - zoomButtonRight >= 12, "chips clear the traffic lights");
+    t.ok(trailing[0].x - plus.x - plus.w >= 24, "the window has a wide area to drag");
+
+    // Scan the spaces above the bottom hairline, including the old separator columns.
+    const read = await pixelReader();
+    const emptyX = plus.x + plus.w + 8;
+    for (const group of [leading, trailing]) {
+      for (let i = 1; i < group.length; i++) {
+        const left = group[i - 1].x + group[i - 1].w;
+        const right = group[i].x;
+        t.near(right - left, 4, 0.5, (group[i].label ?? group[i].id) + " chip gap");
+        for (let x = left + 0.5; x < right; x++) {
+          for (const y of [3, midY(home), 34]) {
+            t.near(read(x, y), read(emptyX, y), 3, "the gap has no separator or control fill");
+          }
+        }
+      }
+    }
+
+    const close = await t.mark({ id: "tab-close", label: "Notes", exact: true });
+    t.near(close.w, 20, 0.5, "close chip width");
+    t.near(close.h, 20, 0.5, "close chip height");
+    t.near(midY(close), midY(notes), 0.5, "the close chip stays centered inside the file tab");
+
+    const selected = homeShown ? home : notes;
+    const bar = read(emptyX, midY(home));
+    const fill = (read: Awaited<ReturnType<typeof pixelReader>>, chip: typeof home) =>
+      Math.abs(read(midX(chip), chip.y + 5) - bar);
+    t.ok(fill(read, selected) > 8, "selection draws a visible fill");
+    t.near(read(selected.x + 0.5, selected.y + 0.5), bar, 3, "the selected chip leaves its rounded corner clear");
+
+    // Closing Resources can leave more room for the tabs, so read their new positions.
+    await closeResources();
+    for (const locate of [() => tab("Studio"), () => mark("tab-new")]) {
+      const plus = await mark("tab-new");
+      const idlePoint = { x: plus.x + plus.w + 8, y: midY(home) };
+      const inactive = await locate();
+      const idle = await t.systemHover(idlePoint, pixelReader);
+      t.near(fill(idle, inactive), 0, 3, "an idle chip has no fill");
+      const hover = await t.systemHover(center(await locate()), async () => t.waitFor(async () => {
+        const strength = fill(await pixelReader(), await locate());
+        return strength > 5 && strength;
+      }, (inactive.label ?? inactive.id) + " shows a hover fill"));
+      t.ok(hover < fill(read, selected), "hover is subtler than selection");
+    }
   };
-  const files = ["Studio", "Reference"].map(name => path.join(t.app.docs, name + ".canvas"));
   try {
     for (const f of files) {
       copyDir(t.file, f);
       await t.app.openShown(f);
+      await t.waitState(s => s.file === f && s.pages.length > 0, baseName(f) + " to show");
     }
-    await t.waitState(s => s.file === files[1] && !s.homeShown, "Reference to show");
     await t.cmd("close", { file: t.file });
-    await t.settle();
-    await check(true);
-    await capture("with-toggle", "tab-new");
-    await t.click(center(await mark("home-tab")));
-    await t.waitState(s => s.homeShown, "Home to show without the sidebar toggle");
-    t.eq((await t.marks({ id: "sidebar-toggle" })).length, 0, "the toggle is hidden on Home");
-    t.eq((await t.marks({ id: "properties-toggle" })).length, 0, "Properties is hidden on Home");
-    await check(false);
-    await capture("without-toggle", "tab-list");
+    await t.cmd("qa.window", { width: 720, height: 420, key: true });
+    for (const homeShown of [false, true]) {
+      if (homeShown) {
+        await t.click(center(await mark("home-tab")));
+        await t.waitState(s => s.homeShown, "Home to show");
+        t.eq((await t.marks({ id: "sidebar-toggle" })).length, 0, "the sidebar toggle is hidden on Home");
+        t.eq((await t.marks({ id: "properties-toggle" })).length, 0, "Properties is hidden on Home");
+      }
+      await t.key("k", ["cmd"]);
+      await t.waitState(s => s.palette.open, "Quick Actions opens");
+      await t.type("Resources");
+      await t.waitState(s => s.palette.items.some((item: string) => item.endsWith(": Resources")), "Resources command appears");
+      await t.key("Return");
+      await mark("resource-readout");
+      await t.move({ x: 80, y: 19 });
+      await check(homeShown);
+    }
   } finally {
-    await t.app.openShown(t.file);
-    for (const file of files) await t.cmd("close", { file });
+    try { await closeResources(); } finally {
+      await t.app.openShown(t.file);
+      for (const file of files) await t.cmd("close", { file });
+      await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });
+    }
+  }
+});
+
+sc("tabs", "Empty title bar space and chip gaps drag the window", { covers: ["tabs:window-drag"] }, async (t: NT) => {
+  const other = path.join(t.app.docs, "Notes.canvas");
+  copyDir(t.file, other);
+  await t.app.openShown(other);
+  await t.waitState(s => s.file === other, "Notes to show");
+  const initial = await t.state();
+  await t.cmd("qa.window", { width: 900, height: 550, key: true });
+  await t.settle();
+  try {
+    const tabs = (await t.marks({ id: "file-tab" })).sort((a, b) => a.x - b.x);
+    const home = await t.mark({ id: "home-tab" });
+    const plus = await t.mark({ id: "tab-new" });
+    const search = await t.mark({ id: "top-bar-button-background", label: "magnifyingglass", exact: true });
+    const conversations = await t.mark({ id: "conversations-toggle" });
+    const gaps = [
+      ["empty title bar", (plus.x + plus.w + search.x) / 2],
+      ["before the strip", (home.x + home.w + tabs[0].x) / 2],
+      ["between file tabs", (tabs[0].x + tabs[0].w + tabs[1].x) / 2],
+      ["between trailing actions", (search.x + search.w + conversations.x) / 2],
+    ] as const;
+    for (const [i, [name, x]] of gaps.entries()) {
+      const before = (await t.state()).window;
+      const dx = i % 2 === 0 ? 30 : -30;
+      const y = midY(home);
+      await t.systemDrag({ x, y }, { x: x + dx, y }, { steps: 12, holdMs: 60 });
+      const after = (await t.state()).window;
+      t.near(after.x - before.x, dx, 3, name + " moves the window");
+      t.near(after.y, before.y, 2, name + " keeps the window at the same height");
+      t.eq((await t.state()).openFiles, initial.openFiles, "a window drag never reorders tabs");
+    }
+    const preference = (key: string) => {
+      try { return execFileSync("defaults", ["read", "-g", key], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); }
+      catch { return ""; }
+    };
+    const action = preference("AppleActionOnDoubleClick");
+    if (action === "Maximize" || action === "Fill" || (!action && preference("AppleMiniaturizeOnDoubleClick") !== "1")) {
+      const before = (await t.state()).window;
+      await t.systemClick({ x: gaps[2][1], y: midY(home) }, { count: 2 });
+      await t.waitState(s => s.window.width > before.width || s.window.height > before.height, "double-click zooms the window");
+    }
+  } finally {
+    await t.cmd("qa.window", { width: initial.window.width, height: initial.window.height });
+    await t.cmd("close", { file: other });
   }
 });
 
@@ -487,6 +566,12 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   await sleep(300);
   t.eq(await order(), [t.file, b, c], "a 2 pt move never starts a drag");
 
+  // A drag that stops short of the next tab's midpoint must include the gap in that distance.
+  const start = mid(tb[0]);
+  const short = midX(tb[1]) - (tb[0].x + tb[0].w) - 2;
+  await t.systemDrag(start, { x: start.x + short, y: start.y }, { steps: 10 });
+  t.eq(await order(), [t.file, b, c], "the dragged edge stopped before the next tab's midpoint");
+
   // Drag the last tab to the front: the others slide aside, the drop saves the order.
   const home0 = await t.mark({ id: "home-tab" });
   tb = await tabs();
@@ -503,13 +588,7 @@ sc("tabs", "File tabs: drag one left or right to reorder, a short move is a clic
   t.eq(tb.map((m) => m.label), [baseName(c), baseName(t.file), baseName(b)], "the tabs are drawn in the new order");
   const home1 = await t.mark({ id: "home-tab" });
   t.ok(Math.abs(home1.x - home0.x) < 0.5 && home1.x + home1.w <= tb[0].x, "Home did not move and is still before the first file tab");
-  t.near(tb[0].h, 38, 0.6, "tabs span the strip height");
-
-  // The whole control row shares a hover lock, including the boundaries between Home, tabs and +.
-  const controls = await t.mark({ id: "tab-controls" });
-  const open = await t.mark({ id: "tab-new" });
-  t.ok(controls.x <= home1.x && controls.x + controls.w >= open.x + open.w,
-    "one hover region covers Home, file tabs and +");
+  t.near(tb[0].h, METRICS.toolbarControl, 0.6, "reordered tabs keep the chip height");
 
   // Home is not draggable: pulling it right changes nothing.
   const l1 = await last();
@@ -593,6 +672,13 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
       t.near(tab.w, single.get(file)!, 1, baseName(file) + " keeps its single-tab width and is fully visible");
       t.ok(tab.x >= home.x + home.w - 1 && tab.x + tab.w <= plus.x + 1, "active tab is inside the strip");
     }
+    await open(files[0]);
+    const first = await mark(files[0]);
+    await t.scroll(center(first), -180, 0);
+    await t.waitFor(async () => {
+      const [visible] = await t.marks({ id: "file-tab", label: baseName(files[0]), exact: true });
+      return !visible || visible.w < first.w - 2;
+    }, "a horizontal scroll moves the strip off the first tab");
     // Both trailing tabs are visible after scrolling to the end. Drag across their midpoint.
     await open(files[4]);
     const from = await mark(files[5]);

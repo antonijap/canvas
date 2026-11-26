@@ -317,7 +317,9 @@ struct ResourceReadout: View {
     var body: some View {
         ZStack {
             Color.clear.frame(width: 0, height: Metric.toolbarControl)
-            if MeterThresholds.readoutShown(level: meter.level, popoverOpen: open) { readout }
+            if MeterThresholds.readoutShown(level: meter.level, popoverOpen: open) {
+                readout.padding(.trailing, ToolbarButtonStyle.chipGap)
+            }
         }
         .onAppear { meter.start(model: model) }
         .popover(isPresented: $meter.popoverOpen, arrowEdge: .bottom) { ResourcePopover(meter: meter, model: model) }
@@ -349,10 +351,9 @@ struct ResourceReadout: View {
             .animation(reduceMotion ? nil : Motion.fast, value: memory + cpu)
             .animation(Motion.island, value: meter.level)
             .lineLimit(1)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 8)
         }
-        .buttonStyle(ToolbarButtonStyle(active: open, width: nil, tint: meter.level.tint))
-        .padding(.horizontal, 3)
+        .buttonStyle(ToolbarButtonStyle(active: open, width: nil, tint: meter.level.tint, topBarSymbol: "resources"))
         .fixedSize()
         .chromeHelp("Memory and CPU used by Canvas")
         .accessibilityLabel("Memory and CPU used by Canvas")
@@ -361,6 +362,7 @@ struct ResourceReadout: View {
         .accessibilityHint("Shows memory and CPU per process")
         .accessibilityAddTraits(open ? .isSelected : [])
         .qaID("resource-readout")
+        .topBarChip()
     }
 }
 

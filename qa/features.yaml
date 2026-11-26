@@ -837,10 +837,10 @@ features:
     driven: [native]
     cases: [pinned, shortcut, recents, card-open, remove, first-launch, server, server-name, clouds, cloud-context-menu, thumbnail, alignment, $themes]
   - id: tabs
-    name: File tabs reorder by drag, keep Home first, and use rounded-rectangle toolbar buttons that clear the traffic lights
+    name: The top bar uses 28 pt chips with equal gaps, keeps Home first, and lets file tabs and the window drag
     area: chrome
     driven: [native]
-    cases: [spacing, overflow, drag, threshold, home-pinned, saved, step, context-menu, rename-menu, rename-double-click, close-others, drag-after-rename, warm-switch, new-file, click-switch, reopen-recent]
+    cases: [spacing, fills, window-drag, overflow, drag, threshold, home-pinned, saved, step, context-menu, rename-menu, rename-double-click, close-others, drag-after-rename, warm-switch, new-file, click-switch, reopen-recent]
   - id: sidebar-resize
     name: Both sidebars (editor panel, Home) drag from their right edge, stop at a minimum and maximum, reset on double-click, and keep their width
     area: chrome

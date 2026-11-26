@@ -17,6 +17,11 @@ struct Click: Decodable {
     let at: Point
     let count: Int
 }
+struct Hover: Decodable {
+    let mode: String
+    let pid: Int32
+    let at: Point
+}
 
 func fail(_ message: String, code: Int32 = 1) -> Never {
     FileHandle.standardError.write(Data((message + "\n").utf8))
@@ -54,8 +59,11 @@ guard CommandLine.arguments.count == 2 else { fail("Invalid system mouse input")
 let data = Data(CommandLine.arguments[1].utf8)
 let click = try? JSONDecoder().decode(Click.self, from: data)
 let drag = try? JSONDecoder().decode(Drag.self, from: data)
+let hover = (try? JSONDecoder().decode(Hover.self, from: data)).flatMap { $0.mode == "hover" ? $0 : nil }
 if let click {
     guard click.mode == "click", (1...2).contains(click.count), click.at.x.isFinite, click.at.y.isFinite else { fail("Invalid system click input") }
+} else if let hover {
+    guard hover.at.x.isFinite, hover.at.y.isFinite else { fail("Invalid system hover input") }
 } else if let drag {
     guard drag.steps >= 2, drag.steps <= 1000,
           [drag.from.x, drag.from.y, drag.to.x, drag.to.y, drag.holdMs, drag.dwellMs].allSatisfy({ $0.isFinite }),
@@ -66,12 +74,13 @@ if let click {
 guard CGPreflightPostEventAccess() else {
     fail("System mouse input requires Accessibility for \(runnerApp()). Enable it in System Settings > Privacy & Security > Accessibility, then restart that app and rerun. No input was posted.", code: 77)
 }
-guard let app = NSRunningApplication(processIdentifier: click?.pid ?? drag!.pid) else { fail("The QA app is no longer running") }
+guard let pid = click?.pid ?? hover?.pid ?? drag?.pid,
+      let app = NSRunningApplication(processIdentifier: pid) else { fail("The QA app is no longer running") }
 let previousApp = NSWorkspace.shared.frontmostApplication
 let previousPointer = CGEvent(source: nil)?.location
 let source = CGEventSource(stateID: .hidSystemState)
 let top = CGDisplayBounds(CGMainDisplayID()).maxY
-let from = click?.at ?? drag!.from, to = click?.at ?? drag!.to
+let from = click?.at ?? hover?.at ?? drag!.from, to = click?.at ?? hover?.at ?? drag!.to
 let start = CGPoint(x: from.x, y: top - from.y)
 let end = CGPoint(x: to.x, y: top - to.y)
 var flags: CGEventFlags = []
@@ -98,7 +107,12 @@ pause(150)
 // A person's pointer arrives before it presses: hover handlers run first, as they do for a real hand.
 send(.mouseMoved, start)
 pause(250)
-if let click {
+if hover != nil {
+    FileHandle.standardOutput.write(Data("ready\n".utf8))
+    // Closing stdin releases the pointer. Restore it even if the runner stalls.
+    var input = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+    _ = poll(&input, 1, 20_000)
+} else if let click {
     // Both halves carry the count. Keep the second press within the user's double-click interval.
     let interval = min(100, NSEvent.doubleClickInterval * 1000 / 3)
     for count in 1...click.count {

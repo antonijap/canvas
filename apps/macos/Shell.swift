@@ -63,26 +63,80 @@ struct WebCanvas: NSViewRepresentable {
     func updateNSView(_ nsView: TabHostView, context: Context) {}
 }
 
-/// Lets a stretch of glass drag the window, since the web view covers the real titlebar.
-struct WindowDragArea: NSViewRepresentable {
-    final class V: NSView { override var mouseDownCanMoveWindow: Bool { true } }
-    func makeNSView(context: Context) -> NSView { V() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+private struct TopBarChipBounds: PreferenceKey {
+    struct Region {
+        let bounds: Anchor<CGRect>
+        var clip: Anchor<CGRect>?
+    }
+    static var defaultValue: [Region] { [] }
+    static func reduce(value: inout [Region], nextValue: () -> [Region]) { value.append(contentsOf: nextValue()) }
 }
 
-/// The top bar sits where the hidden titlebar is, so on mouse down the window server starts a window drag before any
-/// SwiftUI gesture sees the press (a background NSView cannot change that: SwiftUI hit-tests its own content). While the
-/// pointer is over a control, the window stays still. The empty stretch of the bar still drags the window.
-struct KeepsWindowStill: ViewModifier {
-    func body(content: Content) -> some View {
-        content.onHover { inside in
-            let at = NSEvent.mouseLocation
-            guard let w = NSApp.windows.first(where: { $0.isVisible && $0.frame.contains(at) }) ?? NSApp.mainWindow else { return }
-            w.isMovable = !inside
+extension View {
+    func topBarChip() -> some View {
+        anchorPreference(key: TopBarChipBounds.self, value: .bounds) { [.init(bounds: $0)] }
+    }
+}
+
+/// Receives presses only on the custom title bar's empty space, including the gaps in the scroll view.
+private struct WindowDragArea: NSViewRepresentable {
+    let chips: [CGRect]
+
+    func makeNSView(context: Context) -> DragView { DragView() }
+    func updateNSView(_ view: DragView, context: Context) {
+        view.chips = chips
+        if let window = view.window { view.updateMovable(at: window.mouseLocationOutsideOfEventStream) }
+    }
+
+    final class DragView: NSView {
+        var chips: [CGRect] = []
+        private var tracking: NSTrackingArea?
+
+        override var isFlipped: Bool { true }
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        private func isOnChip(_ point: NSPoint) -> Bool { chips.contains { $0.contains(point) } }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            isOnChip(convert(point, from: superview)) ? nil : super.hitTest(point)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+            addTrackingArea(area)
+            tracking = area
+        }
+
+        // AppKit can start a title bar drag before a chip sees the mouse down.
+        func updateMovable(at point: NSPoint) {
+            let movable = !isOnChip(convert(point, from: nil))
+            if let window, movable != window.isMovable { window.isMovable = movable }
+        }
+        override func mouseEntered(with event: NSEvent) { updateMovable(at: event.locationInWindow) }
+        override func mouseMoved(with event: NSEvent) { updateMovable(at: event.locationInWindow) }
+        override func mouseExited(with event: NSEvent) { window?.isMovable = true }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let window else { return }
+            window.isMovable = true
+            if event.clickCount == 1 {
+                window.performDrag(with: event)
+            } else if event.clickCount == 2 {
+                let defaults = UserDefaults.standard
+                switch defaults.string(forKey: "AppleActionOnDoubleClick") {
+                case "None": break
+                case "Minimize": window.performMiniaturize(nil)
+                case nil where defaults.bool(forKey: "AppleMiniaturizeOnDoubleClick"): window.performMiniaturize(nil)
+                default: window.performZoom(nil)
+                }
+            }
         }
     }
 }
-extension View { func keepsWindowStill() -> some View { modifier(KeepsWindowStill()) } }
 
 /// SwiftUI controls in the hidden titlebar must not inherit window dragging.
 final class ControlHostingView<Content: View>: NSHostingView<Content> {
@@ -265,7 +319,7 @@ private struct TabWidthKey: PreferenceKey {
 struct TopBar: View {
     private static let minimumDragWidth: CGFloat = 24
     private static let leadingWidth = Metric.trafficLights + 16
-    private static let separatorWidth: CGFloat = 1
+    private let gap = ToolbarButtonStyle.chipGap
     @ObservedObject var model: CanvasModel
     @State private var tabWidths: [String: CGFloat] = [:]
     @State private var barWidth: CGFloat = 0
@@ -274,23 +328,19 @@ struct TopBar: View {
     @State private var pressedTab: String?
 
     private var showsSidebarToggle: Bool { !model.homeShown && !model.uiHidden }
-    private var hasFileTabs: Bool { !model.openFiles.isEmpty }
 
     private var tabRoom: CGFloat {
-        let controls = ToolbarButtonStyle.topBarSlot * (showsSidebarToggle ? 3 : 2)
-        let separators = hasFileTabs ? Self.separatorWidth * 2 : 0
-        return max(0, barWidth - actionsWidth - Self.leadingWidth - controls - separators - Self.minimumDragWidth)
+        let controls: CGFloat = showsSidebarToggle ? 3 : 2
+        let fixedWidth = controls * (Metric.toolbarControl + gap)
+        return max(0, barWidth - actionsWidth - Self.leadingWidth - fixedWidth - Self.minimumDragWidth)
     }
-    private var fittedWidths: [CGFloat] {
+    private func fittedWidths(for files: [String]) -> [CGFloat] {
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        let natural: [CGFloat] = model.openFiles.map { file in
+        let natural: [CGFloat] = files.map { file in
             let titleWidth = (model.name(of: file) as NSString).size(withAttributes: [.font: font]).width
             return ceil(titleWidth) + TabChip.chromeWidth
         }
         return TabSizing.widths(natural: natural, available: tabRoom, minimum: Metric.tabMin, maximum: Metric.tabMax)
-    }
-    private var stripWidth: CGFloat {
-        min(tabRoom, fittedWidths.reduce(0, +))
     }
     /// The file tab being dragged and how far it is from its place (clamped inside the strip).
     @State private var dragging: String?
@@ -337,7 +387,7 @@ struct TopBar: View {
     private var widths: [CGFloat] { model.openFiles.map { tabWidths[$0] ?? 0 } }
     private var dragTarget: Int? {
         guard let d = dragging, let i = model.openFiles.firstIndex(of: d) else { return nil }
-        return TabOrder.target(from: i, offset: dragX, widths: widths, gap: 0)
+        return TabOrder.target(from: i, offset: dragX, widths: widths, gap: gap)
     }
 
     private func fileSymbol(_ file: String, missing: Bool) -> String {
@@ -349,18 +399,18 @@ struct TopBar: View {
 
     /// One file tab. Press and drag sideways: it follows the pointer, the others slide aside, and the drop saves the
     /// order. A click or a move under TabOrder.dragThreshold stays a click.
-    private func draggableTab(_ f: String, index i: Int) -> some View {
+    private func draggableTab(_ f: String, index i: Int, width: CGFloat) -> some View {
         let isDragged = dragging == f
         var off: CGFloat = 0
         if isDragged { off = dragX }
         else if let d = dragging, let di = model.openFiles.firstIndex(of: d), let t = dragTarget {
-            off = TabOrder.slide(i, dragged: di, target: t, width: tabWidths[d] ?? 0, gap: 0)
+            off = TabOrder.slide(i, dragged: di, target: t, width: tabWidths[d] ?? 0, gap: gap)
         }
         let missing = model.isMissing(f)
         let active = isActive(f)
         let hovering = hoveredTab == f
         return TabChip(title: model.name(of: f), symbol: fileSymbol(f, missing: missing), active: active,
-                       width: fittedWidths[i], hovering: hovering, pressed: pressedTab == f, missing: missing,
+                       width: width, hovering: hovering, pressed: pressedTab == f, missing: missing,
                        onClose: { model.close(f) }) { model.openTab(f) }
             .background(GeometryReader { g in Color.clear.preference(key: TabWidthKey.self, value: [f: g.size.width]) })
             .overlay {
@@ -380,7 +430,7 @@ struct TopBar: View {
                                onDrag: { dx in
                         guard let at = model.openFiles.firstIndex(of: f) else { return }
                         dragging = f
-                        dragX = TabOrder.clamp(dx, index: at, widths: widths, gap: 0)
+                        dragX = TabOrder.clamp(dx, index: at, widths: widths, gap: gap)
                     }, onDrop: {
                         let to = dragTarget
                         withAnimation(Motion.island) {
@@ -391,7 +441,6 @@ struct TopBar: View {
                     })
                 }
             }
-            .overlay(alignment: .leading) { if i > 0 { separator } }
             .onHover { inside in
                 if inside { hoveredTab = f }
                 else if hoveredTab == f { hoveredTab = nil }
@@ -400,15 +449,15 @@ struct TopBar: View {
             .animation(isDragged ? nil : Motion.island, value: off)
             .zIndex(isDragged ? 1 : 0)
             .qaID("file-tab", label: model.name(of: f))
+            .topBarChip()
             .id(f)
     }
 
-    private var separator: some View {
-        Rectangle().fill(Palette.stroke).frame(width: Self.separatorWidth).allowsHitTesting(false)
-    }
-
     private var tabs: some View {
-        HStack(spacing: 0) {
+        let files = model.openFiles
+        let fitted = fittedWidths(for: files)
+        let stripWidth = min(tabRoom, fitted.reduce(0, +) + CGFloat(max(0, files.count - 1)) * gap)
+        return HStack(spacing: gap) {
             if showsSidebarToggle {
                 SidebarToggleButton(model: model)
             }
@@ -416,21 +465,21 @@ struct TopBar: View {
                 model.showHome()
             }
             .qaID("home-tab", label: "Home")
-            if hasFileTabs { separator }
-            FadingScroller(scrollTo: model.currentFile) {
-                ForEach(Array(model.openFiles.enumerated()), id: \.element) { i, file in
-                    draggableTab(file, index: i)
+            if !files.isEmpty {
+                FadingScroller(scrollTo: model.currentFile, spacing: gap) {
+                    ForEach(Array(files.enumerated()), id: \.element) { i, file in
+                        draggableTab(file, index: i, width: fitted[i])
+                    }
                 }
+                .frame(width: stripWidth, height: Metric.toolbarControl)
+                .transformAnchorPreference(key: TopBarChipBounds.self, value: .bounds) { regions, clip in
+                    for i in regions.indices { regions[i].clip = clip }
+                }
+                .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
             }
-            .frame(width: stripWidth, height: Metric.topBar)
-            .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
-            if hasFileTabs { separator }
             TopBarIconButton(symbol: "plus", help: "New file", shortcut: "\u{2318}N") { model.newCanvas() }
                 .qaID("tab-new", label: "New file")
         }
-        .contentShape(Rectangle())
-        .keepsWindowStill()
-        .qaID("tab-controls")
     }
 
     private var tabMenu: some View {
@@ -458,28 +507,29 @@ struct TopBar: View {
         .fixedSize().chromeHelp("Show tabs")
         .accessibilityLabel("Show tabs")
         .qaID("tab-list", label: "Show tabs")
+        .topBarChip()
     }
 
     private var actions: some View {
         HStack(spacing: 0) {
             LivePeopleStrip(model: model)
             ResourceReadout(meter: ResourceMeter.shared, model: model)
-            TopBarIconButton(symbol: "magnifyingglass", help: "Quick actions", shortcut: "\u{2318}K") { PaletteController.shared.toggle() }
-            if model.currentFile != nil && !model.homeShown {
-                TopBarIconButton(symbol: "sparkles.2", active: model.conversationsSidebarOpen, help: "Conversations") { model.run("{cmd:\"conversations\"}") }
-                    .qaID("conversations-toggle")
-            }
-            if model.editorChromeShown {
-                TopBarIconButton(symbol: "sidebar.right", active: model.propertiesShown,
-                                 help: model.propertiesShown ? "Hide properties" : "Show properties") {
-                    model.toggleProperties()
+            HStack(spacing: gap) {
+                TopBarIconButton(symbol: "magnifyingglass", help: "Quick actions", shortcut: "\u{2318}K") { PaletteController.shared.toggle() }
+                if model.currentFile != nil && !model.homeShown {
+                    TopBarIconButton(symbol: "sparkles.2", active: model.conversationsSidebarOpen, help: "Conversations") { model.run("{cmd:\"conversations\"}") }
+                        .qaID("conversations-toggle")
                 }
-                .qaID("properties-toggle")
+                if model.editorChromeShown {
+                    TopBarIconButton(symbol: "sidebar.right", active: model.propertiesShown,
+                                     help: model.propertiesShown ? "Hide properties" : "Show properties") {
+                        model.toggleProperties()
+                    }
+                    .qaID("properties-toggle")
+                }
+                tabMenu
             }
-            tabMenu
         }
-        .contentShape(Rectangle())
-        .keepsWindowStill()
         .padding(.trailing, Metric.pillPad)
         .fixedSize(horizontal: true, vertical: false)
         .qaID("top-bar-actions")
@@ -489,13 +539,21 @@ struct TopBar: View {
     var body: some View {
         GeometryReader { _ in
             HStack(spacing: 0) {
-                WindowDragArea().frame(width: Self.leadingWidth)
+                Color.clear.frame(width: Self.leadingWidth)
                 tabs
-                WindowDragArea().frame(minWidth: Self.minimumDragWidth, maxWidth: .infinity)
+                Spacer(minLength: Self.minimumDragWidth)
                 actions
             }
             .frame(height: Metric.topBar)
             .topBarSurface()
+            .overlayPreferenceValue(TopBarChipBounds.self) { regions in
+                GeometryReader { geometry in
+                    WindowDragArea(chips: regions.map { region in
+                        let bounds = geometry[region.bounds]
+                        return region.clip.map { bounds.intersection(geometry[$0]) } ?? bounds
+                    })
+                }
+            }
         }
         .frame(height: Metric.topBar)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barWidth = $0 }
@@ -1331,33 +1389,38 @@ private struct TabNameField: NSViewRepresentable {
 /// People currently in the file, beside the toolbar actions.
 struct LivePeopleStrip: View {
     @ObservedObject var model: CanvasModel
+    private let gap = ToolbarButtonStyle.chipGap
+
     var body: some View {
         if !model.livePeople.isEmpty && !model.homeShown {
-            HStack(spacing: 8) {
-                HStack(spacing: -6) {
-                    ForEach(Array(model.livePeople.prefix(4))) { person in
-                        Button {
-                            model.run("{cmd:'focusPerson',session:" + JSONText.string(person.id) + "}")
-                        } label: {
-                            Text(String(person.name.prefix(1)).uppercased()).font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(.white).frame(width: 28, height: 28)
-                                .background(Circle().fill(Color(light: UInt32(person.color.dropFirst(), radix: 16) ?? 0x71717A, dark: UInt32(person.color.dropFirst(), radix: 16) ?? 0x71717A)))
-                                .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
-                        }
-                        .buttonStyle(.plain).help(person.name + ", " + person.role)
-                        .qaID("live-person-" + person.id, label: person.name + ", " + person.role)
+            HStack(spacing: gap) {
+                ForEach(Array(model.livePeople.prefix(4))) { person in
+                    let rgb = UInt32(person.color.dropFirst(), radix: 16) ?? 0x71717A
+                    Button {
+                        model.run("{cmd:'focusPerson',session:" + JSONText.string(person.id) + "}")
+                    } label: {
+                        Text(String(person.name.prefix(1)).uppercased()).font(.system(size: 11, weight: .semibold))
                     }
-                    if model.livePeople.count > 4 {
-                        Text("+" + String(model.livePeople.count - 4)).font(Typography.micro)
-                            .frame(width: 28, height: 28).background(Circle().fill(Palette.field))
-                            .help(model.livePeople.dropFirst(4).map { $0.name + ", " + $0.role }.joined(separator: "\n"))
-                    }
+                    .buttonStyle(ToolbarButtonStyle(tint: Color(light: rgb, dark: rgb)))
+                    .chromeHelp(person.name + ", " + person.role)
+                    .accessibilityLabel(person.name + ", " + person.role)
+                    .qaID("live-person-" + person.id, label: person.name + ", " + person.role)
+                    .topBarChip()
+                }
+                if model.livePeople.count > 4 {
+                    Text("+" + String(model.livePeople.count - 4)).font(Typography.micro)
+                        .frame(width: Metric.toolbarControl, height: Metric.toolbarControl)
+                        .chromeHelp(model.livePeople.dropFirst(4).map { $0.name + ", " + $0.role }.joined(separator: "\n"))
+                        .topBarChip()
                 }
                 if model.peopleStatus != "connected" {
                     Text(["offline", "down", "removed", "signedOut", "signInAgain", "forbidden", "notAdded"].contains(model.peopleStatus) ? "Offline" : "Reconnecting")
                         .font(Typography.label).foregroundStyle(Palette.mutedFg)
+                        .frame(height: Metric.toolbarControl)
                 }
-            }.fixedSize()
+            }
+            .padding(.trailing, gap)
+            .fixedSize()
         }
     }
 }

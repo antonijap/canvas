@@ -6,7 +6,7 @@ import path from "node:path";
 import { Fail, Skip, find, type AnyNode, type Rect } from "../harness.ts";
 import { api, sleep } from "../lib.ts";
 import type { QaApp } from "./app.ts";
-import { postSystemClick, postSystemDrag } from "./system-drag.ts";
+import { postSystemClick, postSystemDrag, withSystemHover } from "./system-drag.ts";
 
 export { Fail, Skip, find };
 export type Pt = { x: number; y: number };
@@ -63,6 +63,14 @@ export class NT {
   async systemClick(p: Pt, o: { count?: 1 | 2 } = {}) {
     const { window: frame } = await this.state();
     return postSystemClick({ pid: this.app.pid, at: { x: frame.x + p.x, y: frame.y + frame.height - p.y }, count: o.count ?? 1 });
+  }
+  async systemHover<R>(p: Pt, inspect: () => Promise<R>): Promise<R> {
+    const { window: frame } = await this.state();
+    await this.move(p);
+    return withSystemHover({ pid: this.app.pid, at: { x: frame.x + p.x, y: frame.y + frame.height - p.y } }, async () => {
+      await this.move(p);
+      return inspect();
+    });
   }
   move(p: Pt) { return this.cmd("qa.mouse", { action: "move", x: p.x, y: p.y }); }
   drag(from: Pt, to: Pt, o: { mods?: Mods; steps?: number; via?: Pt[]; holdMs?: number; dwellMs?: number } = {}) {

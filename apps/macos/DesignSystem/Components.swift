@@ -187,11 +187,12 @@ struct TopBarIconButton: View {
         .chromeHelp(help, shortcut: shortcut)
         .accessibilityLabel(help)
         .accessibilityAddTraits(active ? .isSelected : [])
+        .topBarChip()
     }
 }
 
 struct ToolbarButtonStyle: ButtonStyle {
-    static let topBarSlot = Metric.toolbarControl + 6
+    static let chipGap: CGFloat = 4
 
     var active = false
     var visible = true
@@ -226,7 +227,7 @@ struct ToolbarButtonStyle: ButtonStyle {
             let hovered = enabled && (hovering || style.forceHover)
             let shape = ToolbarButtonStyle.shape(height: style.height)
             let fill = ToolbarButtonStyle.fill(active: style.active, hovering: hovered, pressed: enabled && configuration.isPressed)
-            let face = configuration.label
+            configuration.label
                 .foregroundStyle(style.active ? Palette.fg : style.tint ?? (hovered ? Palette.fg : Palette.mutedFg))
                 .opacity(style.visible ? 1 : 0)
                 .frame(width: style.width, height: style.height)
@@ -242,15 +243,7 @@ struct ToolbarButtonStyle: ButtonStyle {
                 }
                 .contentShape(shape)
                 .opacity(enabled ? 1 : 0.45)
-            Group {
-                if style.topBarSymbol != nil && style.height == Metric.toolbarControl {
-                    face.frame(width: ToolbarButtonStyle.topBarSlot, height: Metric.topBar)
-                        .contentShape(Rectangle())
-                } else {
-                    face
-                }
-            }
-            .onHover { hovering = $0 }
+                .onHover { hovering = $0 }
         }
     }
 }
@@ -319,7 +312,7 @@ struct TabChip: View {
                 .foregroundStyle(active ? Palette.fg : Palette.mutedFg)
                 .padding(.leading, Self.leadingInset).padding(.trailing, Self.titleInset)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(height: Metric.topBar)
+                .frame(height: Metric.toolbarControl)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -334,13 +327,11 @@ struct TabChip: View {
             .allowsHitTesting(showClose)
             .padding(.trailing, Self.closeInset)
         }
-        .frame(width: width)
+        .frame(width: width, height: Metric.toolbarControl)
         .background {
             ToolbarButtonStyle.shape()
                 .fill(ToolbarButtonStyle.fill(active: active, hovering: hovering, pressed: pressed))
-                .frame(height: Metric.toolbarControl)
                 .qaID("file-tab-background", label: title)
-                .padding(.horizontal, 2)
         }
     }
 }
@@ -349,6 +340,7 @@ struct TabChip: View {
 /// each edge that has more behind it, and disappears at the end of the strip.
 struct FadingScroller<Content: View>: View {
     var scrollTo: String?
+    var spacing: CGFloat = 0
     @ViewBuilder var content: () -> Content
     @State private var m = Metrics()
 
@@ -358,7 +350,7 @@ struct FadingScroller<Content: View>: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0, content: content)
+                HStack(spacing: spacing, content: content)
             }
             .scrollIndicators(.never)
             .onScrollGeometryChange(for: Metrics.self) { g in

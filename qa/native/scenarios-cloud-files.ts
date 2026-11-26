@@ -481,7 +481,9 @@ sc('cloud-files', 'Live people strip shows roles and follows a cursor', { covers
   await t.js(`const h=window.canvasHost; window.canvasCloudFile={status:'connected',role:'editor',author:{name:'Anna'}}; h.presence.receive([{session:'peer-ben',by:{name:'Ben'},role:'editor',page:h.page,cursor:{x:900,y:500}}]); h.emit('presencechange');`);
   const anna = await t.mark({ id:'live-person-self', label:'Anna, editor' }, 4000);
   const ben = await t.mark({ id:'live-person-peer-ben', label:'Ben, editor' }, 4000);
-  t.ok(anna.x < ben.x, 'you first');
+  t.near(anna.h, 28, 0.5, 'the first presence chip is 28 pt high');
+  t.near(ben.h, 28, 0.5, 'the second presence chip is 28 pt high');
+  t.near(ben.x - (anna.x + anna.w), 4, 0.5, 'your chip comes first with the standard gap');
   const before = await t.js<any>('return {...window.canvasHost.cam}');
   await t.click(center(ben)); await t.settle();
   t.ok(JSON.stringify(await t.js('return {...window.canvasHost.cam}')) !== JSON.stringify(before), 'click follows cursor');

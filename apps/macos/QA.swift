@@ -409,6 +409,7 @@ enum QA {
             QAPointer.mods = []; syncDragCommand()
             if let m = openMenu { closeMenu(m) }
             if PaletteController.shared.isOpen { PaletteController.shared.close(refocus: false) }
+            ResourceMeter.shared.popoverOpen = false
             model.zoomFieldOpen = false
             await MainActor.run { AddCloudPanel.shared.close() }
             // A comment name a scenario typed (a placeholder) goes back to the default: the Mac's full name.

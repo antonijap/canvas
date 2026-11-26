@@ -18,7 +18,7 @@ export function systemDragHelper(source = SOURCE, out = OUT): string {
   fs.mkdirSync(out, { recursive: true });
   const tmp = `${bin}.${process.pid}.tmp`;
   try {
-    childProcess.execFileSync("xcrun", ["swiftc", source, "-o", tmp], { stdio: ["ignore", "ignore", "pipe"] });
+    childProcess.execFileSync("xcrun", ["swiftc", source, "-o", tmp], { stdio: ["ignore", "ignore", "pipe"], timeout: 30_000 });
     fs.renameSync(tmp, bin);
   } finally { fs.rmSync(tmp, { force: true }); }
   return bin;
@@ -31,6 +31,29 @@ export async function postSystemDrag(input: { pid: number; from: Pt; to: Pt; mod
 
 export async function postSystemClick(input: { pid: number; at: Pt; count: 1 | 2 }) {
   return postSystemInput({ mode: "click", ...input });
+}
+
+/** Keep the pointer on the QA window until the caller has inspected the hovered view. */
+export async function withSystemHover<R>(input: { pid: number; at: Pt }, inspect: () => Promise<R>): Promise<R> {
+  const child = childProcess.spawn(systemDragHelper(), [JSON.stringify({ mode: "hover", ...input })]);
+  let stderr = "";
+  child.stderr.setEncoding("utf8").on("data", (chunk) => { stderr += chunk; });
+  child.stdin.on("error", () => {}); // The helper can exit before stdin closes, e.g. when input permission is missing.
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 30_000);
+  try {
+    const ready = await Promise.race([
+      new Promise<boolean>((resolve) => child.stdout.once("data", () => resolve(true))),
+      closed.then(() => false),
+      new Promise<boolean>((resolve) => child.once("error", (error) => { stderr += error.message; resolve(false); })),
+    ]);
+    if (!ready) throw new Fail("System hover helper failed: " + stderr.trim());
+    return await inspect();
+  } finally {
+    child.stdin.end();
+    await closed;
+    clearTimeout(timeout);
+  }
 }
 
 async function postSystemInput(input: object) {
