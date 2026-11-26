@@ -432,6 +432,11 @@ private struct HomeMain: View {
 
     private var onServer: Bool { cloud != nil }
 
+    /// What stands in place of a Cloud's files while the person has to sign in.
+    private var signIn: HomeLogic.SignInEmpty? {
+        cloud.flatMap { account.signInEmpty($0) }
+    }
+
     /// The one muted line in place of the files, or nil when there are files to show. With no recents at all it
     /// shows at once; otherwise only after the first read, so a view with files does not flash it.
     private var emptyLine: String? {
@@ -457,6 +462,15 @@ private struct HomeMain: View {
             CloudFilesView(model: model, entry: cloud).id(cloud.id)
                 .padding(.horizontal, HomeMetric.gutter).padding(.top, topInset)
                 .padding(.bottom, HomeMetric.gutter)
+        } else if let cloud, let signIn {
+            VStack(alignment: .leading, spacing: 0) {
+                top
+                HomeSignIn(state: signIn, signIn: { account.signIn(model, cloud) }, cancel: { account.cancelSignIn(cloud.url) })
+            }
+            .padding(.horizontal, HomeMetric.gutter)
+            .padding(.top, topInset)
+            .padding(.bottom, HomeMetric.gutter)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else if let emptyLine {
             // Nothing to scroll: the header on top, the line in the middle of the space left under it.
             VStack(alignment: .leading, spacing: 0) {
@@ -521,6 +535,51 @@ private struct HomeEmpty: View {
         Text(text).font(Typography.body).foregroundStyle(Palette.mutedFg).lineLimit(1).truncationMode(.middle).qaText(text)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .qaID("home-empty", label: text)
+    }
+}
+
+/// A signed-out Cloud's page: what to do, in the middle, with the sign-in's progress or why it failed.
+struct HomeSignIn: View {
+    let state: HomeLogic.SignInEmpty
+    let signIn: () -> Void
+    let cancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "lock").font(.system(size: 28, weight: .regular)).foregroundStyle(Palette.mutedFg)
+                .accessibilityHidden(true)
+            Text(state.title).font(Typography.display).foregroundStyle(Palette.fg).lineLimit(1).frame(height: 22)
+                .qaID("home-signin-title", label: state.title)
+            Text(state.line).font(Typography.body).foregroundStyle(Palette.mutedFg).lineLimit(1).frame(height: 13).qaText(state.line)
+            Group {
+                if state.waiting {
+                    VStack(spacing: 10) {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text(state.button).font(Typography.label).foregroundStyle(Palette.fg).qaText(state.button)
+                        }
+                        .padding(.horizontal, 12).frame(height: Metric.field)
+                        .background(RoundedRectangle(cornerRadius: Metric.radiusField, style: .continuous).fill(Palette.field.opacity(0.6)))
+                        Button(action: cancel) {
+                            Text("Cancel").font(Typography.label).underline().foregroundStyle(Palette.mutedFg).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .qaID("home-signin-cancel", label: "Cancel")
+                    }
+                } else {
+                    VStack(spacing: 10) {
+                        FieldButton(title: state.button, symbol: nil, prominent: true, action: signIn).qaID("home-signin", label: state.button)
+                        if let error = state.error {
+                            Text(error).font(Typography.label).foregroundStyle(Palette.danger).multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 360)
+                                .qaID("home-signin-error", label: error)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -655,7 +714,8 @@ private struct HomeCloudHeader: View {
     var body: some View {
         let name = HomeLogic.cloudName(entry)
         let s = account.state(entry)
-        let word = HomeLogic.word(status: s.known ? s.status : nil)
+        // Signing in has its own button in the middle of the page: no pill repeats it.
+        let word = account.signInEmpty(entry) == nil ? HomeLogic.word(status: s.known ? s.status : nil) : nil
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Text(name).font(Typography.display).lineLimit(1).foregroundStyle(Palette.fg).qaText(name)

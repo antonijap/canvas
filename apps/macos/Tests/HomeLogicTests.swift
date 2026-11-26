@@ -15,7 +15,7 @@ struct HomeLogicTests {
     }
 
     static func main() {
-        fileNames(); cloudMenu(); recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles(); signInPrompt()
+        fileNames(); cloudMenu(); recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles(); signInPrompt(); signInEmpty()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -47,6 +47,26 @@ struct HomeLogicTests {
         check(HomeLogic.prompt(status: nil, kind: .server) == nil, "no prompt before the first answer")
         check(HomeLogic.pillText("Sign in", name: "Studio") == "Sign in to Studio", "the pill names the Cloud")
         check(HomeLogic.pillText("Down", name: "Studio") == "Down", "other words stay")
+    }
+
+    /// A signed-out Cloud's page is the sign-in empty state, through waiting and a failure; a Cloud that works shows files.
+    static func signInEmpty() {
+        for status in ["signedOut", "signInAgain"] {
+            let v = HomeLogic.signInEmpty(name: "Studio", status: status, kind: .server, phase: .idle)
+            check(v?.title == "Sign in to Studio", "\(status): the title names the Cloud")
+            check(v?.line == "You need to sign in to see this Cloud\u{2019}s files.", "\(status): one short line")
+            check(v?.button == "Sign in" && v?.waiting == false && v?.error == nil, "\(status): a Sign in button")
+        }
+        let waiting = HomeLogic.signInEmpty(name: "Studio", status: "signedOut", kind: .server, phase: .waiting)
+        check(waiting?.waiting == true && waiting?.button == "Waiting for sign-in in your browser\u{2026}", "waiting says so")
+        let failed = HomeLogic.signInEmpty(name: "Studio", status: "signedOut", kind: .server, phase: .failed("No network"))
+        check(failed?.error == "No network" && failed?.button == "Try again" && failed?.waiting == false, "a failure offers Try again")
+        let later = HomeLogic.signInEmpty(name: "Studio", status: "offline", kind: .server, phase: .failed("Cloud offline"))
+        check(later?.error == "Cloud offline", "a sign-in that ends elsewhere than connected keeps its error")
+        check(HomeLogic.signInEmpty(name: "Studio", status: "connected", kind: .server, phase: .waiting) == nil, "success shows the files")
+        check(HomeLogic.signInEmpty(name: "Studio", status: nil, kind: .server, phase: .idle) == nil, "nothing before the first answer")
+        check(HomeLogic.signInEmpty(name: "Studio", status: "down", kind: .server, phase: .idle) == nil, "a down Cloud keeps its page")
+        check(HomeLogic.signInEmpty(name: "Studio", status: "signedOut", kind: .joined, phase: .idle) == nil, "no login for a Cloud on a Mac")
     }
 
     static func cloudMenu() {

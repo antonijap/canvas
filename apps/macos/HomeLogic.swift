@@ -255,6 +255,31 @@ enum HomeLogic {
         return kind == .server && (status == "signedOut" || status == "signInAgain") ? .signIn : .explain
     }
 
+    /// Where a sign-in the person started stands.
+    enum SignInPhase: Equatable { case idle, waiting, failed(String) }
+
+    /// What a Cloud's page shows in place of its files while the person has to sign in.
+    struct SignInEmpty: Equatable {
+        let title: String
+        let line = "You need to sign in to see this Cloud\u{2019}s files."
+        /// The button's words; while waiting, what stands beside its spinner.
+        let button: String
+        var waiting = false
+        var error: String?
+    }
+
+    /// Nil when the page shows files. A sign-in that failed keeps the state, whatever the Cloud says meanwhile, until
+    /// it is connected.
+    static func signInEmpty(name: String, status: String?, kind: CloudKind, phase: SignInPhase) -> SignInEmpty? {
+        guard kind == .server, status != "connected" else { return nil }
+        let title = "Sign in to \(name)"
+        if case .failed(let why) = phase { return SignInEmpty(title: title, button: "Try again", error: why) }
+        guard prompt(status: status, kind: kind) == .signIn else { return nil }
+        return phase == .waiting
+            ? SignInEmpty(title: title, button: "Waiting for sign-in in your browser\u{2026}", waiting: true)
+            : SignInEmpty(title: title, button: "Sign in")
+    }
+
     /// The word on a Cloud's pill: "Sign in" also says to which Cloud.
     static func pillText(_ word: String, name: String) -> String { word == "Sign in" ? "Sign in to \(name)" : word }
 

@@ -109,6 +109,17 @@ final class CloudAccount: ObservableObject {
     /// The Cloud Settings > Cloud has open (an entry id); nil shows the list.
     @Published var selected: String?
     private var signIns: [String: CloudSignInWindow] = [:]
+    /// Each sign-in under way or failed, by the Cloud's address; none is idle.
+    @Published private(set) var signInPhases: [String: HomeLogic.SignInPhase] = [:]
+    func signInEmpty(_ e: CloudEntry) -> HomeLogic.SignInEmpty? {
+        let s = state(e)
+        return HomeLogic.signInEmpty(name: HomeLogic.cloudName(e), status: s.known ? s.status : nil, kind: e.kind, phase: signInPhases[e.url] ?? .idle)
+    }
+
+    func cancelSignIn(_ url: String) {
+        signIns.removeValue(forKey: url)?.close()
+        signInPhases.removeValue(forKey: url)
+    }
     private var hostRefreshGeneration = 0
     private var stoppingOrDeleting: Set<String> = []
     private var stoppedDuringCreation: Set<String> = []
@@ -474,7 +485,7 @@ final class CloudAccount: ObservableObject {
         let hostId = e.kind == .hosted ? e.hostId : nil
         if let hostId, !beginStoppingOrDeleting(model, hostId) { return }
         busy.insert(e.url)
-        signIns.removeValue(forKey: e.url)?.close()
+        cancelSignIn(e.url)
         Task {
             var wipe: (status: Int, error: String?)?
             if let hostId {
@@ -531,21 +542,34 @@ final class CloudAccount: ObservableObject {
                 model.flash("Enter the development email to sign in to \(HomeLogic.cloudName(e))")
                 return
             }
+            let url = e.url
+            signInPhases[url] = .waiting
             Task {
-                _ = await waitListed(model, e.url)
+                _ = await waitListed(model, url)
                 await refresh(model, fresh: true)
+                // Cancelled while it was asked: nothing more happens.
+                guard signInPhases[url] == .waiting else { return }
+                settleSignIn(e)
                 announce(model, e)
             }
             return
         }
-        signIns.removeValue(forKey: e.url)?.close()
         let id = e.id, url = e.url
+        cancelSignIn(url)
+        signInPhases[url] = .waiting
         let w = CloudSignInWindow(origin: url, name: HomeLogic.cloudName(e)) { [weak self] token in
             guard let self else { return }
             self.signIns.removeValue(forKey: url)
             // The sign-in finished late: the Cloud was removed (or replaced) meanwhile, so the token goes nowhere.
             guard let now = self.entry(model, id: id), now.url == url else { return }
             self.store(token: token, entry: now, model: model)
+        }
+        w.failed = { [weak self] why in self?.signInPhases[url] = .failed(why) }
+        // The person closed the window: back to the Sign in button. After a failure, the error stays.
+        w.closed = { [weak self] in
+            guard let self else { return }
+            self.signIns.removeValue(forKey: url)
+            if self.signInPhases[url] == .waiting { self.signInPhases.removeValue(forKey: url) }
         }
         signIns[url] = w
         w.show()
@@ -562,8 +586,17 @@ final class CloudAccount: ObservableObject {
             if !saved { model.flash("Signed in. Canvas couldn't remember it, so you'll sign in again next time.") }
             busy.remove(url)
             await refresh(model, fresh: true)
-            if let now = entry(model, url: url) { announce(model, now) }
+            if let now = entry(model, url: url) {
+                settleSignIn(now)
+                announce(model, now)
+            }
         }
+    }
+
+    /// A sign-in that ran to its end: done once the Cloud is connected, else it says why not.
+    private func settleSignIn(_ e: CloudEntry) {
+        let status = state(e).status
+        signInPhases[e.url] = status == "connected" ? nil : .failed(CloudStatusText.line(status, configured: true))
     }
 
     /// After a sign-in or a join: Home opens on that Cloud and a toast says it worked, or says why it did not.
@@ -585,6 +618,7 @@ final class CloudAccount: ObservableObject {
     }
 
     func signOut(_ model: CanvasModel, _ e: CloudEntry) {
+        cancelSignIn(e.url)
         // A development server has no token: signing out forgets the development email.
         if CloudURL.isLocal(e.url) {
             if let i = model.prefs.clouds.firstIndex(where: { $0.id == e.id }) { model.prefs.clouds[i].devEmail = "" }
@@ -764,6 +798,10 @@ final class CloudSignInWindow: NSObject, WKNavigationDelegate, NSWindowDelegate 
     private let window: NSWindow
     private var finished = false
     private let title: String
+    /// The sign-in cannot go on, and why.
+    var failed: ((String) -> Void)?
+    /// The person closed the window before it finished.
+    var closed: (() -> Void)?
 
     init(origin: String, name: String, done: @escaping (String) -> Void) {
         self.origin = origin
@@ -803,6 +841,7 @@ final class CloudSignInWindow: NSObject, WKNavigationDelegate, NSWindowDelegate 
     private func show(problem: String) {
         guard !finished else { return }
         window.title = title
+        failed?(problem)
         let text = problem.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
         web.loadHTMLString("<meta charset=\"utf-8\"><body style=\"font: 13px -apple-system; padding: 32px; color-scheme: light dark\"><p><b>Canvas couldn't sign in.</b></p><p>\(text)</p><p>Close this window and click Sign in to try again.</p>", baseURL: nil)
     }
@@ -831,7 +870,11 @@ final class CloudSignInWindow: NSObject, WKNavigationDelegate, NSWindowDelegate 
         }
     }
 
-    func windowWillClose(_ notification: Notification) { finished = true }
+    func windowWillClose(_ notification: Notification) {
+        if finished { return }
+        finished = true
+        closed?()
+    }
 }
 
 // MARK: The pane
