@@ -227,7 +227,7 @@ export async function checkCloudMotionWrite(file: string, actionId: string | 0 |
         if (refused.some(r => r.action.id === actionId && r.message === UPDATE_MOTION_HOST)) fail(426, 'update_host', UPDATE_MOTION_HOST);
         if (!pending.some(p => p.action.id === actionId)) return;
         if (s.stopped || s.status !== 'connected' || performance.now() >= deadline) return { actionId, status: 'pending' as const };
-        await delay(25);
+        await new Promise((r) => setTimeout(r, 25));
     }
 }
 class CloudHttpError extends Error {
@@ -1112,6 +1112,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                         try { await request(cloud, route + '/actions', 'POST', { actions: batch }); }
                         catch (error) {
                             if (!(error instanceof CloudHttpError) || error.status !== 400) throw error;
+                            if (isOlderMotionRefusal(error.code, error.message)) fail(426, 'update_host', UPDATE_MOTION_HOST);
                             fail(400, error.code, `Cloud refused import (${error.code}): ${error.message}`);
                         }
                     }
