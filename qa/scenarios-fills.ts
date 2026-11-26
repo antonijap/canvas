@@ -249,7 +249,7 @@ async function openSynthetic(t: T, script: string, run: (o: T, write: (width: nu
   }
 }
 
-sc("render", "a stalled native GPU fence falls back and draws the board", { covers: ["renderer-fallback:gpu-fence"], skip: { visual: "uses a separate synthetic file" } }, async (t: T) => {
+sc("render", "a stalled native GPU fence stops waiting and draws the board", { covers: ["renderer-fallback:gpu-fence"], skip: { visual: "uses a separate synthetic file" } }, async (t: T) => {
   await openSynthetic(t, `
     const fence = GPUQueue.prototype.onSubmittedWorkDone;
     GPUQueue.prototype.onSubmittedWorkDone = function () {
@@ -259,8 +259,7 @@ sc("render", "a stalled native GPU fence falls back and draws the board", { cove
     };
   `, async (o) => {
     await o.waitFor("window.stalledFence", "the page's GPU fence to stall");
-    await o.waitFor("window.__canvas.renderer === 'dom' && !!window.canvasHost.worldRectOf('ben')", "the stalled GPU fence to fall back and draw", 9000);
-    t.ok(/GPU/.test(await o.ev<string>("window.__canvas.note")), "the fallback explains the GPU failure");
+    await o.waitFor("window.__canvas.renderer === 'engine' && !!document.getElementById('engine')?.isConnected && window.__canvas.inViewLoaded()", "the engine to present after the fence deadline", 9000);
   });
 });
 

@@ -39,7 +39,7 @@ export const SMALL_IMAGE_SIDE = 512;
  *         orderOf(id) -> its index in the document (paint order), onLayout() (boards were laid out again),
  *         rebase(id, scene, fetchedAt) -> true when it put live edits on a server scene (src/page/live.js) }
  */
-export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, onStartFailed = onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, nativePreviews = false, showOverview = () => true, rebase = () => false }) {
+export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, nativePreviews = false, showOverview = () => true, rebase = () => false }) {
   if (!navigator.gpu) throw new Error("no WebGPU");
   const canvas = document.createElement("canvas");
   canvas.id = "engine";
@@ -70,8 +70,9 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     const queue = device.queue;
     setTimeout(async () => {
       if (dead) return;
+      // A fence that never answers must not keep the canvas blank: present after the deadline anyway.
       try { await gpuFence(queue); }
-      catch (e) { if (!dead) onStartFailed(e.message); return; }
+      catch (e) { console.warn("[canvas] " + e.message + "; presenting anyway"); }
       gpuReady = true;
       if (!dead) onChange();
     }, 0);

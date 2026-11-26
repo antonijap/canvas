@@ -2521,7 +2521,7 @@ async function startEngine() {
     if (!engineMod) throw new Error("engine module timed out");
     const v = await engineMod.createEngineView({
       view, api, sceneEnv: SCENE_ENV, nativePreviews: document.documentElement.dataset.imagePreviews === "1",
-      showOverview: () => snapHold && !blueprint, waitForGpu: native, onChange: () => requestFlush(false), onLost: engineLost, onStartFailed: engineFailed, getCam: () => cam, isIdle: () => !gesturing && !drag,
+      showOverview: () => snapHold && !blueprint, waitForGpu: native, onChange: () => requestFlush(false), onLost: engineLost, getCam: () => cam, isIdle: () => !gesturing && !drag,
       posOf: (id) => { const b = boards.get(id); return b ? { x: b.meta.x, y: b.meta.y } : null; },
       orderOf: (id) => { const b = boards.get(id); return b ? b.idx : 1e9; },
       onLayout: () => { syncSel(); host.emit("render", null); },
