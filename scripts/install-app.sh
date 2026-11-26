@@ -35,8 +35,14 @@ verify() {
 
 # Processes started from inside a bundle other than its main binary, like the bundled node server. They can outlive
 # the app (parent launchd) and keep serving the replaced bundle's files: the new app then talks to the old server and
-# its engine fails to import. Command lines that start with <app>/Contents/Resources/.
-helpers_of() { pgrep -f "^$1/Contents/Resources/" || true; }
+# its engine fails to import. Command lines that start with <app>/Contents/Resources/, plus whatever still listens on
+# the app's server port once the app has quit (a build from a checkout runs that checkout's src/server.ts).
+# CANVAS_INSTALL_PORT=none skips the port (tests).
+helpers_of() {
+  pgrep -f "^$1/Contents/Resources/" || true
+  local port="${CANVAS_INSTALL_PORT:-5189}"
+  [ "$port" = none ] || lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+}
 
 # Stop them: TERM, up to 10 s to exit (the server saves on TERM), then KILL.
 stop_helpers() {

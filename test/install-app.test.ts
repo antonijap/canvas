@@ -63,7 +63,7 @@ test("stop-helpers ends a process left running from the bundle's Resources", { s
   try {
     spawnSync("sleep", ["0.3"]);
     assert.equal(running(), String(proc.pid), "the helper runs from the bundle");
-    const r = spawnSync("bash", [script, "--stop-helpers", app], { encoding: "utf8" });
+    const r = spawnSync("bash", [script, "--stop-helpers", app], { encoding: "utf8", env: { ...process.env, CANVAS_INSTALL_PORT: "none" } });
     assert.equal(r.status, 0, r.stderr);
     assert.equal(running(), "", "the helper is gone");
   } finally {
