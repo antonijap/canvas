@@ -683,7 +683,7 @@ struct ShellLogicTests {
         check(DrawTool.timer.keycap == "\u{21E7}T", "the Timer control shows its Shift shortcut")
         check(DrawTool.vote.keycap == "\u{21E7}D", "the Vote control shows its Shift shortcut")
         let symbolTools = DrawTool.allCases.filter { $0 != .text }
-        check(symbolTools.map(\.symbol) == ["number", "square", "circle", "note.text", "face.smiling", "hand.thumbsup", "timer"],
+        check(symbolTools.map(\.symbol) == ["number", "square", "circle", "note", "face.smiling", "checkmark.square", "timer"],
               "palette tools use the expected SF Symbols")
         check(DrawTool.allCases.allSatisfy { !$0.symbol.hasSuffix(".fill") }, "palette symbols use outline variants")
     }
