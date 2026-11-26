@@ -284,11 +284,6 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
                                                                fallback: Metric.sidebarWidth, min: Metric.sidebarMin, max: Metric.sidebarMax) {
         didSet { UserDefaults.standard.set(Double(sidebarWidth), forKey: "canvas.sidebarWidth") }
     }
-    /// The Home sidebar's width, dragged the same way and kept separately (Home.swift HomeMetric).
-    @Published var homeSidebarWidth: CGFloat = SidebarSize.restore(UserDefaults.standard.double(forKey: "canvas.homeSidebarWidth"),
-                                                                   fallback: HomeMetric.sidebar, min: HomeMetric.sidebarMin, max: HomeMetric.sidebarMax) {
-        didSet { UserDefaults.standard.set(Double(homeSidebarWidth), forKey: "canvas.homeSidebarWidth") }
-    }
     /// The board whose row in the boards list is being renamed.
     @Published var renamingBoard: String?
     /// Cmd+R with several layers: the Rename Layers sheet (Layers.swift BatchRenameLayer) for these ids, panel order.

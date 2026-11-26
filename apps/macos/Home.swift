@@ -245,11 +245,6 @@ extension View {
 }
 
 enum HomeMetric {
-    static let sidebar: CGFloat = 232
-    static let sidebarMin: CGFloat = 200
-    static let sidebarMax: CGFloat = 360
-    /// The most of the window the sidebar may take, so the file list keeps its room.
-    static let sidebarShare: CGFloat = 0.4
     static let gutter: CGFloat = 28
     static let cardMin: CGFloat = 220
     static let cardMax: CGFloat = 340
@@ -265,36 +260,18 @@ struct HomeView: View {
     @ObservedObject private var store = HomeStore.shared
     @ObservedObject private var account = CloudAccount.shared
 
-    @State private var windowWidth: CGFloat = 0
-
-    /// The sidebar's width in this window: the stored one, held between the minimum and what the window allows.
-    private var sidebarMax: CGFloat {
-        windowWidth > 0 ? SidebarSize.cap(window: windowWidth, share: HomeMetric.sidebarShare, min: HomeMetric.sidebarMin, max: HomeMetric.sidebarMax) : HomeMetric.sidebarMax
-    }
-    private var sidebarShown: CGFloat { min(max(model.homeSidebarWidth, HomeMetric.sidebarMin), sidebarMax) }
+    /// The room the left sidebar (Shell.swift LeftColumn, drawn over this view) takes; 0 while it is hidden.
+    let sidebarReserve: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            GlassIsland(radius: Metric.radiusIsland, padding: Metric.islandPad, dense: true) {
-                HomeSidebar(model: model, store: store, account: account)
-            }
-            .frame(width: sidebarShown)
-            .overlay(alignment: .trailing) {
-                SidebarResizeHandle(model: model, shown: sidebarShown, minWidth: HomeMetric.sidebarMin, maxWidth: sidebarMax,
-                                    defaultWidth: HomeMetric.sidebar) { model.homeSidebarWidth = $0 }
-            }
-            .frame(maxHeight: .infinity, alignment: .top)
-            .padding(.leading, Metric.inset)
-            .padding(.top, Metric.inset + Metric.pill + Metric.islandGap)
-            .padding(.bottom, Metric.inset)
-
             HomeMain(model: model, store: store, account: account)
+                .padding(.leading, sidebarReserve)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: sidebarReserve > 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Palette.canvasBg.ignoresSafeArea())
-        .background(GeometryReader { g in
-            Color.clear.onAppear { windowWidth = g.size.width }.onChange(of: g.size.width) { _, w in windowWidth = w }
-        })
         .transaction { if model.resizingSidebar { $0.animation = nil } }
         .onAppear { store.reload() }
         // A Cloud's page whose Cloud was removed (here, or in Settings) goes back to Recents.
@@ -321,10 +298,10 @@ struct HomeView: View {
 
 // MARK: Sidebar
 
-private struct HomeSidebar: View {
+struct HomeSidebar: View {
     @ObservedObject var model: CanvasModel
-    @ObservedObject var store: HomeStore
-    @ObservedObject var account: CloudAccount
+    @ObservedObject private var store = HomeStore.shared
+    @ObservedObject private var account = CloudAccount.shared
 
     var body: some View {
         VStack(spacing: 2) {
@@ -384,6 +361,7 @@ private struct HomeSidebar: View {
             .scrollIndicators(.automatic)
             .qaID("home-clouds")
         }
+        .environment(\.titlebarTips, false)
     }
 }
 
@@ -462,8 +440,8 @@ private struct HomeMain: View {
 
     /// The header sits level with the sidebar's first control: the search field, or Recents' row before the first file.
     private var headerHeight: CGFloat { HomeLogic.showsSearch(files: store.recents.count, query: store.query) ? Metric.field : Metric.row }
-    /// The sidebar island's top plus its padding: the header's top is its first control's top.
-    private var topInset: CGFloat { Metric.inset + Metric.pill + Metric.islandGap + Metric.islandPad }
+    /// The sidebar panel's top plus its padding: the header's top is its first control's top.
+    private var topInset: CGFloat { Metric.topBar + 2 * Metric.sidebarGap }
 
     @ViewBuilder private var top: some View {
         if let cloud {

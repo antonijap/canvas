@@ -168,20 +168,27 @@ struct RootView: View {
     @State private var windowWidth: CGFloat = 0
     /// The floating right panel and its gap to the window edge.
     private static let propsReserve = Metric.propsWidth + Metric.sidebarGap
-    private var panelOpen: Bool { model.panelOpen && !model.uiHidden && !model.homeShown }
+    /// The left sidebar is the same panel on Home and in a file (only its rows change).
+    private var panelOpen: Bool { model.panelOpen && !model.uiHidden }
     private var inspectorShown: Bool { model.propertiesShown }
     private var toolPaletteShown: Bool { model.currentFile != nil && !model.homeShown && !model.cloudReadOnly && !model.uiHidden }
     private var zoomShown: Bool { !model.uiHidden && !model.homeShown && !model.pageEmpty }
 
     private var rightSidebarShown: Bool { inspectorShown || ((model.commentsSidebarOpen || model.conversationsSidebarOpen) && !model.uiHidden && !model.homeShown) }
+    /// What the open file reserves beside the left sidebar. Home sizes the sidebar by the same numbers, so it never
+    /// changes width on the way between Home and the file.
+    private var fileOpen: Bool { model.currentFile != nil && !model.uiHidden }
+    private var fileRightSidebar: Bool {
+        fileOpen && (model.inspectorOpen || model.commentsSidebarOpen || model.conversationsSidebarOpen)
+    }
     private var minimumCanvasWidth: CGFloat {
-        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.width(compact: true) + Metric.pillPad) : ShellLayout.minCanvas
+        fileOpen && !model.cloudReadOnly ? max(ShellLayout.minCanvas, ToolPalette.width(compact: true) + Metric.pillPad) : ShellLayout.minCanvas
     }
 
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
     private var panelWidth: CGFloat? {
         guard windowWidth > 0 else { return model.sidebarWidth }
-        return ShellLayout.sidebarWidth(window: windowWidth - Metric.sidebarGap, stored: model.sidebarWidth, rightSidebar: rightSidebarShown,
+        return ShellLayout.sidebarWidth(window: windowWidth - Metric.sidebarGap, stored: model.sidebarWidth, rightSidebar: fileRightSidebar,
                                         inset: Metric.inset, gap: Metric.islandGap, props: Self.propsReserve, minWidth: Metric.sidebarMin,
                                         minimumCanvas: minimumCanvasWidth)
     }
@@ -189,7 +196,7 @@ struct RootView: View {
     /// The widest the panel may be dragged in this window: the maximum, or the room the window leaves.
     private var panelMax: CGFloat {
         guard windowWidth > 0 else { return Metric.sidebarMax }
-        let room = ShellLayout.room(window: windowWidth - Metric.sidebarGap, rightSidebar: rightSidebarShown, inset: Metric.inset,
+        let room = ShellLayout.room(window: windowWidth - Metric.sidebarGap, rightSidebar: fileRightSidebar, inset: Metric.inset,
                                     gap: Metric.islandGap, props: Self.propsReserve, minimumCanvas: minimumCanvasWidth)
         return min(Metric.sidebarMax, room)
     }
@@ -222,7 +229,9 @@ struct RootView: View {
                 })
 
             // The Home tab: a native screen over the (hidden, still alive) canvas page (Home.swift).
-            if model.homeShown { HomeView(model: model).ignoresSafeArea() }
+            if model.homeShown {
+                HomeView(model: model, sidebarReserve: panelOpen ? panelWidth.map { $0 + Metric.sidebarGap } ?? 0 : 0).ignoresSafeArea()
+            }
 
             // Talk to the selection: the spark and progress rings, glass over the canvas, under the islands (Spark.swift).
             if !model.uiHidden && !model.homeShown { SparkLayer(model: model) }
@@ -330,7 +339,7 @@ struct TopBar: View {
     @State private var hoveredTab: String?
     @State private var pressedTab: String?
 
-    private var showsSidebarToggle: Bool { !model.homeShown && !model.uiHidden }
+    private var showsSidebarToggle: Bool { !model.uiHidden }
 
     private var tabRoom: CGFloat {
         let controls: CGFloat = showsSidebarToggle ? 3 : 2
@@ -641,6 +650,7 @@ struct LeftColumn: View {
             if !shown { model.sidebarMenuOpen = false; closeSearch() }
         }
         .onChange(of: model.currentFile) { _, _ in model.sidebarMenuOpen = false }
+        .onChange(of: model.homeShown) { _, _ in model.sidebarMenuOpen = false; closeSearch() }
         .onChange(of: model.section) { _, _ in closeSearch() }
         .onChange(of: tokenTab) { _, _ in closeSearch() }
     }
@@ -668,7 +678,46 @@ struct LeftColumn: View {
         !model.revision.isEmpty && (section != .widgets || (model.sidebarWidgetsLoaded && !model.widgetKinds.isEmpty))
     }
 
+    /// One glass panel for Home and for a file: the panel stays put and only its rows change.
     private func column(width: CGFloat) -> some View {
+        let section = model.section
+        return ZStack(alignment: .top) {
+            if model.homeShown {
+                HomeSidebar(model: model)
+                    .padding(Metric.sidebarGap)
+            } else {
+                fileRows
+            }
+        }
+        .frame(width: width)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .sidebarSurface()
+        .overlay(alignment: .trailing) {
+            SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
+                                defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
+                .padding(.vertical, Metric.sidebarPanelRadius / 2)
+        }
+        .task(id: section) { if section == .widgets { model.fetchKinds() } }
+        .overlay(alignment: .topLeading) {
+            if model.sidebarMenuOpen && !model.homeShown {
+                ZStack(alignment: .topLeading) {
+                    Color.clear.contentShape(Rectangle())
+                        .onTapGesture { dismissMenu() }
+                        .padding(.top, Self.headerHeight)
+                    SidebarSectionMenu(selection: section) {
+                        model.section = $0
+                        dismissMenu()
+                    }
+                    .qaID("sidebar-section-popup")
+                    .padding(.leading, Metric.sidebarLabelInset)
+                    .padding(.top, Self.headerHeight)
+                }
+            }
+        }
+        .qaID("sidebar-panel")
+    }
+
+    private var fileRows: some View {
         let section = model.section
         let scrollKey = ScrollKey(file: model.currentFile, section: section)
         let loaded = listLoaded(section)
@@ -737,32 +786,6 @@ struct LeftColumn: View {
                 .id(scrollKey)
             }
         }
-        .frame(width: width)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .sidebarSurface()
-        .overlay(alignment: .trailing) {
-            SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
-                                defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
-                .padding(.vertical, Metric.sidebarPanelRadius / 2)
-        }
-        .task(id: section) { if section == .widgets { model.fetchKinds() } }
-        .overlay(alignment: .topLeading) {
-            if model.sidebarMenuOpen {
-                ZStack(alignment: .topLeading) {
-                    Color.clear.contentShape(Rectangle())
-                        .onTapGesture { dismissMenu() }
-                        .padding(.top, Self.headerHeight)
-                    SidebarSectionMenu(selection: section) {
-                        model.section = $0
-                        dismissMenu()
-                    }
-                    .qaID("sidebar-section-popup")
-                    .padding(.leading, Metric.sidebarLabelInset)
-                    .padding(.top, Self.headerHeight)
-                }
-            }
-        }
-        .qaID("sidebar-panel")
     }
 }
 
@@ -828,7 +851,7 @@ private struct SidebarSectionMenu: View {
 }
 
 /// Invisible strip, SidebarSize.hitWidth wide, along a sidebar's right edge, inside it: resize cursor over it, drag to
-/// set the width, double-click to put it back to its default. Used by the editor panel and the Home sidebar.
+/// set the width, double-click to put it back to its default.
 /// An AppKit view, not a SwiftUI gesture: the cursor comes from a cursor rect (no push and pop to get out of step),
 /// and what lies beside the sidebar (the canvas page, the file list's scroll view) takes the mouse before anything
 /// drawn over it, so the strip stays inside the sidebar.
