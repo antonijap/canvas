@@ -128,14 +128,15 @@ impl AtlasPool {
     }
 }
 
-/// One textured quad: device-px rect, uv rect, premultiplied tint, optional scissor. `extra` is only
-/// read for premultiplied sources: `[width px, height px, corner radius px, 0]` (rounded corners).
+/// One textured quad: device-px rect, uv rect, premultiplied tint, optional scissor and fractional clip.
+/// `extra` is only read for premultiplied sources: `[width px, height px, corner radius px, 0]` (rounded corners).
 #[derive(Clone, Copy)]
 pub struct Quad {
     pub rect: [f32; 4],
     pub uv: [f32; 4],
     pub tint: [f32; 4],
     pub scissor: Option<[u32; 4]>,
+    pub clip: Option<[f32; 4]>, // Device-pixel edges: x0, y0, x1, y1.
     pub extra: [f32; 4],
     pub transform: Option<[f32; 6]>,
 }
@@ -339,9 +340,9 @@ thread_local! {
 }
 
 const SHADER: &str = r#"
-struct VOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) tint: vec4<f32>, @location(2) extra: vec4<f32>, @location(3) local: vec2<f32>, @location(4) @interpolate(flat) sampling: f32 };
+struct VOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) tint: vec4<f32>, @location(2) extra: vec4<f32>, @location(3) local: vec2<f32>, @location(4) @interpolate(flat) sampling: f32, @location(5) @interpolate(flat) clip: vec4<f32> };
 @group(0) @binding(0) var t: texture_2d<f32>;
-@vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) tint: vec4<f32>, @location(3) extra: vec4<f32>, @location(6) axes: vec4<f32>, @location(7) place: vec4<f32>) -> VOut {
+@vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) tint: vec4<f32>, @location(3) extra: vec4<f32>, @location(5) clip: vec4<f32>, @location(6) axes: vec4<f32>, @location(7) place: vec4<f32>) -> VOut {
   var c = array<vec2<f32>, 6>(vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 1.0));
   let p = c[vi];
   var o: VOut;
@@ -352,6 +353,7 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @lo
   o.tint = tint;
   o.extra = extra;
   o.local = p * extra.xy;
+  o.clip = clip;
   return o;
 }
 // vello writes straight alpha. Filtering straight alpha drags the colour of transparent texels
@@ -427,7 +429,9 @@ fn footprint(uv: vec2<f32>) -> vec2<f32> {
     let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
     cover = clamp(0.5 - d, 0.0, 1.0);
   }
-  return sample_fp(i.uv, fp, pm) * i.tint * cover;
+  let half_px = vec2<f32>(0.5);
+  let extent = clamp(min(i.pos.xy + half_px, i.clip.zw) - max(i.pos.xy - half_px, i.clip.xy), vec2<f32>(0.0), vec2<f32>(1.0));
+  return sample_fp(i.uv, fp, pm) * i.tint * cover * (extent.x * extent.y);
 }
 "#;
 
@@ -506,13 +510,13 @@ fn sample_fp(uv: vec2<f32>, fp: vec2<f32>, cell: vec4<f32>, layer: i32) -> vec4<
 }
 @fragment fn fs(i: VOut) -> @location(0) vec4<f32> {
   let fp = vec2<f32>(abs(dpdx(i.uv.x)), abs(dpdy(i.uv.y))) * i.cell.zw * i.sampling;
-  let inside = i.pos.x >= i.clip.x && i.pos.y >= i.clip.y && i.pos.x < i.clip.z && i.pos.y < i.clip.w;
-  let c = sample_fp(i.uv, fp, i.cell, i.layer) * i.tint;
-  return select(vec4<f32>(0.0), c, inside);
+  let half_px = vec2<f32>(0.5);
+  let extent = clamp(min(i.pos.xy + half_px, i.clip.zw) - max(i.pos.xy - half_px, i.clip.xy), vec2<f32>(0.0), vec2<f32>(1.0));
+  return sample_fp(i.uv, fp, i.cell, i.layer) * i.tint * (extent.x * extent.y);
 }
 "#;
 
-/// Per quad: rect, uv, tint, extra, atlas cell and clip, and two vectors for affine and filter.
+/// Per quad: rect, uv, tint, extra, atlas cell, clip, and two vectors for affine and filter.
 const FLOATS: usize = 32;
 
 impl Gpu {
@@ -1412,6 +1416,7 @@ impl Gpu {
                 None => None,
             };
             let full = [0, 0, fw, fh];
+            let full_clip = [0.0, 0.0, w, h];
             let cell = match src {
                 Source::Tile(key) => self.tiles.get(key).and_then(|s| s.tex.cell.as_ref()),
                 _ => None,
@@ -1420,7 +1425,7 @@ impl Gpu {
                 (Some(c), Some(bind)) => {
                     data.extend_from_slice(&[c.layer as f32, 0.0, 0.0, 0.0]);
                     data.extend_from_slice(&[c.at.0 as f32, c.at.1 as f32, c.size.0 as f32, c.size.1 as f32]);
-                    let clip = scissor.map_or([0.0, 0.0, fw as f32, fh as f32], |[x, y, sw, sh]| [x as f32, y as f32, (x + sw) as f32, (y + sh) as f32]);
+                    let clip = q.clip.unwrap_or_else(|| scissor.map_or(full_clip, |[x, y, sw, sh]| [x as f32, y as f32, (x + sw) as f32, (y + sh) as f32]));
                     data.extend_from_slice(&clip);
                     how.push(if scissor.is_some_and(|s| s[2] == 0 || s[3] == 0) { None } else { Some((2, bind, full)) });
                 }
@@ -1428,7 +1433,8 @@ impl Gpu {
                     let mut extra = q.extra;
                     extra[3] = if matches!(src, Source::Premul(_)) { 1.0 } else { 0.0 };
                     data.extend_from_slice(&extra);
-                    data.extend_from_slice(&[0.0; 8]);
+                    data.extend_from_slice(&[0.0; 4]);
+                    data.extend_from_slice(&q.clip.unwrap_or(full_clip));
                     let bind = match src {
                         Source::White => Some(&self.white.own.as_ref().expect("white has a texture").1),
                         Source::Tile(key) => self.tiles.get(key).and_then(|s| s.tex.own.as_ref()).map(|o| &o.1),

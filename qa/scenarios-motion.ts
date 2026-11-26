@@ -336,7 +336,8 @@ sc("hover-motion", "held sprites follow the owner's pixel-fitted clip and restor
   await t.waitFor("window.__motion.sprites === 1", "the clipped sprite");
   await sleep(220);
   t.eq(await pixel(69), [255, 128, 64], "the last pixel inside the fitted clip shows the sprite");
-  t.eq(await pixel(70), [32, 48, 64], "the first pixel outside the fitted clip shows the owner");
+  t.eq(await pixel(70), [77, 64, 64], "the edge pixel blends the sprite and owner");
+  t.eq(await pixel(71), [32, 48, 64], "the first pixel fully outside the fitted clip shows the owner");
   await t.io.move(6, 90);
   await sleep(80);
   t.eq(await pixel(69), [255, 128, 64], "hold keeps the visible pose on ordinary exit");
@@ -352,6 +353,76 @@ sc("hover-motion", "held sprites follow the owner's pixel-fitted clip and restor
   await t.waitFor("window.__motion.sprites === 0", "turning playback off clears a held pose");
   await t.ev("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
   t.eq(await pixel(50), [255, 128, 64], "disabling playback restores the original layer");
+});
+
+sc("hover-motion", "sprite clip edges match the still board at fractional zoom", {
+  covers: ["hover-motion:composite", "hover-motion:rest"],
+  skip: { visual: "Compares device pixels around each clip edge on the first sprite frame." },
+}, async (t: T) => {
+  const boardId = "qa_fractional_board_clip", frameBoardId = "qa_fractional_frame_board", frameId = "qa_fractional_frame_clip";
+  const overflow = (id: string, width: number, height: number) => ({
+    type: "rectangle", id, x: -18, y: -18, width: width + 36, height: height + 36, fill: "#FF8040",
+    motion: [{ id: "slide", on: "boardHover", tracks: [{ prop: "translateX", to: 8, delay: 300, duration: 250 }] }],
+  });
+  const board = { type: "frame", x: 10000.23, y: 10000.41, width: 190.37, height: 124.83, layout: "none", clip: true, fill: "#203040" };
+  const frame = { type: "frame", id: frameId, x: 40.29, y: 24.73, width: 92.43, height: 66.29, layout: "none", clip: true };
+  // Separate boards let the two overflowing layers promote without overlapping later paint.
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [
+    { ...board, id: boardId, children: [overflow("qa_board_overflow", board.width, board.height)] },
+    { ...board, id: frameBoardId, x: board.x + 500, children: [
+      { ...frame, children: [overflow("qa_frame_overflow", frame.width, frame.height)] },
+    ] },
+  ] });
+  await t.page.send("Emulation.setEmulatedMedia", { features: [
+    { name: "prefers-reduced-motion", value: "no-preference" }, { name: "prefers-color-scheme", value: "dark" },
+  ] });
+  await t.waitFor(`window.canvasHost.boards.has('${frameBoardId}')`, "the fractional clip boards");
+  t.ok(await t.ev(RECORDER_JS), "engine frame recorder installed");
+
+  const diffs = [];
+  for (const zoom of [0.73, 1.37, 2.5]) {
+    // Disable tile batching for the last zoom to check the own-texture shader too.
+    if (zoom === 2.5) await t.ev("window.canvasHost.engineView.engine.setDebug(16)");
+    const max = [];
+    for (const [owner, clip] of [[boardId, boardId], [frameBoardId, frameId]]) {
+      await t.io.move(6, 90);
+      await t.waitFor("window.__motion.sprites === 0", "the still board");
+      await t.focus(owner, zoom);
+      const point = await t.center(clip), rect = await t.rect(clip);
+      await t.ev(`(() => {
+        const h = window.canvasHost, e = h.engineView.engine, recorder = window.__frames;
+        const { left, top } = h.view.getBoundingClientRect(), dpr = recorder.dpr();
+        const { x, y, w, h: height } = ${JSON.stringify(rect)};
+        const x0 = (x - left) * dpr, y0 = (y - top) * dpr, x1 = x0 + w * dpr, y1 = y0 + height * dpr;
+        const sx = Math.floor(x0) - 3, sy = Math.floor(y0) - 3;
+        const region = { x: sx, y: sy, w: Math.ceil(x1) + 3 - sx, h: Math.ceil(y1) + 3 - sy };
+        recorder.ref("A", region);
+        const prior = e.spriteFrame();
+        recorder.start(region, 1, 1, () => e.spriteFrame() > prior);
+        window.__clipSpriteReady = () => e.spriteFrame() > prior;
+        window.__clipEdgeDiff = () => {
+          const { frames: [{ data }] } = recorder.stop();
+          let diff = 0;
+          for (let py = 0; py < region.h; py++) for (let px = 0; px < region.w; px++) {
+            const cx = sx + px + 0.5, cy = sy + py + 0.5;
+            if (Math.min(Math.abs(cx - x0), Math.abs(cx - x1), Math.abs(cy - y0), Math.abs(cy - y1)) > 3) continue;
+            const i = (py * region.w + px) * 4;
+            for (let c = 0; c < 4; c++) diff = Math.max(diff, Math.abs(data[i + c] - recorder.A[i + c]));
+          }
+          return diff;
+        };
+      })()`);
+      await t.io.move(point.x, point.y);
+      await t.waitFor("window.__clipSpriteReady()", "the first sprite composite");
+      max.push(await t.ev<number>("window.__clipEdgeDiff()"));
+    }
+    diffs.push({ zoom, board: max[0], frame: max[1] });
+  }
+  await t.io.move(6, 90);
+  await t.waitFor("window.__motion.sprites === 0", "the final return to rest");
+  await t.ev("window.canvasHost.engineView.engine.setDebug(0)");
+  console.log(`sprite clip edge max channel diffs ${JSON.stringify(diffs)}`);
+  t.ok(diffs.every(({ board, frame }) => board <= 3 && frame <= 3), "clip edges match within 3 per channel at all zooms");
 });
 
 sc("hover-motion", "first frame paints sprites that fall outside the batch atlas", {

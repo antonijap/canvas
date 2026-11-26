@@ -1626,7 +1626,7 @@ impl Engine {
         for line in self.blueprint.chunks_exact(3) {
             let [axis, at, a] = [line[0], line[1], line[2]];
             let rect = if axis == 0.0 { [at, 0.0, at + 1.0, height] } else { [0.0, at, width, at + 1.0] };
-            quads.push((Source::White, Quad { rect, uv: [0.0, 0.0, 1.0, 1.0], tint: [r * a, g * a, b * a, a], scissor: None, extra: [0.0; 4], transform: None }));
+            quads.push((Source::White, Quad { rect, uv: [0.0, 0.0, 1.0, 1.0], tint: [r * a, g * a, b * a, a], scissor: None, clip: None, extra: [0.0; 4], transform: None }));
         }
         let white = [1.0, 1.0, 1.0, 1.0];
         let (dw, dh) = self.gpu.size();
@@ -1656,13 +1656,16 @@ impl Engine {
                 let (x, y) = cam_dev;
                 (Some([a, b, c, d, e * s_exact + (1. - a) * x - c * y, f * s_exact - b * x + (1. - d) * y].map(|v| v as f32)), [alpha; 4])
             });
-            let clip = b.sprite.as_ref().and_then(|s| {
+            let clip_rect = b.sprite.as_ref().and_then(|s| {
                 let pi = self.pos_of(&s.owner)?;
                 let owner = &self.boards[pi];
                 let local = s.clip? - kurbo::Vec2::new(owner.x, owner.y);
-                Some(scissor_px(fits[pi].device(local, s_exact, cam_dev), dw, dh).unwrap_or([0; 4]))
+                Some(fits[pi].device(local, s_exact, cam_dev))
             });
-            let sprite_visible = b.sprite.is_some() && clip != Some([0; 4]);
+            // Keep every pixel touched by the clip. The shader applies the fractional coverage.
+            let sprite_scissor = clip_rect.map(|r| scissor_px(r.expand(), dw, dh).unwrap_or([0; 4]));
+            let clip = clip_rect.map(r32);
+            let sprite_visible = b.sprite.is_some() && sprite_scissor != Some([0; 4]);
             let slot_dev = dev(sd.t.rect);
             let mut fresh_now = is_fresh(&self.gpu.tiles, &sd.key, b.generation);
             // A lowres texture at rest is still the best picture of its slot while it renders again.
@@ -1697,7 +1700,7 @@ impl Engine {
                     let uv = interior_uv(slot.px);
                     let (d, uv, scissor) = if transform.is_some() || b.sprite.is_some() {
                         let (d, uv) = crop_quad(d, uv, cover_rect);
-                        (d, uv, clip)
+                        (d, uv, sprite_scissor)
                     } else {
                         let Some(sc) = scissor_px(cover_rect, dw, dh) else { continue };
                         (d, uv, Some(sc))
@@ -1706,7 +1709,7 @@ impl Engine {
                     st.fallbacks += 1;
                     st.board_pixels = true;
                     sprite_drawn |= sprite_visible;
-                    quads.push((Source::Tile(*k), Quad { rect: r32(d), uv, tint, scissor, extra: [0.0; 4], transform }));
+                    quads.push((Source::Tile(*k), Quad { rect: r32(d), uv, tint, scissor, clip, extra: [0.0; 4], transform }));
                     if self.debug & DEBUG_TILES != 0 {
                         outline(&mut quads, d, [0.9, 0.6, 0.0, 0.9]);
                     }
@@ -1719,7 +1722,7 @@ impl Engine {
                         let r = r.intersect(root);
                         if r.width() > 0.0 && r.height() > 0.0 {
                             grey = true;
-                            quads.push((Source::White, Quad { rect: r32(dev(r)), uv: [0.0, 0.0, 1.0, 1.0], tint: [0.4, 0.4, 0.4, 0.4], scissor: None, extra: [0.0; 4], transform: None }));
+                            quads.push((Source::White, Quad { rect: r32(dev(r)), uv: [0.0, 0.0, 1.0, 1.0], tint: [0.4, 0.4, 0.4, 0.4], scissor: None, clip: None, extra: [0.0; 4], transform: None }));
                         }
                     }
                     if grey {
@@ -1741,7 +1744,7 @@ impl Engine {
                 }
                 st.board_pixels = true;
                 sprite_drawn |= sprite_visible;
-                quads.push((Source::Tile(sd.key), Quad { rect: r32(d), uv: interior_uv(px), tint, scissor: clip, extra: [0.0; 4], transform }));
+                quads.push((Source::Tile(sd.key), Quad { rect: r32(d), uv: interior_uv(px), tint, scissor: sprite_scissor, clip, extra: [0.0; 4], transform }));
                 if self.debug & DEBUG_TILES != 0 {
                     outline(&mut quads, d, if zooming { [0.0, 0.3, 0.9, 0.9] } else { [0.9, 0.1, 0.1, 0.9] });
                 }
@@ -2749,7 +2752,7 @@ impl Engine {
             }
             let d = to_device(c.world(), self.cam, self.dpr);
             let r = (c.radius * z * self.dpr) as f32;
-            quads.push((Source::Premul(t.bind.clone()), Quad { rect: r32(d), uv: [0.0, 0.0, 1.0, 1.0], tint: [1.0, 1.0, 1.0, 1.0], scissor: None, extra: [d.width() as f32, d.height() as f32, r, 0.0], transform: None }));
+            quads.push((Source::Premul(t.bind.clone()), Quad { rect: r32(d), uv: [0.0, 0.0, 1.0, 1.0], tint: [1.0, 1.0, 1.0, 1.0], scissor: None, clip: None, extra: [d.width() as f32, d.height() as f32, r, 0.0], transform: None }));
         }
     }
 
@@ -3100,7 +3103,7 @@ fn outline(quads: &mut Vec<(Source, Quad)>, d: Rect, c: [f32; 4]) {
     let tint = [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]];
     let full = [0.0, 0.0, 1.0, 1.0];
     for r in [Rect::new(d.x0, d.y0, d.x1, d.y0 + 2.0), Rect::new(d.x0, d.y1 - 2.0, d.x1, d.y1), Rect::new(d.x0, d.y0, d.x0 + 2.0, d.y1), Rect::new(d.x1 - 2.0, d.y0, d.x1, d.y1)] {
-        quads.push((Source::White, Quad { rect: r32(r), uv: full, tint, scissor: None, extra: [0.0; 4], transform: None }));
+        quads.push((Source::White, Quad { rect: r32(r), uv: full, tint, scissor: None, clip: None, extra: [0.0; 4], transform: None }));
     }
 }
 
