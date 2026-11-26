@@ -1306,8 +1306,8 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 #props summary{color:var(--c-muted-fg);cursor:pointer;font-size:var(--c-size-2xs)}
 #props pre{font:10px/1.55 var(--c-font-mono);background:var(--c-muted);border-radius:var(--c-radius);padding:8px;overflow:auto;max-height:260px;white-space:pre-wrap;word-break:break-all}
 .opening-capture :is(#hov,#sel,#marquee,#guides){visibility:hidden}
-#cloud-wait{position:fixed;z-index:20;top:46px;left:12px;max-width:min(325px,calc(100% - 24px));padding:8px 12px;border-radius:var(--c-radius-island);background:var(--c-island);color:var(--c-fg);font-size:var(--c-size-xs);text-align:center}
-.native #cloud-wait{top:12px}
+#cloud-wait,#load-status{position:fixed;z-index:20;top:46px;left:12px;max-width:min(325px,calc(100% - 24px));padding:8px 12px;border-radius:var(--c-radius-island);background:var(--c-island);color:var(--c-fg);font-size:var(--c-size-xs);text-align:center}
+.native :is(#cloud-wait,#load-status){top:12px}
 #msg{line-height:100%;position:fixed;left:50%;bottom:14px;transform:translateX(-50%);background:var(--c-island);border:0;border-radius:var(--c-radius-island);padding:9px 14px;font-size:var(--c-size-xs);display:none;z-index:20;box-shadow:0 3px 3px #0000001f}
 #wtoast{position:fixed;left:50%;bottom:48px;transform:translateX(-50%);display:none;align-items:center;gap:10px;background:var(--c-island);border:1px solid var(--c-island-rim);border-radius:var(--c-radius-island);padding:5px 8px 5px 14px;font-size:var(--c-size-xs);z-index:30;box-shadow:0 3px 3px #0000001f}
 /* The browser page says what it is: the engine build missing, and that the Mac app is the main way (src/onboarding.ts). */
@@ -1352,6 +1352,7 @@ html{--cmp-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg
 <div id="snapPop" role="dialog" aria-label="Snapping"><label><input type="checkbox" data-k="objects"> Snap to objects</label><label><input type="checkbox" data-k="pixel"> Snap to pixel grid</label><label><input type="checkbox" data-k="blueprint"> Snap to blueprint</label><label><input type="checkbox" data-k="guides"> Show smart guides</label><label>Big nudge <input type="number" min="1" max="1000" data-k="bigNudge"> px</label></div>
 <aside id="props"><div id="propsBody">Click any node to inspect it.</div></aside>
 <div id="msg"></div>
+<div id="load-status" role="status" hidden></div>
 <div id="webhint" role="status" hidden><div class="wh-lines"><div class="wh-engine" hidden>Drawing with the fallback renderer. Run <code>pnpm build:engine</code>.</div><div class="wh-app" hidden>The Mac app is the main way to use Canvas. Run <code>pnpm app</code> to build and open it.</div></div><button type="button" aria-label="Hide" title="Hide">&#x2715;</button></div>
 <script>${FIT_SCRIPT}</script>
 <script>
@@ -1676,7 +1677,7 @@ function flushCam() {
     // The engine draws in this same frame, after the overlays moved: one rAF for both.
     let more = false;
     try { ev.setCam(cam); more = ev.frame(!!doc && (perf.landed !== null || window.__canvas.inViewLoaded())); } catch (err) { engineLost("engine frame failed: " + (err && err.message || err)); return; }
-    engineBusy = more;
+    engineBusy = more || ev.waitingForGpu;
     if (!document.hidden && perf.landed !== null && (perf.paint === null || perf.picture === null)) {
       const s = ev.pictureState();
       if (s.boardPixels) {
@@ -2013,13 +2014,36 @@ function measureWorld(el) {
   const r = el.getBoundingClientRect(), v = view.getBoundingClientRect();
   return { x: (r.left - v.left - cam.x) / cam.z, y: (r.top - v.top - cam.y) / cam.z, w: r.width / cam.z, h: r.height / cam.z };
 }
-const wait = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(r, ms))]);
+const LOAD_MS = 15_000;
+const loadRequest = (url) => fetch(url, { signal: AbortSignal.timeout(LOAD_MS) });
+function wait(p, ms) {
+  let timer;
+  return Promise.race([p, new Promise((r) => { timer = setTimeout(r, ms); })]).finally(() => clearTimeout(timer));
+}
+function boardLoadFailed(b, key) {
+  b.fails = b.failedKey === key ? (b.fails || 0) + 1 : 1;
+  b.failedKey = key;
+  const delay = retryDelay(b.fails);
+  b.retryAt = performance.now() + delay;
+  if (b.fails === 1 && boardInView(b)) say("A board could not load. Retrying…");
+  return delay;
+}
 async function loadBoard(b) {
   const seq = (b.seq = (b.seq || 0) + 1);
-  b.loading = b.meta.key;
+  const key = b.loading = b.meta.key;
+  const current = () => b.seq === seq && boards.get(b.meta.id) === b;
   let d;
-  try { d = await (await fetch(api("/api/board") + "&id=" + encodeURIComponent(b.meta.id) + keyedQ(b.meta.key))).json(); } catch { b.loading = null; return; }
-  if (d.error || boards.get(b.meta.id) !== b) { b.loading = null; return; }
+  try {
+    const res = await loadRequest(api("/api/board") + "&id=" + encodeURIComponent(b.meta.id) + keyedQ(key));
+    if (res.ok) d = await res.json();
+  } catch {}
+  if (!current()) return;
+  if (b.meta.key !== key || !d || d.error) {
+    b.loading = null;
+    if (b.meta.key !== key) scheduleVisible();
+    else setTimeout(scheduleVisible, boardLoadFailed(b, key) + 20);
+    return;
+  }
   for (const href of d.links || []) if (!fonts.has(href)) { fonts.add(href); const l = document.createElement("link"); l.rel = "stylesheet"; l.href = href; document.head.appendChild(l); }
   if (d.faces && !fonts.has(d.faces)) { fonts.add(d.faces); const s = document.createElement("style"); s.textContent = d.faces; document.head.appendChild(s); }
   // Build the new drawing hidden next to the old one, let fonts and images settle, then swap in one frame: no flash.
@@ -2029,8 +2053,11 @@ async function loadBoard(b) {
   b.el.appendChild(next);
   await wait(document.fonts.ready, 3000);
   await wait(Promise.all([...next.querySelectorAll("img")].map((i) => i.decode().catch(() => {}))), 5000);
-  if (seq < (b.applied || 0) || !next.isConnected) { next.remove(); return; }
-  b.applied = seq;
+  if (!current() || b.meta.key !== key || !next.isConnected) {
+    next.remove();
+    if (current()) { b.loading = null; scheduleVisible(); }
+    return;
+  }
   showBoard(b); // a culled board has no layout to fit or measure
   window.__fit(next, cam.z);
   for (const old of b.el.querySelectorAll(":scope>.cur,:scope>.ph")) old.remove();
@@ -2040,6 +2067,8 @@ async function loadBoard(b) {
   if (LOD_FLAT_Z > 0) { const f = next.firstElementChild; b.el.style.setProperty("--bf", f ? getComputedStyle(f).backgroundColor : "#fff"); }
   b.loadedKey = d.key;
   b.loading = null;
+  b.failedKey = null;
+  b.fails = 0;
   requestFlush(); // a drawn board may now be flat or culled
   if (b.meta.key !== d.key) scheduleVisible();
   syncSel();
@@ -2061,31 +2090,35 @@ function loadVisible() {
     if (!(sx < R && sx + r.w * cam.z > L && sy < B && sy + r.h * cam.z > T)) continue;
     if (!b.loadedKey && !b.snap) wantSnap(b);
     // A board whose load failed is asked for again after a bounded backoff (a server hiccup must not leave it blank).
-    if (mode === "engine") { if (b.failedKey !== b.meta.key || performance.now() >= b.retryAt) batch.push(b); }
+    if (b.failedKey === b.meta.key && performance.now() < b.retryAt) continue;
+    if (mode === "engine") batch.push(b);
     else if (mode === "dom") loadBoard(b);
   }
   if (batch.length) engineLoad(batch);
 }
 // Engine: fetch the boards' resolved scenes, register what they need, hand them to the engine. Only changed boards come here.
 async function engineLoad(list) {
-  const view0 = ev, keys = list.map((b) => b.meta.key);
-  for (const b of list) b.loading = b.meta.key;
+  const view0 = ev;
+  const loads = list.map((b) => {
+    b.loading = b.meta.key;
+    b.seq = (b.seq || 0) + 1;
+    return { meta: b.meta, seq: b.seq };
+  });
   let retryIn = 0;
   // Each board lands as soon as the engine has it (boards are placed in slices across frames, nearest first).
   const done = new Set();
   const landed = (i, r) => {
     done.add(i);
     if (ev !== view0 || mode !== "engine") return;
-    const b = list[i], key = keys[i];
+    const b = list[i], { meta: { key }, seq } = loads[i];
     // A board that left the page (or the document) while it loaded: the engine must not keep it.
     if (boards.get(b.meta.id) !== b) { if (!boards.has(b.meta.id) && ev && !ev.isParked(b.meta.id)) ev.removeBoard(b.meta.id); return; }
-    if (b.loading === key) b.loading = null;
+    if (b.seq !== seq || b.loading !== key) return;
+    b.loading = null;
+    if (b.meta.key !== key) { scheduleVisible(); return; }
     if (r && r.stale) return;
     if (!r || !r.root) {
-      b.fails = b.failedKey === key ? (b.fails || 0) + 1 : 1;
-      b.failedKey = key;
-      const wait = retryDelay(b.fails);
-      b.retryAt = performance.now() + wait;
+      const wait = boardLoadFailed(b, key);
       retryIn = retryIn ? Math.min(retryIn, wait) : wait;
       return;
     }
@@ -2101,7 +2134,7 @@ async function engineLoad(list) {
     host.emit("render", b.meta.id);
     requestFlush();
   };
-  try { await ev.loadBoards(list.map((b) => b.meta), landed); } catch (err) { console.warn("[canvas] engine boards", err); }
+  try { await ev.loadBoards(loads.map((l) => l.meta), landed); } catch (err) { console.warn("[canvas] engine boards", err); }
   for (let i = 0; i < list.length; i++) if (!done.has(i)) landed(i, null); // the batch failed: retried after a backoff
   if (ev !== view0 || mode !== "engine") return;
   if (retryIn) setTimeout(scheduleVisible, retryIn + 20);
@@ -2387,13 +2420,16 @@ async function prefetchPages() {
       const k = rev + ":" + id;
       if (prefetched.has(k)) continue;
       // Never during a gesture or while the visible boards still load.
-      while (gesturing || drag || engineBusy || [...boards.values()].some((b) => b.loading)) { await new Promise((r) => setTimeout(r, 400)); if (!doc || doc.revision !== rev) return; }
+      while (gesturing || drag || engineBusy || [...boards.values()].some((b) => b.loading)) { await new Promise((r) => setTimeout(r, 400)); if (!doc || doc.revision !== rev || mode !== "engine") return; }
       prefetched.add(k);
       try {
         const meta = doc.boards.find((m) => m.id === id);
-        const sc = await fetch(api("/api/scene") + "&id=" + encodeURIComponent(id) + keyedQ(meta && meta.key)).then((r) => r.json());
+        const sc = await loadRequest(api("/api/scene") + "&id=" + encodeURIComponent(id) + keyedQ(meta && meta.key)).then((r) => r.json());
         const urls = [...(sc.images || []), ...(sc.fonts || []).map((f) => f && f.url).filter(Boolean)];
-        for (const u of urls) await fetch(u).then((r) => r.arrayBuffer()).catch(() => {});
+        for (const u of urls) {
+          if (!doc || doc.revision !== rev || mode !== "engine") return;
+          await loadRequest(u).then((r) => r.arrayBuffer()).catch(() => {});
+        }
       } catch {}
     }
   }
@@ -2455,7 +2491,11 @@ function useDom(note) {
   scheduleVisible();
   syncSel();
 }
-function engineFailed(note) { console.warn("[canvas] " + note + "; using the DOM renderer"); useDom(note); }
+function engineFailed(note) {
+  console.warn("[canvas] " + note + "; using the DOM renderer");
+  useDom(note);
+  say("Using the fallback renderer. " + note);
+}
 // The engine went away (its GPU device was lost: a driver reset, a GPU switch; or it threw): a new one starts after a
 // short wait and loads the boards again. The DOM renderer only when that keeps happening (engineRestartDelay).
 let engineMod = null; // /page/engine-view.js, once imported
@@ -2477,10 +2517,11 @@ function engineLost(note) {
 }
 async function startEngine() {
   try {
-    engineMod = await import("/page/engine-view.js");
+    engineMod = await wait(import("/page/engine-view.js"), LOAD_MS);
+    if (!engineMod) throw new Error("engine module timed out");
     const v = await engineMod.createEngineView({
       view, api, sceneEnv: SCENE_ENV, nativePreviews: document.documentElement.dataset.imagePreviews === "1",
-      showOverview: () => snapHold && !blueprint, waitForGpu: native, onChange: () => requestFlush(false), onLost: (why) => engineLost(why), getCam: () => cam, isIdle: () => !gesturing && !drag,
+      showOverview: () => snapHold && !blueprint, waitForGpu: native, onChange: () => requestFlush(false), onLost: engineLost, onStartFailed: engineFailed, getCam: () => cam, isIdle: () => !gesturing && !drag,
       posOf: (id) => { const b = boards.get(id); return b ? { x: b.meta.x, y: b.meta.y } : null; },
       orderOf: (id) => { const b = boards.get(id); return b ? b.idx : 1e9; },
       onLayout: () => { syncSel(); host.emit("render", null); },
@@ -2510,12 +2551,13 @@ window.__canvas = {
     return window.__canvas.inViewLoaded(PREFETCH) && !engineBusy && !camRaf;
   },
   // Every board in the view (and m views around it) is laid out at its current content.
-  inViewLoaded(m = 0) {
+  inViewLoaded(m = 0, allowFailed = true) {
     if (mode !== "engine" || !ev || !cam) return false;
     const L = -VW * m, T = -VH * m, R = VW * (1 + m), B = VH * (1 + m);
     for (const b of boards.values()) {
       const r = loadBox(b.meta, b.w, b.h, b.measured), sx = r.x * cam.z + cam.x, sy = r.y * cam.z + cam.y;
-      if (sx < R && sx + r.w * cam.z > L && sy < B && sy + r.h * cam.z > T && b.loadedKey !== b.meta.key && b.failedKey !== b.meta.key) return false;
+      if (sx < R && sx + r.w * cam.z > L && sy < B && sy + r.h * cam.z > T &&
+          b.loadedKey !== b.meta.key && (!allowFailed || b.failedKey !== b.meta.key)) return false;
     }
     return true;
   },
@@ -2606,7 +2648,7 @@ function perfPoll() {
     if (!engineBusy && !camRaf) perfAt("idle");
     if (perf.imgs === null && ev && ev.imagesPending() === 0 && window.__canvas.inViewLoaded(PREFETCH)) perfAt("imgs");
   }
-  if (!window.__canvas.settled() || (ev && ev.imagesPending() > 0)) return;
+  if (!window.__canvas.settled() || !window.__canvas.inViewLoaded(0, false) || ev.imagesPending() > 0) return;
   for (const w of perfWait) { perf[w.kind] = Math.round(now - w.t0); if (w.kind === "show") perf.shows++; if (w.kind === "page") perf.pages++; }
   // An empty view finishes at load. A failed visible board has no first-look mark.
   if (perf.look === null && ![...boards.values()].some(boardInView)) perf.look = perf.load;
@@ -3982,7 +4024,21 @@ if (!file) { say("Pick a file from the top-left menu."); }
 const reconnect = ${reconnectingStream};
 host.reconnectingStream = reconnect;
 const es = reconnect(() => api("/events") + (doc && doc.revision ? "&since=" + encodeURIComponent(doc.revision) : ""));
+const loadStatus = document.getElementById("load-status");
+let tabShown = true, docTimer = 0;
+function connectDoc() {
+  es.connect();
+  clearTimeout(docTimer);
+  if (!doc) docTimer = setTimeout(() => {
+    loadStatus.textContent = "The document did not load. Retrying…";
+    loadStatus.hidden = false;
+    es.close();
+    connectDoc();
+  }, LOAD_MS);
+}
 const onDoc = (d) => {
+  clearTimeout(docTimer);
+  loadStatus.hidden = true;
   // The first document waits for the pages (they follow on the same stream) so no other page's board loads.
   if (!pagesReady) {
     pendingDoc = d;
@@ -4042,7 +4098,14 @@ es.addEventListener("docdiff", (e) => {
   // Missed a revision: ask for the whole thing. A newer document that arrives first (the stream's full "doc", a
   // later fetch) wins: an answer that comes back after it would roll the canvas back.
   const g = ++docGen;
-  fetch(api("/api/doc")).then((r) => r.json()).then((full) => { if (g === docGen) onDoc(full); }).catch(() => {});
+  loadRequest(api("/api/doc")).then((r) => {
+    if (!r.ok) throw new Error("document request failed");
+    return r.json();
+  }).then((full) => {
+    if (g === docGen) onDoc(full);
+  }).catch(() => {
+    if (g === docGen && tabShown) { es.close(); connectDoc(); }
+  });
 });
 host.es = es;
 host.presenceEarly = [];
@@ -4053,12 +4116,11 @@ es.addEventListener('presence', e => {
 });
 // widgets.js is a deferred module; keep what the stream says before it starts listening.
 for (const n of ["hello", "widgets", "wdata"]) es.addEventListener(n, (e) => { if (host.early) host.early.push([n, e.data]); });
-if (file) es.connect();
-let tabShown = true;
+if (file) connectDoc();
 function setTabShown(on) {
   if (on === tabShown) return;
   tabShown = on;
-  if (on) { if (file) es.connect(); requestFlush(false); scheduleVisible(); } else { saveCam(); es.close(); }
+  if (on) { if (file) connectDoc(); requestFlush(false); scheduleVisible(); } else { saveCam(); clearTimeout(docTimer); es.close(); }
   host.emit("tab", on);
 }
 readViewBox();

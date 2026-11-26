@@ -12,7 +12,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const fail = (code, message) => Object.assign(new Error(message), { code });
 /** The highest zoom, 25600% (server.ts and the engine clamp there too). */
 const MAX_ZOOM = 256;
-const post = (path, body) => fetch(path, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
+const post = (path, body) => fetch(path, {
+  method: "POST", signal: AbortSignal.timeout(4000),
+  headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify(body),
+});
 
 // ---------- state ----------
 /** The rectangle around every given one (missing ones skipped), or null. */
@@ -362,7 +365,8 @@ function run(msg) {
       ack.ok = false;
       ack.error = { code: e.code || "failed", message: String(e.message || e).slice(0, 400) };
     }
-    try { await post("/api/ack", ack); } catch {}
+    // An acknowledgement that stalled must give the next command its turn.
+    try { await (await post("/api/ack", ack)).arrayBuffer(); } catch {}
   });
 }
 

@@ -215,3 +215,121 @@ sc("render", "after the engine traps, a new engine starts in a fresh wasm instan
   t.eq(r, "engine", "a new engine runs");
   await t.settle();
 });
+
+async function openSynthetic(t: T, script: string, run: (o: T, write: (width: number) => void) => Promise<void>, extraBoards = 0) {
+  const file = path.join(path.dirname(t.file), "Opening.canvas");
+  fs.mkdirSync(file);
+  const write = (width: number) => {
+    const doc = { version: "2.21", children: [
+      { id: "anna", type: "frame", name: "Anna", x: 0, y: 0, width: 300, height: 200, fill: "#FFFFFF", children: [
+        { id: "ben", type: "rectangle", name: "Ben", x: 10, y: 10, width, height: 40, fill: "#333333" },
+      ] },
+      ...Array.from({ length: extraBoards }, (_, i) => ({
+        id: "board-" + i, type: "frame", x: (i % 6 + 1) * 320, y: Math.floor(i / 6) * 240,
+        width: 300, height: 200, fill: "#FFFFFF",
+      })),
+    ] };
+    const next = path.join(file, "document.next");
+    fs.writeFileSync(next, JSON.stringify(doc));
+    fs.renameSync(next, path.join(file, "document.json"));
+  };
+  write(100);
+  // The playground's streams share an HTTP connection limit with tabs on its origin.
+  const srv = { ...t.srv, base: t.srv.base.replace("127.0.0.1", "localhost") };
+  const tab = await openTab(t.chromePort);
+  try {
+    await tab.page.send("Page.bringToFront");
+    await tab.page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
+    await tab.page.send("Page.addScriptToEvaluateOnNewDocument", { source: script });
+    await tab.page.goto(`${srv.base}/?file=${encodeURIComponent(file)}&shell=native`);
+    await run(new T(tab.page, file, srv), write);
+  } finally {
+    await tab.close();
+    await t.page.send("Page.bringToFront");
+  }
+}
+
+sc("render", "a stalled native GPU fence falls back and draws the board", { covers: ["renderer-fallback:gpu-fence"], skip: { visual: "uses a separate synthetic file" } }, async (t: T) => {
+  await openSynthetic(t, `
+    const fence = GPUQueue.prototype.onSubmittedWorkDone;
+    GPUQueue.prototype.onSubmittedWorkDone = function () {
+      if (!new Error().stack.split("\\n")[2]?.includes("/page/engine-view.js:")) return fence.call(this);
+      window.stalledFence = true;
+      return new Promise(() => {});
+    };
+  `, async (o) => {
+    await o.waitFor("window.stalledFence", "the page's GPU fence to stall");
+    await o.waitFor("window.__canvas.renderer === 'dom' && !!window.canvasHost.worldRectOf('ben')", "the stalled GPU fence to fall back and draw", 9000);
+    t.ok(/GPU/.test(await o.ev<string>("window.__canvas.note")), "the fallback explains the GPU failure");
+  });
+});
+
+sc("render", "a stalled scene stream retries before reporting a completed load", { covers: ["renderer-fallback:scene-stream"], skip: { visual: "uses a separate synthetic file" } }, async (t: T) => {
+  await openSynthetic(t, `
+    const realFetch = window.fetch;
+    window.fetch = (url, init) => {
+      if (String(url).includes("/api/scenes?") && !window.stalledStream) {
+        window.stalledStream = true;
+        return Promise.resolve(new Response(new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () => controller.error(init.signal.reason), { once: true });
+          },
+        })));
+      }
+      return realFetch(url, init);
+    };
+  `, async (o) => {
+    await o.waitFor("window.stalledStream", "the bulk scene stream to stall");
+    await o.waitFor("window.canvasHost.worldRectOf('ben') && canvasHost.perf.load !== null", "the retry to draw and finish reporting", 21000);
+    const { load, landed } = await o.ev("window.canvasHost.perf");
+    t.ok(landed !== null && load >= landed, "load is measured after a board actually lands");
+  }, 48);
+});
+
+sc("render", "external writes during engine startup recover from a stalled scene", { covers: ["renderer-fallback:scene-reload"], skip: { visual: "uses a separate synthetic file" } }, async (t: T) => {
+  await openSynthetic(t, `
+    const request = GPUAdapter.prototype.requestDevice;
+    GPUAdapter.prototype.requestDevice = async function (...args) {
+      await new Promise(resolve => { window.releaseDevice = resolve; });
+      return request.apply(this, args);
+    };
+    const realFetch = window.fetch;
+    window.fetch = (url, init) => {
+      if (url === "/api/ack" && window.stallAck) {
+        window.stallAck = false;
+        return new Promise((_, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+        });
+      }
+      if (String(url).includes("/api/scene?") && !window.stalledScene) {
+        window.stalledScene = true;
+        return Promise.resolve(new Response(new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () => controller.error(init.signal.reason), { once: true });
+          },
+        })));
+      }
+      return realFetch(url, init);
+    };
+  `, async (o, write) => {
+    const rev = await o.waitFor<string>("window.releaseDevice && window.canvasHost.doc?.revision", "the first revision during startup");
+    write(120);
+    await o.waitFor(`window.canvasHost.doc.revision !== ${JSON.stringify(rev)}`, "the external revision during startup");
+    t.eq(await o.ev("window.__canvas.renderer"), "pending", "the engine is still starting");
+    await o.ev("window.releaseDevice()");
+    await o.waitFor("window.stalledScene", "the first scene body's stall");
+    await o.waitFor("window.canvasHost.worldRectOf('ben')?.w === 120", "the same revision to load after the stalled scene", 20000);
+    t.eq(await o.ev("window.__canvas.renderer"), "engine", "a stalled scene recovers on the engine");
+    write(130);
+    await o.waitFor("window.canvasHost.worldRectOf('ben')?.w === 130", "the next external revision to draw");
+    write(140);
+    write(150);
+    await o.waitFor("window.canvasHost.worldRectOf('ben')?.w === 150", "the last of consecutive writes to draw");
+    const measure = (timeoutMs: number) => o.a.post("/api/bridge/cmd", { file: o.file, op: "measure", args: { ids: ["ben"] }, timeoutMs });
+    t.ok((await measure(2000)).result.nodes[0].drawn, "the bridge measures the updated board");
+    await o.ev("window.stallAck = true");
+    const code = await measure(500).then(() => null, (e) => e.body?.error?.code);
+    t.eq(code, "timeout", "the stalled acknowledgement times out");
+    t.ok((await measure(6500)).result.nodes[0].drawn, "a stalled acknowledgement does not block the next command");
+  });
+});

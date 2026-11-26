@@ -6,6 +6,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { after, describe, test } from "node:test";
 import { tmpDir } from "./helpers.ts";
+import { sceneOf } from "../src/scene.ts";
 
 const dir = tmpDir("scene");
 process.env.CANVAS_ROOTS = dir;
@@ -87,6 +88,25 @@ const server = await startServer(0); // a free port of its own: fixed ones clash
 server.maxRequestsPerSocket = 1;
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 const q = (s: string) => `?file=${encodeURIComponent(real)}${s}`;
+
+test("a scene looks up slow web font families together and reuses each result across weights", async (t) => {
+  process.env.CANVAS_WEB_FONTS = "1";
+  t.after(() => { process.env.CANVAS_WEB_FONTS = "0"; });
+  let active = 0, peak = 0;
+  const calls = t.mock.method(globalThis, "fetch", async () => {
+    peak = Math.max(peak, ++active);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    active--;
+    throw new Error("font provider timed out");
+  });
+  const texts = ["Anna Font", "Ben Font", "Anna Font"].map((fontFamily, i) => ({
+    id: `text-${i}`, type: "text", content: "Anna", fontFamily, fontWeight: 400 + i * 100, fontSize: 16,
+  }));
+  const scene = await sceneOf({ version: "2.21", children: [{ id: "board", type: "frame", children: texts }] }, real, "board");
+  assert.ok(scene.fonts.some((f) => f.fallback), "fallback faces are still included");
+  assert.ok(peak > 1, "a slow family does not hold up the others");
+  assert.equal(calls.mock.callCount(), 4, "two stylesheets per family, even when a lookup fails");
+});
 
 after(() => {
   fs.unwatchFile(real);

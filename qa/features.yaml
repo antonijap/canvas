@@ -109,7 +109,7 @@ features:
     name: DOM renderer when WebGPU is missing; a new engine after one traps, never stuck pending
     area: canvas
     driven: [page]
-    cases: [tiny, large, engine-restart]
+    cases: [tiny, large, engine-restart, gpu-fence, scene-reload, scene-stream]
 
   # ------------------------------------------------------------ selection
   - id: select-click

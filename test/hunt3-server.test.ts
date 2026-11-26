@@ -303,7 +303,9 @@ describe("codex hunt 3: page script guards (source)", () => {
     assert.doesNotMatch(flush, /groupItems\(\)/);
   });
   test("b4 a document recovery fetch that a newer document overtook is dropped", () => {
-    assert.match(page, /const g = \+\+docGen;\s*fetch\(api\("\/api\/doc"\)\)[^\n]*if \(g === docGen\) onDoc\(full\)/);
+    const recovery = page.slice(page.indexOf("const g = ++docGen;"), page.indexOf("host.es = es;"));
+    assert.match(recovery, /loadRequest\(api\("\/api\/doc"\)\)/);
+    assert.match(recovery, /if \(g === docGen\) onDoc\(full\)/);
     assert.match(page, /es\.addEventListener\("doc", \(e\) => \{ docGen\+\+;/);
   });
   test("b3 a shader source fetched for a removed card never reaches the engine", () => {

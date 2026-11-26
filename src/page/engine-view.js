@@ -39,7 +39,7 @@ export const SMALL_IMAGE_SIDE = 512;
  *         orderOf(id) -> its index in the document (paint order), onLayout() (boards were laid out again),
  *         rebase(id, scene, fetchedAt) -> true when it put live edits on a server scene (src/page/live.js) }
  */
-export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, nativePreviews = false, showOverview = () => true, rebase = () => false }) {
+export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, onStartFailed = onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, nativePreviews = false, showOverview = () => true, rebase = () => false }) {
   if (!navigator.gpu) throw new Error("no WebGPU");
   const canvas = document.createElement("canvas");
   canvas.id = "engine";
@@ -48,7 +48,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   const start = async () => {
     const started = await startEngine(canvas);
     device = started.device;
-    if (late) { started.engine.free(); return null; }
+    if (late) { try { started.engine.free(); } finally { device?.destroy(); } return null; }
     return started.engine;
   };
   try {
@@ -59,17 +59,21 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     throw e;
   }
   let dead = false;
+  const viewAbort = new AbortController();
+  const request = (url, init) => fetch(url, {
+    ...init, signal: AbortSignal.any([viewAbort.signal, AbortSignal.timeout(RESOURCE_MS)]),
+  });
   let gpuReady = !waitForGpu || !device;
   if (!gpuReady) {
     // Vello submits its pipeline creation in the first task after Engine.create. Fence that work
     // before presenting so WebKit does not wait in the compositor while scenes and images arrive.
     const queue = device.queue;
-    setTimeout(() => {
+    setTimeout(async () => {
       if (dead) return;
-      void queue.onSubmittedWorkDone().catch(() => {}).then(() => {
-        gpuReady = true;
-        if (!dead) onChange();
-      });
+      try { await gpuFence(queue); }
+      catch (e) { if (!dead) onStartFailed(e.message); return; }
+      gpuReady = true;
+      if (!dead) onChange();
     }, 0);
   }
   if (device) device.lost.then((info) => { if (!dead) onLost("GPU device lost: " + (info && (info.message || info.reason) || "unknown")); });
@@ -113,7 +117,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   const fetchFont = (url) => {
     let p = fontFetch.get(url);
     if (!p) {
-      p = fetch(url).then(async (r) => (r.ok ? { bytes: new Uint8Array(await r.arrayBuffer()), weight: Number(r.headers.get("x-font-weight")) || 0, style: r.headers.get("x-font-style") || "" } : null)).catch(() => null);
+      p = request(url).then(async (r) => (r.ok ? { bytes: new Uint8Array(await r.arrayBuffer()), weight: Number(r.headers.get("x-font-weight")) || 0, style: r.headers.get("x-font-style") || "" } : null)).catch(() => { fontFetch.delete(url); return null; });
       fontFetch.set(url, p);
     }
     return p;
@@ -143,7 +147,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     if (warmed || dead) return;
     warmed = true;
     let list = [];
-    try { list = (await (await fetch(api("/api/scene/fonts"))).json()).fonts || []; } catch { return; }
+    try { list = (await (await request(api("/api/scene/fonts"))).json()).fonts || []; } catch { return; }
     const idle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 2000 }) : setTimeout(fn, 150));
     const tried = new Set(); // a face whose fetch failed is not asked for again in a loop
     const next = () => {
@@ -283,7 +287,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   }
 
   let bulkOverview = false, previewUnavailable = false, previewTimer = 0, previewActive = 0;
-  const previewQueue = new Map(), previewAbort = new AbortController();
+  const previewQueue = new Map();
   function queuePreview(url, m) {
     if (!bulkOverview || previewUnavailable || m.cap || m.busy || m.overview || m.previewFailed) return;
     const file = localJpegPath(url);
@@ -312,7 +316,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     let records;
     try {
       if (!previewUnavailable) {
-        const res = await fetch("/api/image-previews", { method: "POST", signal: previewAbort.signal,
+        const res = await request("/api/image-previews", { method: "POST",
           headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify(jobs.map((j) => j.file)) });
         if (res.status === 404) previewUnavailable = true;
         if (res.ok) records = previewRecords(await res.arrayBuffer(), jobs.length);
@@ -349,7 +353,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       simpleOverview ||= createImageOverview();
       for (const { m } of thumbnails) m.busy = true;
       try {
-        const tiles = await simpleOverview.add(thumbnails);
+        const tiles = await withTimeout(simpleOverview.add(thumbnails), RESOURCE_MS, "image overview did not finish");
         if (tiles) for (const [i, { m }] of thumbnails.entries()) m.previewTile = tiles[i];
       } catch {
         if (!dead) endOverview();
@@ -389,7 +393,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     const m = imageOf(url);
     m.busy = true;
     const onMain = async () => {
-      const response = await fetch(url);
+      const response = await request(url);
       if (!response.ok) throw Object.assign(new Error(String(response.status)), { status: response.status });
       const blob = await response.blob();
       const decoded = await bitmapFromBlob(blob, cap).catch((cause) => {
@@ -400,7 +404,16 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     const viaWorker = decodeOffThread(url, cap);
     // A worker that could not decode (no ImageBitmap in workers, the worker died): this image on the main thread,
     // and when that works the worker is the problem (counted; a broken file fails both and counts nothing).
-    return (viaWorker ? viaWorker.catch((e) => (e && e.status ? Promise.reject(e) : onMain().then((r) => { workerFailed(); return r; }))) : onMain()).then((r) => (url.includes("#adjust=") ? adjusted(url, r) : r)).then(({ bm, nw, nh, opaque, etag, cached }) => {
+    const decoded = viaWorker ? viaWorker.catch((e) => {
+      if (dead || e?.status) throw e;
+      return onMain().then((r) => { workerFailed(); return r; });
+    }) : onMain();
+    let expired = false;
+    const bitmap = decoded.then((r) => (url.includes("#adjust=") ? adjusted(url, r) : r)).then((r) => {
+      if (expired) r.bm.close();
+      return r;
+    });
+    return withTimeout(bitmap, 2 * RESOURCE_MS, "image decode did not finish").then(({ bm, nw, nh, opaque, etag, cached }) => {
       m.busy = false;
       if (dead) { bm.close(); return; } // the engine is gone: nobody will ever draw it
       // The board that wanted it left (another page, a removal) while it decoded: never register it.
@@ -418,6 +431,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       if (cached) previewHits++;
       onChange();
     }).catch((e) => {
+      expired = true;
       m.busy = false;
       const gone = imageUnavailable(e);
       if (!gone || !toldGone.has(url)) console.warn("[canvas] image", url, e && e.message);
@@ -527,7 +541,16 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       } catch { decoder = false; return null; }
     }
     const d = decoder, id = ++d.seq;
-    return new Promise((res, rej) => { d.jobs.set(id, { res, rej }); d.worker.postMessage({ id, url: new URL(url, location.href).href, cap }); });
+    const job = new Promise((res, rej) => { d.jobs.set(id, { res, rej }); d.worker.postMessage({ id, url: new URL(url, location.href).href, cap }); });
+    return withTimeout(job, RESOURCE_MS, "image worker did not finish").catch((e) => {
+      if (d.jobs.has(id)) {
+        d.worker.terminate();
+        if (decoder === d) decoder = null;
+        for (const j of d.jobs.values()) j.rej(e);
+        d.jobs.clear();
+      }
+      throw e;
+    });
   }
 
   // ---- boards
@@ -565,9 +588,8 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     const placeOne = (i, g) => {
       const j = jobs[i];
       let r = null;
-      if (!g || g.scene.error) r = null;
-      else if (dead || j.seq !== j.rec.seq || loaded.get(j.meta.id) !== j.rec) r = { stale: true };
-      else { try { r = place(j.meta, j.rec, g.scene, g.text, j.t); } catch (e) { console.warn("[canvas] engine board " + j.meta.id, e); } }
+      if (dead || j.seq !== j.rec.seq || loaded.get(j.meta.id) !== j.rec) r = { stale: true };
+      else if (g && !g.scene.error) { try { r = place(j.meta, j.rec, g.scene, g.text, j.t); } catch (e) { console.warn("[canvas] engine board " + j.meta.id, e); } }
       out[i] = r;
       if (onEach && !dead) onEach(i, r);
     };
@@ -591,7 +613,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     async function loadGroup(indices) {
       const got = await Promise.all(indices.map((i) => {
         const { meta } = jobs[i];
-        return fetch(sceneUrl(api, meta.id, meta.key, sceneEnv)).then((r) => r.text())
+        return request(sceneUrl(api, meta.id, meta.key, sceneEnv)).then((r) => r.text())
           .then((text) => ({ text, scene: JSON.parse(text) })).catch(() => null);
       }));
       await registerFonts(fontsOf(got));
@@ -610,17 +632,25 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
    * read at all (the caller fetches the boards one by one); a board that did not come is left null (retried).
    */
   async function loadBulk(jobs, order, each) {
+    const abort = new AbortController();
+    try {
+      return await readBulk(jobs, order, each, AbortSignal.any([viewAbort.signal, abort.signal]));
+    } finally {
+      abort.abort();
+    }
+  }
+  async function readBulk(jobs, order, each, signal) {
     const index = new Map(jobs.map((j, i) => [j.meta.id, i]));
     let r;
     try {
-      r = await fetch(api("/api/scenes"), { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ ids: order.map((i) => jobs[i].meta.id) }) });
+      r = await withTimeout(fetch(api("/api/scenes"), { method: "POST", signal, headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ ids: order.map((i) => jobs[i].meta.id) }) }), RESOURCE_MS, "scene stream did not start");
     } catch { return false; }
     if (!r.ok || !r.body) return false;
     const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
     let buf = "", head = null;
     for (;;) {
       let chunk;
-      try { chunk = await reader.read(); } catch { break; }
+      try { chunk = await withTimeout(reader.read(), RESOURCE_MS, "scene stream stopped"); } catch { break; }
       if (chunk.value) buf += chunk.value;
       const group = [];
       let at = 0;
@@ -795,7 +825,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   }
   /** Fetch a board's scene into the cache without drawing it (the first edit of a board the cache let go). */
   function fetchScene(id) {
-    return fetch(api("/api/scene") + "&id=" + encodeURIComponent(id)).then((r) => r.text()).then((text) => {
+    return request(api("/api/scene") + "&id=" + encodeURIComponent(id)).then((r) => r.text()).then((text) => {
       const s = JSON.parse(text);
       if (s.error || !loaded.has(id) || scenes.has(id)) return !s.error && loaded.has(id);
       keepScene(id, text);
@@ -915,13 +945,13 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   }
 
   return {
-    engine, get canvas() { return drawnCanvas(); },
+    engine, get canvas() { return drawnCanvas(); }, get waitingForGpu() { return !gpuReady; },
     setCam: (c) => engine.setCamera(c.x, c.y, c.z),
     frame(show = true) {
       if (show && overviewFrame(getCam())) return false;
       if (!presenting) {
         if (!show) return false;
-        if (!gpuReady) return true;
+        if (!gpuReady) return false;
         presenting = true;
         view.prepend(canvas);
       }
@@ -987,7 +1017,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       // The engine is gone, so the bitmaps it held can be closed now.
       for (const m of images.values()) if (m.bm) { try { m.bm.close(); } catch {} m.bm = null; }
       simpleOverview?.destroy();
-      previewAbort.abort();
+      viewAbort.abort();
       clearTimeout(previewTimer);
       previewQueue.clear();
       images.clear();
@@ -1031,7 +1061,7 @@ export async function warmEngine(canvas) {
     do {
       engine.frame();
       if (engine.pictureState()[3] === 1) {
-        await device.queue.onSubmittedWorkDone();
+        await gpuFence(device.queue);
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 16));
@@ -1048,6 +1078,11 @@ export async function warmEngine(canvas) {
 let engineStarts = 0;
 /** How long an engine may take to start before the page draws with the DOM instead (it never stays pending). */
 export const ENGINE_START_MS = 15_000;
+const RESOURCE_MS = 15_000;
+async function gpuFence(queue) {
+  try { await withTimeout(queue.onSubmittedWorkDone(), 5000, "timed out"); }
+  catch (e) { throw new Error("GPU startup fence " + (e?.message || e)); }
+}
 /**
  * The engine's module URL for the `n`th engine started in this page (0 first): the first uses the plain URL, every
  * later one its own query, so the browser instantiates the wasm again instead of handing back the instance the lost
@@ -1057,7 +1092,7 @@ export const engineModuleUrl = (n) => "/engine/canvas_engine.js" + (n > 0 ? "?i=
 /** `p`, or a rejection with `message` after `ms`. */
 export function withTimeout(p, ms, message) {
   let t;
-  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new Error(message)), ms); })]).finally(() => clearTimeout(t));
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(new DOMException(message, "TimeoutError")), ms); })]).finally(() => clearTimeout(t));
 }
 
 /** Images decoding at once in the decoder worker (an 8k decode holds 256 MB until it is shrunk). */
@@ -1294,7 +1329,13 @@ export const PLACE_SLICE_MS = 8;
 /** and while the camera is still (opening a file, a page switch: the view fills sooner, nothing moves). */
 export const PLACE_SLICE_IDLE_MS = 20;
 /** The next slice: right after the next frame (or a task, in a hidden page, where rAF does not run). */
-const nextSlice = () => new Promise((r) => (typeof document !== "undefined" && !document.hidden ? requestAnimationFrame(() => setTimeout(r, 0)) : setTimeout(r, 0)));
+const nextSlice = () => new Promise((resolve) => {
+  if (document.hidden) { setTimeout(resolve, 0); return; }
+  // A view can stop receiving animation frames after this check.
+  const next = () => { clearTimeout(timer); cancelAnimationFrame(frame); resolve(); };
+  const timer = setTimeout(next, 50);
+  const frame = requestAnimationFrame(() => setTimeout(next, 0));
+});
 
 /** Run fn(item) over items, yielding (await next()) whenever a slice has used budgetMs (a number, or a function
  * asked at each check); every slice runs at least one. */
@@ -1523,7 +1564,7 @@ export function decodeScale(w, h, cap) {
 }
 
 /** An asset that answered but cannot be drawn can settle while its retries continue. */
-export const imageUnavailable = (error) => !!(error && (error.invalidBitmap || (error.status >= 400 && error.status < 500)));
+export const imageUnavailable = (error) => !!(error && (error.invalidBitmap || error.name === "TimeoutError" || (error.status >= 400 && error.status < 500)));
 
 /**
  * Bounded backoff for an image that could not be drawn: 1 s, 2 s, 4 s ... at most 30 s. That covers a missing file

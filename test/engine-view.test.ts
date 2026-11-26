@@ -408,8 +408,9 @@ test("a resize draws in the same task, with the page's camera", async () => {
 });
 
 
-test("an unreadable bitmap can settle while transient fetch failures remain pending", () => {
+test("an unreadable or timed-out image can settle while other transient fetch failures remain pending", () => {
   assert.equal(imageUnavailable({ invalidBitmap: true }), true);
+  assert.equal(imageUnavailable(new DOMException("image did not load", "TimeoutError")), true);
   assert.equal(imageUnavailable({ status: 404 }), true);
   assert.equal(imageUnavailable({ status: 503 }), false);
   assert.equal(imageUnavailable(new Error("network error")), false);

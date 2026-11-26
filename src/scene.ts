@@ -301,14 +301,19 @@ async function fontRefs(uses: TextUse[], c: Ctx): Promise<FontRef[]> {
     if (!seen.has(k)) out.push(r), seen.add(k);
   };
   const docFonts = new Set((Array.isArray(c.doc.fonts) ? (c.doc.fonts as { name?: string }[]) : []).map((f) => String(f.name ?? "").toLowerCase()));
-  const web = webFontsOn();
+  // Start each web family together. A failed lookup still serves every weight on this board, and the next scene can retry.
+  const webFaces = new Map<string, ReturnType<typeof googleFaces>>();
+  if (webFontsOn()) for (const { family } of uses) {
+    const key = family.toLowerCase();
+    if (!webFaces.has(key) && !docFonts.has(key) && !isSystemFamily(family)) webFaces.set(key, googleFaces(family));
+  }
   sfCoverage ??= coverageOfFile("/System/Library/Fonts/SFNS.ttf");
   const missing = new Map<string, { weight: number; style: "normal" | "italic"; cps: Set<number> }>();
   for (const u of uses) {
     let covered: ((cp: number) => boolean) | undefined;
-    const askGoogle = web && !docFonts.has(u.family.toLowerCase()) && !isSystemFamily(u.family);
-    const google = askGoogle ? pickGoogle(await googleFaces(u.family), u.weight, u.style === "italic") : [];
-    if (askGoogle && googleFailed(u.family)) c.transient = true; // offline: the faces may be there next time
+    const faces = webFaces.get(u.family.toLowerCase());
+    const google = faces ? pickGoogle(await faces, u.weight, u.style === "italic") : [];
+    if (faces && googleFailed(u.family)) c.transient = true; // offline: the faces may be there next time
     if (google.length) {
       // Only the subsets the text touches, the way the browser only downloads those.
       const need = google.filter((g) => [...u.cps].some((cp) => !isWhite(cp) && g.ranges.some(([a, b]) => cp >= a && cp <= b)));
@@ -530,7 +535,12 @@ async function bulkScenes(url: URL, res: http.ServerResponse, snapOf: (file: str
     } catch (e) {
       out = JSON.stringify({ id, key, error: (e as Error).message }) + "\n";
     }
-    if (!res.write(out)) await new Promise<void>((r) => { res.once("drain", r); res.once("close", r); });
+    if (res.destroyed) return;
+    if (!res.write(out)) await new Promise<void>((resolve) => {
+      const done = () => { res.off("drain", done); res.off("close", done); resolve(); };
+      res.once("drain", done);
+      res.once("close", done);
+    });
     if (performance.now() - t0 > 8) {
       await new Promise<void>((r) => setImmediate(r));
       t0 = performance.now();
