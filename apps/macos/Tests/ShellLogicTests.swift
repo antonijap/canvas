@@ -744,6 +744,14 @@ struct ShellLogicTests {
         check(symbolTools.map(\.symbol) == ["number", "square", "circle", "note", "face.smiling", "checkmark.square", "timer"],
               "palette tools use the expected SF Symbols")
         check(DrawTool.allCases.allSatisfy { !$0.symbol.hasSuffix(".fill") }, "palette symbols use outline variants")
+        check(KeyframesTool.title == "Keyframes" && KeyframesTool.keycap == "⌥⌘T", "Keyframes shows the timeline shortcut")
+        for height: CGFloat in [0, 280] {
+            for hasLayer in [false, true] {
+                check(KeyframesTool.enabled(hasLayer: hasLayer, timelineHeight: height) == (hasLayer || height > 0),
+                      "Keyframes is enabled with a layer or an open timeline")
+            }
+            check(KeyframesTool.active(timelineHeight: height) == (height > 0), "only an open timeline activates Keyframes")
+        }
     }
 
     // Sidebar resize: the editor panel and the Home sidebar share one set of rules.

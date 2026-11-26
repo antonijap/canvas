@@ -11,9 +11,11 @@
   z-index: 12;
   bottom: 0;
   height: 280px;
+  box-sizing: border-box;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: grid;
   grid-template-rows: 41px minmax(0, 1fr);
-  background: #232326f2;
+  background: #232326;
   color: var(--mt-fg);
   color-scheme: dark;
   font: 400 12px/1 "SF Pro", -apple-system, BlinkMacSystemFont, sans-serif;

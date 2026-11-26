@@ -155,18 +155,26 @@ function installTimeline(host) {
   let open = false, shown = !document.hidden, selected = null, dismissed = false, manual = false, model = null, request = null, unwatch = null;
   let layers = [], byId = new Map(), rowId, keyIndex = 0, collapsed = new Set(), readouts = [];
   let scale = 1, length = 0, time = 0, loopPreview = false, frame = 0, started = 0, drag = null, pinchScale = 1;
-  let controls = null, resize = null, curl = null;
+  let controls = null, resize = null, curl = null, reportedHeight = 0;
   const axisX = t => axisInset + t * scale;
   const selectedRow = () => byId.get(rowId);
   const seek = t => { time = clamp(t, 0, length); updateTime(); if (model) host.motion?.seek(model.board, time); };
   const writable = () => !host.readOnly && !!model && !model.failed;
 
   function place() {
-    const rect = host.view.getBoundingClientRect(), { l, r } = host.insets;
-    const inset = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--c-inset")) || 10;
-    panel.style.left = rect.left + (host.native ? l || 0 : 0) + "px";
-    panel.style.right = innerWidth - rect.right + (host.native && r > inset ? r : 0) + "px";
+    const rect = host.view.getBoundingClientRect(), { l, r, clearance } = host.timelineInsets;
+    panel.style.left = rect.left + l + "px";
+    panel.style.right = innerWidth - rect.right + r + "px";
+    panel.style.maxHeight = Math.max(0, rect.height - clearance) + "px";
     drawRuler();
+    reportHeight();
+  }
+  function reportHeight() {
+    const height = open ? panel.offsetHeight : 0;
+    if (reportedHeight === height) return;
+    reportedHeight = height;
+    host.emit("timeline", height);
+    if (host.native) host.post({ timelineHeight: height });
   }
   function show(on) {
     if (open === on) return;
@@ -190,9 +198,7 @@ function installTimeline(host) {
     }
     panel.inert = !on;
     panel.toggleAttribute("data-open", on);
-    const height = on ? panel.offsetHeight : 0;
-    host.emit("timeline", height);
-    if (host.native) host.post({ timelineHeight: height });
+    if (!on) reportHeight();
   }
 
   function watch(on) {

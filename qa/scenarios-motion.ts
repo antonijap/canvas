@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { RECORDER_JS } from "./frames.ts";
 import { sc, type T } from "./harness.ts";
-import { sleep } from "./lib.ts";
+import { gradientPng, sleep } from "./lib.ts";
 
 const hoverBoard = (id: string, x: number, children: object[]) => ({
   type: "frame", id, name: id, x, y: 10000, width: 220, height: 130, layout: "none", fill: "#203040", children,
@@ -698,7 +698,7 @@ sc("motion-timeline", "timeline entry points add the first property in one undo 
   t.eq(await t.ev("window.timelineHeights.at(-1)"), 0, "the shortcut closes the same panel");
   await t.ev("window.canvasCmd({cmd:'motionTimeline'})");
   await t.waitFor(isOpen, "the View menu command to reopen the panel");
-  await t.ev("window.canvasCmd({cmd:'insets',l:90,t:40,r:280,b:60})");
+  await t.ev("window.canvasCmd({cmd:'insets',l:90,t:40,r:280,b:60,timelineInsets:{l:80,r:270,clearance:0}})");
 
   const menu = ".mt-add-property select";
   t.eq(await t.ev("document.querySelector('.mt-group-label').textContent"), "Card", "the selected layer has a row");
@@ -745,14 +745,42 @@ sc("motion-timeline", "timeline entry points add the first property in one undo 
   await t.clearSel();
 });
 
-sc("motion-timeline", "timeline follows board selection and respects side insets", {
-  covers: ["motion-timeline:selection"], skip: { visual: "Asserts panel geometry and selection with real keyboard input." },
+sc("motion-timeline", "timeline docks at the sidebar and window edges", {
+  covers: ["motion-timeline:docking"], skip: { visual: "Measures the dock against the sidebar widths sent by the shell." },
+}, async (t: T) => {
+  await t.page.send("Page.addScriptToEvaluateOnNewDocument", { source: `
+    window.webkit = { messageHandlers: { canvasState: { postMessage: raw => {
+      const { timelineHeight } = JSON.parse(raw);
+      if (timelineHeight != null) window.dockHeight = timelineHeight;
+    } } } };
+  ` });
+  await openTimeline(t);
+  for (const [left, right] of [[240, 260], [0, 260], [280, 0], [0, 0]]) {
+    await t.ev(`window.canvasCmd({cmd:'insets',l:${left ? left + 10 : 0},t:40,r:${right + 10},b:60,timelineInsets:{l:${left},r:${right},clearance:0}})`);
+    t.eq(await t.ev(`(() => {
+      const p = document.querySelector(${JSON.stringify(timelinePanel)}).getBoundingClientRect();
+      return [p.left, innerWidth - p.right, innerHeight - p.bottom, p.height];
+    })()`), [left, right, 0, 280], "the dock meets the exact sidebar or window edges at its reported height");
+  }
+  t.eq(await t.ev(`(() => {
+    const style = getComputedStyle(document.querySelector('.motion-timeline'));
+    return [style.borderTopWidth, style.borderTopColor, style.borderRadius];
+  })()`), ["1px", "rgba(255, 255, 255, 0.08)", "0px"], "the dock has a hairline and square corners");
+  t.eq(await t.ev("getComputedStyle(document.querySelector('.motion-timeline')).transitionDuration"), "0s", "reduced motion skips the slide");
+
+  await t.ev("window.canvasCmd({cmd:'insets',l:250,t:60,r:270,b:60,timelineInsets:{l:240,r:260,clearance:180}})");
+  for (const [height, expected] of [[420, 240], [600, 280]]) {
+    await t.page.send("Emulation.setDeviceMetricsOverride", { width: 760, height, deviceScaleFactor: 1, mobile: false });
+    await t.waitFor(`window.dockHeight === ${expected}`, "the shell to receive the dock's resized height");
+    t.eq(await t.ev(`document.querySelector(${JSON.stringify(timelinePanel)}).getBoundingClientRect().bottom`), height,
+      "the dock stays flush at the bottom as its height changes");
+  }
+});
+
+sc("motion-timeline", "timeline follows board selection", {
+  covers: ["motion-timeline:selection"], skip: { visual: "Exercises selection and the keyboard shortcut." },
 }, async (t: T) => {
   await openTimeline(t);
-  await t.ev("window.canvasCmd({cmd:'insets',l:90,t:40,r:280,b:60})");
-  t.eq(await t.ev(`(() => { const p = document.querySelector(${JSON.stringify(timelinePanel)}).getBoundingClientRect(); return [p.x, innerWidth-p.right, innerHeight-p.bottom, p.height]; })()`),
-    [90, 280, 0, 280], "the panel clears both sidebars");
-  t.eq(await t.ev("getComputedStyle(document.querySelector('.motion-timeline')).transitionDuration"), "0s", "reduced motion skips the slide");
   for (const id of ["tl_board", "tl_plain"]) {
     await t.select([id]);
     await t.waitFor(`document.querySelector(${JSON.stringify(timelinePanel)})`, "the selected layer's board timeline");
@@ -764,6 +792,68 @@ sc("motion-timeline", "timeline follows board selection and respects side insets
   await t.waitFor(`document.querySelector(${JSON.stringify(timelinePanel)})`, "the shortcut reopens the timeline");
   await t.clearSel();
   t.eq(await t.ev(`!!document.querySelector(${JSON.stringify(timelinePanel)})`), false, "deselecting closes the timeline");
+});
+
+const keyframeShape = { width: 48, height: 32, fill: "#FF8040" };
+const keyframeLayers = [
+  ["board frame", null],
+  ["nested frame", { ...keyframeShape, type: "frame", layout: "none" }],
+  ["group", { type: "group", children: [{ id: "tl_group_shape", type: "rectangle", ...keyframeShape }] }],
+  ["text", { type: "text", content: "Move", fontSize: 20, fill: "#FF8040" }],
+  ["image", { ...keyframeShape, type: "rectangle", fill: { type: "image", url: "images/keyframes.png", mode: "fill" } }],
+  ["rectangle", { ...keyframeShape, type: "rectangle" }],
+  ["ellipse", { ...keyframeShape, type: "ellipse" }],
+  ["vector shape", { ...keyframeShape, type: "path", geometry: "M0 0 L48 0 L30 32 L0 32 Z", viewBox: [0, 0, 48, 32] }],
+  ["component instance", { type: "ref", ref: "tl_component" }],
+] as const;
+
+for (const [kind, layer] of keyframeLayers) sc("motion-timeline", `first keyframes play on ${kind}`, {
+  covers: ["motion-timeline:first-keyframes"], skip: { visual: "Samples rendered motion and the restored canvas pose." },
+}, async (t: T) => {
+  const board = "tl_first_board", id = layer ? "tl_first_layer" : board;
+  if (kind === "image") {
+    const images = path.join(t.file, "images");
+    fs.mkdirSync(images, { recursive: true });
+    fs.writeFileSync(path.join(images, "keyframes.png"), gradientPng(48, 32));
+  }
+  const nodes: object[] = [hoverBoard(board, 10000, layer ? [{ ...layer, id, name: "First motion", x: 24, y: 24 }] : [])];
+  if (kind === "component instance") nodes.push({ ...hoverBoard("tl_component", 10400, []), ...keyframeShape, reusable: true });
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes });
+  await t.open({ native: true });
+  await t.focus(board);
+  await t.select([id]);
+  await t.ev(`window.canvasCmd({cmd:'motionTimeline',id:${JSON.stringify(id)}})`);
+
+  const row = `${timelinePanel} .mt-line[data-layer-id="${id}"]`;
+  const menu = `${row} .mt-add-property select`;
+  const select = `document.querySelector(${JSON.stringify(menu)})`;
+  await t.waitFor(select, "the selected layer's empty timeline row");
+  t.eq(await t.ev(`Array.from(${select}.options).filter(o => !o.disabled && o.value).map(o => o.value)`),
+    ["translateX", "translateY", "scale", "rotate", "opacity"], "the first property choices are enabled");
+  t.eq(await t.ev("document.querySelectorAll('.mt-key').length"), 0, "the selected layer has no keys yet");
+  await t.ev(`(() => { const select = ${select}; select.value = 'translateX'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await t.waitFor(`document.querySelector('${timelineKey}')?.getAttribute('aria-label') === 'Translate X keyframe 2, 300 ms'`, "the first two keys to save");
+  await t.flush();
+  const { node } = await t.a.get(`/api/node?id=${id}&depth=0`);
+  t.eq(node.motion?.[0]?.tracks?.[0]?.keys, [{ t: 0, v: 0 }, { t: 300, v: 8 }], "both keyframes are saved on the selected layer");
+
+  await t.ev("window.canvasCmd({cmd:'motionTimeline'})");
+  await t.clearSel();
+  await t.settle();
+  const rect = await t.rect(id);
+  await t.ev(`window.timelinePixels = () => {
+    const { canvas, capture } = window.canvasHost.engineView;
+    const d = canvas.width / canvas.clientWidth;
+    const sx = Math.floor(${rect.x} * d), sy = Math.floor(${rect.y} * d);
+    const w = Math.ceil(Math.min(${rect.w}, 48) * d), h = Math.ceil(Math.min(${rect.h}, 32) * d);
+    return capture([{sx, sy, sw:w, sh:h, w, h}])[0].toDataURL();
+  }; window.timelineRest = window.timelinePixels();`);
+  await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await t.ev("window.canvasCmd({cmd:'prefs',prefs:{playHoverMotion:true}})");
+  await moveToHoverTarget(t, board);
+  await t.waitFor("window.__motion.sprites === 1 && window.timelinePixels() !== window.timelineRest", "the new hover keys to move the layer's rendered pixels");
+  await t.io.move(6, 90);
+  await t.waitFor("window.__motion.sprites === 0 && window.timelinePixels() === window.timelineRest", "the layer to return to its original pose");
 });
 
 sc("motion-timeline", "timeline key and segment drags each undo in one step", {

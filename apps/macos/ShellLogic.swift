@@ -702,7 +702,7 @@ struct BottomBarLayout {
     let zoomAboveTools: Bool
     let clearance: CGFloat
 
-    /// `height` is the palette's (two rows when compact); the zoom control keeps the one-row `zoomHeight` and sits on the
+    /// `height` is the palette's (multiple rows when compact); the zoom control keeps the one-row `zoomHeight` and sits on the
     /// palette's centre line, or above the palette when they would collide.
     init(windowWidth: CGFloat, leftInset: CGFloat, rightInset: CGFloat, zoomRightInset: CGFloat,
          paletteWidth: CGFloat?, zoomWidth: CGFloat?, height: CGFloat, zoomHeight: CGFloat, gap: CGFloat) {
@@ -1467,6 +1467,16 @@ enum TimelineMenu {
     static func layerID(primary: String, selected: [String]) -> String? {
         let ids = selected.isEmpty ? [primary] : selected
         return ids.last { !$0.isEmpty && !$0.hasPrefix("widget:") }
+    }
+}
+
+enum KeyframesTool {
+    static let title = "Keyframes"
+    static let keycap = "⌥⌘T"
+
+    static func active(timelineHeight: CGFloat) -> Bool { timelineHeight > 0 }
+    static func enabled(hasLayer: Bool, timelineHeight: CGFloat) -> Bool {
+        hasLayer || active(timelineHeight: timelineHeight)
     }
 }
 

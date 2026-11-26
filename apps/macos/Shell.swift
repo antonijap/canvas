@@ -214,10 +214,11 @@ struct RootView: View {
             paletteWidth: toolPaletteShown ? ToolPalette.width(compact: compactTools) : nil,
             zoomWidth: zoomShown ? ZoomPill.width : nil, height: ToolPalette.height(compact: compactTools),
             zoomHeight: ToolPalette.height(compact: false), gap: Metric.islandGap)
-        let timelineHeight = model.timelineHeight
-        let timelineLift = timelineHeight > 0 ? timelineHeight + 20 - BottomBarLayout.bottomMargin : 0
+        let timelineLift = model.timelineHeight
         let timelineAnimation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.14)
-        let insets = insets(bottomClearance: bottomBars.clearance + timelineLift)
+        let controlsTop = min(bottomBars.palette?.minY ?? 0, bottomBars.zoom?.minY ?? 0)
+        let timelineClearance = Metric.topBar + Metric.islandGap - controlsTop
+        let insets = insets(bottomClearance: bottomBars.clearance + timelineLift, timelineClearance: timelineClearance)
 
         ZStack(alignment: .topLeading) {
             WebCanvas(host: model.tabHost).ignoresSafeArea()
@@ -265,7 +266,7 @@ struct RootView: View {
                 }
             }
             .transaction { if model.resizingSidebar { $0.animation = nil } }
-            .animation(timelineAnimation, value: timelineHeight)
+            .animation(timelineAnimation, value: timelineLift)
             .animation(Motion.island, value: model.uiHidden)
             .ignoresSafeArea()
 
@@ -294,7 +295,7 @@ struct RootView: View {
                             .fixedSize()
                             .offset(x: palette.midX - windowWidth / 2, y: palette.maxY - timelineLift)
                     }
-                    .animation(timelineAnimation, value: timelineHeight)
+                    .animation(timelineAnimation, value: timelineLift)
                     .ignoresSafeArea()
             }
 
@@ -312,7 +313,8 @@ struct RootView: View {
         .onChange(of: canPeek) { _, can in if !can { model.sidebarPeek.close() } }
         .onChange(of: model.revealBoardId) { _, board in if board != nil { model.panelOpen = true } }
         .onChange(of: insets, initial: true) { _, v in
-            model.setInsets(l: v.l, t: v.t, r: v.r, b: v.b, bottomClearance: v.bottomClearance)
+            model.setInsets(l: v.l, t: v.t, r: v.r, b: v.b, bottomClearance: v.bottomClearance,
+                            timeline: (v.sidebarLeft, v.sidebarRight, v.timelineClearance))
         }
     }
 
@@ -323,13 +325,15 @@ struct RootView: View {
     }
 
     private struct Insets: Equatable {
-        let l, t, r, b, bottomClearance: CGFloat
+        let l, t, r, b, bottomClearance, sidebarLeft, sidebarRight, timelineClearance: CGFloat
     }
 
     /// The free rectangle the canvas should fit into, so boards never hide under an island.
-    private func insets(bottomClearance: CGFloat) -> Insets {
+    private func insets(bottomClearance: CGFloat, timelineClearance: CGFloat) -> Insets {
         let i = canvasInsets(bottomClearance: bottomClearance)
-        return Insets(l: i.l, t: i.t, r: i.r, b: i.b, bottomClearance: bottomClearance)
+        return Insets(l: i.l, t: i.t, r: i.r, b: i.b, bottomClearance: bottomClearance,
+                      sidebarLeft: panelOpen ? panelWidth ?? 0 : 0, sidebarRight: rightSidebarShown ? propsReserve : 0,
+                      timelineClearance: timelineClearance)
     }
 }
 
@@ -1180,28 +1184,47 @@ private struct ToolPalette: View {
         return content + 2 * BottomBarStyle.padding
     }
 
-    private struct Item: Identifiable {
-        let tool: DrawTool
-        var id: String { tool.rawValue }
+    private enum Item: Identifiable {
+        case draw(DrawTool), keyframes
+
+        var tool: DrawTool? {
+            if case let .draw(tool) = self { return tool }
+            return nil
+        }
+        var id: String { tool?.rawValue ?? "keyframes" }
+        var title: String { tool?.title ?? KeyframesTool.title }
+        var keycap: String { tool?.keycap ?? KeyframesTool.keycap }
+        var symbol: String { tool?.symbol ?? "diamond" }
         var mark: String {
-            switch tool {
-            case .vote: return "vote-tool"
-            case .timer: return "timer-tool"
+            switch self {
+            case .draw(.vote): return "vote-tool"
+            case .draw(.timer): return "timer-tool"
+            case .keyframes: return "keyframes-tool"
             default: return "draw-tool"
             }
         }
+        @MainActor func enabled(in model: CanvasModel) -> Bool {
+            tool == nil ? model.canToggleTimeline : model.canDraw
+        }
         @MainActor func selected(in model: CanvasModel) -> Bool {
-            switch tool {
-            case .vote: return model.voteToolActive
-            case .timer: return model.timerToolActive
-            default: return model.activeDrawTool == tool
+            switch self {
+            case .draw(.vote): return model.voteToolActive
+            case .draw(.timer): return model.timerToolActive
+            case .draw(let tool): return model.activeDrawTool == tool
+            case .keyframes: return KeyframesTool.active(timelineHeight: model.timelineHeight)
             }
+        }
+        @MainActor func perform(in model: CanvasModel) {
+            if let tool { model.draw(tool) }
+            else if selected(in: model) { model.toggleMotionTimeline() }
+            else { model.showMotionTimeline() }
         }
     }
 
     private static let groups: [[Item]] = {
-        var groups = DrawTool.paletteGroups.map { $0.map { Item(tool: $0) } }
-        groups[groups.count - 1].append(contentsOf: [Item(tool: .vote), Item(tool: .timer)])
+        var groups = DrawTool.paletteGroups.map { $0.map(Item.draw) }
+        groups[groups.count - 1].append(contentsOf: [.draw(.vote), .draw(.timer)])
+        groups.append([.keyframes])
         return groups
     }()
 
@@ -1231,14 +1254,14 @@ private struct ToolPalette: View {
                         ToolButton(item: item, tooltipOffset: tooltipOffset(for: index),
                                    selected: item.selected(in: model),
                                    qaHovered: qaHoveredTool == item.id) {
-                            model.draw(item.tool)
+                            item.perform(in: model)
                         }
+                        .disabled(!item.enabled(in: model))
                     }
                 }
             }
         }
         .bottomBar(height: Self.height(compact: compact))
-        .disabled(!model.canDraw)
         .qaID("tool-palette")
     }
 
@@ -1257,20 +1280,20 @@ private struct ToolPalette: View {
                     if item.tool == .text {
                         Text("T")
                     } else {
-                        Image(systemName: item.tool.symbol)
+                        Image(systemName: item.symbol)
                             .symbolRenderingMode(.monochrome)
                     }
                 }
                 .font(BottomBarStyle.iconFont)
             }
-            .buttonStyle(ToolbarButtonStyle(active: selected, selectedMark: (item.mark + "-selected", item.tool.title),
+            .buttonStyle(ToolbarButtonStyle(active: selected, selectedMark: (item.mark + "-selected", item.title),
                                             forceHover: qaHovered))
             .onHover { hovering = $0 }
             .overlay(alignment: .bottom) {
                 if showsTooltip {
                     HStack(spacing: 6) {
-                        Text(item.tool.title)
-                        Text(item.tool.keycap)
+                        Text(item.title)
+                        Text(item.keycap)
                             .padding(.horizontal, 3)
                             .frame(minWidth: 18, minHeight: 18, maxHeight: 18)
                             .background(Palette.fg.opacity(0.08), in: RoundedRectangle(cornerRadius: 4))
@@ -1281,16 +1304,16 @@ private struct ToolPalette: View {
                     .frame(height: 28)
                     .fixedSize()
                     .background(Palette.popover, in: RoundedRectangle(cornerRadius: 8))
-                    .qaID("tool-tooltip", label: item.tool.title)
+                    .qaID("tool-tooltip", label: item.title)
                     .offset(y: -tooltipOffset)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
             }
-            .accessibilityLabel(item.tool.title)
-            .accessibilityHint("Shortcut \(item.tool.keycap)")
+            .accessibilityLabel(item.title)
+            .accessibilityHint("Shortcut \(item.keycap)")
             .accessibilityAddTraits(selected ? .isSelected : [])
-            .qaID(item.mark, label: item.tool.title)
+            .qaID(item.mark, label: item.title)
         }
     }
 }

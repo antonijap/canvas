@@ -1611,6 +1611,9 @@ if (!native) {
   hint.querySelector("button").onclick = () => { hint.hidden = true; try { localStorage.setItem("canvas:webhint", "hidden"); } catch {} };
 }
 let insets = { l: 0, t: 0, r: 0, b: 0 };
+// The timeline meets the sidebars and leaves room for the native controls above it.
+const emptyTimelineInsets = { l: 0, r: 0, clearance: 0 };
+let timelineInsets = emptyTimelineInsets;
 let initialInsets = !native;
 const post = (m) => { try { window.webkit.messageHandlers.canvasState.postMessage(JSON.stringify(m)); } catch {} };
 addEventListener("keydown", (e) => {
@@ -1647,6 +1650,7 @@ const host = {
   view, world, file, native, post, api,
   get readOnly() { return cloudReadOnly; },
   get cam() { return cam; }, get insets() { return insets; }, get sel() { return sel && sel.id; },
+  get timelineInsets() { return timelineInsets; },
   selectId: (id) => select(id), clearSel: () => deselect(), syncSel: () => syncSel(), get hand() { return space; }, setCam: (c) => { endTween(true); firstFit = null; cam = c; applyCam(); }, flushCam: () => flushNow(),
   on(n, f) { if (!bus.has(n)) bus.set(n, new Set()); bus.get(n).add(f); return () => bus.get(n).delete(f); },
   emit(n, a) { for (const f of bus.get(n) || []) { try { f(a); } catch (err) { console.error(err); } } },
@@ -4265,6 +4269,7 @@ window.canvasCmd = (c) => {
   else if (c.cmd === "deselect") deselect();
   else if (c.cmd === "insets") {
     insets = { l: c.l, t: c.t, r: c.r, b: c.b };
+    timelineInsets = c.timelineInsets ?? emptyTimelineInsets;
     VW = view.clientWidth; VH = view.clientHeight;
     readViewBox(); sizeGuides();
     if (!initialInsets && cam && !restoredCam && perf.picture === null && !drag) fitAll({ instant: true });

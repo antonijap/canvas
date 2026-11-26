@@ -1468,7 +1468,9 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         guard let selection else { return nil }
         return TimelineMenu.layerID(primary: selection.id, selected: selection.ids)
     }
-    var canToggleTimeline: Bool { currentFile != nil && !homeShown && (timelineHeight > 0 || timelineLayerID != nil) }
+    var canToggleTimeline: Bool {
+        currentFile != nil && !homeShown && KeyframesTool.enabled(hasLayer: timelineLayerID != nil, timelineHeight: timelineHeight)
+    }
 
     func showMotionTimeline() {
         guard let id = timelineLayerID else { return }
@@ -1580,18 +1582,22 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     }
     /// The free rectangle last sent, so a freshly loaded page (tab switch, reload) gets it again: SwiftUI only
     /// sends insets when they change, and a new page starts with none.
-    private var lastInsets: (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat, bottomClearance: CGFloat)?
+    private typealias TimelineInsets = (l: CGFloat, r: CGFloat, clearance: CGFloat)
+    private var lastInsets: (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat, bottomClearance: CGFloat, timeline: TimelineInsets)?
     private var zoomCornerFrame: CGRect = .zero
     func setZoomCorner(frame: CGRect) {
         zoomCornerFrame = frame
         run("{cmd:'zoomCorner',left:\(frame.minX),bottom:\(frame.maxY),height:\(frame.height)}")
     }
-    func setInsets(l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat, bottomClearance: CGFloat) {
-        lastInsets = (l, t, r, b, bottomClearance)
-        run("{cmd:'insets',l:\(l),t:\(t),r:\(r),b:\(b),bottomClearance:\(bottomClearance)}")
+    func setInsets(l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat, bottomClearance: CGFloat,
+                   timeline: (l: CGFloat, r: CGFloat, clearance: CGFloat)) {
+        lastInsets = (l, t, r, b, bottomClearance, timeline)
+        run("{cmd:'insets',l:\(l),t:\(t),r:\(r),b:\(b),bottomClearance:\(bottomClearance),timelineInsets:{l:\(timeline.l),r:\(timeline.r),clearance:\(timeline.clearance)}}")
     }
     func resendInsets() {
-        if let i = lastInsets { setInsets(l: i.l, t: i.t, r: i.r, b: i.b, bottomClearance: i.bottomClearance) }
+        if let i = lastInsets {
+            setInsets(l: i.l, t: i.t, r: i.r, b: i.b, bottomClearance: i.bottomClearance, timeline: i.timeline)
+        }
         setZoomCorner(frame: zoomCornerFrame)
         run("{cmd:'bottomToast',shown:\(toast != nil)}")
     }

@@ -79,7 +79,7 @@ features:
     name: Board motion timeline edits, scrubs, and sleeps after closing
     area: canvas
     driven: [page]
-    cases: [entry, selection, drag, scrub, keys, idle]
+    cases: [entry, selection, docking, first-keyframes, drag, scrub, keys, idle]
 
   - id: icons
     name: Phosphor and Material Symbols draw locally in the canvas and exports
