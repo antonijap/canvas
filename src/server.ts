@@ -2234,7 +2234,7 @@ function putBox(box, w) {
 }
 function placeHoverBox() {
   const board = hovId && (boards.has(hovId) ? hovId : ev?.boardOf(hovId));
-  const suppressed = host.motion?.canHover(board) && (board === hovBody || board === host.motion.spriteBoard);
+  const suppressed = host.motion?.canHover(board) && (board === hovBody || board === host.motion.outlineBoard);
   putBox(hovBox, suppressed ? null : hovWorld);
 }
 function placeOverlays() {
@@ -2344,7 +2344,7 @@ function queueHover() {
     if (gesturing || drag || mv || space || !ptr || (host.comments && host.comments.mode) || (host.autolayout && host.autolayout.dragging)) { clearHover(); return; }
     const title = titleAt(ptr.x, ptr.y);
     hovBody = null;
-    if (!title && host.motion && ev?.engine.boardAt && document.elementFromPoint(ptr.x, ptr.y) === ev.canvas) {
+    if (prefs.playHoverMotion && !title && host.motion && ev?.engine.boardAt && document.elementFromPoint(ptr.x, ptr.y) === ev.canvas) {
       const board = ev.engine.boardAt(ptr.x - VL, ptr.y - VT);
       const r = board && boards.has(board) && ev.rect(board);
       if (r && Math.min(r.w, r.h) * cam.z >= 48) hovBody = board;

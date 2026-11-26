@@ -6,6 +6,7 @@ if (host) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
   const stats = { evaluations: 0, wakes: 0, sprites: 0, skipped: [], hoverToFirstPoseMs: null, poses: 0 };
   let desired = null, entered = 0, active = null, preview = false, playing = false, trace = null;
+  let rejected = null;
   let wasReduced = reduce.matches;
   const wake = () => { stats.wakes++; host.requestFrame(); };
 
@@ -33,15 +34,28 @@ if (host) {
   function start(board) {
     const ev = host.engineView, e = ev?.engine;
     const source = ev?.motionSource(board);
-    if (!source || !e?.setBoardSprite || ev.compactOverview() || host.live?.touched(board)) return;
-    const scene = JSON.parse(source.text), z = host.cam.z;
+    if (!source || !e?.setBoardSprite || ev.compactOverview() || host.live?.touched(board)) {
+      rejected = null;
+      return;
+    }
+    const scale = host.cam.z * devicePixelRatio, budget = e.textureBudget() * 0.25;
+    const { content, x, y, fontLayout } = source;
+    if (rejected?.ev === ev && rejected.board === board && rejected.content === content &&
+        rejected.x === x && rejected.y === y && rejected.fontLayout === fontLayout &&
+        rejected.scale === scale && rejected.budget === budget) return;
+    rejected = null;
+    const scene = JSON.parse(source.text);
     const { sprites, skipped } = planMotion(scene.root, n => {
       const placement = e.nodeMotionRect(board, n.id);
       const box = n.type === "group" ? e.nodeRectIn(board, n.id) : placement;
       return { box, placement, ink: e.nodeInkIn(board, n.id), get bounds() { return e.nodeRectIn(board, n.id); } };
-    }, { scale: z * devicePixelRatio, budget: e.textureBudget() * 0.25 });
+    }, { scale, budget });
     stats.skipped = skipped;
     stats.hoverToFirstPoseMs = null;
+    if (!sprites.length) {
+      rejected = { ev, board, content, x, y, fontLayout, scale, budget };
+      return;
+    }
     const made = [], parents = new Map();
     const promoted = new Set(sprites.map(s => s.node.id));
     try {
@@ -64,7 +78,6 @@ if (host) {
         if (!e.setBoardSprite(id, board, new Float64Array(clip ? [clip.x, clip.y, clip.w, clip.h] : []))) throw new Error("Could not attach motion sprite");
         e.drawNow(id);
       }
-      if (!made.length) return;
       active = { board, source, scene, ev, sprites: made, phase: "enter", at: 0, preview };
       ev.motionBoard(board, source.x, source.y, { ...scene, root: hideMotionRoots(scene.root, promoted) });
       e.drawNow(board);
@@ -91,7 +104,7 @@ if (host) {
     wasReduced = reduced;
     if (!active && !desired) return;
     if (host.motionBlocked()) {
-      desired = null; preview = false;
+      desired = null; preview = false; rejected = null;
       stop();
       return;
     }
@@ -141,8 +154,10 @@ if (host) {
       held ||= pose.held;
     }
     if (done && active.phase === "leave") {
-      if (held && !active.preview) active.phase = "still";
-      else stop();
+      if (held && !active.preview) {
+        active.phase = "still";
+        host.emit("motionSprites");
+      } else stop();
     } else if (done && active.preview) {
       desired = null; preview = false;
       if (reduced) {
@@ -165,6 +180,7 @@ if (host) {
     if (!canHover(id)) id = null;
     if (desired === id) return;
     desired = id;
+    rejected = null;
     entered = time;
     wake();
   };
@@ -173,14 +189,14 @@ if (host) {
     hover: setHover,
     canHover,
     get active() { return !!active; },
-    get spriteBoard() { return active?.board ?? null; },
+    get outlineBoard() { return active && (active.phase !== "still" || active.preview) ? active.board : null; },
     invalidate(id) { if (active?.board === id || desired === id) this.cancel(); },
-    cancel() { desired = null; preview = false; if (stop()) wake(); },
+    cancel() { desired = null; preview = false; rejected = null; if (stop()) wake(); },
     preview(id) {
       const ev = host.engineView, board = host.boards.has(id) ? id : ev?.boardOf(id);
       const rect = board && ev?.rect(board);
       if (rect && Math.min(rect.w, rect.h) * host.cam.z >= 48 && ev.motionSource(board) && !host.motionBlocked()) {
-        desired = board; preview = true; entered = performance.now(); wake();
+        desired = board; preview = true; rejected = null; entered = performance.now(); wake();
       }
     },
     // Only wake the existing frame loop when a pose can still advance.

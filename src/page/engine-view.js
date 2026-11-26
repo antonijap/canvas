@@ -116,6 +116,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   // ---- fonts and images, fetched once per URL, lazily (only what a loaded board lists)
   const fontFetch = new Map(); // url -> Promise<{bytes, weight, style} | null>
   const fontDone = new Set();
+  let fontLayout = 0;
   const fetchFont = (url) => {
     let p = fontFetch.get(url);
     if (!p) {
@@ -136,7 +137,10 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       g.bytes = null; // the engine has its own copy
     });
     // A new face lays boards out again (an auto-sized board can grow): the cached rects follow.
-    if (added) for (const [id, rec] of loaded) if (rec.rect) rec.rect = engine.nodeRectIn(id, id) || rec.rect;
+    if (added) {
+      fontLayout++;
+      for (const [id, rec] of loaded) if (rec.rect) rec.rect = engine.nodeRectIn(id, id) || rec.rect;
+    }
     return added;
   }
   /**
@@ -984,7 +988,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     sceneText, fetchScene, install, moveNode, updateNode,
     motionSource(id) {
       const r = loaded.get(id);
-      return r?.motionText && r.content !== -1 ? { text: r.motionText, content: r.content, x: r.x, y: r.y } : null;
+      return r?.motionText && r.content !== -1 ? { text: r.motionText, content: r.content, x: r.x, y: r.y, fontLayout } : null;
     },
     motionBoard(id, x, y, scene, originalText) {
       const text = originalText ?? JSON.stringify(scene);

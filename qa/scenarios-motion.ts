@@ -68,9 +68,17 @@ sc("hover-motion", "the hover box stays hidden through the leave animation", {
   await moveToHoverTarget(t, "qa_hover_static");
   await t.waitFor("window.__motion.sprites === 1", "the reduced motion end pose");
   t.eq(await hoverBoxVisible(t), false, "the reduced motion end pose has no hover box");
-  await t.ev(`window.canvasCmd({cmd:"prefs",prefs:{playHoverMotion:false}})`);
+  await t.ev(`(() => {
+    const e = window.canvasHost.engineView.engine, original = e.boardAt;
+    window.__hoverBoardScans = 0;
+    e.boardAt = function (...point) { window.__hoverBoardScans++; return original.apply(this, point); };
+    window.canvasCmd({cmd:"prefs",prefs:{playHoverMotion:false}});
+  })()`);
   await t.frames();
   t.eq(await hoverBoxVisible(t), true, "turning off playback shows the hover box");
+  await moveToHoverTarget(t, "qa_hover_board");
+  t.eq(await t.ev("window.__hoverBoardScans"), 0, "disabled playback skips the board scan");
+  t.eq(await hoverBoxVisible(t), true, "disabled playback still shows the board outline");
 });
 
 sc("hover-motion", "hovering a board title from rest leaves its outline visible", {
@@ -88,6 +96,48 @@ sc("hover-motion", "hovering a board title from rest leaves its outline visible"
   await t.io.move(6, 90);
 });
 
+sc("hover-motion", "the fitted board edge triggers hover at fractional zoom", {
+  covers: ["hover-motion:suppression"],
+  skip: { visual: "Checks a subpixel pointer position at the fitted edge." },
+}, async (t: T) => {
+  const id = "qa_fitted_hover";
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [
+    hoverBoard(id, 10000.2, [{ ...hoverLayer("qa_fitted_mover"), motion: hoverSlide }]),
+  ] });
+  await t.waitFor(`window.canvasHost.boards.has('${id}')`, "the fractional board");
+  await t.focus(id, 1.25);
+  await t.look(10000, 10000, 1.25, 60.4);
+  const r = await t.rect(id);
+  const target = { x: r.x - 0.4, y: r.y + r.h / 2 };
+  t.eq(await t.ev(`window.canvasHost.pickSelectable(${target.x}, ${target.y}, false)`), id, "the layer hit test sees the fitted edge");
+  await t.io.move(target.x, target.y);
+  await t.frames();
+  t.eq(await hoverState(t), { sprites: 1, outline: false }, "the fitted edge starts playback with its outline hidden");
+});
+
+sc("hover-motion", "the title outline returns after the leave animation settles into hold", {
+  covers: ["hover-motion:suppression"],
+  skip: { visual: "Checks the title outline while sprites are still present." },
+}, async (t: T) => {
+  const id = "qa_hold_title";
+  await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [
+    hoverBoard(id, 10000, [
+      { ...hoverLayer("qa_hold_mover"), motion: [{ ...hoverSlide[0], leave: "hold" }] },
+      { ...hoverLayer("qa_reverse_mover", 120), motion: hoverSlide },
+    ]),
+  ] });
+  await t.waitFor(`window.canvasHost.boards.has('${id}')`, "the board with hold and reverse tracks");
+  await t.focus(id);
+  await moveToHoverTarget(t, id);
+  await t.waitFor("window.__motion.sprites === 2", "the hover sprites");
+  await sleep(400);
+  await moveToHoverTitle(t, id);
+  t.eq(await hoverState(t), { sprites: 2, outline: false }, "the title stays hidden during the reverse track");
+  await sleep(400);
+  t.eq(await hoverState(t), { sprites: 2, outline: true }, "the title returns while the held pose stays on screen");
+});
+
 sc("hover-motion", "compiled motion hides the hover box even when promotion is skipped", {
   covers: ["hover-motion:suppression"],
   skip: { visual: "Checks the transient hover box directly." },
@@ -102,11 +152,36 @@ sc("hover-motion", "compiled motion hides the hover box even when promotion is s
   await t.focus("qa_named_board");
   await moveToHoverTarget(t, "qa_named_layer");
   const named = await hoverState(t);
+  await t.ev(`(() => {
+    const e = window.canvasHost.engineView.engine, original = e.nodeMotionRect;
+    window.__promotionAttempts = 0;
+    e.nodeMotionRect = function (board, id) {
+      if (id === "qa_skipped_layer") window.__promotionAttempts++;
+      return original.call(this, board, id);
+    };
+  })()`);
   await moveToHoverTarget(t, "qa_skipped_layer");
   await t.waitFor(`window.__motion.skipped.some(s => s.id === "qa_skipped_layer" && s.reason === "overlaps later paint")`, "the motion track to be skipped");
   t.eq({ named, skipped: await hoverState(t) }, {
     named: { sprites: 0, outline: true }, skipped: { sprites: 0, outline: false },
   }, "only the board with compiled motion hides the hover box");
+  const redraw = () => t.ev(`new Promise(resolve => {
+    const step = n => {
+      if (!n) return resolve(window.__promotionAttempts);
+      window.canvasHost.requestFrame();
+      requestAnimationFrame(() => step(n - 1));
+    };
+    step(5);
+  })`);
+  t.eq(await redraw(), 1, "unrelated frames do not replan a rejected hover");
+  await t.ev(`window.canvasHost.engineView.engine.setTextureBudget(32 * 1024 * 1024)`);
+  t.eq(await redraw(), 2, "a new texture budget permits one new plan");
+  await moveToHoverTarget(t, "qa_named_layer");
+  await moveToHoverTarget(t, "qa_skipped_layer");
+  t.eq(await redraw(), 3, "reentering the board permits one new plan");
+  await t.a.post("/api/update", { file: t.file, id: "qa_later_paint", props: { x: 120 } });
+  await t.waitFor("window.__motion.sprites === 1", "an edit that makes the hovered layer promotable");
+  t.eq(await redraw(), 4, "the new scene is planned once with the pointer still over the board");
   await t.io.move(6, 90);
 });
 

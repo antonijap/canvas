@@ -7,6 +7,7 @@ use std::collections::{HashSet, VecDeque};
 use kurbo::{Point, Rect};
 use vello::Scene;
 
+use crate::cache::{Fit, fit_board};
 use crate::hit::HitIndex;
 use crate::layout::{LayoutResult, drop_texts, layout_doc, local_transform, relayout_subtree, restore_texts, uses_baselines};
 use std::collections::HashMap;
@@ -322,6 +323,11 @@ impl Board {
     /// The root node's box in world space (the board's frame).
     pub fn world_root(&self) -> Rect {
         self.layout.aabb.first().copied().unwrap_or(Rect::ZERO) + kurbo::Vec2::new(self.x, self.y)
+    }
+
+    pub fn pixel_fit(&self, ink: Rect, scale: f64) -> Fit {
+        let f = self.layout.aabb.first().copied().unwrap_or(Rect::ZERO);
+        fit_board((self.x, self.y), (f.x1, f.y1), ink, scale)
     }
 
     /// Put node `id` at (x, y) in its parent without laying the board out again: only when nothing else can move

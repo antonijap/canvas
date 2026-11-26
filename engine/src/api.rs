@@ -10,7 +10,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 use crate::board::{Board, BuildOptions, Sprite};
-use crate::cache::{BATCH_TILE_PX, Batch, Cover, Fit, Redraw, TileRect, redraw_area, FrameClock, fit_board, fit_tiles, gesture_stretch, gpu_limit, keep_pending, PREFETCH_HEADROOM, ScaleKey, TileBudget, TileKey, base_px_for, base_scale_at, frame_budgets, interior_uv, jobs_needed, prefetch_ring, scissor_px, tile_budget_for, tile_bytes, tiles_in_view, wants_more};
+use crate::cache::{BATCH_TILE_PX, Batch, Cover, Fit, Redraw, TileRect, redraw_area, FrameClock, fit_tiles, gesture_stretch, gpu_limit, keep_pending, PREFETCH_HEADROOM, ScaleKey, TileBudget, TileKey, base_px_for, base_scale_at, frame_budgets, interior_uv, jobs_needed, prefetch_ring, scissor_px, tile_budget_for, tile_bytes, tiles_in_view, wants_more};
 use crate::gpu::{GPU_BASE_MS, GPU_DONE_MS, GPU_MS_PER_MPX, Gpu, Quad, Source, to_device};
 use crate::images::{ATLAS_PX, Cells, DEFAULT_IMAGE_BUDGET, MipCache, Plan, Want, ahead_short, cell_src, fit_plans, gives_back_levels, grid, keep_cells, level_dims, level_for, plan_px, slot};
 use crate::paint::{BoardImage, ImageStore, ImageTiles, image_part_in};
@@ -177,6 +177,8 @@ pub struct Engine {
     board_ix: std::cell::RefCell<(u64, crate::cache::FastMap<String, usize>)>,
     /// Bumped when boards are removed or reordered (`board_ix` is built again when next asked).
     boards_gen: u64,
+    /// Resting ink used to fit sprite owners in the last draw, also used for hit testing.
+    sprite_owner_ink: crate::cache::FastMap<u64, Rect>,
     next_uid: u64,
     cam: (f64, f64, f64),
     dpr: f64,
@@ -312,6 +314,7 @@ impl Engine {
             boards: Vec::new(),
             board_ix: Default::default(),
             boards_gen: 1,
+            sprite_owner_ink: Default::default(),
             next_uid: 1,
             cam: (0.0, 0.0, 1.0),
             dpr,
@@ -1194,13 +1197,9 @@ impl Engine {
         let gpu_budget = gpu_limit(period, gpu_share, GPU_BASE_MS.with(std::cell::Cell::get));
         // At rest every board is fitted to whole device pixels (shared edges stay shared: `cache::fit_board`);
         // a zoom draws them where the world puts them.
-        let fit = |b: &Board, ink| {
-            if zooming { return Fit::none((b.x, b.y), s_exact); }
-            let f = b.layout.aabb.first().copied().unwrap_or(Rect::ZERO);
-            fit_board((b.x, b.y), (f.x1, f.y1), ink, s)
-        };
-        let mut fits: Vec<Fit> = self.boards.iter().map(|b| fit(b, b.ink)).collect();
+        let mut fits: Vec<Fit> = self.boards.iter().map(|b| if zooming { Fit::none((b.x, b.y), s_exact) } else { b.pixel_fit(b.ink, s) }).collect();
         let uses_sprites = self.boards.iter().any(|b| b.sprite.is_some());
+        self.sprite_owner_ink.clear();
         if uses_sprites && !zooming {
             for (i, b) in self.boards.iter().enumerate() {
                 let Some(sprite) = &b.sprite else { continue };
@@ -1208,7 +1207,8 @@ impl Engine {
                 let owner = &self.boards[p];
                 // Hiding ink can change the owner's fit. Keep its static fit and rasterize aligned
                 // sprites in that same grid, including the fractional positions inside the board.
-                fits[p] = fit(owner, sprite.rest_ink);
+                fits[p] = owner.pixel_fit(sprite.rest_ink, s);
+                self.sprite_owner_ink.insert(owner.uid, sprite.rest_ink);
                 if (b.x, b.y) == (owner.x, owner.y) {
                     fits[i] = fits[p];
                 }
@@ -2753,9 +2753,8 @@ impl Engine {
         }
     }
 
-    /// Topmost node under a canvas-relative CSS point, or null.
-    #[wasm_bindgen(js_name = hitTest)]
-    pub fn hit_test(&self, screen_x: f64, screen_y: f64) -> Option<String> {
+    /// Map a canvas-relative CSS point back through each board's drawing transform.
+    fn hit_point(&self, screen_x: f64, screen_y: f64) -> impl Fn(&Board) -> Point + '_ {
         let (cx, cy, z) = self.cam;
         let p = Point::new((screen_x - cx) / z, (screen_y - cy) / z);
         // At rest boards are fitted to whole device pixels (`cache::fit_board`), each drawn up to a pixel from
@@ -2764,14 +2763,20 @@ impl Engine {
         let s = z * self.dpr;
         let fitted = now() - self.last_zoom >= SETTLE_MS;
         let (dev, cam_dev) = ((screen_x * self.dpr, screen_y * self.dpr), ((cx * self.dpr).round(), (cy * self.dpr).round()));
+        move |b| {
+            if !fitted { return p; }
+            let ink = self.sprite_owner_ink.get(&b.uid).copied().unwrap_or(b.ink);
+            let at = b.pixel_fit(ink, s).board_point(dev, s, cam_dev);
+            Point::new(at.x + b.x, at.y + b.y)
+        }
+    }
+
+    /// Topmost node under a canvas-relative CSS point, or null.
+    #[wasm_bindgen(js_name = hitTest)]
+    pub fn hit_test(&self, screen_x: f64, screen_y: f64) -> Option<String> {
+        let point = self.hit_point(screen_x, screen_y);
         self.boards.iter().rev().filter(|b| !b.hidden && b.sprite.is_none()).find_map(|b| {
-            let q = if fitted {
-                let f = b.layout.aabb.first().copied().unwrap_or(Rect::ZERO);
-                let at = fit_board((b.x, b.y), (f.x1, f.y1), b.ink, s).board_point(dev, s, cam_dev);
-                Point::new(at.x + b.x, at.y + b.y)
-            } else {
-                p
-            };
+            let q = point(b);
             (b.world_ink().contains(q) || b.world_root().contains(q)).then(|| b.hit(q).map(str::to_string)).flatten()
         })
     }
@@ -2848,12 +2853,11 @@ impl Engine {
         json(&rect_json(Rect::new(b.x + at.x, b.y + at.y, b.x + at.x + bb.w, b.y + at.y + bb.h)))
     }
 
-    /// Top board whose resting box contains the point, even if its fill is transparent.
+    /// Top board whose pixel-fitted resting box contains the point, even if its fill is transparent.
     #[wasm_bindgen(js_name = boardAt)]
     pub fn board_at(&self, x: f64, y: f64) -> Option<String> {
-        let (cx, cy, z) = self.cam;
-        let point = Point::new((x - cx) / z, (y - cy) / z);
-        self.boards.iter().rev().find(|b| !b.hidden && b.sprite.is_none() && b.world_root().contains(point)).map(|b| b.id.clone())
+        let point = self.hit_point(x, y);
+        self.boards.iter().rev().find(|b| !b.hidden && b.sprite.is_none() && b.world_root().contains(point(b))).map(|b| b.id.clone())
     }
 
     /// The paint bounds of a subtree, including effects and protruding children.
