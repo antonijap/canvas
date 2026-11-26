@@ -16,6 +16,13 @@ import { shiftLists, type ListItem } from './page/text-paras.js';
 const viewHash = (document: string | Buffer, widgets: string | Buffer) =>
     createHash('sha256').update(document).update('\0').update(widgets).digest('hex');
 
+/** An inserted layer (an add, paste or duplicate) that has motion itself or on a layer inside it. */
+function carriesMotion(node: unknown): boolean {
+    if (!node || typeof node !== 'object') return false;
+    const n = node as { motion?: unknown; children?: unknown };
+    return n.motion != null || (Array.isArray(n.children) && n.children.some(carriesMotion));
+}
+
 export function isOlderMotionRefusal(code: string, message: string): boolean {
     // Older hosts reject a set of a property outside the layer's allowlist.
     return code === 'invalid' && /"motion" is not an? [\w-]+ property\b/.test(message);
@@ -160,7 +167,7 @@ export class FileStateStore {
             if (msg.type === 'reject' && isOlderMotionRefusal(msg.code, msg.message)) {
                 const { id } = msg;
                 const action = this.replica.pending.find(p => p.action.id === id)?.action;
-                if (action?.ops.some(op => op.k === 'set' && op.props.motion != null)) msg = { ...msg, message: UPDATE_MOTION_HOST };
+                if (action?.ops.some(op => (op.k === 'set' && op.props.motion != null) || (op.k === 'insert' && carriesMotion(op.node)))) msg = { ...msg, message: UPDATE_MOTION_HOST };
             }
             // joined is transport state, deliberately not restored after a process restart.
             const result = await this.replica.receive(msg, objects);

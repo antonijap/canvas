@@ -68,6 +68,11 @@ test('an older host refusing a motion write leaves an actionable error in the re
         assert.ok(!('reject' in b));
         await store.receive({ type: 'reject', id: b.id, code: 'conflict', message: 'The layer changed' }, new MemoryObjects());
         assert.equal(store.replica.refused.at(-1)!.message, 'The layer changed');
+        // A pasted or added layer whose child has motion: the older host refuses the insert.
+        const c = store.propose([{ k: 'insert', parent: null, after: null, node: { id: 'Card', type: 'frame', children: [{ id: 'Dot', type: 'rectangle', motion: [{ id: 'fade', on: 'boardHover', tracks: [{ prop: 'opacity', to: 0.5 }] }] }] } }]);
+        assert.ok(!('reject' in c));
+        await store.receive({ type: 'reject', id: c.id, code: 'invalid', message: 'insert: "motion" is not a rectangle property' }, new MemoryObjects());
+        assert.match(store.replica.refused.at(-1)!.message, /Cloud host runs an older Canvas and must be updated/);
     } finally {
         store.close();
         fs.rmSync(pkg, { recursive: true, force: true });
