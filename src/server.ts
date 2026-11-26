@@ -2337,13 +2337,16 @@ function queueHover() {
     hovFrame = 0;
     // An auto layout reorder drag (/page/autolayout.js) draws the layer at the pointer: no hover box chasing it a frame behind.
     if (gesturing || drag || mv || space || !ptr || (host.comments && host.comments.mode) || (host.autolayout && host.autolayout.dragging)) { clearHover(); return; }
-    if (host.motion && prefs.playHoverMotion && ev?.engine.boardAt && document.elementFromPoint(ptr.x, ptr.y) === ev.canvas) {
-      const board = ev.engine.boardAt(ptr.x - VL, ptr.y - VT);
+    const title = titleAt(ptr.x, ptr.y);
+    let motionBoard = null;
+    if (host.motion && prefs.playHoverMotion && ev?.engine.boardAt) {
+      const board = title || (document.elementFromPoint(ptr.x, ptr.y) === ev.canvas ? ev.engine.boardAt(ptr.x - VL, ptr.y - VT) : null);
       const r = board && boards.has(board) && ev.rect(board);
-      host.motion.hover(r && Math.min(r.w, r.h) * cam.z >= 48 ? board : null, ptr.time);
+      motionBoard = host.motion.hover(r && Math.min(r.w, r.h) * cam.z >= 48 ? board : null, ptr.time);
     } else host.motion?.hover(null);
-    const id = titleAt(ptr.x, ptr.y) || pickSelectable(ptr.x, ptr.y, false);
+    const id = title || pickSelectable(ptr.x, ptr.y, false);
     if (!id || isW(id) || (sel && id === sel.id)) { clearHover(); return; } // a card shows no hover box
+    if (motionBoard && (id === motionBoard || ev.boardOf(id) === motionBoard)) { clearHover(); return; }
     hovId = id;
     hovBox.classList.toggle("cmp", host.isCmp(id));
     hovWorld = worldRectOf(id);
@@ -2354,6 +2357,7 @@ view.addEventListener("pointermove", (e) => { ptr = { x: e.clientX, y: e.clientY
 view.addEventListener("pointerleave", () => { ptr = null; clearHover(); });
 view.addEventListener("pointerup", () => { if (ptr) queueHover(); });
 host.on("render", () => { if (ptr && !gesturing && !drag) queueHover(); });
+host.on("prefs", () => { if (ptr) queueHover(); });
 // Comment mode draws this outline itself (/page/comments.js), for the layer the comment would pin to.
 host.on("commentmode", (on) => { if (on) clearHover(); });
 // Working on the page shown makes it the one this viewer comes back to (see rememberPage).

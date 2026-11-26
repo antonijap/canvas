@@ -6,7 +6,7 @@ if (host) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)");
   const stats = { evaluations: 0, wakes: 0, sprites: 0, skipped: [], hoverToFirstPoseMs: null, poses: 0 };
   let desired = null, entered = 0, active = null, preview = false, playing = false, trace = null;
-  let reduceChanged = false;
+  let wasReduced = reduce.matches;
   const wake = () => { stats.wakes++; host.requestFrame(); };
 
   function stop() {
@@ -82,8 +82,9 @@ if (host) {
 
   function tick() {
     playing = false;
-    const preferenceChanged = reduceChanged;
-    reduceChanged = false;
+    // A queued playback frame can see the new preference before the change event arrives.
+    const reduced = reduce.matches, becameReduced = reduced && !wasReduced;
+    wasReduced = reduced;
     if (!active && !desired) return;
     if (host.motionBlocked()) {
       desired = null; preview = false;
@@ -98,14 +99,14 @@ if (host) {
     if (active && desired && (active.board !== desired || (preview && !active.preview))) stop();
     if (!active && desired) start(desired, now);
     if (!active) return;
-    if (reduce.matches && preferenceChanged) {
+    if (becameReduced) {
       if (!desired) { stop(); return; }
       phase("enter", now);
     }
     active.frame = active.ev.engine.spriteFrame?.();
     if (desired && (active.phase === "leave" || active.phase === "still") && !active.preview) phase("enter", now);
     if (!desired && (active.phase === "enter" || active.phase === "settled") && !active.preview) {
-      if (reduce.matches || !active.presented) { stop(); return; }
+      if (reduced || !active.presented) { stop(); return; }
       phase("leave", now);
     }
     if (active.phase === "preview-end") {
@@ -118,7 +119,7 @@ if (host) {
     for (const s of active.sprites) {
       // An explicit preview runs one cycle, including tracks that normally loop indefinitely.
       const compiled = active.preview ? s.previewMotion ??= { ...s.compiled, tracks: s.compiled.tracks.map(t => ({ ...t, cycles: 1 })) } : s.compiled;
-      const options = { end: reduce.matches && active.phase === "enter" };
+      const options = { end: reduced && active.phase === "enter" };
       if (active.phase === "leave") options.leave = s.basis;
       else options.enter = s.basis;
       const pose = motionPose(compiled, elapsed, options);
@@ -140,7 +141,7 @@ if (host) {
       else stop();
     } else if (done && active.preview) {
       desired = null; preview = false;
-      if (reduce.matches) {
+      if (reduced) {
         // Keep the end pose visible for the preview before restoring it.
         active.phase = "still";
         const run = active;
@@ -153,14 +154,17 @@ if (host) {
     else playing = true;
   }
 
+  // Return the board accepted for hover playback so the pointer outline can follow it.
   const setHover = (id, time = performance.now()) => {
-    if (preview || active?.preview) return;
-    if (!id && !desired && !active) return;
+    if (preview || active?.preview) return null;
+    if (!id && !desired && !active) return null;
     if (!host.prefs().playHoverMotion || host.motionBlocked() || !host.engineView?.motionSource(id)) id = null;
-    if (desired === id) return;
-    desired = id;
-    entered = time;
-    wake();
+    if (desired !== id) {
+      desired = id;
+      entered = time;
+      wake();
+    }
+    return id;
   };
   host.beforeFrame(tick);
   host.motion = {
@@ -197,7 +201,7 @@ if (host) {
   host.on("cmd", c => { if (c.cmd === "motionPreview") host.motion.preview(c.id); });
   document.addEventListener("visibilitychange", () => { if (document.hidden) cancel(); });
   reduce.addEventListener("change", () => {
-    if (reduce.matches && active) { reduceChanged = true; wake(); }
+    if (active) wake();
   });
   host.view.addEventListener("pointerdown", cancel, true);
   host.view.addEventListener("pointerleave", () => setHover(null));
