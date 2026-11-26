@@ -10,7 +10,7 @@ cd "${0:A:h}/exports"
 H=$(ls -d ~/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-mac-arm64/chrome-headless-shell | tail -1)
 U="file://${PWD:h}/release-banner.html"
 D=24; CW=1920
-mkdir -p layers; rm -f layers/*
+mkdir -p layers; rm -f layers/*(N)
 shot() { "$H" --hide-scrollbars --window-size=$1 --default-background-color=00000000 --virtual-time-budget=1500 --screenshot=$2 "$3" >/dev/null 2>&1; }
 shot 1920,1080 layers/bg.png "$U?layer=bg"
 shot 1920,1080 layers/head.png "$U?layer=head&v=$V"
