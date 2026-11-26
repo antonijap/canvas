@@ -29,9 +29,15 @@ The Mac file room validates pages, frames and eligible layers against the live d
 
 Rooms store ballots privately. Anonymous votes use a separate key for each vote. The Cloud host can link anonymous ballots to voters while a vote is live. When the vote ends, the room deletes its key and replaces ballot and voter IDs with random IDs. Both hidden and anonymous votes hide live counts and other people's pointers and selections. A voter sees their own dots. Progress shows who has finished in a named vote and how many have finished in an anonymous vote. Ended votes show totals. Named votes also show voter display names where shared. Welcome, live updates and history carry the requesting member's filtered view and a sequence marker for each vote change. Save As, downloads and Cloud duplicates carry the design, including any placed conclusion card. Ballots stay in their room.
 
-Canvas places a conclusion card after it receives the winning end receipt for an operation it queued. A timer uses the room clock, which `welcome.serverTime` reports. The host schedules expiry and checks the deadline when clients connect or read. When a room closes an expired vote, the first owner or editor client to claim the conclusion places the card. Clearing removes the vote from the canvas overlay. Undo can remove the conclusion card as a design edit.
+Canvas places a conclusion card after it receives the winning end receipt for an operation it queued. A timer uses the room clock, which `welcome.serverTime` reports. The host schedules expiry while idle and also checks the deadline when clients connect, read or send changes. A ballot arriving at or after the deadline is rejected. When a room closes an expired vote, the first owner or editor client to claim the conclusion places the card. Clearing removes the vote from the canvas overlay. Undo can remove the conclusion card as a design edit.
 
 Clients and hosts advertise `cloud-votes` in `hello` and `welcome`. Hosts also list it in `/v1/info`. REST clients can negotiate it with `x-canvas-comments-capabilities` on comments-only rooms and `x-canvas-files-capabilities` on file rooms. Older clients keep their existing comment stream. New clients show an update message for voting and viewer comments when connected to an older host and hold incompatible queued work until a capable host answers.
+
+## Timers
+
+A vote may start with `vote.start.timerMs`. A file can also have one standalone timer. It lives beside votes in the comments data and stays out of design exports and undo. Both timers use `timer.set` on the comments stream. Standalone operations set `standalone: true` and put the timer ID in the `vote` field. The server stamps the start and deadline, keeps remaining time while paused, and adds one minute on extend, up to the duration limit. Owners and editors manage both timers. Everyone can read them. Standalone expiry publishes a completion state without changing the design.
+
+A host with these controls advertises `cloud-timers`. Older clients can keep using the comment and vote stream and ignore the standalone timer field. New clients hold timer operations queued for an older host and show an update message in the timer controls.
 
 ## Anchors
 

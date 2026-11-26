@@ -324,7 +324,7 @@ export class MacFiles {
         for (const [ws, me] of r.sockets) {
             if (!r.ready.has(ws)) continue;
             ws.send(JSON.stringify({ type: 'comments.applied', entries,
-                ...(changed && this.votingSockets.has(ws) && { votes: r.comments.voteView(me, false) }),
+                ...(changed && this.votingSockets.has(ws) && r.comments.socialView(me)),
             }));
         }
     }
@@ -752,10 +752,10 @@ export class MacFiles {
                 this.scheduleVoteExpiry(r);
                 if (out.entries.length)
                     this.broadcastComments(r, out.entries);
-                return json(200, { ...out, ...(allowance < b.ops.length && { retryAfterMs: 60_000 - now % 60_000 + 50 }), ...r.comments.snapshot(), ...(voting && { votes: r.comments.voteView(fresh, false) }) });
+                return json(200, { ...out, ...(allowance < b.ops.length && { retryAfterMs: 60_000 - now % 60_000 + 50 }), ...r.comments.snapshot(), ...(voting && r.comments.socialView(fresh)) });
             }
             if (sub === 'comments' && method === 'GET')
-                return json(200, { ...r.comments.read(Number(url.searchParams.get('since') ?? 0)), ...(voting && { votes: r.comments.voteView(me, false) }) });
+                return json(200, { ...r.comments.read(Number(url.searchParams.get('since') ?? 0)), ...(voting && r.comments.socialView(me)) });
             return json(404, { code: 'not_found' });
         }
         catch (e) {
@@ -847,7 +847,7 @@ export class MacFiles {
                             if (voting) this.votingSockets.add(ws);
                             const peers = r.privateVoting ? [] : snapshotFor(presence.socket, r.presence.values());
                             if (peers.length) ws.send(JSON.stringify({ type: 'presence', peers }));
-                            ws.send(JSON.stringify({ type: 'comments.snapshot', ...social, ...(voting && { votes: r.comments.voteView(fresh, false) }) }));
+                            ws.send(JSON.stringify({ type: 'comments.snapshot', ...social, ...(voting && r.comments.socialView(fresh)) }));
                         }
                         else if (msg.type === 'actions' && r.ready.has(ws)) {
                             const out = this.bounded(r, () => r.core.submit({ ...this.conn(fresh), whiteboard: r.ready.get(ws) }, msg, Buffer.byteLength(text)));

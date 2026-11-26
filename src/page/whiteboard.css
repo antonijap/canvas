@@ -41,7 +41,7 @@
 .vote-layer{z-index:6;--vote-top:max(60px,calc(var(--wb-top) + 8px));--vote-bottom:max(var(--wb-bottom),var(--native-bottom,16px))}
 .vote-layer .vote-sheet,.vote-layer .vote-results{position:absolute;box-sizing:border-box;padding:12px;width:342px;max-width:calc(var(--wb-width) - 16px);max-height:calc(100% - var(--vote-top) - var(--vote-bottom));overflow:auto}
 .vote-layer .vote-sheet{--vote-bottom:max(var(--wb-bottom),var(--native-bottom,72px));left:var(--wb-center);bottom:var(--vote-bottom);transform:translateX(-50%)}
-.vote-layer .vote-results{right:calc(var(--wb-right) + 8px);bottom:var(--vote-bottom);width:304px;max-height:calc(100% - var(--vote-top) - var(--vote-bar-height,0px) - var(--vote-bottom) - 8px)}
+.vote-layer .vote-results{right:calc(var(--wb-right) + 8px);bottom:var(--vote-bottom);width:304px;max-height:calc(100% - var(--vote-top) - var(--vote-bar-height,0px) - var(--timer-bar-height,0px) - var(--vote-bottom) - 8px)}
 .vote-title{display:flex;align-items:center;gap:8px;margin:0;font-size:var(--c-size-sm);font-weight:700;white-space:nowrap}
 .vote-muted{color:var(--c-muted-fg);font-size:var(--c-size-xs);margin:3px 0}
 .vote-form-row{display:flex;flex-wrap:wrap;align-items:center;column-gap:12px;row-gap:4px;margin-top:12px;font-size:var(--c-size-xs)}
@@ -61,6 +61,16 @@
 .vote-layer button.vote-button.vote-primary{background:var(--c-sel);color:var(--wb-white)}
 .vote-layer button.vote-primary:hover{filter:brightness(.93)}
 .vote-bar{position:absolute;top:var(--vote-top);left:var(--wb-center);transform:translateX(-50%);display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 10px;padding:6px 8px 6px 12px;width:max-content;max-width:calc(var(--wb-width) - 16px);min-height:34px;box-sizing:border-box;border-radius:var(--c-radius-island)}
+.timer-with-vote .standalone-timer-bar{top:calc(var(--vote-top) + var(--vote-bar-height) + 8px)}
+.timer-readout{display:inline-flex;align-items:center;gap:10px;white-space:nowrap;color:var(--c-fg)}
+.timer-readout.timer-urgent{color:color-mix(in srgb,var(--c-warn) 75%,var(--c-fg))}
+.timer-ring{display:block;width:30px;height:30px;flex:none}
+.timer-ring svg{display:block;width:100%;height:100%;fill:none;stroke-width:3.5;transform:rotate(-90deg)}
+.timer-ring circle:first-child{stroke:var(--c-active)}
+.timer-ring circle:last-child{stroke:currentColor;stroke-linecap:round;stroke-dasharray:var(--timer-progress,1) 1}
+.timer-number{font-size:var(--c-size-lg);font-weight:700;font-variant-numeric:tabular-nums}
+.vote-bar .timer-complete svg{color:var(--c-ok)}
+.vote-layer button.timer-icon-button{display:grid;place-items:center;min-width:32px;padding:0 8px}
 .vote-budget{display:flex;gap:5px}
 .vote-budget span{width:10px;height:10px;border-radius:50%;background:var(--c-field)}
 .vote-budget .available{background:var(--c-sel)}

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import type { VoteOp } from "../cloud/protocol.ts";
 
 export async function votePost(base: string, route: string, body: unknown) {
   const r = await fetch(base + route, { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -29,3 +30,14 @@ export async function viewerComment(base: string, file: string) {
     kind: "thread.create", thread: randomUUID(), comment: randomUUID(), anchor: { x: 0, y: 0 }, body: "A viewer can comment",
   } }] });
 }
+
+export function whiteboardOp(base: string, file: string, op: VoteOp) {
+  return fetch(base + "/api/votes?file=" + encodeURIComponent(file), {
+    method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" },
+    body: JSON.stringify({ name: "Anna", envelope: {
+      doc: "00000000-0000-4000-8000-000000000000", opId: randomUUID(), at: new Date().toISOString(), op,
+    } }),
+  });
+}
+
+export const viewerTimerControls = "[data-timer-pause], [data-timer-resume], [data-timer-extend], [data-timer-stop]";

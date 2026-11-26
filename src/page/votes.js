@@ -4,6 +4,12 @@ import { STICKY_COLORS, WHITEBOARD_PAINT } from "./whiteboard-model.js";
 
 const NIL_DOC = "00000000-0000-4000-8000-000000000000";
 const VOTE_ICON = icon("M4 21h16M6 21V7h12v14m-9-8 2 2 4-4");
+const TIMER_ICON = icon("M10 2h4m-2 6a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm0 7 3-3");
+const PAUSE_ICON = icon("M9 5v14m6-14v14");
+const RESUME_ICON = icon("M8 5l11 7-11 7Z");
+const COMPLETE_ICON = icon("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM8 12l3 3 5-6");
+const DURATIONS = [["180000", "3 min"], ["300000", "5 min"], ["600000", "10 min"]];
+const MUTE_KEY = "canvas.timer.muted";
 const field = "input,textarea,select,[contenteditable]";
 const canvasChrome = "button,a,#labels,#rulerTop,#rulerLeft,#rulerCorner,[data-whiteboard-ui]," + field;
 
@@ -22,10 +28,16 @@ function panel(cls, label) {
   return body;
 }
 
-function heading(label) {
+function heading(label, glyph = VOTE_ICON) {
   const h = el("h2", "vote-title");
-  h.innerHTML = VOTE_ICON;
+  h.innerHTML = glyph;
   h.append(document.createTextNode(label));
+  return h;
+}
+
+function doneHeading() {
+  const h = heading("Time's up", COMPLETE_ICON);
+  h.classList.add("timer-complete");
   return h;
 }
 
@@ -35,7 +47,7 @@ function optionRow(label, ...controls) {
   return row;
 }
 
-function segments(label, options, changed) {
+function segments(label, options, changed, key) {
   const group = el("div", "vote-segments");
   group.setAttribute("role", "group");
   group.setAttribute("aria-label", label);
@@ -46,7 +58,7 @@ function segments(label, options, changed) {
   for (const [value, text] of options) {
     const b = control(text, () => select(value));
     b.value = value;
-    if (label === "Vote on") b.dataset.voteMode = value;
+    if (key) b.dataset[key] = value;
     group.append(b);
   }
   return { group, select };
@@ -78,8 +90,8 @@ function start(host) {
   sheet.dataset.voteSheet = "";
   sheet.setAttribute("role", "dialog");
   sheet.append(heading("Start a vote"));
-  let draft = null;
-  const things = segments("Vote on", [["stickies", "Stickies"], ["anything", "Anything"]], value => { draft.on = value; });
+  let draft = null, timerDuration = null;
+  const things = segments("Vote on", [["stickies", "Stickies"], ["anything", "Anything"]], value => { draft.on = value; }, "voteMode");
   const scopes = segments("Scope", [["frame", "Selected frame"], ["page", "This page"]], value => { draft.scopeKind = value; });
   const scopeRow = optionRow("Scope", scopes.group);
   const each = el("output", "", "3");
@@ -90,31 +102,60 @@ function start(host) {
   more.setAttribute("aria-label", "More votes");
   const stepper = el("div", "vote-stepper");
   stepper.append(less, each, more);
+  const voteDurations = segments("Timer", [["0", "Off"], ...DURATIONS], value => { draft.timerMs = Number(value); }, "timerDuration");
+  const timerNotice = el("p", "vote-muted");
+  timerNotice.hidden = true;
   const hidden = toggle("Hide votes until the end", "voteHidden", true);
   const anonymous = toggle("Anonymous results", "voteAnonymous");
   const startVote = control("Start", submitStart, "voteStart", true);
   const sheetActions = el("div", "vote-actions");
   const sheetPeople = el("div", "vote-sheet-people");
   sheetActions.append(sheetPeople, control("Cancel", closeSheet), startVote);
-  sheet.append(optionRow("Vote on", things.group), scopeRow, optionRow("Votes each", stepper), hidden.row, anonymous.row, sheetActions);
+  sheet.append(optionRow("Vote on", things.group), scopeRow, optionRow("Votes each", stepper), optionRow("Timer", voteDurations.group), timerNotice, hidden.row, anonymous.row, sheetActions);
   layer.append(sheet);
+
+  const timerSheet = panel("vote-sheet", "Start a timer");
+  timerSheet.dataset.timerSheet = "";
+  timerSheet.setAttribute("role", "dialog");
+  const soloDurations = segments("Duration", DURATIONS, value => { timerDuration = Number(value); }, "standaloneDuration");
+  const startTimer = control("Start", async () => {
+    if (await send({ kind: "timer.set", standalone: true, action: "start", vote: crypto.randomUUID(), ms: timerDuration })) closeTimerSheet();
+  }, "timerStart", true);
+  const timerActions = el("div", "vote-actions");
+  timerActions.append(control("Cancel", closeTimerSheet), startTimer);
+  timerSheet.append(heading("Start a timer", TIMER_ICON), optionRow("Duration", soloDurations.group), timerActions);
+  layer.append(timerSheet);
 
   const bar = panel("vote-bar", "Voting");
   bar.setAttribute("role", "region");
-  layer.append(bar);
-  new ResizeObserver(() => layer.style.setProperty("--vote-bar-height", bar.offsetHeight + "px")).observe(bar);
+  const timerBar = panel("vote-bar standalone-timer-bar", "Timer");
+  timerBar.dataset.timerBar = "";
+  layer.append(bar, timerBar);
+  const bars = new ResizeObserver(() => {
+    layer.style.setProperty("--vote-bar-height", bar.offsetHeight + "px");
+    layer.style.setProperty("--timer-bar-height", timerBar.offsetHeight + "px");
+    layer.classList.toggle("timer-with-vote", !bar.hidden && !timerBar.hidden);
+  });
+  bars.observe(bar);
+  bars.observe(timerBar);
   const results = panel("vote-results", "Vote results");
   results.dataset.voteResults = "";
   layer.append(results);
 
-  let canVote = true, canStart = true, cloud = false, message, people = [], clockOffset, endTimer;
+  let canVote = true, canStart = true, canTimer = true, cloud = false, message, timerMessage, people = [], clockOffset = 0;
+  const checkedDeadlines = new Set();
+  const dismissKey = "canvas.timer.dismissed:" + host.file;
+  let standalone, clock, clocks = [], muted = localStorage.getItem(MUTE_KEY) === "1";
+  let dismissedTimer = localStorage.getItem(dismissKey);
   const shownErrors = new Set();
-  let page = host.page, votes = [], showResults = null, lastActive = null, busy = false, loading = 0, anchored = [], hovered = null;
+  let page = host.page, votes = [], showResults = null, lastActive = null, repeatVote = null, busy = false, loading = 0, anchored = [], hovered = null;
   const current = () => votes.find(v => v.scope.page === host.page);
   const active = () => current()?.state === "active";
   const capturing = () => !!draft || active();
   const path = host.api("/api/votes");
-  const reportTool = () => { if (host.native) host.post({ voteTool: capturing() }); };
+  const reportTool = () => {
+    if (host.native) host.post({ voteTool: capturing(), timerTool: !timerSheet.hidden });
+  };
 
   function step(delta) {
     if (!draft) return;
@@ -133,6 +174,33 @@ function start(host) {
     host.requestFrame();
   }
 
+  function closeTimerSheet() {
+    if (timerSheet.hidden) return;
+    if (timerSheet.contains(document.activeElement)) document.activeElement.blur();
+    timerSheet.hidden = true;
+    reportTool();
+  }
+
+  function activateTimer() {
+    if (!host.page || host.textEdit?.active) return;
+    if (!canStart || host.readOnly) { host.toast("Owners and editors can start a timer."); return; }
+    if (!canTimer) { host.toast(timerMessage); return; }
+    if (standalone && !standalone.endedAt) { timerBar.querySelector("button")?.focus(); return; }
+    if (!timerSheet.hidden) { closeTimerSheet(); return; }
+    host.emit("draw-tool", "timer");
+    soloDurations.select("300000");
+    timerSheet.hidden = false;
+    reportTool();
+    soloDurations.group.querySelector('[aria-pressed="true"]').focus({ preventScroll: true });
+  }
+
+  function updateTimerOptions() {
+    for (const b of voteDurations.group.children) b.disabled = !canTimer && b.value !== "0";
+    if (!canTimer && draft?.timerMs) voteDurations.select("0");
+    timerNotice.hidden = canTimer;
+    timerNotice.textContent = canTimer ? "" : timerMessage;
+  }
+
   function activate() {
     if (!host.page || host.textEdit?.active) return;
     const v = current();
@@ -147,6 +215,8 @@ function start(host) {
     draft = { page: host.page, frame, scopeKind: frame ? "frame" : "page", on: "stickies", perPerson: 3 };
     things.select(draft.on);
     scopes.select(draft.scopeKind);
+    voteDurations.select("0");
+    updateTimerOptions();
     scopeRow.hidden = !frame;
     hidden.input.checked = true;
     anonymous.input.checked = false;
@@ -160,40 +230,51 @@ function start(host) {
 
   async function submitStart() {
     if (!draft) return;
-    const { page, frame, scopeKind, on, perPerson } = draft;
+    const { page, frame, scopeKind, on, perPerson, timerMs } = draft;
     const ok = await send({
       kind: "vote.start", vote: crypto.randomUUID(),
       scope: { page, ...(scopeKind === "frame" && { frame }) },
-      on, perPerson, hidden: hidden.input.checked, anonymous: anonymous.input.checked,
+      on, perPerson, ...(timerMs && { timerMs }), hidden: hidden.input.checked, anonymous: anonymous.input.checked,
     });
     if (ok) { closeSheet(); if (host.page === page) host.clearSel(); }
   }
 
   function update(data) {
+    const activeBefore = new Set(votes.filter(vote => vote.state === "active").map(vote => vote.id));
+    const soloWas = standalone;
     votes = data.votes;
+    standalone = data.timer;
     cloud = data.canVote !== undefined;
     canVote = data.canVote ?? true;
     canStart = data.canStart ?? true;
     people = data.people ?? [];
     message = data.message;
-    clockOffset = data.clockOffset;
-    clearTimeout(endTimer);
-    const v = current();
-    if (canVote && canStart && Number.isFinite(clockOffset) && v?.state === "active" && v.timer?.endsAt && !v.pendingEnd) {
-      const remaining = Date.parse(v.timer.endsAt) - (Date.now() + clockOffset);
-      endTimer = setTimeout(() => {
-        if (current()?.id === v.id && !busy) void send({ kind: "vote.end", vote: v.id, expired: true });
-      }, Math.max(0, remaining) + 200);
+    clockOffset = data.clockOffset ?? 0;
+    canTimer = data.canTimer ?? true;
+    timerMessage = data.timerMessage;
+    if (data.waitingForTimerSupport && !shownErrors.has(timerMessage)) {
+      shownErrors.add(timerMessage);
+      host.toast(timerMessage);
     }
+    const v = current();
+    for (const vote of votes) if (vote.timedOut && activeBefore.has(vote.id)) playEnd(vote.id);
+    if (standalone?.endedAt && standalone.id === soloWas?.id && !soloWas.endedAt) playEnd(standalone.id);
     if (draft && !canStart) closeSheet();
+    if (!canStart || !canTimer || (standalone && !standalone.endedAt)) closeTimerSheet();
+    updateTimerOptions();
     for (const error of data.rejected ?? []) {
       if (shownErrors.has(error.id)) continue;
       shownErrors.add(error.id);
+      repeatVote = null;
       host.toast(error.message);
     }
     if (v?.state === "ended" && v.id === lastActive) showResults = v.id;
     lastActive = v?.state === "active" ? v.id : null;
     paint();
+    if (repeatVote && v?.id !== repeatVote) {
+      repeatVote = null;
+      activate();
+    }
   }
 
   async function load() {
@@ -210,7 +291,7 @@ function start(host) {
     if (busy) return false;
     busy = true;
     loading++;
-    startVote.disabled = true;
+    startVote.disabled = startTimer.disabled = true;
     try {
       const r = await fetch(path, {
         method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" },
@@ -230,7 +311,7 @@ function start(host) {
       return false;
     } finally {
       busy = false;
-      startVote.disabled = false;
+      startVote.disabled = startTimer.disabled = false;
       void load();
     }
   }
@@ -261,6 +342,110 @@ function start(host) {
   }
   anonymous.input.addEventListener("change", paintSheetPeople);
 
+  function playEnd(id) {
+    const last = "canvas.timer.lastEnd";
+    if (localStorage.getItem(last) === id) return;
+    localStorage.setItem(last, id);
+    if (muted) return;
+    if (host.native) host.post({ timerEnded: true });
+    else host.chime?.();
+  }
+
+  function muteControl() {
+    const mute = control(muted ? "Unmute" : "Mute", () => {
+      muted = !muted;
+      localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+      for (const button of layer.querySelectorAll("[data-timer-mute]")) {
+        button.textContent = muted ? "Unmute" : "Mute";
+        button.setAttribute("aria-label", muted ? "Unmute timer sound" : "Mute timer sound");
+      }
+    }, "timerMute");
+    mute.setAttribute("aria-label", muted ? "Unmute timer sound" : "Mute timer sound");
+    return mute;
+  }
+
+  function timerControls(timer, vote, standalone) {
+    const change = action => send({ kind: "timer.set", vote, ...(standalone && { standalone }), action });
+    const paused = !!timer.pausedAt;
+    const pause = control(paused ? "Resume" : "Pause", () => change(paused ? "resume" : "pause"), paused ? "timerResume" : "timerPause");
+    pause.classList.add("timer-icon-button");
+    pause.innerHTML = paused ? RESUME_ICON : PAUSE_ICON;
+    const controls = [
+      pause,
+      control("+1 min", () => change("extend"), "timerExtend"),
+    ];
+    if (standalone) controls.push(control("Stop", () => change("stop"), "timerStop"));
+    return controls;
+  }
+
+  function countdown(id, timer, status, voting) {
+    const display = el("span", "timer-readout");
+    const ring = el("span", "timer-ring");
+    const number = el("span", "timer-number");
+    ring.innerHTML = '<svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13"/><circle cx="16" cy="16" r="13" pathLength="1"/></svg>';
+    number.dataset.timerCountdown = "";
+    number.setAttribute("role", "timer");
+    display.append(ring, number);
+    clocks.push({ id, timer, display, number, ring, status, voting });
+    return display;
+  }
+
+  function tick() {
+    clearTimeout(clock);
+    if (!clocks.length) return;
+    let next = Infinity;
+    for (const { id, timer, display, number, ring, status, voting } of clocks) {
+      const ms = Math.max(0, timer.pausedAt ? timer.remainingMs ?? 0 : Date.parse(timer.endsAt) - (Date.now() + clockOffset));
+      const seconds = Math.ceil(ms / 1000);
+      const time = [Math.floor(seconds / 60), seconds % 60].map(n => String(n).padStart(2, "0")).join(":");
+      if (number.textContent !== time) number.textContent = time;
+      const urgent = !timer.pausedAt && seconds <= 10;
+      display.classList.toggle("timer-urgent", urgent);
+      ring.style.setProperty("--timer-progress", Math.min(1, ms / timer.ms));
+      const text = timer.pausedAt ? (voting ? "Timer paused" : "Paused")
+        : urgent && voting ? (seconds ? `Votes lock in ${seconds} s` : "Votes locked")
+        : voting ? status.dataset.prompt : "";
+      if (status.textContent !== text) status.textContent = text;
+      status.hidden = !text;
+      if (timer.pausedAt) continue;
+      if (seconds) next = Math.min(next, ms - (seconds - 1) * 1000 + 10);
+      else {
+        const key = id + ":" + timer.endsAt;
+        if (!checkedDeadlines.has(key)) {
+          checkedDeadlines.add(key);
+          if (!busy) void load();
+        }
+      }
+    }
+    if (Number.isFinite(next)) clock = setTimeout(tick, next);
+  }
+
+  function paintStandalone() {
+    timerBar.replaceChildren();
+    timerBar.hidden = !standalone || dismissedTimer === standalone.id;
+    if (timerBar.hidden) return;
+    if (standalone.endedAt) {
+      timerBar.append(doneHeading(), control("Done", () => {
+        dismissedTimer = standalone.id;
+        localStorage.setItem(dismissKey, dismissedTimer);
+        paintTimerBars(current());
+      }, "timerDone"));
+      return;
+    }
+    const status = el("span", "vote-muted");
+    timerBar.append(countdown(standalone.id, standalone, status, false), status);
+    if (!canTimer) timerBar.append(el("span", "vote-muted", timerMessage));
+    if (canStart && canTimer) timerBar.append(...timerControls(standalone, standalone.id, true));
+    timerBar.append(muteControl());
+  }
+
+  function paintTimerBars(v) {
+    clocks = [];
+    paintBar(v);
+    paintStandalone();
+    tick();
+  }
+
   function paintBar(v) {
     bar.replaceChildren();
     bar.hidden = !v;
@@ -270,23 +455,33 @@ function start(host) {
       const dots = el("span", "vote-budget");
       dots.setAttribute("aria-label", `${remaining} votes left`);
       for (let i = 0; i < v.perPerson; i++) dots.append(el("span", i < remaining ? "available" : ""));
-      bar.append(heading("Voting"), el("span", "vote-muted", v.on === "stickies" ? "Click a sticky to vote" : "Click an object to vote"), dots);
+      const status = el("span", "vote-muted");
+      status.dataset.prompt = v.on === "stickies" ? "Click a sticky to vote" : "Click an object to vote";
+      if (v.timer?.endsAt || v.timer?.pausedAt) bar.append(countdown(v.id, v.timer, status, true));
+      else { bar.append(heading("Voting")); status.textContent = status.dataset.prompt; }
+      bar.append(status, dots);
       if (v.people?.length) bar.append(avatars(v.people, true));
       if (v.done > (v.people?.filter(p => p.done).length ?? 0)) bar.append(el("span", "vote-muted", `${v.done} done`));
       if (!canVote) bar.append(el("span", "vote-muted", message));
       if (v.host && canVote) {
         const end = control(v.pendingEnd ? "Ending…" : "End vote", () => send({ kind: "vote.end", vote: v.id }), "voteEnd");
         end.disabled = v.pendingEnd;
+        if (v.timer && canTimer) bar.append(...timerControls(v.timer, v.id, false));
         bar.append(end);
       }
+      if (v.timer) bar.append(muteControl());
       return;
     }
-    bar.append(heading("Vote ended"), el("span", "vote-muted", (v.anonymous ? "Anonymous, " : "") + voteTotal(v.total)));
+    const count = v.timedOut && v.voters ? `${voteTotal(v.total)} from ${v.voters} ${v.voters === 1 ? "person" : "people"}` : voteTotal(v.total);
+    bar.append(v.timedOut ? doneHeading() : heading("Vote ended"), el("span", "vote-muted", (v.anonymous ? "Anonymous, " : "") + count));
     if (showResults !== v.id) bar.append(control("Results", () => { showResults = v.id; paint(); }));
     if (!canVote && !v.archived) bar.append(el("span", "vote-muted", message));
     if (!v.host || (!canVote && !v.archived)) return;
     if (v.pendingConclusion) bar.append(control("Place conclusion", () => cloud ? load() : send({ kind: "vote.end", vote: v.id }), "voteEnd"));
-    else bar.append(control("Clear votes", () => send({ kind: "vote.clear", vote: v.id }), "voteClear"));
+    else bar.append(control(v.timedOut && !v.archived ? "Vote again" : "Clear votes", async () => {
+      if (v.timedOut && !v.archived) repeatVote = v.id;
+      if (!await send({ kind: "vote.clear", vote: v.id })) repeatVote = null;
+    }, "voteClear"));
   }
 
   const voteTotal = count => count + (count === 1 ? " vote" : " votes");
@@ -394,7 +589,7 @@ function start(host) {
     }
     const v = current();
     if (showResults && showResults !== v?.id) showResults = null;
-    paintBar(v);
+    paintTimerBars(v);
     if (draft) paintSheetPeople();
     paintResults(v);
     paintMarks(v);
@@ -415,7 +610,9 @@ function start(host) {
 
   addEventListener("keydown", e => {
     if (e.defaultPrevented || e.isComposing || e.repeat || e.metaKey || e.ctrlKey || e.altKey || host.textEdit?.active) return;
-    if (e.key === "Escape" && draft) closeSheet();
+    if (e.key === "Escape" && !timerSheet.hidden) closeTimerSheet();
+    else if (e.key === "Escape" && draft) closeSheet();
+    else if (e.key.toLowerCase() === "t" && e.shiftKey && !e.target.closest?.(field)) activateTimer();
     else if (e.key.toLowerCase() === "d" && e.shiftKey && !e.target.closest?.(field)) activate();
     else return;
     e.preventDefault();
@@ -429,7 +626,7 @@ function start(host) {
     if (!id && e.target.closest?.(canvasChrome)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!id || busy) return;
+    if (!id || busy || (v.timer?.endsAt && !v.timer.pausedAt && Date.parse(v.timer.endsAt) <= Date.now() + clockOffset)) return;
     if (v.mine >= v.perPerson) { host.toast("You have no votes left. Click one of your dots to remove it."); return; }
     void send({ kind: "vote.cast", vote: v.id, ballot: crypto.randomUUID(), layer: id });
   }, true);
@@ -441,27 +638,32 @@ function start(host) {
 
   host.on("cmd", c => {
     if (c.cmd === "draw" && c.type === "vote") activate();
-    if (c.cmd === "cancelDraw") closeSheet();
+    if (c.cmd === "draw" && c.type === "timer") activateTimer();
+    if (c.cmd === "cancelDraw") { closeSheet(); closeTimerSheet(); }
     if (c.cmd === "syncVoteTool") reportTool();
   });
-  host.on("draw-tool", type => { if (draft && type !== "vote") closeSheet(); });
+  host.on("draw-tool", type => {
+    if (type !== "vote") closeSheet();
+    if (type !== "timer") closeTimerSheet();
+  });
   host.on("page", () => {
     if (page !== host.page) {
       page = host.page;
       closeSheet();
-      lastActive = showResults = hovered = null;
+      closeTimerSheet();
+      lastActive = showResults = hovered = repeatVote = null;
     }
     paint();
   });
   host.on("tab", shown => {
-    if (!shown) closeSheet();
+    if (!shown) { closeSheet(); closeTimerSheet(); }
     else { reportTool(); void load(); }
   });
   host.on("resync", load);
   host.es?.addEventListener("comments", load);
   host.es?.addEventListener("cloudfile", load);
   host.beforeFrame(positionMarks);
-  host.votes = { activate, active, capturing, get privatePresence() { return privatePresence(); } };
+  host.votes = { activate, activateTimer, active, capturing, get privatePresence() { return privatePresence(); } };
   void load();
 }
 

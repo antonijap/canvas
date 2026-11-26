@@ -139,7 +139,7 @@ export function projectVotes(votes: StoredVote[], legacyKey: string | undefined,
       people.set(voter.id, p);
     }
     return [{
-      id, scope, on, perPerson, hidden, anonymous, state, timer, ballots, conclusionOp, needsConclusion,
+      id, scope, on, perPerson, hidden, anonymous, state, timer, timedOut: vote.timedOut, ballots, conclusionOp, needsConclusion,
       ...(live && !anonymous && { progress: [...people].flatMap(([id, p], index) => p.name ? [{ id: id.includes("@") ? `${vote.id}:${index}` : id, name: p.name, done: p.count >= perPerson }] : []) }),
       ...(live && { done: [...people.values()].filter(p => p.count >= perPerson).length }),
       ...(!live && !anonymous && { voters: people.size }),

@@ -165,3 +165,31 @@ test("one client keeps the conclusion only for its own winning end receipt", () 
   assert.equal(a.cloudVotes?.[0].totals?.[0].count, 1);
   assert.deepEqual(b.cloudVotes, []);
 });
+
+test("timed vote starts atomically and rejects late ballots", () => {
+  const votes: Vote[] = [];
+  const now = new Date("2026-01-01T00:00:00Z").toISOString();
+  const end = new Date(Date.parse(now) + 10_000).toISOString();
+  const timerVote = randomUUID();
+  const start: Op = { kind: "vote.start", vote: timerVote, scope: { page: "page" }, on: "anything",
+    hidden: true, anonymous: false, perPerson: 1, timerMs: 10_000 };
+  const who = { id: "anna", name: "Anna" };
+  const doc = randomUUID();
+  assert.equal(applyOp([], doc, start, who, now, votes, true), null);
+  assert.equal(votes[0].timer?.endsAt, end);
+  assert.equal(applyOp([], doc, { kind: "vote.cast", vote: timerVote, ballot: randomUUID(), layer: "target" }, who, end, votes, true),
+    "The vote has ended");
+});
+
+test("a vote-only host gets compatible ops while timed work stays queued", () => {
+  const vote = randomUUID();
+  const start = envelope({ kind: "vote.start", vote, scope: { page: "page" }, on: "anything",
+    hidden: true, anonymous: false, perPerson: 1, timerMs: 180_000 });
+  const timer = envelope({ kind: "timer.set", vote: randomUUID(), standalone: true, action: "start", ms: 3000 });
+  const comment = threadCreateEnvelope({ x: 0, y: 0 }, "A comment");
+  const cast = envelope({ kind: "vote.cast", vote, ballot: randomUUID(), layer: "note" });
+  const pending = [start, timer, comment, cast];
+  assert.deepEqual(sendableCommentOps(pending, "editor", true, false), [comment]);
+  assert.deepEqual(sendableCommentOps(pending, "editor", true, true), pending);
+  assert.equal(pending.length, 4);
+});

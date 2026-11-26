@@ -20,7 +20,7 @@ import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, 
 import { createPackage, targetPath } from './docpath.ts';
 import { type BlobRow } from '../cloud/core/files/seam.ts';
 import { readBodyText } from './body.ts';
-import { applyOp, CLOUD_VOTES, isVoteOp, LIMITS, supportsCloudVotes, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type Thread, type Vote, type VoteView } from '../cloud/protocol.ts';
+import { applyOp, CLOUD_VOTES, isVoteOp, LIMITS, needsCloudTimers, supportsCloudTimers, supportsCloudVotes, UPDATE_TIMER_HOST, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type StandaloneTimer, type Thread, type Vote, type VoteView } from '../cloud/protocol.ts';
 import { COMMENTS_FILE, forkComments, readCommentsFile, writeCommentsFile } from './comments-file.ts';
 import { ownLocalVotes, receiveVoteViews, sendableCommentOps } from './vote-state.ts';
 import { prepareMove } from './cloud-files-move.ts';
@@ -75,6 +75,8 @@ interface Session {
     status: string;
     whiteboard?: boolean;
     voting?: boolean;
+    timerCapable?: boolean;
+    cloudTimer?: StandaloneTimer | null;
     serverTime?: string;
     voteClockOffset?: number;
     cloudVotes?: VoteView[];
@@ -281,7 +283,7 @@ function render(s: Session) { if (s.stopped)
     return; adoptWriters(path.join(s.store.pkg, 'document.json'), s.store.replica.view().allVers()); s.store.materialize(); fileEvents.view?.(path.join(s.store.pkg, 'document.json')); }
 function commentState(s: Session): CommentsFile {
     return { format: 1, doc: s.store.meta.file, seq: s.commentsSeq, threads: s.comments, outbox: s.commentsPending,
-        rejected: s.commentsRejected ?? [], cloudVotes: s.cloudVotes, voteConclusions: s.voteConclusions };
+        rejected: s.commentsRejected ?? [], cloudVotes: s.cloudVotes, cloudTimer: s.cloudTimer, timerCapable: s.timerCapable, voteConclusions: s.voteConclusions };
 }
 export function fileVoteState(file: string): CommentsFile | undefined {
     const s = sessions.get(docFile(file));
@@ -315,6 +317,7 @@ export function queueFileVote(file: string, envelope: OpEnvelope) {
     const s = sessions.get(docFile(file));
     if (!s) return fail(409, "conflict", "Open the Cloud file before voting.");
     if (!s.voting) fail(426, 'version', s.voting === false ? UPDATE_VOTE_HOST : 'Connect to the Cloud to check for voting support.');
+    if (needsCloudTimers(envelope.op) && !s.timerCapable) fail(426, 'version', UPDATE_TIMER_HOST);
     if (!s.commentsPending.some(e => e.opId === envelope.opId) && !s.commentsRejected?.some(r => r.envelope.opId === envelope.opId)) {
         s.commentsPending.push({ ...envelope, doc: s.store.meta.file });
         saveComments(s);
@@ -322,7 +325,7 @@ export function queueFileVote(file: string, envelope: OpEnvelope) {
     }
 }
 function saveComments(s: Session) {
-    s.store.db.prepare('INSERT OR REPLACE INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: s.comments, commentsSeq: s.commentsSeq, commentsPending: s.commentsPending, commentsRejected: s.commentsRejected ?? [], voting: s.voting, cloudVotes: s.cloudVotes, voteConclusions: s.voteConclusions, legacyVotes: s.legacyVotes, legacyVoteConclusions: s.legacyVoteConclusions, voteQueueVersion: 1 }));
+    s.store.db.prepare('INSERT OR REPLACE INTO comments_state VALUES(1,?)').run(JSON.stringify({ comments: s.comments, commentsSeq: s.commentsSeq, commentsPending: s.commentsPending, commentsRejected: s.commentsRejected ?? [], voting: s.voting, cloudVotes: s.cloudVotes, cloudTimer: s.cloudTimer, timerCapable: s.timerCapable, voteConclusions: s.voteConclusions, legacyVotes: s.legacyVotes, legacyVoteConclusions: s.legacyVoteConclusions, voteQueueVersion: 1 }));
     const threads = structuredClone(s.comments);
     for (const e of [...s.commentsPending, ...(s.commentsRejected ?? []).map(r => r.envelope)])
         if (!isVoteOp(e.op)) applyOp(threads, s.store.meta.file, e.op, { name: s.store.meta.author.name ?? "Me", id: s.store.meta.author.id }, e.at);
@@ -403,6 +406,7 @@ export async function receive(s: Session, m: any) {
     }
     if (m.type === 'comments.snapshot') {
         if (m.votes) saveVoteViews(s, m.votes);
+        if (m.timer !== undefined) s.cloudTimer = m.timer;
         s.comments = m.threads;
         s.commentsSeq = m.seq;
         saveComments(s);
@@ -411,6 +415,7 @@ export async function receive(s: Session, m: any) {
     }
     if (m.type === 'comments.applied') {
         if (m.votes) saveVoteViews(s, m.votes);
+        if (m.timer !== undefined) s.cloudTimer = m.timer;
         for (const e of m.entries) {
             if (e.seq <= s.commentsSeq)
                 continue;
@@ -460,6 +465,7 @@ export async function receive(s: Session, m: any) {
     if (m.type === 'welcome') {
         s.whiteboard = supportsWhiteboard(m.capabilities);
         s.voting = supportsCloudVotes(m.capabilities);
+        s.timerCapable = supportsCloudTimers(m.capabilities);
         s.serverTime = m.serverTime;
         s.voteClockOffset = m.serverTime ? Date.parse(m.serverTime) - Date.now() : undefined;
         s.updateMessage = undefined;
@@ -477,7 +483,7 @@ function sendComments(s: Session) {
     if (s.ws?.readyState !== WebSocket.OPEN || !s.store.replica.joined || s.stopped || s.status !== 'connected') return;
     const inFlight = s.commentsInFlight ??= new Set<string>();
     if (inFlight.size) return;
-    const ops = sendableCommentOps(s.commentsPending, s.store.meta.role, s.voting).slice(0, LIMITS.opsPerMessage);
+    const ops = sendableCommentOps(s.commentsPending, s.store.meta.role, s.voting, s.timerCapable).slice(0, LIMITS.opsPerMessage);
     if (!ops.length) return;
     for (const e of ops) inFlight.add(e.opId);
     s.ws.send(JSON.stringify({ type: 'comments', ops }));
@@ -827,6 +833,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                 if (hasWhiteboard(doc.children) || comments.some(e => isVoteOp(e.op))) {
                     const info = await cloudJson(await request(b.cloud, '/v1/info')) as { capabilities?: unknown };
                     if (comments.some(e => isVoteOp(e.op)) && !supportsCloudVotes(info.capabilities)) fail(426, 'version', UPDATE_VOTE_HOST);
+                    if (comments.some(e => needsCloudTimers(e.op)) && !supportsCloudTimers(info.capabilities)) fail(426, 'version', UPDATE_TIMER_HOST);
                     if (hasWhiteboard(doc.children) && !supportsWhiteboard(info.capabilities)) fail(426, 'update_host', UPDATE_WHITEBOARD_HOST);
                 }
                 const created = { id: randomUUID() };
@@ -848,7 +855,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                     seq += a.ops.length;
                     actions.push(a);
                 }
-                let social: { seq: number; threads: Thread[]; votes?: VoteView[] } | undefined;
+                let social: { seq: number; threads: Thread[]; votes?: VoteView[]; timer?: StandaloneTimer | null } | undefined;
                 for (let i = 0; i < comments.length; i += LIMITS.opsPerMessage) {
                     let ops = comments.slice(i, i + LIMITS.opsPerMessage).map(e => ({ ...e, doc: created.id }));
                     while (ops.length) {

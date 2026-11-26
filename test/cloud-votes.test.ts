@@ -200,3 +200,35 @@ test("a comments-only account reloads its own vote queue from private storage", 
   const cache = path.join(dir, "cloud-votes");
   assert.equal(fs.statSync(path.join(cache, fs.readdirSync(cache)[0])).mode & 0o777, 0o600);
 });
+
+test("the standalone timer uses server time, keeps its paused time and broadcasts idle expiry", t => {
+  const store = new SqliteStore(":memory:");
+  t.after(() => store.close());
+  let now = Date.parse(at);
+  const ops = new Operations(store, () => now);
+  const apply = (action: Op, role: Role = "editor") => ops.submit(doc, [envelope(action)], anna, role, 100, [], design);
+  const timer = { kind: "timer.set", standalone: true, vote: randomUUID() } as const;
+  assert.equal(apply({ ...timer, action: "start", ms: 4000 }, "viewer").rejected[0].code, "forbidden");
+  assert.equal(apply({ ...timer, action: "start", ms: 4000 }).acks.length, 1);
+  assert.deepEqual(ops.socialView(anna).timer, ops.socialView(ben).timer);
+  assert.equal(ops.nextVoteExpiry(), now + 4000);
+  now += 1000;
+  assert.equal(apply({ ...timer, action: "pause" }).acks.length, 1);
+  assert.equal(ops.nextVoteExpiry(), undefined);
+  now += 5000;
+  assert.equal(apply({ ...timer, action: "extend" }).acks.length, 1);
+  assert.equal(ops.socialView(ben).timer?.remainingMs, 63_000);
+  assert.equal(apply({ ...timer, action: "resume" }).acks.length, 1);
+  assert.equal(ops.nextVoteExpiry(), now + 63_000);
+  const expiry: number[] = [];
+  ops.onVotesExpired = entries => expiry.push(...entries.map(e => e.seq));
+  now += 63_000;
+  ops.expireDueVotes();
+  ops.expireDueVotes();
+  assert.equal(expiry.length, 1);
+  assert.equal(ops.socialView(ben).timer?.endedAt, new Date(now).toISOString());
+  assert.equal(ops.nextVoteExpiry(), undefined);
+  assert.equal(ops.socialView(anna).votes.length, 0);
+  assert.equal(apply({ ...timer, action: "stop" }).acks.length, 1);
+  assert.equal(ops.socialView(ben).timer, null);
+});

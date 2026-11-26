@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { CLOUD_VOTES, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../../protocol";
+import { CLOUD_TIMERS, CLOUD_VOTES, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../../protocol";
 import type { Applied, PeopleRule, Role, ServerMessage } from "../../../protocol";
 import type { Identity } from "./auth";
 import type { SqlStore } from "../../../core/sql.ts";
@@ -34,7 +34,7 @@ export class Room extends DurableObject<Env> {
   async read(since: number, me?: Identity) {
     const data = this.operations.read(since);
     await this.scheduleVoteExpiry();
-    return { ...data, ...(me && { votes: this.operations.voteView(me, false) }) };
+    return { ...data, ...(me && this.operations.socialView(me)) };
   }
   async setVoteDesign(doc: string, email: string, value: unknown) {
     if (!this.matches(doc)) return false;
@@ -63,7 +63,7 @@ export class Room extends DurableObject<Env> {
     const changed = entries.some(entry => entry.op.kind === "vote.changed");
     for (const socket of this.ctx.getWebSockets()) {
       const state = session(socket);
-      if (state.ready) send(socket, { type: "applied", entries, ...(changed && state.voting && { votes: this.operations.voteView(state.me, false) }) });
+      if (state.ready) send(socket, { type: "applied", entries, ...(changed && state.voting && this.operations.socialView(state.me)) });
     }
   }
   private async scheduleVoteExpiry() {
@@ -153,7 +153,7 @@ export class Room extends DurableObject<Env> {
         const data = this.operations.read(sinceValue(message.since));
         send(socket, {
           type: "welcome", protocol: PROTOCOL_VERSION, server: this.env.SERVER_VERSION,
-          role: state.role, me: state.me, seq: data.seq, serverTime: new Date().toISOString(), capabilities: [CLOUD_VOTES], ...(state.voting && { votes: this.operations.voteView(state.me, false) }), ...("threads" in data ? { threads: data.threads } : {}),
+          role: state.role, me: state.me, seq: data.seq, serverTime: new Date().toISOString(), capabilities: [CLOUD_VOTES, CLOUD_TIMERS], ...(state.voting && this.operations.socialView(state.me)), ...("threads" in data ? { threads: data.threads } : {}),
         });
         if ("entries" in data && data.entries.length) send(socket, { type: "applied", entries: data.entries });
         state.ready = true;

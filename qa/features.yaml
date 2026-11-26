@@ -53,6 +53,12 @@ features:
     driven: [page, native, mcp]
     cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable, palette, compact-panels, cloud, cloud-privacy, cloud-viewer, cloud-private-presence, cloud-cache, cloud-design]
 
+  - id: timer
+    name: Whiteboard countdowns
+    area: canvas
+    driven: [page, native]
+    cases: [standalone, controls, compact, cloud, expiry]
+
   - id: draw
     name: Draw boards and layers
     area: canvas

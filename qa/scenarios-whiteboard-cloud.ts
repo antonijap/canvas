@@ -3,7 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { launchChrome, type Chrome } from "../fidelity/cdp.ts";
 import { sc, T } from "./harness.ts";
-import { cloudVoteFiles, viewerComment, votePost } from "./cloud-vote-fixture.ts";
+import { cloudVoteFiles, viewerComment, viewerTimerControls, whiteboardOp, votePost } from "./cloud-vote-fixture.ts";
 import { openTab, ROOT, sleep, startServer, type Scratch } from "./lib.ts";
 
 sc("sticky", "Sticky text presence and stickers replicate on a Cloud file", {
@@ -96,8 +96,8 @@ sc("sticky", "Sticky text presence and stickers replicate on a Cloud file", {
   }
 });
 
-sc("vote", "Cloud vote lets a viewer vote and comment without revealing hidden ballots", {
-  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence", "vote:cloud-cache", "vote:cloud-design"],
+sc("vote", "Cloud vote and timer let a viewer vote and comment without revealing hidden ballots", {
+  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence", "vote:cloud-cache", "vote:cloud-design", "timer:cloud", "timer:expiry"],
   skip: { visual: "Checks the two live canvases and the synchronized results." },
 }, async (t: T) => {
   const dir = fs.mkdtempSync(path.join(path.dirname(t.file), "vote-cloud-"));
@@ -162,6 +162,36 @@ sc("vote", "Cloud vote lets a viewer vote and comment without revealing hidden b
     await ben.waitFor('!document.querySelector("[data-vote-count]")', "clear removes the viewer's counts");
     t.eq(await ben.ev('[...window.canvasHost.boards.keys()].filter(id => id.startsWith("vote-conclusion-")).length'), 1,
       "clearing leaves exactly one conclusion card");
+
+    const timer = randomUUID();
+    const startTimer = { kind: "timer.set", action: "start", standalone: true, vote: timer, ms: 60_000 } as const;
+    t.eq((await whiteboardOp(b.base, files.viewer, startTimer)).status, 403, "the viewer cannot start a timer");
+    t.eq((await whiteboardOp(a.base, files.owner, startTimer)).status, 200, "the owner starts a timer");
+    const readout = '[data-timer-bar] [data-timer-countdown]';
+    await ben.waitFor(`document.querySelector(${JSON.stringify(readout)})?.textContent`, "the viewer sees the standalone timer");
+    t.eq(await ben.ev(`document.querySelectorAll(${JSON.stringify(viewerTimerControls)}).length`), 0, "the viewer has no timer controls");
+    await anna.waitFor('document.querySelector("[data-timer-pause]")', "owner can pause the timer");
+    await anna.ev('document.querySelector("[data-timer-pause]").click()');
+    const paused = `document.querySelector("[data-timer-bar]").textContent.includes("Paused") && document.querySelector(${JSON.stringify(readout)}).textContent`;
+    t.eq(await ben.waitFor(paused, "viewer sees the timer pause"), await anna.waitFor(paused, "owner sees the timer pause"), "both see the same countdown");
+    t.eq((await whiteboardOp(b.base, files.viewer, { ...startTimer, action: "stop", ms: undefined })).status, 403, "the viewer cannot stop it");
+    await anna.ev('document.querySelector("[data-timer-stop]").click()');
+    await ben.waitFor('document.querySelector("[data-timer-bar]").hidden', "the viewer sees the timer stop");
+
+    const timedVote = randomUUID();
+    const page = await anna.ev<string>("window.canvasHost.page");
+    t.eq((await whiteboardOp(a.base, files.owner, { kind: "vote.start", vote: timedVote, scope: { page }, on: "anything",
+      perPerson: 1, hidden: true, anonymous: false, timerMs: 7000 })).status, 200, "the owner starts a timed vote");
+    await ben.waitFor('document.querySelector(".timer-urgent")', "the viewer sees the last ten seconds styling");
+    await ben.io.click(point.x, point.y);
+    await ben.waitFor('document.querySelector("[data-vote-mark]")', "the viewer votes before the deadline");
+    await ben.waitFor(`document.querySelector(".vote-bar").textContent.includes("Time's up")`, "the idle host ends the vote");
+    await ben.waitFor('document.querySelector("[data-vote-count]")?.textContent.trim() === "1"', "expiry reveals the result");
+    await ben.waitFor('[...window.canvasHost.boards.keys()].filter(id => id.startsWith("vote-conclusion-")).length === 2', "one more conclusion card");
+
+    await anna.waitFor('document.querySelector("[data-vote-clear]")?.textContent === "Vote again"', "the owner can start another vote");
+    await anna.ev('document.querySelector("[data-vote-clear]").click()');
+    await anna.waitFor('document.querySelector("[data-vote-sheet]:not([hidden])")', "Vote again opens the start sheet");
 
     // A comments-only room shares its design out of band, as a synced folder would.
     const local = path.join(dir, "Anna", "Shared.canvas"), copy = path.join(dir, "Ben", "Shared.canvas");

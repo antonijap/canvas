@@ -616,6 +616,7 @@ struct ShellLogicTests {
         let groups = DrawTool.paletteGroups
         check(groups == [[.frame, .rectangle, .ellipse, .text], [.sticky, .sticker]], "draw tools precede whiteboard tools")
         check(groups.flatMap { $0 }.map(\.keycap) == ["F", "R", "O", "T", "S", "\u{21E7}S"], "palette keycaps match tool shortcuts")
+        check(DrawTool.timer.keycap == "\u{21E7}T", "the Timer control shows its Shift shortcut")
         check(DrawTool.vote.keycap == "\u{21E7}D", "the Vote control shows its Shift shortcut")
     }
 
@@ -790,6 +791,7 @@ struct ShellLogicTests {
         check(items.contains { $0.0 == "Edit" && $0.1.command == "repeat" && $0.1.key == "." && $0.1.mods.isEmpty && $0.1.pageKey }, "Edit > Repeat on the page's . key")
         check(has("View", "Draw Sticky", "s", []) && has("View", "Place Sticker", "s", [.shift]), "whiteboard tools have distinct shortcuts")
         check(has("View", "Start a Vote", "d", [.shift]), "start a vote from the View menu or Shift+D")
+        check(has("View", "Start a Timer", "t", [.shift]), "start a timer from the View menu or Shift+T")
         check(has("View", "Zoom to 100%", "0", [.shift]) && has("View", "Zoom to Fit", "1", [.shift]) && has("View", "Zoom to Selection", "2", [.shift]), "zoom keys")
         check(has("View", "Zoom In", "=", [.command]) && has("View", "Zoom Out", "-", [.command]), "zoom in and out")
         check(has("Object", "Create Component", "k", [.command, .option]) && has("Object", "Detach Instance", "b", [.command, .option]), "components")

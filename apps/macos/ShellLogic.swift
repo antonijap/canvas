@@ -1271,7 +1271,7 @@ enum RepeatHint {
 }
 
 enum DrawTool: String, CaseIterable {
-    case frame, rectangle, ellipse, text, sticky, sticker, vote
+    case frame, rectangle, ellipse, text, sticky, sticker, vote, timer
 
     /// The bottom palette's groups, in order; a divider sits between them (ToolPalette, Shell.swift).
     static let paletteGroups: [[DrawTool]] = [[.frame, .rectangle, .ellipse, .text], [.sticky, .sticker]]
@@ -1287,6 +1287,7 @@ enum DrawTool: String, CaseIterable {
         case .text: return "t"
         case .sticky, .sticker: return "s"
         case .vote: return "d"
+        case .timer: return "t"
         }
     }
     var symbol: String {
@@ -1298,16 +1299,18 @@ enum DrawTool: String, CaseIterable {
         case .sticky: return "note"
         case .sticker: return "seal"
         case .vote: return "checkmark.square"
+        case .timer: return "timer"
         }
     }
     var menuTitle: String {
         switch self {
         case .sticker: return "Place Sticker"
         case .vote: return "Start a Vote"
+        case .timer: return "Start a Timer"
         default: return "Draw " + title
         }
     }
-    var usesShift: Bool { self == .sticker || self == .vote }
+    var usesShift: Bool { self == .sticker || self == .vote || self == .timer }
 }
 
 /// The menu bar: what each menu holds, in order, with its key. main.swift wires each command to its action;

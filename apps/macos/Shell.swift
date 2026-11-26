@@ -119,8 +119,7 @@ struct RootView: View {
 
     private var rightSidebarShown: Bool { inspectorShown || ((model.commentsSidebarOpen || model.conversationsSidebarOpen) && !model.uiHidden && !model.homeShown) }
     private var minimumCanvasWidth: CGFloat {
-        // Leave room for the timer beside Vote when it joins the palette.
-        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.Size.compact.paletteWidth(reserving: 1) + Metric.pillPad) : ShellLayout.minCanvas
+        toolPaletteShown ? max(ShellLayout.minCanvas, ToolPalette.Size.compact.paletteWidth() + Metric.pillPad) : ShellLayout.minCanvas
     }
 
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
@@ -954,8 +953,8 @@ private struct ToolPalette: View {
         static let full = Size(width: 36, height: 36, padding: 6, gap: 2, divider: 9, glyph: 18)
         static let compact = Size(width: 20, height: 26, padding: 4, gap: 1, divider: 5, glyph: 15)
 
-        @MainActor func paletteWidth(reserving extra: Int = 0) -> CGFloat {
-            let count = ToolPalette.groups.reduce(extra) { $0 + $1.count }
+        @MainActor func paletteWidth() -> CGFloat {
+            let count = ToolPalette.groups.reduce(0) { $0 + $1.count }
             let dividers = max(0, ToolPalette.groups.count - 1)
             return 2 * padding + CGFloat(count) * width + CGFloat(dividers) * divider
                 + CGFloat(max(0, count + dividers - 1)) * gap
@@ -965,12 +964,26 @@ private struct ToolPalette: View {
     private struct Item: Identifiable {
         let tool: DrawTool
         var id: String { tool.rawValue }
-        var mark: String { tool == .vote ? "vote-tool" : "draw-tool" }
+        var mark: String {
+            switch tool {
+            case .vote: return "vote-tool"
+            case .timer: return "timer-tool"
+            default: return "draw-tool"
+            }
+        }
+        @MainActor func selected(in model: CanvasModel) -> Bool {
+            switch tool {
+            case .vote: return model.voteToolActive
+            case .timer: return model.timerToolActive
+            default: return model.activeDrawTool == tool
+            }
+        }
         var icon: WhiteboardToolIcon? {
             switch tool {
             case .sticky: return .sticky
             case .sticker: return .sticker
             case .vote: return .vote
+            case .timer: return .timer
             default: return nil
             }
         }
@@ -978,7 +991,7 @@ private struct ToolPalette: View {
 
     private static let groups: [[Item]] = {
         var groups = DrawTool.paletteGroups.map { $0.map { Item(tool: $0) } }
-        groups[groups.count - 1].append(Item(tool: .vote))
+        groups[groups.count - 1].append(contentsOf: [Item(tool: .vote), Item(tool: .timer)])
         return groups
     }()
 
@@ -1000,7 +1013,7 @@ private struct ToolPalette: View {
                     ForEach(Self.groups[index]) { item in
                         ToolButton(item: item, size: size,
                                    tooltipOffset: max(size.height + 8, tooltipClearance - Self.bottomMargin - size.padding),
-                                   selected: item.tool == .vote ? model.voteToolActive : model.activeDrawTool == item.tool,
+                                   selected: item.selected(in: model),
                                    qaHovered: qaHoveredTool == item.id) {
                             model.draw(item.tool)
                         }

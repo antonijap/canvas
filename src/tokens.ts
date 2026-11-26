@@ -136,6 +136,7 @@ export const TYPE = {
   sizeXs: "12px",
   sizeSm: "13px",
   sizeBase: "16px",
+  sizeLg: "22px",
 };
 
 export const MOTION = {
@@ -157,6 +158,7 @@ function block(palette: Palette): string {
     `  --c-size-xs: ${TYPE.sizeXs};`,
     `  --c-size-sm: ${TYPE.sizeSm};`,
     `  --c-size-base: ${TYPE.sizeBase};`,
+    `  --c-size-lg: ${TYPE.sizeLg};`,
   ];
   const motion = [
     `  --c-fast: ${MOTION.fast};`,

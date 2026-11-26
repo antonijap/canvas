@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { evictDurableObject, reset } from "cloudflare:test";
-import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION } from "../../../protocol";
+import { CLOUD_TIMERS, CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION } from "../../../protocol";
 import { bindings, call, connect, envelope, member, owner, post, register, rules } from "./helpers";
 
 const sockets: WebSocket[] = [];
@@ -130,6 +130,21 @@ it("broadcasts when an idle room's vote timer ends", async () => {
   expect(await response.json()).toMatchObject({ rejected: [] });
   expect(await a.next()).toMatchObject({ votes: [{ id: vote, state: "active" }] });
   expect(await a.next()).toMatchObject({ type: "applied", entries: [{ seq: 3 }], votes: [{ id: vote, state: "ended", needsConclusion: true }] });
+});
+it("broadcasts standalone timer expiry on the comments stream", async () => {
+  await rules([{ match: member, role: "viewer" }]);
+  const doc = await register(), timer = crypto.randomUUID(), route = `/v1/docs/${doc}/ops`;
+  const legacy = await open(doc), viewer = await open(doc, member, 0, [CLOUD_VOTES, CLOUD_TIMERS]);
+  await legacy.next();
+  expect(await viewer.next()).toMatchObject({ capabilities: [CLOUD_VOTES, CLOUD_TIMERS], timer: null });
+  const start = envelope(doc, { kind: "timer.set", vote: timer, standalone: true, action: "start", ms: 350 });
+  const headers = { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES };
+  expect(await (await call(route, member, "POST", { ops: [start] }, headers)).json())
+    .toMatchObject({ rejected: [{ code: "forbidden" }] });
+  expect(await (await call(route, owner, "POST", { ops: [start] }, headers)).json()).toMatchObject({ rejected: [] });
+  expect(await legacy.next()).not.toHaveProperty("timer");
+  expect(await viewer.next()).toMatchObject({ votes: [], timer: { id: timer, startedAt: expect.any(String), endsAt: expect.any(String) } });
+  expect(await viewer.next()).toMatchObject({ type: "applied", timer: { id: timer, endedAt: expect.any(String) } });
 });
 it("closes the oldest socket above the per-person limit", async () => {
   const doc = await register();

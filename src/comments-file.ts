@@ -49,7 +49,7 @@ export function readCommentsFile(pkg: string): CommentsFile | null {
 
 /** Portable Cloud packages carry comments. Vote queues and member-specific views stay in private state. */
 export function withoutCloudVotes(f: CommentsFile): CommentsFile {
-  const { votes, cloudVotes, voteConclusions, voteCapable, voteRole, ...comments } = f;
+  const { votes, cloudVotes, voteConclusions, voteCapable, voteRole, timer, cloudTimer, timerCapable, ...comments } = f;
   return { ...comments, outbox: comments.outbox.filter(e => !isVoteOp(e.op)),
     rejected: comments.rejected?.filter(r => !isVoteOp(r.envelope.op)) };
 }

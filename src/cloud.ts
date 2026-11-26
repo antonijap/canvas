@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
-import { CLOUD_VOTES, isVoteOp, PROTOCOL_VERSION, supportsCloudVotes, UPDATE_VOTE_HOST, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread, type CommentsFile, type Role } from "../cloud/protocol.ts";
+import { CLOUD_VOTES, isVoteOp, PROTOCOL_VERSION, needsCloudTimers, supportsCloudTimers, supportsCloudVotes, UPDATE_TIMER_HOST, UPDATE_VOTE_HOST, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread, type CommentsFile, type Role } from "../cloud/protocol.ts";
 import { readBodyText } from "./body.ts";
 import { addCloud, bump, cleanServerUrl, cloudConfigs, devEmailFor, generation, hostedId, hostedUrl, hostOf, isConfigured, isLocalDev, onCloudsChanged, parseInvite, removeCloud } from "./cloud-config.ts";
 import { hostsHere, hostStatus, hostStatusAll, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
@@ -215,7 +215,7 @@ export function setToken(url: string, token: string | null): void {
 
 // ---------- the server ----------
 
-interface ServerState { status: Status; email?: string; name?: string; role?: string; id?: string; server?: string; protocol?: number; voting?: boolean; at: number; devEmail: string }
+interface ServerState { status: Status; email?: string; name?: string; role?: string; id?: string; server?: string; protocol?: number; voting?: boolean; timerCapable?: boolean; at: number; devEmail: string }
 
 /**
  * How long a status answer is reused, so the team's server is not asked on every look. A connected server is asked
@@ -298,7 +298,7 @@ export async function checkServer(origin: string, force = false, fresh = false):
   const me = await request(origin, "/v1/me");
   if (me.fail) return set({ status: me.fail, protocol });
   if (!me.res.ok) return set({ status: "offline", protocol });
-  return set({ status: "connected", id: me.json?.id, email: me.json?.email, name: me.json?.name, role: me.json?.role, protocol, server: info.json?.server, voting: supportsCloudVotes(info.json?.capabilities) });
+  return set({ status: "connected", id: me.json?.id, email: me.json?.email, name: me.json?.name, role: me.json?.role, protocol, server: info.json?.server, voting: supportsCloudVotes(info.json?.capabilities), timerCapable: supportsCloudTimers(info.json?.capabilities) });
 }
 
 // ---------- one room per shared file ----------
@@ -474,6 +474,8 @@ function onMessage(s: Session, m: ServerMessage): void {
         if (m.threads) snapshot(f, m.threads as Thread[], m.seq);
         if (m.votes) receiveVoteViews(f, m.votes);
         f.voteCapable = supportsCloudVotes(m.capabilities);
+        f.timerCapable = supportsCloudTimers(m.capabilities);
+        if (m.timer !== undefined) f.cloudTimer = m.timer;
         f.voteRole = m.role;
         f.me = m.me;
         return true;
@@ -497,7 +499,8 @@ function onMessage(s: Session, m: ServerMessage): void {
           const active = new Set(m.votes.filter(v => v.state === "active").map(v => v.id));
           for (const id of s.publishedDesign?.keys() ?? []) if (!active.has(id)) s.publishedDesign?.delete(id);
         }
-        return confirm(f, m.entries as Applied[]) || !!m.votes;
+        if (m.timer !== undefined) f.cloudTimer = m.timer;
+        return confirm(f, m.entries as Applied[]) || !!m.votes || m.timer !== undefined;
       });
       flush(s);
       return;
@@ -548,7 +551,7 @@ export function flush(s: Session): void {
   const now = Date.now();
   s.sentAt = s.sentAt.filter((t) => now - t < 60_000);
   const room = OPS_PER_MINUTE - s.sentAt.length;
-  const todo = sendableCommentOps(f.outbox, s.role, f.voteCapable).filter(e => !s.inflight.has(e.opId));
+  const todo = sendableCommentOps(f.outbox, s.role, f.voteCapable, f.timerCapable).filter(e => !s.inflight.has(e.opId));
   const batch = !s.inflight.size && room > 0 ? todo.slice(0, Math.min(MAX_BATCH, room)) : [];
   if (todo.length && room <= 0) delayFlush(s, s.sentAt[0] + 60_000 - now + 50);
   const deliver = () => {
@@ -722,7 +725,7 @@ function touch(pkg: string, display: string | null): void {
   try { f = readCommentsFile(pkg) as SyncFile | null; } catch { return; }
   const live = sessions.get(pkg);
   if (!f || !isShared(f)) { if (live) stop(live); parked.delete(pkg); return; }
-  const hadLegacyVotes = Boolean(f.cloudVotes || f.votes || f.voteConclusions || f.voteCapable !== undefined || f.voteRole ||
+  const hadLegacyVotes = Boolean(f.cloudVotes || f.cloudTimer || f.timer || f.timerCapable !== undefined || f.votes || f.voteConclusions || f.voteCapable !== undefined || f.voteRole ||
     f.outbox.some(e => isVoteOp(e.op)) || f.rejected?.some(r => isVoteOp(r.envelope.op)));
   if (hadLegacyVotes) f = withoutCloudVotes(f);
   if (vouch(pkg, f) || hadLegacyVotes) { try { writeCommentsFile(pkg, f); } catch { return; } notifier(display, pkg); }
@@ -838,8 +841,9 @@ async function shareOnce(pkg: string, display: string | null, to?: string | null
   if (isShared(fresh)) { touch(pkg, display); return { doc: fresh.doc, url: fresh.server!.url, already: true, ops: 0 }; }
   if (fresh.doc !== file.doc) throw new CloudError(409, "conflict", "The file's comments changed while sharing. Try again.");
   const me: Author = { id: st.id, email: st.email, name: st.name ?? localName() };
-  const voteOps = fresh.votes?.length ? voteOpsForShare(fresh, voterId()) : [];
+  const voteOps = voteOpsForShare(fresh, fresh.votes?.length ? voterId() : "");
   if (voteOps.length && !st.voting) throw new CloudError(426, "version", UPDATE_VOTE_HOST);
+  if (voteOps.some(e => needsCloudTimers(e.op)) && !st.timerCapable) throw new CloudError(426, "version", UPDATE_TIMER_HOST);
   const ops = [...opsForShare(fresh), ...voteOps];
   const shared = shareLocal({ ...fresh, outbox: fresh.outbox.filter(e => !isVoteOp(e.op)) }, url, me, ops);
   markKnown(knownKey(pkg, shared)); // shared from this Mac: its ops are this person's

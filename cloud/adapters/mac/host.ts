@@ -22,7 +22,7 @@ import { WHITEBOARD } from "../../protocol-files.ts";
 import type { AddressInfo, Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
-import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../protocol.ts";
+import { CLOUD_TIMERS, CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../protocol.ts";
 import type { Applied, Role, ServerInfo, ServerMessage } from "../../protocol.ts";
 import { Operations, type Identity } from "../../core/operations.ts";
 import { ranks } from "../../core/people.ts";
@@ -376,7 +376,7 @@ export class CloudHost {
     for (const [socket, s] of r.sockets) {
       if (!s.ready) continue;
       if (!this.current(s.me)) { r.sockets.delete(socket); drop(socket, true); continue; }
-      socket.send(JSON.stringify({ type: "applied", entries, ...(changed && s.voting && { votes: r.ops.voteView(s.me, false) }) } satisfies ServerMessage));
+      socket.send(JSON.stringify({ type: "applied", entries, ...(changed && s.voting && r.ops.socialView(s.me)) } satisfies ServerMessage));
     }
   }
 
@@ -515,7 +515,7 @@ export class CloudHost {
     }
     if (!this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
     if (await this.files.route(req, res, url, me, () => this.body(req, 1024 * 1024, me.device))) return;
-    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", WHITEBOARD, CLOUD_VOTES], hostId: this.hostId() } as ServerInfo);
+    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", WHITEBOARD, CLOUD_VOTES, CLOUD_TIMERS], hostId: this.hostId() } as ServerInfo);
     if (p === "/v1/members" && method === "GET") return json(200, this.people().filter(p => p.devices.length).map(p => ({ id: p.id, name: p.label, role: p.role })));
     if (p === "/v1/me" && method === "GET") return json(200, { id: me.id, email: me.email, name: me.name, role: me.role, hostId: this.hostId() });
     if (p === "/v1/docs" && method === "POST") {
@@ -639,7 +639,7 @@ export class CloudHost {
         s.voting = supportsCloudVotes(message.capabilities);
         const data = room.ops.read(since);
         const me = { id: s.me.id, email: s.me.email, name: s.me.name };
-        send({ type: "welcome", protocol: PROTOCOL_VERSION, server: SERVER_VERSION, role: s.me.role, me, seq: data.seq, serverTime: new Date(this.now()).toISOString(), capabilities: [CLOUD_VOTES], ...(s.voting && { votes: room.ops.voteView(me, false) }), ...("threads" in data ? { threads: data.threads } : {}) });
+        send({ type: "welcome", protocol: PROTOCOL_VERSION, server: SERVER_VERSION, role: s.me.role, me, seq: data.seq, serverTime: new Date(this.now()).toISOString(), capabilities: [CLOUD_VOTES, CLOUD_TIMERS], ...(s.voting && room.ops.socialView(me)), ...("threads" in data ? { threads: data.threads } : {}) });
         if ("entries" in data && data.entries.length) send({ type: "applied", entries: data.entries });
         s.ready = true;
         return;

@@ -112,7 +112,7 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     walk(doc);
     walk(env);
     const comments = readCommentsFile(pkg);
-    const voting = comments?.votes?.length
+    const voting = (comments?.votes?.length || comments?.timer)
         ? voteOpsForMove(comments, voterId(), voteDesignForTopology(voteTopology(path.join(pkg, 'document.json'), doc)))
         : { ops: [] };
     const dest = await publish(path.basename(pkg, '.canvas'), doc, env, blobs, comments ? [...opsForShare(comments), ...voting.ops] : []);

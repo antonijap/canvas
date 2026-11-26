@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type http from "node:http";
 import path from "node:path";
-import { applyOp, checkEnvelope, isVoteOp, mayApply, UPDATE_VOTE_HOST, type Author, type CommentsFile, type OpEnvelope, type Role, type Vote, type VoteOp, type VoteView } from "../cloud/protocol.ts";
+import { applyStandaloneTimer, needsCloudTimers, timerExpired, UPDATE_TIMER_HOST, applyOp, checkEnvelope, isVoteOp, mayApply, UPDATE_VOTE_HOST, type Author, type CommentsFile, type OpEnvelope, type Role, type Vote, type VoteOp, type VoteView } from "../cloud/protocol.ts";
 import { readBodyText } from "./body.ts";
 import { CommentsError, emptyComments, readCommentsFile, writeCommentsFile } from "./comments-file.ts";
 import { packageOf } from "./comments.ts";
@@ -84,9 +84,9 @@ function visibleCloudVotes(file: CommentsFile, doc: CanvasDoc, role: Role | unde
       const id = person.id || person.email;
       if (id && !progress.has(id) && ![...progress.values()].some(p => p.name === person.name)) progress.set(id, { id, name: person.name, done: false });
     }
-    const { id, scope, on, perPerson, hidden, anonymous, state, timer } = v;
+    const { id, scope, on, perPerson, hidden, anonymous, state, timer, timedOut } = v;
     return {
-      id, scope, on, perPerson, hidden, anonymous, state, timer, mine: v.ballots.length, host, pendingEnd,
+      id, scope, on, perPerson, hidden, anonymous, state, timer, timedOut, mine: v.ballots.length, host, pendingEnd,
       scopeName: (scope.frame && docNode(doc, scope.frame)?.node.name) || "",
       pendingConclusion: file.voteConclusions?.includes(id) ?? false,
       ballots: live ? v.ballots.map(b => ({ ...b, own: true })) : [],
@@ -108,9 +108,9 @@ export function visibleVotes(file: CommentsFile, id: string, doc: CanvasDoc, loc
       layer: b.layer, own: b.voter.id === id, ...(b.voter.id === id && { id: b.id }),
       ...(!v.anonymous && !v.hidden && b.voter.name && { name: b.voter.name }),
     })) : [];
-    const { scope, on, perPerson, hidden, anonymous, state, timer } = v;
+    const { scope, on, perPerson, hidden, anonymous, state, timer, timedOut } = v;
     return {
-      id: v.id, scope, on, perPerson, hidden, anonymous, state, timer, ballots: visible,
+      id: v.id, scope, on, perPerson, hidden, anonymous, state, timer, timedOut, ballots: visible,
       mine: mine.length, host: local || v.host.id === id,
       scopeName: (scope.frame && docNode(doc, scope.frame)?.node.name) || "",
       pendingConclusion: file.voteConclusions?.includes(v.id) ?? false,
@@ -218,6 +218,46 @@ export async function syncVoteConclusions(file: string, deps: VoteDeps) {
   }
 }
 
+const localAlarms = new Map<string, NodeJS.Timeout>();
+
+function refreshLocalTimers(file: string, pkg: string, docFile: string, f: CommentsFile, deps: VoteDeps) {
+  const at = new Date().toISOString();
+  let changed = false;
+  if (f.timer && !f.timer.endedAt && timerExpired(f.timer, at)) {
+    f.timer.endedAt = at;
+    changed = true;
+  }
+  for (const vote of f.votes ?? []) {
+    if (vote.state !== "active" || !timerExpired(vote.timer, at)) continue;
+    vote.state = "ended";
+    vote.timedOut = true;
+    (f.voteConclusions ??= []).push(vote.id);
+    changed = true;
+  }
+  if (changed) {
+    writeCommentsFile(pkg, f);
+    deps.changed(file);
+  }
+  for (const vote of f.votes ?? []) {
+    if (vote.timedOut && f.voteConclusions?.includes(vote.id))
+      void placeConclusion(file, pkg, docFile, vote, deps).then(() => deps.changed(file)).catch(() => {});
+  }
+
+  clearTimeout(localAlarms.get(pkg));
+  localAlarms.delete(pkg);
+  const running = (f.votes ?? []).filter(v => v.state === "active").map(v => v.timer);
+  if (f.timer && !f.timer.endedAt) running.push(f.timer);
+  const next = Math.min(Infinity, ...running.flatMap(t => t?.endsAt && !t.pausedAt ? [Date.parse(t.endsAt)] : []));
+  if (!Number.isFinite(next)) return;
+  localAlarms.set(pkg, setTimeout(() => {
+    localAlarms.delete(pkg);
+    try {
+      const latest = readCommentsFile(pkg);
+      if (latest && !isShared(latest) && !fileInfo(file, false)) refreshLocalTimers(file, pkg, docFile, latest, deps);
+    } catch { /* The file may have moved or closed since the alarm was scheduled. */ }
+  }, Math.max(0, next - Date.now())).unref());
+}
+
 export async function handleVotesRoute(req: http.IncomingMessage, res: http.ServerResponse, url: URL, deps: VoteDeps): Promise<boolean> {
   if (url.pathname !== "/api/votes") return false;
   const reply = (status: number, body: unknown): true => {
@@ -235,6 +275,7 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
     const cloud = !!shared || isShared(sidecar);
     const capable = shared ? shared.voting : sidecar.voteCapable;
     const role = shared?.role ?? sidecar.voteRole;
+    const timerCapable = sidecar.timerCapable;
     const me = shared?.author ?? sidecar.me;
     const present = [...(me?.name ? [me as Author] : []), ...filePeers(file).filter(p => !p.gone && !p.by.agent).map(p => ({ ...p.by, name: p.by.name ?? "Someone" }))];
     const people = [...new Map(present.map(p => [p.id || p.email || p.name, p])).values()];
@@ -250,6 +291,10 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
           ...visibleCloudVotes(f, doc, role, people),
           ...visibleVotes({ ...f, votes: archived }, "", doc, true).map(v => ({ ...v, archived: true, pendingConclusion: false })),
         ],
+        timer: f.cloudTimer ?? null,
+        canTimer: timerCapable === true,
+        waitingForTimerSupport: timerCapable === false && f.outbox.some(({ op }) => needsCloudTimers(op)),
+        timerMessage: timerCapable === false ? UPDATE_TIMER_HOST : "Connect to the Cloud to check for timer support.",
         people: people.slice(0, 8).map(p => ({ id: p.id || p.email, name: p.name, done: false })),
         canStart: role === "owner" || role === "editor", canVote: capable === true, serverTime: shared?.serverTime,
         clockOffset: shared?.voteClockOffset ?? legacyVoteClockOffset(pkg),
@@ -258,8 +303,15 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
         rejected: (f.rejected ?? []).filter(r => isVoteOp(r.envelope.op)).map(r => ({ id: r.envelope.opId, message: r.message })),
       };
     };
+    const localView = (f: CommentsFile) => ({
+      votes: f.votes?.length ? visibleVotes(f, voterId(), currentDoc(docFile).doc, true) : [],
+      timer: f.timer ?? null,
+    });
     if (req.method === "GET") {
-      if (!cloud) return reply(200, { votes: sidecar.votes?.length ? visibleVotes(sidecar, voterId(), currentDoc(docFile).doc, true) : [] });
+      if (!cloud) {
+        refreshLocalTimers(file, pkg, docFile, sidecar, deps);
+        return reply(200, localView(sidecar));
+      }
       if (sidecar.voteConclusions?.length || sidecar.cloudVotes?.some(v => v.needsConclusion))
         void syncVoteConclusions(file, deps).catch(() => {});
       return reply(200, cloudView(sidecar));
@@ -284,9 +336,10 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
     }
     if (cloud) {
       const actualRole = fileInfo(file)?.role ?? latestState.voteRole;
+      if (needsCloudTimers(op) && !latestState.timerCapable) return reply(426, { error: cloudView(latestState).timerMessage });
       if (capable !== true) return reply(426, { error: cloudView(latestState).message });
       if (!actualRole || !mayApply(op, actualRole, me as Author, []))
-        return reply(403, { error: "Only owners and editors can manage Cloud votes." });
+        return reply(403, { error: op.kind === "timer.set" ? "Only owners and editors can manage Cloud timers." : "Only owners and editors can manage Cloud votes." });
       if (addressed !== NIL_DOC && addressed !== latestState.doc) return reply(409, { error: "This vote is for a different file." });
       const targetError = validateTarget(docFile, currentDoc(docFile).doc, pendingCloudVotes(latestState), op);
       if (targetError) return reply(409, { error: targetError });
@@ -298,9 +351,19 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
       return reply(200, cloudView(readState()));
     }
     if (op.kind === "vote.end" && op.expired) return reply(409, { error: "Cloud timer required" });
+    refreshLocalTimers(file, pkg, docFile, latestState, deps);
+    if (addressed !== NIL_DOC && addressed !== latestState.doc) return reply(409, { error: "This vote is for a different file." });
+    if (op.kind === "timer.set" && op.standalone) {
+      const timer = applyStandaloneTimer(latestState.timer, op, new Date().toISOString());
+      if (typeof timer === "string") return reply(409, { error: timer });
+      latestState.timer = timer;
+      writeCommentsFile(pkg, latestState);
+      refreshLocalTimers(file, pkg, docFile, latestState, deps);
+      deps.changed(file);
+      return reply(200, localView(latestState));
+    }
     const votes = latestState.votes ??= [];
     const doc = currentDoc(docFile).doc, id = voterId();
-    if (addressed !== NIL_DOC && addressed !== latestState.doc) return reply(409, { error: "This vote is for a different file." });
     const targetError = validateTarget(docFile, doc, votes, op);
     if (targetError) return reply(409, { error: targetError });
     const previous = votes.find(v => v.id === op.vote)?.state;
@@ -311,13 +374,14 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
     const vote = votes.find(v => v.id === op.vote)!;
     if (op.kind === "vote.end" && previous === "active") (latestState.voteConclusions ??= []).push(vote.id);
     writeCommentsFile(pkg, latestState);
+    refreshLocalTimers(file, pkg, docFile, latestState, deps);
     try {
       if (op.kind === "vote.end" && latestState.voteConclusions?.includes(vote.id)) await placeConclusion(file, pkg, docFile, vote, deps);
     } finally {
       deps.changed(file);
     }
     const latest = readCommentsFile(pkg) ?? latestState;
-    return reply(200, { votes: visibleVotes(latest, id, currentDoc(docFile).doc, true) });
+    return reply(200, localView(latest));
   } catch (error) {
     if (error instanceof CommentsError) return reply(error.status, { error: error.message });
     if (error instanceof Error && "status" in error && typeof error.status === "number") return reply(error.status, { error: error.message });

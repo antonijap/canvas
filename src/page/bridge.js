@@ -193,6 +193,8 @@ function chime() {
   } catch {}
 }
 
+host.chime = chime;
+
 // ---------- toast fallback ----------
 let toastEl = null, toastTimer = 0;
 function toast(a) {

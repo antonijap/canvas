@@ -1,10 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { QaApp } from "./app.ts";
-import { cloudVoteFiles, viewerComment, votePost } from "../cloud-vote-fixture.ts";
+import { cloudVoteFiles, viewerComment, viewerTimerControls, whiteboardOp, votePost } from "../cloud-vote-fixture.ts";
 import { center, sc, NT } from "./harness.ts";
 import fs from "node:fs";
 import path from "node:path";
 
-sc("vote", "Vote palette control and panels fit at 720 pt", { covers: ["vote:palette", "vote:compact-panels"] }, async (t: NT) => {
+sc("vote", "Vote and timer palette controls and panels fit at 720 pt", { covers: ["vote:palette", "vote:compact-panels", "timer:compact"] }, async (t: NT) => {
   const initial = await t.state();
   try {
     await t.cmd("qa.cloud", { commentName: "Anna" });
@@ -38,6 +39,13 @@ sc("vote", "Vote palette control and panels fit at 720 pt", { covers: ["vote:pal
     };
     const selected = (on: boolean) => t.waitFor(async () =>
       (await t.marks({ id: "vote-tool-selected" })).length === (on ? 1 : 0), on ? "Vote highlighted" : "Vote highlight cleared");
+    await t.click(center(await t.mark({ id: "timer-tool" })));
+    await panel("[data-timer-sheet]");
+    await click("[data-timer-start]");
+    await panel("[data-timer-bar]");
+    await t.shot(path.resolve("qa/out/native/timer-bar-720.png"));
+    await click("[data-timer-stop]");
+    await t.waitJs('document.querySelector("[data-timer-bar]").hidden', "timer stopped");
     await t.click(center(vote));
     await panel("[data-vote-sheet]");
     await selected(true);
@@ -49,9 +57,20 @@ sc("vote", "Vote palette control and panels fit at 720 pt", { covers: ["vote:pal
     await panel("[data-vote-sheet]");
     await selected(true);
     for (let i = 0; i < 7; i++) await click('[aria-label="More votes"]');
+    await t.shot(path.resolve("qa/out/native/timer-vote-sheet-720.png"));
+    await click('[data-timer-duration="300000"]');
     await click("[data-vote-start]");
     await t.waitJs('document.querySelector("[data-vote-end]")?.offsetWidth', "vote started");
     await panel(".vote-bar");
+    await t.waitJs('document.querySelector(".vote-bar [data-timer-countdown]")', "timed vote");
+    await t.shot(path.resolve("qa/out/native/timer-vote-bar-720.png"));
+    await click("[data-timer-pause]");
+    await t.waitJs('document.querySelector("[data-timer-resume]")', "vote timer paused");
+    const paused = await t.js<string>('return document.querySelector("[data-timer-countdown]").textContent');
+    await click("[data-timer-extend]");
+    await t.waitJs(`document.querySelector("[data-timer-countdown]").textContent !== ${JSON.stringify(paused)}`, "vote timer extended");
+    await click("[data-timer-resume]");
+    await t.waitJs('document.querySelector("[data-timer-pause]")', "vote timer resumed");
     await selected(true);
     await t.showPage("style");
     await selected(false);
@@ -214,8 +233,8 @@ sc("whiteboard-review", "Sticky author removal clears disk and undo restores it"
   await t.waitDisk(() => t.node(id)?.author?.name === "Anna", "undo restores the author");
 });
 
-sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it", {
-  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence"],
+sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it, and both see the timer", {
+  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence", "timer:cloud", "timer:expiry"],
 }, async (t: NT) => {
   const peer = new QaApp(path.dirname(t.app.dir), 100 + t.app.shard);
   fs.mkdirSync(peer.dir, { recursive: true });
@@ -248,6 +267,37 @@ sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it", 
     await ben.waitJs('document.querySelector("[data-vote-count]")?.textContent.trim() === "1"', "viewer sees the revealed count");
     await ben.shot(path.resolve("qa/out/native/vote-cloud-revealed.png"));
     await ben.waitJs('[...window.canvasHost.boards.keys()].filter(id => id.startsWith("vote-conclusion-")).length === 1', "one conclusion on the viewer canvas");
+    const voteID = await t.js<string>('return [...window.canvasHost.boards.keys()].find(id => id.startsWith("vote-conclusion-")).slice("vote-conclusion-".length)');
+    t.eq((await whiteboardOp(t.app.base, files.owner, { kind: "vote.clear", vote: voteID })).status, 200, "clear the first vote");
+    await ben.waitJs('document.querySelector(".vote-bar").hidden', "viewer sees the first vote clear");
+    await t.cmd("qa.mainmenu", { title: "Start a Timer", perform: true });
+    await t.waitJs('document.querySelector("[data-timer-sheet]:not([hidden])")', "View menu opens the timer sheet");
+    await t.key("Escape");
+    await t.key("t", ["shift"]);
+    await t.waitJs('document.querySelector("[data-timer-sheet]:not([hidden])")', "Shift+T opens the timer sheet");
+    await t.js('document.querySelector("[data-timer-start]").click()');
+    await ben.waitJs('document.querySelector("[data-timer-bar] [data-timer-countdown]")?.textContent', "viewer sees the standalone countdown");
+    t.eq(await ben.js(`return document.querySelectorAll(${JSON.stringify(viewerTimerControls)}).length`), 0, "viewer cannot control the timer");
+    await t.waitJs('document.querySelector("[data-timer-pause]")', "owner can pause");
+    await t.js('document.querySelector("[data-timer-pause]").click()');
+    const paused = 'document.querySelector("[data-timer-bar]").textContent.includes("Paused")';
+    await ben.waitJs(paused, "viewer sees the timer pause");
+    await t.waitJs(paused, "owner sees the timer pause");
+    const countdown = 'return document.querySelector("[data-timer-bar] [data-timer-countdown]").textContent';
+    t.eq(await ben.js(countdown), await t.js(countdown), "both see the same countdown");
+    await t.js('document.querySelector("[data-timer-stop]").click()');
+    await ben.waitJs('document.querySelector("[data-timer-bar]").hidden', "viewer sees the timer stop");
+    const vote = randomUUID(), page = await t.js<string>("return window.canvasHost.page");
+    t.eq((await whiteboardOp(t.app.base, files.owner, { kind: "vote.start", vote, scope: { page }, on: "anything",
+      perPerson: 1, hidden: true, anonymous: false, timerMs: 7000 })).status, 200, "start a timed vote");
+    await ben.waitJs('document.querySelector(".timer-urgent")', "viewer sees the last ten seconds styling");
+    await ben.click(center(await ben.rect("BallotTarget")));
+    await ben.waitJs('document.querySelector("[data-vote-mark]")', "viewer casts a vote");
+    await ben.waitJs(`document.querySelector(".vote-bar").textContent.includes("Time's up")`, "the idle host ends the vote");
+    await ben.waitJs('document.querySelector("[data-vote-count]")?.textContent.trim() === "1"', "expiry reveals the result");
+    await ben.waitJs('[...window.canvasHost.boards.keys()].filter(id => id.startsWith("vote-conclusion-")).length === 2', "one more conclusion card");
+    await ben.settle();
+    await ben.shot(path.resolve("qa/out/native/timer-cloud-revealed.png"));
   } finally {
     await peer.stop().catch(() => {});
     if (files) {

@@ -3,6 +3,9 @@
 // docs/cloud/protocol.md; change both together, and bump PROTOCOL_VERSION for any change an older side cannot read.
 
 export const CLOUD_VOTES = "cloud-votes";
+export const CLOUD_TIMERS = "cloud-timers";
+export const UPDATE_TIMER_HOST = "Update Canvas on the host to use Cloud timers.";
+export const supportsCloudTimers = (capabilities: unknown) => Array.isArray(capabilities) && capabilities.includes(CLOUD_TIMERS);
 export const COMMENTS_CAPABILITIES_HEADER = "x-canvas-comments-capabilities";
 export const UPDATE_VOTE_HOST = "Update Canvas on the host to use Cloud voting.";
 export const UPDATE_COMMENT_HOST = "Update Canvas on the host to let viewers comment.";
@@ -95,7 +98,8 @@ export interface Thread {
 export interface VoteScope { page: string; frame?: string }
 export interface Voter { id: string; name?: string }
 export interface VoteBallot { id: Uuid; voter: Voter; layer: string }
-export interface VoteTimer { ms: number; startedAt?: Iso; pausedAt?: Iso; endsAt?: Iso }
+export interface VoteTimer { ms: number; startedAt?: Iso; pausedAt?: Iso; endsAt?: Iso; remainingMs?: number }
+export interface StandaloneTimer extends VoteTimer { id: Uuid; endedAt?: Iso }
 export interface Vote {
   id: Uuid;
   host: Voter;
@@ -116,7 +120,7 @@ export interface Vote {
 export interface VoteTotal { layer: string; count: number; names: string[] }
 export interface VoteProgress { id: string; name: string; done: boolean }
 /** Only this member's ballot IDs ever leave the room. Other people appear as totals and optional display names. */
-export interface VoteView extends Pick<Vote, "id" | "scope" | "on" | "perPerson" | "hidden" | "anonymous" | "state" | "timer"> {
+export interface VoteView extends Pick<Vote, "id" | "scope" | "on" | "perPerson" | "hidden" | "anonymous" | "state" | "timer" | "timedOut"> {
   ballots: Pick<VoteBallot, "id" | "layer">[];
   totals?: VoteTotal[];
   progress?: VoteProgress[];
@@ -132,12 +136,21 @@ export interface VoteDesign {
 }
 
 export type VoteOp =
-  | ({ kind: "vote.start"; vote: Uuid; showName?: boolean } & Pick<Vote, "scope" | "on" | "perPerson" | "hidden" | "anonymous">)
+  | ({ kind: "vote.start"; vote: Uuid; showName?: boolean; timerMs?: number } & Pick<Vote, "scope" | "on" | "perPerson" | "hidden" | "anonymous">)
   | { kind: "vote.cast"; vote: Uuid; ballot: Uuid; layer: string; showName?: boolean }
   | { kind: "vote.retract"; vote: Uuid; ballot: Uuid }
   | { kind: "vote.end"; vote: Uuid; expired?: boolean }
   | { kind: "vote.clear"; vote: Uuid }
-  | { kind: "timer.set"; vote: Uuid; ms: number };
+  | TimerOp;
+
+export type TimerOp = { kind: "timer.set"; vote: Uuid; standalone?: true } & (
+  | { action?: "start"; ms: number }
+  | { action: "pause" | "resume" | "extend" | "stop"; ms?: never }
+);
+
+export const needsCloudTimers = (op: Op) =>
+  (op.kind === "vote.start" && op.timerMs !== undefined) ||
+  (op.kind === "timer.set" && (op.action !== undefined || op.standalone === true));
 
 /** One change. Every change to comments is one of these, locally and on the server. */
 export type Op =
@@ -186,8 +199,8 @@ export type ClientMessage =
   | { type: "ops"; ops: OpEnvelope[] };
 
 export type ServerMessage =
-  | { type: "welcome"; protocol: number; server: string; role: Role; me: Author; seq: number; threads?: Thread[]; capabilities?: string[]; serverTime?: Iso; votes?: VoteView[] }
-  | { type: "applied"; entries: Applied[]; votes?: VoteView[] }
+  | { type: "welcome"; protocol: number; server: string; role: Role; me: Author; seq: number; threads?: Thread[]; capabilities?: string[]; serverTime?: Iso; votes?: VoteView[]; timer?: StandaloneTimer | null }
+  | { type: "applied"; entries: Applied[]; votes?: VoteView[]; timer?: StandaloneTimer | null }
   | { type: "ack"; opId: Uuid; seq: number }
   | { type: "reject"; rejected: Rejected[] }
   | { type: "error"; code: ErrorCode; message: string };
@@ -222,6 +235,9 @@ export interface CommentsFile {
   threads: Thread[];
   votes?: Vote[];
   cloudVotes?: VoteView[];
+  timer?: StandaloneTimer | null;
+  cloudTimer?: StandaloneTimer | null;
+  timerCapable?: boolean;
   voteCapable?: boolean;
   voteRole?: Role;
   /** Local vote conclusions still being placed in the design. */
@@ -315,10 +331,16 @@ export function checkEnvelope(e: unknown): string | null {
       if (!op.scope || Array.isArray(op.scope) || !layerId(op.scope.page) || (op.scope.frame !== undefined && !layerId(op.scope.frame))) return "vote needs a page and optional frame";
       if (op.on !== "stickies" && op.on !== "anything") return "invalid vote target";
       if (!Number.isInteger(op.perPerson) || op.perPerson < 1 || op.perPerson > LIMITS.votesPerPerson) return "invalid number of votes each";
+      if (op.timerMs !== undefined && !validTimerMs(op.timerMs)) return "invalid vote timer";
       return typeof op.hidden === "boolean" && typeof op.anonymous === "boolean" ? checkShowName(op.showName) : "vote preferences need booleans";
     case "vote.cast": return !isUuid(op.vote) || !isUuid(op.ballot) || !layerId(op.layer) ? "vote and ballot need uuids and a layer" : checkShowName(op.showName);
     case "vote.retract": return !isUuid(op.vote) || !isUuid(op.ballot) ? "vote and ballot need uuids" : null;
-    case "timer.set": return !isUuid(op.vote) || !Number.isInteger(op.ms) || op.ms < 0 || op.ms > LIMITS.voteTimerMs ? "invalid vote timer" : null;
+    case "timer.set":
+      if (!isUuid(op.vote) || (op.standalone !== undefined && op.standalone !== true)) return "invalid timer";
+      if (op.action === undefined && !op.standalone && op.ms === 0) return null;
+      if (op.action === "start" || op.action === undefined) return validTimerMs(op.ms) ? null : "invalid timer duration";
+      return (op.action === "pause" || op.action === "resume" || op.action === "extend" || (op.action === "stop" && op.standalone)) &&
+        op.ms === undefined ? null : "invalid timer action";
     case "vote.end": return !isUuid(op.vote) || (op.expired !== undefined && typeof op.expired !== "boolean") ? "invalid end vote" : null;
     case "vote.clear": return !isUuid(op.vote) ? "vote needs a uuid" : null;
     default: return "unknown op kind";
@@ -388,6 +410,44 @@ export function applyOp(threads: Thread[], doc: Uuid, op: Applied["op"], by: Aut
   }
 }
 
+const validTimerMs = (ms: number) => Number.isInteger(ms) && ms > 0 && ms <= LIMITS.voteTimerMs;
+export const timerExpired = (timer: VoteTimer | null | undefined, at: Iso) =>
+  !!timer?.endsAt && !timer.pausedAt && Date.parse(timer.endsAt) <= Date.parse(at);
+const endAfter = (at: Iso, ms: number) => new Date(Date.parse(at) + ms).toISOString();
+const startTimer = (ms: number, at: Iso): VoteTimer => ({ ms, startedAt: at, endsAt: endAfter(at, ms) });
+
+function changeTimer(timer: VoteTimer | undefined, op: TimerOp, at: Iso): VoteTimer | undefined | string {
+  if (op.action === undefined || op.action === "start") return op.ms ? startTimer(op.ms, at) : undefined;
+  if (!timer || timerExpired(timer, at)) return "The timer has ended";
+  const { ms, startedAt, endsAt, pausedAt, remainingMs } = timer;
+  if (op.action === "stop") return undefined;
+  if (op.action === "pause" && endsAt && !pausedAt) {
+    return { ms, startedAt, pausedAt: at, remainingMs: Date.parse(endsAt) - Date.parse(at) };
+  }
+  if (op.action === "resume" && pausedAt && remainingMs !== undefined) {
+    return { ms, startedAt, endsAt: endAfter(at, remainingMs) };
+  }
+  if (op.action === "extend") {
+    const extra = 60_000;
+    if (ms + extra > LIMITS.voteTimerMs) return "The timer has reached its duration limit";
+    if (pausedAt && remainingMs !== undefined) return { ...timer, ms: ms + extra, remainingMs: remainingMs + extra };
+    if (endsAt) return { ...timer, ms: ms + extra, endsAt: endAfter(endsAt, extra) };
+  }
+  return "The timer changed. Try again.";
+}
+
+export function applyStandaloneTimer(timer: StandaloneTimer | null | undefined, op: TimerOp, at: Iso): StandaloneTimer | null | string {
+  if (op.action === "start" || op.action === undefined) {
+    if (timer && !timer.endedAt && !timerExpired(timer, at)) return "A timer is already running";
+    return { id: op.vote, ...startTimer(op.ms, at) };
+  }
+  if (!timer || timer.id !== op.vote) return "This timer is no longer running";
+  if (op.action === "stop") return null;
+  if (timer.endedAt) return "The timer has ended";
+  const next = changeTimer(timer, op, at);
+  return typeof next === "string" ? next : next ? { ...next, id: timer.id } : null;
+}
+
 export function applyVote(votes: Vote[], op: VoteOp, by: Author, at: Iso, manage: boolean): string | null {
   const id = by.id || by.email;
   if (!id || by.agent) return "A person must cast the vote";
@@ -404,7 +464,7 @@ export function applyVote(votes: Vote[], op: VoteOp, by: Author, at: Iso, manage
     const { page, frame } = op.scope;
     const { on, perPerson, hidden, anonymous } = op;
     const host = { id, ...(!anonymous && op.showName !== false && by.name ? { name: by.name } : {}) };
-    votes.push({ id: op.vote, host, scope: frame === undefined ? { page } : { page, frame }, on, perPerson, hidden, anonymous, state: "active", ballots: [] });
+    votes.push({ id: op.vote, host, scope: frame === undefined ? { page } : { page, frame }, on, perPerson, hidden, anonymous, state: "active", ballots: [], ...(op.timerMs && { timer: startTimer(op.timerMs, at) }) });
     return null;
   }
   if (!vote) return "No such vote";
@@ -419,10 +479,13 @@ export function applyVote(votes: Vote[], op: VoteOp, by: Author, at: Iso, manage
     }
     return null;
   }
-  if (vote.state !== "active") return "The vote has ended";
+  if (vote.state !== "active" || timerExpired(vote.timer, at)) return "The vote has ended";
   if (op.kind === "timer.set") {
     if (!manage && vote.host.id !== id) return "Only the host can set the timer";
-    if (op.ms) vote.timer = { ms: op.ms, startedAt: at, endsAt: new Date(Date.parse(at) + op.ms).toISOString() };
+    if (op.standalone) return "Expected a vote timer";
+    const next = changeTimer(vote.timer, op, at);
+    if (typeof next === "string") return next;
+    if (next) vote.timer = next;
     else delete vote.timer;
     return null;
   }

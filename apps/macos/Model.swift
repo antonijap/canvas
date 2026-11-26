@@ -222,6 +222,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var currentFile: String?
     @Published private(set) var activeDrawTool: DrawTool?
     @Published private(set) var voteToolActive = false
+    @Published private(set) var timerToolActive = false
     /// The Home tab is the shown one (Home.swift): the shown file's page stays alive underneath, hidden, and takes no keys.
     @Published var homeShown = false {
         didSet {
@@ -412,6 +413,12 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
         if !homeShown, let active = m["voteTool"] as? Bool, voteToolActive != active {
             voteToolActive = active
+        }
+        if !homeShown, let active = m["timerTool"] as? Bool, timerToolActive != active {
+            timerToolActive = active
+        }
+        if m["timerEnded"] as? Bool == true {
+            _ = FinishSound.play("Glass", volume: prefs.soundVolume)
         }
         if m.keys.contains("selBoard") { selectedBoard = m["selBoard"] as? String }
         if let p = m["pages"] as? [String: Any] {
@@ -1431,6 +1438,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func clearDrawTool() {
         if activeDrawTool != nil { activeDrawTool = nil }
         if voteToolActive { voteToolActive = false }
+        if timerToolActive { timerToolActive = false }
     }
     func draw(_ tool: DrawTool) {
         guard canDraw else { return }

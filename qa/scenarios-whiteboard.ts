@@ -1,4 +1,6 @@
 import { sc, type T } from "./harness.ts";
+import { whiteboardOp } from "./cloud-vote-fixture.ts";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -276,4 +278,45 @@ sc("whiteboard-review", "DOM sticker placement anchors to the sticky layer", {
   await t.open();
   await t.focus("lay_nest");
   await t.waitFor('document.querySelector("[data-sticker-seal]:not([hidden])")', "the seal drawn after reopening in the engine");
+});
+
+sc("timer", "Standalone timer pauses, extends, resumes and ends", {
+  covers: ["timer:standalone", "timer:controls"],
+  skip: { visual: "Countdown text changes against the clock. The scenario checks rendered states and captures the running bar." },
+}, async (t: T) => {
+  await t.io.key("t", { shift: true });
+  await t.waitFor('document.querySelector("[data-timer-sheet]:not([hidden])")', "timer duration sheet");
+  await t.ev('document.querySelector("[data-timer-start]").click()');
+  await t.waitFor('document.querySelector("[data-timer-pause]")', "running timer");
+  await t.ev('document.querySelector("[data-timer-pause]").click()');
+  const paused = await t.waitFor<string>('document.querySelector("[data-timer-resume]") && document.querySelector("[data-timer-countdown]").textContent', "paused countdown");
+  await t.ev('document.querySelector("[data-timer-extend]").click()');
+  await t.waitFor(`document.querySelector("[data-timer-countdown]").textContent !== ${JSON.stringify(paused)}`, "extended countdown");
+  await t.ev('document.querySelector("[data-timer-resume]").click()');
+  await t.waitFor('document.querySelector("[data-timer-pause]")', "resumed countdown");
+  await t.ev('document.querySelector("[data-timer-stop]").click()');
+  await t.waitFor('document.querySelector("[data-timer-bar]").hidden', "stopped timer disappears");
+  const vote = randomUUID();
+  t.eq((await whiteboardOp(t.srv.base, t.file, { kind: "timer.set", action: "start", standalone: true, vote, ms: 3000 })).status,
+    200, "a short timer starts");
+  await t.waitFor('document.querySelector(".timer-urgent")', "last ten seconds styling");
+  await t.ev('document.querySelector("[data-timer-mute]").click()');
+  await t.waitFor('document.querySelector("[data-timer-mute]")?.getAttribute("aria-label") === "Unmute timer sound"', "the local mute toggle");
+  fs.writeFileSync("qa/out/timer-standalone.png", await t.shot());
+  await t.waitFor(`document.querySelector("[data-timer-bar]").textContent.includes("Time's up")`, "standalone timer ends while idle");
+  await t.ev('document.querySelector("[data-timer-done]").click()');
+  await t.waitFor('document.querySelector("[data-timer-bar]").hidden', "the end notice dismisses");
+  await t.open();
+  t.ok(await t.ev('document.querySelector("[data-timer-bar]").hidden'), "the local dismissal stays after reload");
+  // The harness also reopens a copy in a fresh app profile, which has its own dismissal preference.
+  t.eq((await whiteboardOp(t.srv.base, t.file, { kind: "timer.set", action: "stop", standalone: true, vote })).status,
+    200, "clear the completed timer before comparing the saved design");
+
+  const timedVote = randomUUID(), page = await t.ev<string>("window.canvasHost.page");
+  t.eq((await whiteboardOp(t.srv.base, t.file, { kind: "vote.start", vote: timedVote, scope: { page }, on: "anything",
+    perPerson: 1, hidden: true, anonymous: false, timerMs: 2000 })).status, 200, "start a local timed vote");
+  await t.waitFor(`document.querySelector(".vote-bar").textContent.includes("Time's up")`, "local vote ends while idle");
+  await t.waitFor('[...window.canvasHost.boards.keys()].filter(id => id.startsWith("vote-conclusion-")).length === 1', "one local conclusion is placed");
+  await t.waitFor('document.querySelector("[data-vote-clear]")', "the conclusion is saved");
+  t.eq((await whiteboardOp(t.srv.base, t.file, { kind: "vote.clear", vote: timedVote })).status, 200, "clear the local result overlay");
 });

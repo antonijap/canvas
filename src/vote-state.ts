@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { isVoteOp, LIMITS, type Author, type CommentsFile, type OpEnvelope, type Role, type Vote, type VoteDesign, type VoteOp, type VoteView } from "../cloud/protocol.ts";
+import { isVoteOp, needsCloudTimers, LIMITS, type Author, type CommentsFile, type OpEnvelope, type Role, type Vote, type VoteDesign, type VoteOp, type VoteTimer, type VoteView } from "../cloud/protocol.ts";
 import { validateVoteTarget, type VoteTopology } from "../cloud/core/votes.ts";
 import type { CanvasDoc } from "./engine.ts";
 import { listPages } from "./pages.ts";
@@ -19,7 +19,7 @@ export const voteAccount = (me?: Author) => me?.id || me?.email?.toLowerCase();
 const privateVotePath = (origin: string, doc: string, account: string) =>
   path.join(stateDir(), "cloud-votes", createHash("sha256").update(JSON.stringify([origin, doc, account])).digest("hex") + ".json");
 
-type PrivateVotes = Pick<CommentsFile, "cloudVotes" | "voteConclusions" | "voteCapable" | "voteRole" | "outbox" | "rejected">;
+type PrivateVotes = Pick<CommentsFile, "cloudVotes" | "cloudTimer" | "timerCapable" | "voteConclusions" | "voteCapable" | "voteRole" | "outbox" | "rejected">;
 export function withPrivateVotes(file: CommentsFile, account: string): CommentsFile {
   if (!file.server) return file;
   const location = privateVotePath(file.server.url, file.doc, account);
@@ -30,8 +30,8 @@ export function withPrivateVotes(file: CommentsFile, account: string): CommentsF
 }
 export function savePrivateVotes(file: CommentsFile, account: string) {
   if (!file.server) return;
-  const { cloudVotes, voteConclusions, voteCapable, voteRole } = file;
-  const votes: PrivateVotes = { cloudVotes, voteConclusions, voteCapable, voteRole,
+  const { cloudVotes, cloudTimer, timerCapable, voteConclusions, voteCapable, voteRole } = file;
+  const votes: PrivateVotes = { cloudVotes, cloudTimer, timerCapable, voteConclusions, voteCapable, voteRole,
     outbox: file.outbox.filter(e => isVoteOp(e.op)), rejected: file.rejected?.filter(r => isVoteOp(r.envelope.op)) };
   const location = privateVotePath(file.server.url, file.doc, account), tmp = location + "." + randomUUID();
   fs.mkdirSync(path.dirname(location), { recursive: true, mode: 0o700 });
@@ -51,6 +51,13 @@ export function voteOpsForShare(file: CommentsFile, own: string, now = new Date(
   if (file.server || file.cloudVotes) return [];
   const out: OpEnvelope[] = [];
   const add = (op: VoteOp) => out.push({ doc: file.doc, opId: id(), at: now.toISOString(), op });
+  const transferTimer = (timer: VoteTimer, vote: string, standalone?: true) => {
+    const ms = timer.pausedAt ? timer.remainingMs : Date.parse(timer.endsAt ?? "") - now.getTime();
+    if (!ms || ms <= 0) return;
+    add({ kind: "timer.set", vote, standalone, action: "start", ms });
+    if (timer.pausedAt) add({ kind: "timer.set", vote, standalone, action: "pause" });
+  };
+  if (file.timer && !file.timer.endedAt) transferTimer(file.timer, file.timer.id, true);
   for (const v of file.votes ?? []) {
     if (v.state === "dismissed") continue;
     add({ kind: "vote.start", vote: v.id, scope: v.scope, on: v.on, perPerson: v.perPerson, hidden: v.hidden,
@@ -58,7 +65,9 @@ export function voteOpsForShare(file: CommentsFile, own: string, now = new Date(
     for (const b of v.ballots) if (b.voter.id === own) {
       add({ kind: "vote.cast", vote: v.id, ballot: b.id, layer: b.layer, showName: !!b.voter.name });
     }
-    if (v.state === "ended") add({ kind: "vote.end", vote: v.id });
+    if (v.state === "ended" || (v.timer?.endsAt && Date.parse(v.timer.endsAt) <= now.getTime() && !v.timer.pausedAt))
+      add({ kind: "vote.end", vote: v.id });
+    else if (v.timer) transferTimer(v.timer, v.id);
   }
   return out;
 }
@@ -76,7 +85,7 @@ export function voteOpsForMove(file: CommentsFile, own: string, design: VoteDesi
   let active = 0, skippedBallots = 0, skippedVotes = 0;
   const voteById = new Map(votes.map(v => [v.id, v]));
   const filtered = ops.filter(({ op }) => {
-    if (!isVoteOp(op)) return true;
+    if (!isVoteOp(op) || (op.kind === "timer.set" && op.standalone)) return true;
     const vote = voteById.get(op.vote)!;
     if (op.kind === "vote.start") {
       if (pages.has(vote.scope.page) || (vote.state === "active" && active >= LIMITS.openVotesPerDoc) ||
@@ -102,8 +111,11 @@ export function voteOpsForMove(file: CommentsFile, own: string, design: VoteDesi
   return { ops: filtered, notice: skipped.length ? `Moved to Cloud. Skipped ${skipped.join(" and ")} because the target was unavailable or the Cloud vote limit was reached.` : undefined };
 }
 
-export function sendableCommentOps(outbox: OpEnvelope[], role: Role | undefined, voting: boolean | undefined) {
-  return voting ? outbox : role === "viewer" ? [] : outbox.filter(e => !isVoteOp(e.op));
+export function sendableCommentOps(outbox: OpEnvelope[], role: Role | undefined, voting: boolean | undefined, timers?: boolean) {
+  if (!voting) return role === "viewer" ? [] : outbox.filter(e => !isVoteOp(e.op));
+  if (timers) return outbox;
+  const waitingVotes = new Set(outbox.flatMap(({ op }) => op.kind === "vote.start" && needsCloudTimers(op) ? [op.vote] : []));
+  return outbox.filter(({ op }) => !needsCloudTimers(op) && !(isVoteOp(op) && waitingVotes.has(op.vote)));
 }
 
 export function receiveVoteViews(file: CommentsFile, votes: VoteView[], pending: readonly OpEnvelope[] = file.outbox) {

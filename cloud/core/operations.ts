@@ -1,5 +1,5 @@
-import { applyOp, canonicalMentions, checkEnvelope, isVoteOp, isUuid, LIMITS, mayApply } from "../protocol.ts";
-import type { Applied, Author, OpEnvelope, Rejected, Role, Thread, Vote, VoteDesign, VoteOp } from "../protocol.ts";
+import { applyStandaloneTimer, timerExpired, applyOp, canonicalMentions, checkEnvelope, isVoteOp, isUuid, LIMITS, mayApply } from "../protocol.ts";
+import type { Applied, Author, OpEnvelope, Rejected, Role, StandaloneTimer, Thread, TimerOp, Vote, VoteDesign, VoteOp } from "../protocol.ts";
 import { forgetAnonymousBallots, projectVotes, voteTotals, readVoteTopology, updateRoomVote, voteDesignForTopology, type StoredVote, type VoteTopology } from "./votes.ts";
 import { initializeRoom } from "./room-schema.ts";
 import type { SqlStore } from "./sql.ts";
@@ -17,6 +17,8 @@ export interface OpResult {
 }
 const DOCUMENT_BYTES = 20 * 1024 * 1024;
 const HISTORY_OPS = 10_000;
+const SOCIAL_MARKER = { kind: "vote.changed" } as const;
+const SOCIAL_MARKER_JSON = JSON.stringify(SOCIAL_MARKER);
 const size = (text: string) => new TextEncoder().encode(text).byteLength;
 export class Operations {
   private readonly storage: SqlStore;
@@ -98,6 +100,13 @@ export class Operations {
     if (expire) this.expireDueVotes();
     return projectVotes(this.voteRows().map(row => JSON.parse(row.json) as StoredVote), this.legacyKey(), me);
   }
+  private standaloneTimer(): StandaloneTimer | null {
+    const row = this.storage.sql.exec<{ json: string }>("SELECT json FROM room_timer WHERE id = 1").toArray()[0];
+    return row ? JSON.parse(row.json) : null;
+  }
+  socialView(me: Author) {
+    return { votes: this.voteView(me, false), timer: this.standaloneTimer() };
+  }
   endedVoteTotals() {
     return this.voteRows().map(row => JSON.parse(row.json) as Vote)
       .filter(vote => vote.state === "ended" || vote.clearedTotals)
@@ -110,8 +119,11 @@ export class Operations {
   }
   nextVoteExpiry(): number | undefined {
     const { at } = this.storage.sql.exec<{ at: string | null }>(`SELECT MIN(json_extract(json, '$.timer.endsAt')) AS at
-      FROM room_votes WHERE json_extract(json, '$.state') = 'active'`).one();
-    return at ? Date.parse(at) : undefined;
+      FROM room_votes WHERE json_extract(json, '$.state') = 'active' AND json_extract(json, '$.timer.pausedAt') IS NULL`).one();
+    const timer = this.standaloneTimer();
+    const next = Math.min(at ? Date.parse(at) : Infinity,
+      timer?.endsAt && !timer.endedAt && !timer.pausedAt ? Date.parse(timer.endsAt) : Infinity);
+    return Number.isFinite(next) ? next : undefined;
   }
   expireDueVotes() {
     const entries: Applied[] = [];
@@ -143,22 +155,47 @@ export class Operations {
   }
   private writeVoteChange(vote: Vote, opId: string, at: string, previous?: string, evicted?: string, expire = false): Applied | undefined {
     const sql = this.storage.sql, persisted = JSON.stringify(vote);
-    const marker = { kind: "vote.changed" } as const;
-    const opJson = JSON.stringify(marker);
     const usage = sql.exec<{ bytes: number }>("SELECT bytes FROM room_usage WHERE id = 1").one().bytes;
-    if (!expire && usage + size(persisted) - (previous ? size(previous) : 0) + size(opJson) + size(opId) + 8 > DOCUMENT_BYTES) return;
+    if (!expire && usage + size(persisted) - (previous ? size(previous) : 0) + size(SOCIAL_MARKER_JSON) + size(opId) + 8 > DOCUMENT_BYTES) return;
     if (evicted) sql.exec("DELETE FROM room_votes WHERE id = ?", evicted);
     sql.exec("INSERT INTO room_votes (id, json) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json", vote.id, persisted);
-    const seq = sql.exec<{ seq: number }>("INSERT INTO ops (op_id, by_email, by_name, at, op_json) VALUES (?, '', '', ?, ?) RETURNING seq", opId, at, opJson).one().seq;
+    return this.writeSocialMarker(opId, at);
+  }
+  private writeSocialMarker(opId: string, at: string): Applied {
+    const sql = this.storage.sql;
+    const seq = sql.exec<{ seq: number }>("INSERT INTO ops (op_id, by_email, by_name, at, op_json) VALUES (?, '', '', ?, ?) RETURNING seq", opId, at, SOCIAL_MARKER_JSON).one().seq;
     sql.exec("DELETE FROM ops WHERE seq < ?", seq - HISTORY_OPS + 1);
-    return { seq, opId, by: { name: "", email: "" }, at, op: marker };
+    return { seq, opId, by: { name: "", email: "" }, at, op: SOCIAL_MARKER };
+  }
+  private writeTimer(timer: StandaloneTimer | null, opId: string, at: string) {
+    const sql = this.storage.sql;
+    if (timer) sql.exec("INSERT INTO room_timer VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET json=excluded.json", JSON.stringify(timer));
+    else sql.exec("DELETE FROM room_timer WHERE id = 1");
+    return this.writeSocialMarker(opId, at);
+  }
+  private applyRoomTimer(op: TimerOp, opId: string, at: string, result: OpResult) {
+    const previous = this.standaloneTimer();
+    const next = applyStandaloneTimer(previous, op, at);
+    if (typeof next === "string") { result.rejected.push({ opId, code: "conflict", message: next }); return; }
+    const usage = this.storage.sql.exec<{ bytes: number }>("SELECT bytes FROM room_usage WHERE id = 1").one().bytes;
+    const added = (next ? size(JSON.stringify(next)) : 0) - (previous ? size(JSON.stringify(previous)) : 0);
+    if (next && usage + added + size(SOCIAL_MARKER_JSON) + size(opId) + 8 > DOCUMENT_BYTES) {
+      result.rejected.push({ opId, code: "quota", message: "Document storage quota exceeded" });
+      return;
+    }
+    const entry = this.writeTimer(next, opId, at);
+    result.acks.push({ opId, seq: entry.seq });
+    result.entries.push(entry);
   }
   private finishVote(id: string) {
     this.storage.sql.exec("DELETE FROM vote_designs WHERE id = ?", id);
     this.dropLegacyKey();
   }
   private expireVotes(at: string, entries: Applied[]) {
-    const rows = this.storage.sql.exec<{ json: string }>("SELECT json FROM room_votes WHERE json_extract(json, '$.state') = 'active' AND json_extract(json, '$.timer.endsAt') <= ?", at).toArray();
+    const timer = this.standaloneTimer();
+    if (timer && !timer.endedAt && timerExpired(timer, at))
+      entries.push(this.writeTimer({ ...timer, endedAt: at }, crypto.randomUUID(), at));
+    const rows = this.storage.sql.exec<{ json: string }>("SELECT json FROM room_votes WHERE json_extract(json, '$.state') = 'active' AND json_extract(json, '$.timer.pausedAt') IS NULL AND json_extract(json, '$.timer.endsAt') <= ?", at).toArray();
     for (const row of rows) {
       const vote = JSON.parse(row.json) as StoredVote;
       vote.state = "ended";
@@ -191,6 +228,7 @@ export class Operations {
           if (!voteDesign) { reject("version", "Voting is unavailable on this connection. Update Canvas."); return; }
           const receipt = sql.exec<{ seq: number }>("SELECT seq FROM op_receipts WHERE op_id = ?", opId).toArray()[0];
           if (receipt) { result.acks.push({ opId, seq: receipt.seq }); return; }
+          if (op.kind === "timer.set" && op.standalone) { this.applyRoomTimer(op, opId, at, result); return; }
           const design = voteDesign === true ? this.voteDesign(op.vote) : voteDesign;
           if (!design && (op.kind === "vote.start" || op.kind === "vote.cast")) { reject("conflict", "An editor must publish the vote design first"); return; }
           this.applyRoomVote(op, opId, me, at, design ?? { page: () => false, node: () => undefined }, result);
