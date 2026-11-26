@@ -8,7 +8,7 @@ import { fileStorageBytes, UPLOAD_LIMITS } from "./uploads.ts";
 // the dirty boards and the room's seq. A crash anywhere before the commit leaves no trace; a resend after the commit
 // is answered from the receipt and never applies twice.
 
-import { insertsWhiteboard, supportsWhiteboard, WHITEBOARD, WHITEBOARD_UPDATE } from "../../protocol-files.ts";
+import { EXTENDED_BLOB_PATHS, insertsWhiteboard, supportsWhiteboard, WHITEBOARD, WHITEBOARD_UPDATE } from "../../protocol-files.ts";
 import type { SqlStore } from "../sql.ts";
 import { initFileRoomSchema } from "./room-schema.ts";
 import { SqlTree, BOARD_BYTES_CAP } from "./tree-sql.ts";
@@ -261,7 +261,7 @@ export class FileRoom {
       if (tail.some(action => insertsWhiteboard(action.ops))) return [WHITEBOARD_UPDATE];
       snapshot = { seq: s.seq, manifest: s.manifest };
     }
-    out.push({ type: "welcome", protocol: 2, capabilities: [WHITEBOARD, ...voteRoomCapabilities(supportsPrivateVoteViews(h.capabilities))], serverTime: new Date(this.now()).toISOString(), role, me: conn.author, epoch: m.epoch, seq: m.seq, ...(snapshot ? { snapshot } : {}), known, limits: { opsPerMessage: ROOM_LIMITS.opsPerMessage, actionBytes: ROOM_LIMITS.actionBytes } });
+    out.push({ type: "welcome", protocol: 2, capabilities: [WHITEBOARD, EXTENDED_BLOB_PATHS, ...voteRoomCapabilities(supportsPrivateVoteViews(h.capabilities))], serverTime: new Date(this.now()).toISOString(), role, me: conn.author, epoch: m.epoch, seq: m.seq, ...(snapshot ? { snapshot } : {}), known, limits: { opsPerMessage: ROOM_LIMITS.opsPerMessage, actionBytes: ROOM_LIMITS.actionBytes } });
     if (tail.length) out.push({ type: "applied", actions: tail });
     return out;
   }

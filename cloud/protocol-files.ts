@@ -10,6 +10,8 @@ import { sha256Hex } from "./core/files/sha256.ts";
 
 export const FILES_PROTOCOL = 2;
 export const WHITEBOARD = "whiteboard";
+export const EXTENDED_BLOB_PATHS = "extended-blob-paths";
+export const UPDATE_BLOB_PATHS_HOST = "Update Canvas on the Mac that hosts this Cloud to use these assets.";
 export const FILE_CAPABILITIES_HEADER = "x-canvas-files-capabilities";
 export const UPDATE_WHITEBOARD_HOST = "Update Canvas on the host to use stickies and stickers.";
 export const WHITEBOARD_UPDATE = { type: "error", code: "update", message: "Update Canvas to open this file. It contains stickies or stickers." } as const;
@@ -135,6 +137,18 @@ export const BLOB_TYPES = {
 const FONT_EXT = new Set(["ttf", "otf", "ttc", "woff", "woff2"]);
 const MEDIA_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "heic", "heif", "bmp", "tif", "tiff", "mp4", "m4v", "mov", "webm", ...FONT_EXT]);
 const NAME_RE = /^[A-Za-z0-9._-]{1,120}$/;
+const validBlobSegment = (part: string) => NAME_RE.test(part) && !part.startsWith(".") && !part.includes("..");
+
+/** An unknown asset can be kept in a replica as metadata if its path is safely relative. */
+export function safeBlobPath(p: unknown): p is string {
+  if (typeof p !== "string" || p.length > 200) return false;
+  const parts = p.split("/");
+  return parts.length >= 2 && parts.every(validBlobSegment);
+}
+
+export function needsExtendedBlobPaths(p: string): boolean {
+  return p.startsWith("fonts/") || p.split("/").length > 2 || /\.(woff|ttc)$/i.test(p);
+}
 
 /** Validate a relative package asset path. Callers opening it on disk also check for links. */
 export function checkBlobPath(p: unknown): string | null {
@@ -144,7 +158,7 @@ export function checkBlobPath(p: unknown): string | null {
   if (p.startsWith("/") || p.startsWith("~") || p.includes("\\")) return `"${p}" is not a path inside the package`;
   const [dir, ...parts] = p.split("/");
   if (!parts.length || (dir !== "media" && dir !== "shaders" && dir !== "fonts")) return `"${p}" is not in media/, shaders/ or fonts/`;
-  if (parts.some(part => !NAME_RE.test(part) || part.startsWith(".") || part.includes(".."))) {
+  if (parts.some(part => !validBlobSegment(part))) {
     return `"${p}": path segments may hold letters, digits, ".", "-" and "_" only, with no leading dot or consecutive dots`;
   }
   const name = parts.at(-1)!;

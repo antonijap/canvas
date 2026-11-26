@@ -191,7 +191,7 @@ export class Replica {
           this.epoch = msg.epoch;
         }
         if (msg.snapshot) {
-          const { tree, manifest } = await treeFromManifest(objects, msg.snapshot.manifest);
+          const { tree, manifest } = await treeFromManifest(objects, msg.snapshot.manifest, true);
           this.tree = this.makeTree(tree.state());
           this.seq = manifest.seq;
           this.textEdits = [];

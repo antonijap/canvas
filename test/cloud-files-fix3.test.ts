@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {test} from 'node:test';
+import {PassThrough, Readable} from 'node:stream';
+import {createHash} from 'node:crypto';
+import {startServer} from '../qa/lib.ts';
 import {FileStateStore} from '../src/cloud-files-store.ts';
 import {stateFromFiles} from '../cloud/core/files/state.ts';
 import {memoryRoom} from '../cloud/core/files/memory.ts';
@@ -73,7 +76,7 @@ test("a permanent timer refusal does not enter the comment or design cooldown", 
   }
 });
 
-import {prepareMove} from '../src/cloud-files-move.ts';
+import {MovePendingError, prepareMove} from '../src/cloud-files-move.ts';
 test('move keeps source edits made while the Cloud copy is being verified', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-publish-'));
     const source = path.join(dir, 'Design.canvas'), dest = path.join(dir, 'Cloud.canvas');
@@ -97,13 +100,13 @@ test('move keeps source edits made while the Cloud copy is being verified', asyn
     }
 });
 
-test('a refused publication restores the hidden local source', async () => {
+test('an unconfirmed publication keeps the verified source visible', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-restore-'));
     const source = path.join(dir, 'Design.canvas'), dest = path.join(dir, 'Cloud.canvas');
     const document = JSON.stringify({ version: '2.21', children: [] });
     fs.mkdirSync(source);
     fs.writeFileSync(path.join(source, 'document.json'), document);
-    const refusal = new Error('Cloud refused publication');
+    const refusal = new MovePendingError('The Cloud did not confirm the move');
     try {
         await assert.rejects(prepareMove(source, async (name, doc, env) => {
             fs.mkdirSync(dest);
@@ -111,13 +114,102 @@ test('a refused publication restores the hidden local source', async () => {
             fs.writeFileSync(path.join(dest, 'widgets.json'), JSON.stringify(env));
             return { id: crypto.randomUUID(), file: dest, name, cloud: 'mac://studio', role: 'editor' };
         }, async () => {
-            assert.equal(fs.existsSync(source), false);
             throw refusal;
         }), refusal);
         assert.equal(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), document);
         assert.ok(!fs.readdirSync(dir).some(name => name.startsWith('.canvas-move-')));
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('publication keeps an external replacement of the original path', async t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-replaced-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const source = path.join(dir, 'Design.canvas'), dest = path.join(dir, 'Cloud.canvas');
+    const document = JSON.stringify({ version: '2.21', children: [] });
+    fs.mkdirSync(source);
+    fs.writeFileSync(path.join(source, 'document.json'), document);
+    assert.equal((await prepareMove(source, async (name, doc, env) => {
+        fs.mkdirSync(dest);
+        fs.writeFileSync(path.join(dest, 'document.json'), JSON.stringify(doc));
+        fs.writeFileSync(path.join(dest, 'widgets.json'), JSON.stringify(env));
+        return { id: crypto.randomUUID(), file: dest, name, cloud: 'mac://studio', role: 'editor' };
+    }, async () => {
+        fs.renameSync(source, path.join(dir, 'Edited.canvas'));
+        fs.mkdirSync(source);
+        fs.writeFileSync(path.join(source, 'document.json'), document);
+    })).verified, true);
+    assert.equal(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), document);
+});
+
+test('stale imports only expire when their source was kept visible', () => hostTest(async (h, call) => {
+    const now = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    const older = crypto.randomUUID(), sourceVisible = crypto.randomUUID();
+    for (const id of [older, sourceVisible]) {
+        assert.equal((await call('/v1/files', 'POST', { id, name: 'Design', importing: true, transfer: true,
+            ...(id === sourceVisible && { sourceVisible: true }) })).status, 201);
+    }
+    (h.files as any).db.sql.exec('UPDATE files SET created_at=?', now);
+    await h.files.expireImports();
+    assert.equal((await call(`/v1/files/${older}`)).status, 200);
+    assert.equal((await call(`/v1/files/${sourceVisible}`)).status, 404);
+}));
+
+test('startup restores staged packages next to local files and keeps existing packages', async t => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-startup-')));
+    const folder = path.join(dir, 'Designs');
+    const staged = path.join(folder, '.canvas-move-ABC123', 'Board.canvas');
+    const existing = path.join(folder, 'Board.canvas');
+    fs.mkdirSync(staged, { recursive: true });
+    fs.mkdirSync(existing);
+    fs.writeFileSync(path.join(staged, 'document.json'), 'staged design');
+    fs.writeFileSync(path.join(existing, 'document.json'), 'existing design');
+    let server: Awaited<ReturnType<typeof startServer>> | undefined;
+    t.after(async () => {
+        await server?.stop();
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+    server = await startServer(dir);
+    const restored = path.join(folder, 'Board Recovered.canvas', 'document.json');
+    for (let i = 0; i < 25 && !fs.existsSync(restored); i++) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(fs.readFileSync(restored, 'utf8'), 'staged design');
+    assert.equal(fs.readFileSync(path.join(existing, 'document.json'), 'utf8'), 'existing design');
+    assert.equal(fs.existsSync(path.dirname(staged)), false);
+});
+
+test('batch downloads have an idle timeout and a separate per-person allowance', () => hostTest(async (h, call) => {
+    const id = crypto.randomUUID(), bytes = Buffer.from('asset');
+    const sha = createHash('sha256').update(bytes).digest('hex');
+    await call('/v1/files', 'POST', { id, name: 'Design' });
+    const files = h.files as any, room = files.rooms.get(id);
+    const me = h.identify(h.ownerDevice('Anna'))!;
+    await files.objects.putIfAbsent(`files/${id}/blobs/${sha}`, bytes);
+    room.store.sql.exec('INSERT INTO blobs VALUES(?,?,?,?,?)', 'media/fixture.png', sha, bytes.length, 'image/png', 1);
+    const responses = Array.from({ length: 3 }, () => Object.assign(new PassThrough(), {
+        writeHead() {},
+        setTimeout(ms: number, onTimeout: () => void) { this.idle = { ms, onTimeout }; return this; },
+        idle: undefined as { ms: number; onTimeout: () => void } | undefined,
+    }));
+    try {
+        files.sendBlobBatch(responses[0], room, me, [sha]);
+        assert.equal(files.bodies, 0);
+        assert.equal(files.inFlight, 0);
+        assert.ok(responses[0].idle?.ms);
+        files.sendBlobBatch(responses[1], room, me, [sha]);
+        assert.throws(() => files.sendBlobBatch(responses[2], room, me, [sha]), { status: 429 });
+        responses[0].idle.onTimeout();
+        assert.equal(responses[0].destroyed, true);
+    } finally { for (const res of responses) res.destroy(); }
+}));
+
+test('an interrupted batch only charges import bytes received', () => hostTest(async (h, call) => {
+    const id = crypto.randomUUID();
+    await call('/v1/files', 'POST', { id, name: 'Design', importing: true, transfer: true });
+    const files = h.files as any, room = files.rooms.get(id);
+    const me = h.identify(h.ownerDevice('Anna'))!;
+    const req = Object.assign(Readable.from([Buffer.alloc(16)]), { headers: { 'content-length': '4096' } });
+    await assert.rejects(files.importBlobs(req, room, me), { status: 400 });
+    assert.equal(files.db.sql.exec("SELECT used FROM file_transfer_usage WHERE person=? AND kind='inBytes'", me.id).toArray()[0].used, 16);
+}));
 
 test('multipart total cannot exceed reservation and closed parts are swept',()=>hostTest(async(h,call,dir)=>{
  const id=crypto.randomUUID();await call('/v1/files','POST',{id,name:'Design'});

@@ -2,6 +2,7 @@
 import { reconnectingStream } from "./event-stream.ts";
 import { forgetStore } from "./widgets/store.ts";
 import { handleCloudFiles, renameCloudFile, fileInfo, fileSession, fileEvents, filePeers, waitForCachedCloudSettings } from "./cloud-files.ts";
+import { movePackagePath, recoverMoveStages } from "./cloud-files-move.ts";
 import { readOnlyRoute } from "./cloud-files-gate.ts";
 import { applyView, docKeysEffect } from "./docwriter.ts";
 import { updateVariables, variableEditBody } from "./doc/variables.ts";
@@ -23,7 +24,7 @@ import { SnapshotCache } from "./snapcache.ts";
 import { compactWrites, currentDoc, editDoc, writeSettled, finishWrites, flushWrites, hasPendingWrites, journalSynced, persistedRevision, reconcileLoad, restoreSuspected, resumeWrites, setDocHost, writerHooks } from "./docwriter.ts";
 import { PAGE_BRIDGE_JS } from "./bridge-page.ts";
 import { dispatch, docChanged, finishWork, trackChange, handleBridge, originOk, handleDocRoute, noteDoc, emit as bridgeEmit, type BridgeCtx } from "./bridge.ts";
-import { DESIGN_FILE, DocError, displayPath, newCanvas, primeDoc, renameCanvas, saveAsCanvas } from "./docpath.ts";
+import { DESIGN_FILE, DocError, displayPath, newCanvas, plain, primeDoc, renameCanvas, saveAsCanvas } from "./docpath.ts";
 import { storeForAsync } from "./widgets/store.ts";
 import { enginePkgDir, handleEngineRoute, sceneEnv, streamFile } from "./scene.ts";
 import { keyedAnswer } from "./keyed.ts";
@@ -365,11 +366,15 @@ type FileEntry = { file: string; name: string; modified: string };
 let fileList: FileEntry[] = [];
 let scanStartedAt = 0;
 
-async function scanAsync(dir: string, depth: number, out: FileEntry[]): Promise<void> {
-  if (depth < 0 || out.length > 400) return;
+async function scanAsync(dir: string, depth: number, out: FileEntry[], recover: boolean): Promise<void> {
+  if (depth < 0 || (!recover && out.length > 400)) return;
   let entries: fs.Dirent[];
   try {
     entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    if (recover && entries.some(e => e.name.startsWith(".canvas-move-"))) {
+      recoverMoveStages(dir, entries);
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    }
   } catch {
     return;
   }
@@ -380,16 +385,17 @@ async function scanAsync(dir: string, depth: number, out: FileEntry[]): Promise<
     const p = path.join(dir, e.name);
     // A .canvas folder is one document: listed once, never descended into. A plain .canvas file is Obsidian's.
     if (e.isDirectory() && e.name.endsWith(".canvas")) {
+      if (out.length > 400) continue;
       try {
         const st = await fs.promises.stat(path.join(p, DESIGN_FILE));
         if (st.isFile()) out.push({ file: fs.realpathSync(p), name: path.basename(p, ".canvas"), modified: st.mtime.toISOString() });
       } catch {}
     } else if (e.isDirectory()) subdirs.push(p);
   }
-  await Promise.all(subdirs.map((d) => scanAsync(d, depth - 1, out)));
+  await Promise.all(subdirs.map((d) => scanAsync(d, depth - 1, out, recover)));
 }
 
-async function listFiles(): Promise<FileEntry[]> {
+async function listFiles(recover = false): Promise<FileEntry[]> {
   if (scanStartedAt && Date.now() - scanStartedAt < 10_000) return fileList;
   scanStartedAt = Date.now();
   const out: FileEntry[] = [];
@@ -400,7 +406,7 @@ async function listFiles(): Promise<FileEntry[]> {
   (async () => {
     try {
       for (const r of roots) {
-        await scanAsync(r, 4, out);
+        await scanAsync(r, 4, out, recover);
         // Publish what each root yielded as soon as it is done, so near-root files land early.
         fileList = out
           .slice()
@@ -1199,8 +1205,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     const port = (s.address() as { port: number }).port;
     const url = `http://127.0.0.1:${port}/${file ? `?file=${encodeURIComponent(file)}` : ""}`;
     console.log(`canvas: ${url}`);
-    if (file) watched(resolveDocPath(file));
-    listFiles(); // warm the file menu in the background
+    if (file) {
+      try { recoverMoveStages(path.dirname(movePackagePath(plain(file)))); } catch {}
+      watched(resolveDocPath(file));
+    }
+    listFiles(true); // recover interrupted moves and warm the file menu in the background
   });
 }
 
@@ -4080,7 +4089,7 @@ cloudWait.hidden = true;
 document.body.append(cloudWait);
 es.addEventListener("cloudfile", (e) => {
   const info = JSON.parse(e.data); window.canvasCloudFile = info; cloudReadOnly = !!info && (!!info.updateMessage || (info.role !== "owner" && info.role !== "editor"));
-  cloudWait.textContent = info?.waitingForHost || info?.updateMessage || "";
+  cloudWait.textContent = info?.waitingForHost || info?.updateMessage || info?.assetNotice || "";
   cloudWait.hidden = !cloudWait.textContent;
   if (native) post({ file, cloudFile: info });
   document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });

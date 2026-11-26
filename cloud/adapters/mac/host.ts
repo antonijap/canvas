@@ -13,13 +13,13 @@
 // Storage, in `dir` (0700, files 0600): team.sqlite and rooms/<doc>.sqlite (one per shared document, the Worker's room
 // schema). Comments and people only; no files, no tokens in clear.
 
-import { FILE_TRANSFER } from "../../file-transfer.ts";
+import { FILE_TRANSFER, FILE_TRANSFER_PARTS, isImportUpload } from "../../file-transfer.ts";
 import { MacFiles } from "./files.ts";
 import { route } from "../../core/router.ts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
-import { WHITEBOARD } from "../../protocol-files.ts";
+import { EXTENDED_BLOB_PATHS, WHITEBOARD } from "../../protocol-files.ts";
 import type { AddressInfo, Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
@@ -497,8 +497,10 @@ export class CloudHost {
     const url = new URL(req.url ?? "/", "http://cloud.invalid");
     const method = req.method ?? "GET";
     const p = url.pathname;
-    const importBlobs = method === "PUT" && /^\/v1\/files\/[0-9a-f-]{36}\/import\/blobs$/.test(p);
-    const transfer = importBlobs || (method === "POST" && /^\/v1\/files\/[0-9a-f-]{36}\/(?:import\/(?:actions|comments)|blob-batch)$/.test(p));
+    const fileRoute = /^\/v1\/files\/[0-9a-f-]{36}\/(.*)$/.exec(p)?.[1] ?? "";
+    const importUpload = isImportUpload(fileRoute, method);
+    const importBlobs = method === "PUT" && (fileRoute === "import/blobs" || importUpload);
+    const transfer = importBlobs || importUpload || (method === "POST" && (fileRoute === "import/actions" || fileRoute === "import/comments"));
     if (importBlobs && req.headers["content-type"] !== "application/octet-stream") return json(415, { code: "invalid", message: "Binary upload required" });
     if (method !== "GET" && !importBlobs && !(method === "PUT" && /^\/v1\/files\/[^/]+\/uploads\/[^/]+(?:\/parts\/\d+)?$/.test(p))) {
       const type = String(req.headers["content-type"] ?? "").split(";", 1)[0].trim().toLowerCase();
@@ -525,7 +527,7 @@ export class CloudHost {
     }
     if (!transfer && !this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
     if (await this.files.route(req, res, url, me, () => this.body(req, 1024 * 1024, me.device))) return;
-    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", FILE_TRANSFER, WHITEBOARD, PRIVATE_VOTE_VIEWS, CLOUD_TIMERS, PER_VOTE_DESIGN], hostId: this.hostId() } as ServerInfo);
+    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", FILE_TRANSFER, FILE_TRANSFER_PARTS, EXTENDED_BLOB_PATHS, WHITEBOARD, PRIVATE_VOTE_VIEWS, CLOUD_TIMERS, PER_VOTE_DESIGN], hostId: this.hostId() } as ServerInfo);
     if (p === "/v1/members" && method === "GET") return json(200, this.people().filter(p => p.devices.length).map(p => ({ id: p.id, name: p.label, role: p.role })));
     if (p === "/v1/me" && method === "GET") return json(200, { id: me.id, email: me.email, name: me.name, role: me.role, hostId: this.hostId() });
     if (p === "/v1/docs" && method === "POST") {

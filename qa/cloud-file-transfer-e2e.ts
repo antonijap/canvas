@@ -196,6 +196,24 @@ try {
         delete original['comments.json'];
         assert.deepEqual(after, original);
         console.log(`PASS ${rels.length} distinct images, embedded font, shader, document and pages retained their hashes (${uploadRequests} transfer requests to import and verify)`);
+
+        const largeSource = path.join(tmp, 'member', 'Large.canvas');
+        const asset = path.join('media', 'fixture.mp4');
+        const video = Buffer.alloc(9 * 1024 * 1024);
+        video.write('ftypisom', 4);
+        fs.mkdirSync(path.join(largeSource, 'media'), { recursive: true });
+        fs.writeFileSync(path.join(largeSource, 'document.json'), JSON.stringify({ version: '2.21', children: [] }));
+        fs.writeFileSync(path.join(largeSource, asset), video);
+        const beforeParts = usage();
+        const inputBytes = () => Number(db.prepare("SELECT COALESCE(SUM(used),0) AS total FROM file_transfer_usage WHERE kind='inBytes'").get()!.total);
+        const beforeBytes = inputBytes();
+        const largeMove = await json(member, '/api/cloud/files/move?file=' + encodeURIComponent(largeSource), { cloud });
+        assert.equal(largeMove.verified, true);
+        assert.equal(sha(fs.readFileSync(path.join(largeMove.file, asset))), sha(video));
+        assert.equal(fs.existsSync(largeSource), false);
+        assert.equal(usage() - beforeParts, 6, 'one reservation, two parts, one completion, actions and verification');
+        assert.equal(inputBytes() - beforeBytes, video.length);
+        console.log('PASS a 9 MiB asset moved through bounded upload parts and retained its hash');
     } finally { db.close(); }
 
     const health = await json(member, '/health');

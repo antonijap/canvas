@@ -7,7 +7,7 @@
 // recoverSnapshots() marks its boards dirty again and drops it. Compaction trims the log, the text edits, old
 // receipts and removed subtrees only below what a `done` snapshot covers.
 
-import { checkBlobPath } from "../../protocol-files.ts";
+import { checkBlobPath, safeBlobPath } from "../../protocol-files.ts";
 import type { FileRoom } from "./room.ts";
 import { RECEIPT_DAYS, DAY_MS } from "./room.ts";
 import { stateOf, type FileState } from "./state.ts";
@@ -160,10 +160,11 @@ export function compact(room: FileRoom): { versionsDropped: number; logDropped: 
 export class IntegrityError extends Error {}
 
 /** Read a manifest and its objects back into a whole state, checking every object against its hash. */
-export async function loadManifest(objects: FileRoom["objects"], manifestText: string): Promise<{ manifest: Manifest; state: FileState }> {
+export async function loadManifest(objects: FileRoom["objects"], manifestText: string, allowUnknownBlobPaths = false): Promise<{ manifest: Manifest; state: FileState }> {
   const m = JSON.parse(manifestText) as Manifest;
   if (!m || typeof m !== "object" || !Array.isArray(m.blobs)) throw new IntegrityError("invalid manifest");
-  for (const b of m.blobs) if (!b || checkBlobPath(b.path) || !/^[0-9a-f]{64}$/.test(b.sha256) || !Number.isSafeInteger(b.bytes) || b.bytes <= 0) throw new IntegrityError("invalid blob path or metadata in manifest");
+  for (const b of m.blobs) if (!b || (checkBlobPath(b.path) && !(allowUnknownBlobPaths && safeBlobPath(b.path)))
+    || !/^[0-9a-f]{64}$/.test(b.sha256) || !Number.isSafeInteger(b.bytes) || b.bytes <= 0) throw new IntegrityError("invalid blob path or metadata in manifest");
   if (!/^[A-Za-z0-9-]{1,100}$/.test(m.file) || !Array.isArray(m.boards) || m.boards.some(b => !/^[0-9a-f]{64}$/.test(b.sha256)) || !/^[0-9a-f]{64}$/.test(m.vers?.sha256)) throw new IntegrityError("invalid snapshot identity or hash");
   if (m.format !== 1) throw new IntegrityError(`manifest format ${m.format} is not one this Canvas reads`);
   const fetchText = async (key: string, sha: string) => {
@@ -177,14 +178,13 @@ export async function loadManifest(objects: FileRoom["objects"], manifestText: s
   if(m.boards.length>20_000 || m.blobs.reduce((n,b)=>n+b.bytes,0)>1024**3 || m.blobs.some(b=>b.bytes>100*1024*1024))throw new IntegrityError("Manifest exceeds file limits");
   for (const b of m.boards) { const text=await fetchText(boardKey(m.file,b.sha256),b.sha256);total+=text.length;if(total>500*1024*1024)throw new IntegrityError("File exceeds layer limit");children.push(JSON.parse(text)); }
   const vers = JSON.parse(await fetchText(versKey(m.file, m.vers.sha256), m.vers.sha256)) as Record<string, string>;
-  const blobs: Record<string, BlobRow> = {};
-  for (const b of m.blobs) blobs[b.path] = { sha256: b.sha256, bytes: b.bytes, type: b.type };
+  const blobs: Record<string, BlobRow> = Object.fromEntries(m.blobs.map(b => [b.path, { sha256: b.sha256, bytes: b.bytes, type: b.type }]));
   return { manifest: m, state: { top: m.top, children, doc: m.doc, widgets: m.widgets, pages: m.pages, meta: m.meta, blobs, vers } };
 }
 
 /** A Mac's copy of the file as a snapshot holds it. */
-export async function treeFromManifest(objects: FileRoom["objects"], manifestText: string): Promise<{ manifest: Manifest; tree: MemoryTree }> {
-  const { manifest, state } = await loadManifest(objects, manifestText);
+export async function treeFromManifest(objects: FileRoom["objects"], manifestText: string, allowUnknownBlobPaths = false): Promise<{ manifest: Manifest; tree: MemoryTree }> {
+  const { manifest, state } = await loadManifest(objects, manifestText, allowUnknownBlobPaths);
   return { manifest, tree: new MemoryTree(state) };
 }
 

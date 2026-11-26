@@ -12,10 +12,10 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { applyAction, isReject, nextProps, opRunner } from "../cloud/core/files/apply.ts";
+import { applyAction, isReject, mediaRefsOfFonts, mediaRefsOfNode, mediaRefsOfWidget, nextProps, opRunner } from "../cloud/core/files/apply.ts";
 import { stripPageAppearance } from "../cloud/core/files/state.ts";
 import { DESCENDANTS_PREFIX, type DocNode, type Json } from "../cloud/core/schema.ts";
-import { actionBytes, blobTypeOf, checkBlobPath, FILE_LIMITS, META_KEYS, type Action, type BlobPath, type FileOp, type MetaKey, type Val } from "../cloud/protocol-files.ts";
+import { actionBytes, blobTypeOf, checkBlobPath, needsExtendedBlobPaths, FILE_LIMITS, META_KEYS, type Action, type BlobPath, type FileOp, type MetaKey, type Val } from "../cloud/protocol-files.ts";
 import { DocTree, type DocLike, type Envelope } from "./cloud-files-tree.ts";
 import type { Op } from "./history.ts";
 
@@ -453,6 +453,26 @@ function diffEnvelope(before: Envelope, after: Envelope): FileOp[] {
 }
 
 // ---------- media ----------
+
+export function usesExtendedBlobPaths(ops: FileOp[]): boolean {
+  const needsUpdate = (rel: string) => !checkBlobPath(rel) && needsExtendedBlobPaths(rel);
+  const nodeHasNewPath = (node: DocNode): boolean => mediaRefsOfNode(node).some(needsUpdate)
+    || !!node.children?.some(nodeHasNewPath);
+  return ops.some(op => {
+    switch (op.k) {
+      case "blob": return needsUpdate(op.path);
+      case "insert": return nodeHasNewPath(op.node);
+      case "doc": return op.key === "fonts" && mediaRefsOfFonts(op.value?.v).some(needsUpdate);
+      case "widget": return op.value !== null && mediaRefsOfWidget(op.value.v).some(needsUpdate);
+      case "set": {
+        const props = Object.fromEntries(Object.entries(op.props).filter(([, v]) => v !== null).map(([k, v]) => [k, v!.v]));
+        return mediaRefsOfNode(props).some(needsUpdate) || Object.entries(props).some(([k, v]) =>
+          k.startsWith(DESCENDANTS_PREFIX) && v && typeof v === "object" && !Array.isArray(v) && mediaRefsOfNode(v).some(needsUpdate));
+      }
+      default: return false;
+    }
+  });
+}
 
 /**
  * The package path a media file of `docFile` takes in a Cloud file, including nested subfolders. A plain

@@ -14,7 +14,7 @@ import { whiteboardPerson } from "../../../src/page/whiteboard-model.js";
 import { docKeyError, setKeyError, validateNode, validateVariable, DESCENDANTS_PREFIX, PROTO_KEYS, type DocNode, type Json } from "../schema.ts";
 import { shift as shiftSpans } from "../../../src/page/text-spans.js";
 import { shiftLists, type ListItem } from "../../../src/page/text-paras.js";
-import { checkBlobPath, blobTypeOf, FILE_LIMITS, META_KEYS, type Action, type AppliedAction, type AppliedOp, type Author, type BlobPath, type FileOp, type Reject, type RejectCode, type Val } from "../../protocol-files.ts";
+import { checkBlobPath, blobTypeOf, safeBlobPath, FILE_LIMITS, META_KEYS, type Action, type AppliedAction, type AppliedOp, type Author, type BlobPath, type FileOp, type Reject, type RejectCode, type Val } from "../../protocol-files.ts";
 
 /** A version: the id of the action that wrote something last, or 0 when nothing did since the state was loaded. */
 export type Ver = string | 0;
@@ -574,10 +574,14 @@ class Run {
 
   private blob(op: Extract<FileOp, { k: "blob" }>): AppliedOp {
     const bad = checkBlobPath(op.path);
-    if (bad) this.fail("forbidden", `blob: ${bad}`);
+    if (bad && !(this.ctx.replay && safeBlobPath(op.path))) this.fail("forbidden", `blob: ${bad}`);
     if (typeof op.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(op.sha256)) this.fail("invalid", "blob: sha256 must be 64 hex digits");
     if (!Number.isSafeInteger(op.bytes) || op.bytes < 0) this.fail("invalid", "blob: bytes must be a whole number");
-    if (op.type !== blobTypeOf(op.path as BlobPath)) this.fail("invalid", `blob: ${op.path} is stored as ${blobTypeOf(op.path as BlobPath)}`);
+    if (bad) {
+      if (typeof op.type !== "string") this.fail("invalid", "blob: type must be a string");
+    } else if (op.type !== blobTypeOf(op.path as BlobPath)) {
+      this.fail("invalid", `blob: ${op.path} is stored as ${blobTypeOf(op.path as BlobPath)}`);
+    }
     const have = this.tree.blob(op.path);
     if (have) {
       if (have.sha256 !== op.sha256) this.fail("conflict", `blob: ${op.path} holds other bytes; a file is never replaced`);
@@ -596,6 +600,7 @@ class Run {
     }
     for (const u of this.uses) if (this.tree.node(u.user) && !this.tree.isComponent(u.ref)) this.fail("invalid", `"${u.user}" uses "${u.ref}", which is not a component`);
     for (const m of this.media) {
+      if (this.ctx.replay && safeBlobPath(m) && this.tree.blob(m)) continue;
       const bad = confinedRefError(this.tree, m);
       if (bad) this.fail("forbidden", bad);
     }

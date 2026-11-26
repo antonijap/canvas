@@ -3,6 +3,9 @@ import {test} from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
+import {Readable} from 'node:stream';
+import type {IncomingMessage, ServerResponse} from 'node:http';
 import {writeBoardCheckpoint,evictClosedPackages} from '../src/cloud-files-cache.ts';
 import {FileStateStore} from '../src/cloud-files-store.ts';
 import {stateFromFiles} from '../cloud/core/files/state.ts';
@@ -399,6 +402,90 @@ test('a legacy host leaves ordinary edits enabled and refuses whiteboard inserts
     assert.equal(fileInfo(file)?.waitingForHost, undefined);
     assert.deepEqual(session.store.replica.pending.map(p => p.action.id), ids);
 
+});
+
+test('nested asset edits require support from the live file host', async t => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-legacy-assets-')));
+    const cloud = 'http://127.0.0.1:9197', id = crypto.randomUUID();
+    const pkg = path.join(dir, 'Library', 'Application Support', 'Canvas', 'cloud-files', cloudKey(cloud), id + '.canvas');
+    t.mock.method(os, 'homedir', () => dir);
+    t.mock.method(globalThis, 'fetch', async () => { throw new Error('offline'); });
+    setCloudConfig({ clouds: [{ url: cloud, devEmail: 'anna@example.test' }] });
+    t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const store = new FileStateStore(pkg, { cloud, file: id, name: 'Board', role: 'editor', author: { id: 'anna', name: 'Anna' },
+        state: stateFromFiles({ children: [] }) });
+    store.close();
+    const session = fileSession(pkg, false, true)!;
+    const { receive } = await import('../src/cloud-files.ts');
+    const { deliverOps } = await import('../src/cloud-files-ops.ts');
+    const op = { k: 'blob', path: 'media/nested/fixture.png', sha256: 'a'.repeat(64), bytes: 8, type: 'image/png' } as const;
+    const deliver = () => deliverOps(path.join(pkg, 'document.json'), [op]);
+    assert.throws(deliver, { status: 426, message: 'Update Canvas on the Mac that hosts this Cloud to use these assets.' });
+    assert.equal(session.store.replica.pending.length, 0);
+    await receive(session, { type: 'welcome', protocol: 2, capabilities: ['extended-blob-paths'], role: 'editor',
+        me: { id: 'anna', name: 'Anna' }, epoch: 1, seq: 0, known: [], limits: { opsPerMessage: 100, actionBytes: 1024 } });
+    deliver();
+    assert.equal(session.store.replica.pending.length, 1);
+});
+
+test('blob downloads skip unknown asset paths and return a notice', async t => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-future-assets-')));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const {downloadBlobs} = await import('../src/cloud-files.ts');
+    const blob = { sha256: 'a'.repeat(64), bytes: 8, type: 'image/png' };
+    const notice = await downloadBlobs('http://127.0.0.1:9198', crypto.randomUUID(), dir, { 'future/fixture.av1': blob }, () => false);
+    assert.match(notice ?? '', /1 unsupported asset/i);
+    assert.deepEqual(fs.readdirSync(dir), []);
+});
+
+test('cache assets are installed relative to their verified parent', async t => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-future-assets-')));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const bytes = Buffer.from('fixture');
+    const blob = { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length, type: 'image/png' };
+    const {downloadBlobs} = await import('../src/cloud-files.ts');
+    t.mock.method(globalThis, 'fetch', async () => new Response(bytes));
+    const cloud = 'http://127.0.0.1:9198';
+    setCloudConfig({ clouds: [{ url: cloud, devEmail: 'anna@example.test' }] });
+    t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); });
+    const rename = fs.renameSync;
+    const cwd = process.cwd();
+    const calls = t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => rename(from, to));
+    const open = fs.openSync;
+    const opens = t.mock.method(fs, 'openSync', (file: fs.PathLike, flags: string | number, mode?: number) => open(file, flags, mode));
+    await downloadBlobs(cloud, crypto.randomUUID(), dir, { 'media/nested/fixture.png': blob }, () => false);
+    assert.deepEqual(fs.readFileSync(path.join(dir, 'media/nested/fixture.png')), bytes);
+    assert.match(String(calls.mock.calls[0].arguments[1]), /^fixture\.png$/);
+    assert.equal(process.cwd(), cwd);
+    if (process.platform === 'darwin') {
+        const temporary = opens.mock.calls.find(call => String(call.arguments[0]).includes('.asset-'));
+        assert.ok(Number(temporary?.arguments[1]) & 0x20000000);
+    }
+});
+
+test('moving extended assets to a basic transfer host returns an update error before import', async t => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-legacy-move-assets-')));
+    const source = path.join(dir, 'Design.canvas'), cloud = 'http://127.0.0.1:9199';
+    fs.mkdirSync(path.join(source, 'media', 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'document.json'), JSON.stringify({ version: '2.21', children: [] }));
+    fs.writeFileSync(path.join(source, 'media', 'nested', 'fixture.png'), 'image fixture');
+    t.mock.method(os, 'homedir', () => dir);
+    const request = t.mock.method(globalThis, 'fetch', async (input: string) => {
+        if (new URL(input).pathname === '/v1/info') return Response.json({ capabilities: ['files', 'file-transfer-v1'] });
+        return Response.json({ message: 'Unexpected import request' }, { status: 400 });
+    });
+    setCloudConfig({ clouds: [{ url: cloud, devEmail: 'anna@example.test' }] });
+    t.after(() => { setCloudConfig({ clouds: [] }); resetCloudConfig(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const { handleCloudFiles } = await import('../src/cloud-files.ts');
+    const req = Object.assign(Readable.from([Buffer.from(JSON.stringify({ cloud }))]), { method: 'POST', headers: { 'x-canvas': '1' } });
+    let status = 0, reply: any;
+    const res = { writeHead: (code: number) => { status = code; }, end: (body: string) => { reply = JSON.parse(body); } };
+    const url = new URL('http://127.0.0.1/api/cloud/files/move?file=' + encodeURIComponent(source));
+    await handleCloudFiles(req as unknown as IncomingMessage, res as unknown as ServerResponse, url);
+    assert.equal(status, 426, JSON.stringify(reply));
+    assert.match(reply.error, /Update Canvas on the Mac that hosts this Cloud/);
+    assert.equal(request.mock.calls.length, 1);
+    assert.equal(fs.existsSync(source), true);
 });
 
 test('a comment snapshot and cache removal preserve the only copy of local votes', async (t) => {

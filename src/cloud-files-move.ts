@@ -30,6 +30,53 @@ export function movePackagePath(source: string): string {
     return path.basename(file) === 'document.json' && parent.endsWith('.canvas') ? parent : file;
 }
 
+const activeMoveStages = new Set<string>();
+export function stageMove(target: string): string {
+    const parent = fs.realpathSync(path.dirname(target));
+    const stage = fs.mkdtempSync(path.join(parent, '.canvas-move-'));
+    activeMoveStages.add(stage);
+    return stage;
+}
+
+export function finishMoveStage(stage: string) {
+    activeMoveStages.delete(stage);
+    try { fs.rmdirSync(stage); } catch { /* Startup can recover a remaining package. */ }
+}
+
+export function restoreMovedPackage(parked: string): string {
+    const dir = path.dirname(path.dirname(parked));
+    const name = path.basename(parked, '.canvas');
+    for (let i = 0; ; i++) {
+        const label = i === 0 ? name : i === 1 ? `${name} Recovered` : `${name} Recovered ${i}`;
+        const target = path.join(dir, label + '.canvas');
+        if (fs.lstatSync(target, { throwIfNoEntry: false })) continue;
+        try {
+            fs.renameSync(parked, target);
+            return target;
+        } catch (error) {
+            if (!fs.lstatSync(target, { throwIfNoEntry: false })) throw error;
+        }
+    }
+}
+
+export function recoverMoveStages(dir: string, entries = fs.readdirSync(dir, { withFileTypes: true })) {
+    dir = fs.realpathSync(dir);
+    for (const entry of entries) {
+        if (!entry.isDirectory() || !/^\.canvas-move-[a-z0-9]{6}$/i.test(entry.name)) continue;
+        const stage = path.join(dir, entry.name);
+        if (activeMoveStages.has(stage)) continue;
+        try {
+            for (const item of fs.readdirSync(stage, { withFileTypes: true })) {
+                if (!item.isDirectory() || !item.name.endsWith('.canvas')) continue;
+                const parked = path.join(stage, item.name);
+                if (fs.lstatSync(path.join(parked, 'document.json'), { throwIfNoEntry: false })?.isFile())
+                    restoreMovedPackage(parked);
+            }
+            fs.rmdirSync(stage);
+        } catch { /* Leave inaccessible packages for the next startup. */ }
+    }
+}
+
 export async function prepareMove(source: string, publish: (name: string, doc: Record<string, Json>, envelope: Record<string, Json>, blobs: MoveBlob[], comments: ReturnType<typeof opsForShare>) => Promise<{
     id: string;
     file: string;
@@ -38,16 +85,17 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     role: string;
 }>, finalize?: (destination: { id:string; file:string; name:string; cloud:string; role:string }) => Promise<void>) {
     const pkg = movePackagePath(source);
-    if (!pkg.endsWith('.canvas') || fs.lstatSync(pkg).isSymbolicLink() || !fs.statSync(pkg).isDirectory())
+    const sourceStat = fs.lstatSync(pkg);
+    if (!pkg.endsWith('.canvas') || !sourceStat.isDirectory())
         throw new Error('Move a local Canvas package');
     const chunk = Buffer.allocUnsafe(64 * 1024);
-    const fingerprint = (dir: string): string => {
+    const fingerprint = (dir: string, root = dir): string => {
         const hash = createHash('sha256');
         for (const name of fs.readdirSync(dir).sort()) {
             const file = path.join(dir, name), stat = fs.lstatSync(file);
             if (!stat.isDirectory() && !stat.isFile()) throw new Error('Move refuses linked or non-regular files');
-            const digest = stat.isDirectory() ? fingerprint(file)
-                : withPackageFile(pkg, path.relative(pkg, file), fd => {
+            const digest = stat.isDirectory() ? fingerprint(file, root)
+                : withPackageFile(root, path.relative(root, file), fd => {
                     const content = createHash('sha256');
                     for (let count; (count = fs.readSync(fd, chunk, 0, chunk.length, null));)
                         content.update(chunk.subarray(0, count));
@@ -181,27 +229,32 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
         if (createHash('sha256').update(bytes).digest('hex') !== b.op.sha256)
             throw new Error('Move verification failed: blob hash differs');
     }
-    // No await between the final source check and the reversible rename.
     if (fingerprint(pkg) !== sourceHash) throw new Error('Local file changed during the move; source kept');
-    const stage = fs.mkdtempSync(path.join(path.dirname(pkg), '.canvas-move-'));
-    const parked = path.join(stage, path.basename(pkg));
-    try { fs.renameSync(pkg, parked); }
-    catch (error) { fs.rmdirSync(stage); throw error; }
+    // The local file stays visible through a lost reply or a crash before publication.
+    await finalize?.(dest);
+    const sameSource = (file: string) => {
+        const st = fs.lstatSync(file, { throwIfNoEntry: false });
+        return !!st?.isDirectory() && st.dev === sourceStat.dev && st.ino === sourceStat.ino;
+    };
+    let stage: string | undefined, parked: string | undefined;
     try {
-        await finalize?.(dest);
-    } catch (error) {
-        if (error instanceof MovePendingError || fs.lstatSync(pkg, { throwIfNoEntry: false })) {
-            throw new MovePendingError(`${(error as Error).message}; the verified local source is at ${parked}`);
+        if (!sameSource(pkg)) return { ...dest, verified: true, notice: 'The local path changed during the move.' };
+        stage = stageMove(pkg);
+        parked = path.join(stage, path.basename(pkg));
+        fs.renameSync(pkg, parked);
+        let unchanged = false;
+        try { unchanged = sameSource(parked) && fingerprint(parked) === sourceHash; }
+        catch { /* Keep a source whose contents can no longer be verified. */ }
+        if (!unchanged) {
+            const restored = restoreMovedPackage(parked);
+            return { ...dest, verified: true, notice: `Local changes were kept at ${restored}` };
         }
-        fs.renameSync(parked, pkg);
-        fs.rmdirSync(stage);
-        throw error;
-    }
-    try {
         trashPackage(parked);
-        fs.rmdirSync(stage);
     } catch {
-        return { ...dest, verified: true, notice: `The source is recoverable in ${stage}` };
+        const kept = parked && fs.existsSync(parked) ? parked : pkg;
+        return { ...dest, verified: true, notice: `The local source was kept at ${kept}` };
+    } finally {
+        if (stage) finishMoveStage(stage);
     }
     return { ...dest, verified: true, notice: voting.notice };
 }

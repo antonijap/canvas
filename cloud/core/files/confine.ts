@@ -33,7 +33,7 @@ export interface PackageFs {
   constants: { O_RDONLY: number; O_NOFOLLOW?: number; O_NONBLOCK?: number };
 }
 /** macOS: refuse a link at any component of the path, inside the open itself (O_NOFOLLOW_ANY, macOS 11). */
-const O_NOFOLLOW_ANY = 0x20000000;
+export const O_NOFOLLOW_ANY = 0x20000000;
 
 /**
  * Open a package file for reading, closing what resolveInPackage leaves open: the check and the open are one step.

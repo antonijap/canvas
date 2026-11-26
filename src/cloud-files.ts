@@ -12,19 +12,19 @@ import { FileStateStore } from './cloud-files-store.ts';
 import { DocTree } from './cloud-files-tree.ts';
 import { documentOf, envelopeOf } from '../cloud/core/files/state.ts';
 import { cloudFileHooks } from './cloud-files-runtime.ts';
-import { asOneAction, adoptWriters, onAction, envelopeFileOps } from './cloud-files-ops.ts';
+import { asOneAction, adoptWriters, onAction, envelopeFileOps, usesExtendedBlobPaths } from './cloud-files-ops.ts';
 import { loadManifest, type Manifest } from '../cloud/core/files/snapshots.ts';
 import { type ObjectStore, fromUtf8 } from '../cloud/core/files/objects.ts';
-import { FILE_TRANSFER, blobBatches } from '../cloud/file-transfer.ts';
-import { openInPackage } from '../cloud/core/files/confine.ts';
-import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, checkBlobPath, FILE_CAPABILITIES_HEADER, hasWhiteboard, insertsWhiteboard, supportsWhiteboard, UPDATE_WHITEBOARD_HOST, WHITEBOARD } from '../cloud/protocol-files.ts';
+import { FILE_TRANSFER, FILE_TRANSFER_PARTS, TRANSFER_HEADER_BYTES, TRANSFER_PART_BYTES, blobBatches } from '../cloud/file-transfer.ts';
+import { O_NOFOLLOW_ANY, openInPackage } from '../cloud/core/files/confine.ts';
+import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, checkBlobPath, EXTENDED_BLOB_PATHS, FILE_CAPABILITIES_HEADER, hasWhiteboard, insertsWhiteboard, safeBlobPath, supportsWhiteboard, UPDATE_BLOB_PATHS_HOST, UPDATE_WHITEBOARD_HOST, WHITEBOARD } from '../cloud/protocol-files.ts';
 import { createPackage, targetPath } from './docpath.ts';
 import { type BlobRow } from '../cloud/core/files/seam.ts';
 import { readBodyText } from './body.ts';
 import { applyOp, VOTE_CLIENT_CAPABILITIES, isRateRefusal, isVoteOp, LIMITS, needsCloudTimers, supportsCloudTimers, supportsCloudVotes, supportsPrivateVoteViews, UPDATE_TIMER_HOST, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type Rejected, type StandaloneTimer, type Thread, type Vote, type VoteView } from '../cloud/protocol.ts';
 import { COMMENTS_FILE, emptyComments, forkComments, readCommentsFile, writeCommentsFile } from './comments-file.ts';
 import { anchorVoteClock, ownLocalVotes, receiveVoteViews, sendableCommentOps, voteOpsForTransfer, voteServerTime, type VoteClock } from './vote-state.ts';
-import { MovePendingError, movePackagePath, prepareMove } from './cloud-files-move.ts';
+import { finishMoveStage, MovePendingError, movePackagePath, prepareMove, restoreMovedPackage, stageMove, type MoveBlob } from './cloud-files-move.ts';
 import { checkPresence, stripIdentity, keep, type Presence, type PeerPresence } from '../cloud/core/presence.ts';
 import { createPresenceSender } from './page/presence-client.js';
 import { pendingStates, retry, discard, type RefusedOp } from './cloud-sync.ts';
@@ -80,6 +80,8 @@ interface Session {
     importing?: boolean;
     status: string;
     whiteboard?: boolean;
+    extendedBlobPaths?: boolean;
+    assetNotice?: string;
     voting?: boolean;
     timerCapable?: boolean;
     cloudTimer?: StandaloneTimer | null;
@@ -207,10 +209,12 @@ cloudFileHooks.whiteboardIssue = (file, nodes) => {
     return s && s.whiteboard !== true && hasWhiteboard(nodes) ? UPDATE_WHITEBOARD_HOST : undefined;
 };
 function waitingForHost(s: Session) {
-    return s.whiteboard === false && s.store.replica.pending.some(p => insertsWhiteboard(p.action.ops))
+    return s.store.replica.pending.some(({ action }) =>
+        (s.whiteboard === false && insertsWhiteboard(action.ops)) ||
+        (s.extendedBlobPaths === false && usesExtendedBlobPaths(action.ops)))
         ? 'Edits are waiting for the Cloud host to update Canvas.' : undefined;
 }
-export function fileInfo(file: string, open = true) { const s = open ? fileSession(file) : sessions.get(docFile(file)); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, whiteboard: s.whiteboard === true, voting: s.voting, serverTime: voteServerTime(s.voteClock), leasedConclusions: s.leasedConclusions, updateMessage: s.updateMessage, waitingForHost: waitingForHost(s), pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
+export function fileInfo(file: string, open = true) { const s = open ? fileSession(file) : sessions.get(docFile(file)); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, whiteboard: s.whiteboard === true, voting: s.voting, serverTime: voteServerTime(s.voteClock), leasedConclusions: s.leasedConclusions, updateMessage: s.updateMessage, assetNotice: s.assetNotice, waitingForHost: waitingForHost(s), pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
 class CloudHttpError extends Error {
     readonly status: number;
     readonly code: string;
@@ -262,7 +266,7 @@ function objects(cloud: string, file: string): ObjectStore {
 async function cacheBlobs(s: Session) {
     const { cloud, file } = s.store.meta;
     const g = generation(cloud);
-    await downloadBlobs(cloud, file, s.store.pkg, s.store.replica.tree.state().blobs, () => s.stopped || generation(cloud) !== g);
+    s.assetNotice = await downloadBlobs(cloud, file, s.store.pkg, s.store.replica.tree.state().blobs, () => s.stopped || generation(cloud) !== g);
 }
 function blobDestination(pkg: string, rel: string, makeParents = false) {
     if (checkBlobPath(rel)) throw new Error('Invalid blob path');
@@ -280,9 +284,41 @@ function blobDestination(pkg: string, rel: string, makeParents = false) {
     return dest;
 }
 
-async function downloadBlobs(cloud: string, file: string, pkg: string, blobs: Record<string, BlobRow>, cancelled: () => boolean) {
+function saveCacheAsset(dest: string, bytes: Uint8Array) {
+    const parent = path.dirname(dest), name = path.basename(dest);
+    const before = fs.lstatSync(parent);
+    if (!before.isDirectory() || fs.realpathSync(parent) !== parent) throw new Error('Cloud cache asset folder changed');
+    const cwd = process.cwd();
+    // Node has no renameat. Use relative names inside the verified directory for this synchronous write.
+    process.chdir(parent);
+    try {
+        const current = fs.statSync('.');
+        if (before.dev !== current.dev || before.ino !== current.ino) throw new Error('Cloud cache asset folder changed');
+        const tmp = '.asset-' + randomUUID();
+        const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL
+            | (process.platform === 'darwin' ? O_NOFOLLOW_ANY : fs.constants.O_NOFOLLOW);
+        const fd = fs.openSync(tmp, flags, 0o600);
+        try {
+            fs.writeFileSync(fd, bytes);
+            const existing = fs.lstatSync(name, { throwIfNoEntry: false });
+            if (existing && (!existing.isFile() || existing.nlink !== 1)) throw new Error('Cloud cache asset is a link or a folder');
+            fs.renameSync(tmp, name);
+        } finally {
+            fs.closeSync(fd);
+            fs.rmSync(tmp, { force: true });
+        }
+    } finally { process.chdir(cwd); }
+}
+
+export async function downloadBlobs(cloud: string, file: string, pkg: string, blobs: Record<string, BlobRow>, cancelled: () => boolean) {
     const missing = new Map<string, { blob: BlobRow; paths: string[] }>();
+    let skipped = 0;
     for (const [rel, blob] of Object.entries(blobs)) {
+        if (checkBlobPath(rel)) {
+            if (!safeBlobPath(rel)) throw new Error('Invalid blob path');
+            skipped++;
+            continue;
+        }
         const dest = blobDestination(pkg, rel);
         if (fs.existsSync(dest)) {
             const opened = openInPackage(pkg, rel, fs);
@@ -300,21 +336,7 @@ async function downloadBlobs(cloud: string, file: string, pkg: string, blobs: Re
         if (createHash('sha256').update(bytes).digest('hex') !== blob.sha256 || bytes.length !== blob.bytes)
             throw new Error('Blob hash mismatch');
         if (cancelled() || revoked.has(cloud)) throw new Error('Cloud membership was removed during download');
-        for (const rel of paths) {
-            const dest = blobDestination(pkg, rel, true);
-            const tmp = path.join(path.dirname(dest), '.asset-' + randomUUID());
-            const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
-            const fd = fs.openSync(tmp, flags, 0o600);
-            try {
-                blobDestination(pkg, rel);
-                fs.writeFileSync(fd, bytes);
-                blobDestination(pkg, rel);
-                fs.renameSync(tmp, dest);
-            } finally {
-                fs.closeSync(fd);
-                fs.rmSync(tmp, { force: true });
-            }
-        }
+        for (const rel of paths) saveCacheAsset(blobDestination(pkg, rel, true), bytes);
     };
     const route = `/v1/files/${file}`;
     let bulk = true;
@@ -340,6 +362,7 @@ async function downloadBlobs(cloud: string, file: string, pkg: string, blobs: Re
         }
         for (const entry of batch) save(entry, await boundedBytes(await request(cloud, route + '/blobs/' + entry.blob.sha256), entry.blob.bytes));
     }
+    if (skipped) return `Skipped ${skipped} unsupported asset${skipped === 1 ? '' : 's'}. Update Canvas to see the complete file.`;
 }
 function render(s: Session) { if (s.stopped)
     return; adoptWriters(path.join(s.store.pkg, 'document.json'), s.store.replica.view().allVers()); s.store.materialize(); fileEvents.view?.(path.join(s.store.pkg, 'document.json')); }
@@ -529,6 +552,7 @@ export async function receive(s: Session, m: any) {
     if(m.type==='applied'&&Number(s.store.db.prepare('SELECT COUNT(*) AS n FROM confirmed').get()!.n)>=2000)checkpointSession(s);
     if (m.type === 'welcome') {
         s.whiteboard = supportsWhiteboard(m.capabilities);
+        s.extendedBlobPaths = m.capabilities?.includes(EXTENDED_BLOB_PATHS) === true;
         s.voting = supportsCloudVotes(m.capabilities);
         s.timerCapable = supportsCloudTimers(m.capabilities);
         s.voteClock = anchorVoteClock(m.serverTime);
@@ -559,7 +583,8 @@ async function send(s: Session) {
     sendComments(s);
     if (!CAN_EDIT[s.store.meta.role])
         return;
-    const actions = s.store.replica.outgoing(100, action => s.whiteboard === true || !insertsWhiteboard(action.ops));
+    const actions = s.store.replica.outgoing(100, ({ ops }) =>
+        (s.whiteboard === true || !insertsWhiteboard(ops)) && (s.extendedBlobPaths === true || !usesExtendedBlobPaths(ops)));
     s.store.commit();
     for (const a of actions) {
         for (const op of a.ops)
@@ -689,6 +714,7 @@ onAction((file, action) => { const s = fileSession(file); if (!s)
     requireStationaryFile(file);
     if (s.updateMessage) fail(426, 'update', s.updateMessage);
     if (s.whiteboard !== true && insertsWhiteboard(action.ops)) fail(426, 'update_host', UPDATE_WHITEBOARD_HOST);
+    if (s.extendedBlobPaths !== true && usesExtendedBlobPaths(action.ops)) fail(426, 'update_host', UPDATE_BLOB_PATHS_HOST);
     a = s.store.propose(action.ops, action);
 }
 catch (e) {
@@ -720,7 +746,7 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
         }
         if (cached.stopped) fail(403, 'removed', 'Cloud membership was removed during open');
         if (cached.updateMessage) fail(426, 'update', cached.updateMessage);
-        return { id, file: pkg, name: cached.store.meta.name, cloud, role: cached.store.meta.role };
+        return { id, file: pkg, name: cached.store.meta.name, cloud, role: cached.store.meta.role, notice: cached.assetNotice };
     }
     const listed = importingName === undefined ? await cloudFiles(cloud) as any : null;
     const item = importingName === undefined ? listed.files?.find((f: any) => f.id === id) : {id,name:importingName};
@@ -734,7 +760,7 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
         const m = await cloudJson(await request(cloud, `/v1/files/${id}/manifest`)) as Manifest;
         if (m.file !== id)
             throw new Error('Manifest names another file');
-        const { state } = await loadManifest(objects(cloud, id), JSON.stringify(m));
+        const { state } = await loadManifest(objects(cloud, id), JSON.stringify(m), true);
         checkGeneration(cloud, openingGeneration);
         const store = new FileStateStore(pkg, { cloud, file: id, name: item.name, role: me.role, author: { id: me.id, name: me.name }, state });
         store.replica.seq = m.seq;
@@ -750,7 +776,7 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
         s.store.commit();
     }
     evictClosedPackages(root(),new Set([...sessions.values()].map(s=>s.store.pkg)));
-    return { id, file: pkg, name: item.name, cloud, role: s.store.meta.role };
+    return { id, file: pkg, name: item.name, cloud, role: s.store.meta.role, notice: s.assetNotice };
 }
 function* importBatches<T>(items: T[], count: number, byteLimit = 1024 * 1024 - 100): Generator<T[]> {
     let batch: T[] = [], size = 2;
@@ -766,6 +792,26 @@ function* importBatches<T>(items: T[], count: number, byteLimit = 1024 * 1024 - 
         size += bytes;
     }
     if (batch.length) yield batch;
+}
+
+const IMPORT_BATCH_PAYLOAD = TRANSFER_PART_BYTES - TRANSFER_HEADER_BYTES - 4;
+async function uploadMoveBlobs(cloud: string, route: string, blobs: MoveBlob[]) {
+    const unique = new Map(blobs.map(blob => [blob.op.sha256, blob]));
+    for (const batch of blobBatches(unique.values(), item => item.bytes.length, IMPORT_BATCH_PAYLOAD)) {
+        if (batch[0].bytes.length > IMPORT_BATCH_PAYLOAD) {
+            const { op, bytes } = batch[0];
+            const { id } = await cloudJson(await request(cloud, route + '/uploads', 'POST', op));
+            const upload = `${route}/uploads/${id}`;
+            for (let offset = 0, part = 0; offset < bytes.length; offset += TRANSFER_PART_BYTES, part++)
+                await request(cloud, `${upload}/parts/${part}`, 'PUT', bytes.subarray(offset, offset + TRANSFER_PART_BYTES));
+            await request(cloud, upload + '/complete', 'POST', {});
+        } else {
+            const header = Buffer.from(JSON.stringify(batch.map(item => item.op)));
+            const prefix = Buffer.alloc(4);
+            prefix.writeUInt32BE(header.length);
+            await request(cloud, route + '/blobs', 'PUT', Buffer.concat([prefix, header, ...batch.map(item => item.bytes)]));
+        }
+    }
 }
 
 async function commitTransfer(cloud: string, route: string, method: string, body: unknown) {
@@ -817,12 +863,13 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
     }
     const manifest = await cloudJson(await request(cloud, route + '/manifest')) as Manifest;
     if (manifest.file !== id) throw new Error('Manifest names another file');
-    const { state } = await loadManifest(objects(cloud, id), JSON.stringify(manifest));
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-cloud-download-'));
+    const { state } = await loadManifest(objects(cloud, id), JSON.stringify(manifest), true);
+    const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'canvas-cloud-download-'));
     let stage: string | undefined;
     let keepStage = false;
     try {
-        await downloadBlobs(cloud, id, dir, state.blobs, cancelled);
+        const notice = await downloadBlobs(cloud, id, dir, state.blobs, cancelled);
+        if (move && notice) fail(426, 'update', notice);
         await request(cloud, route);
         if (cancelled()) fail(403, 'removed', 'Cloud membership was removed during download');
         if (move) {
@@ -834,7 +881,7 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
         if (localComments && comments) localComments.threads = comments.threads.map(thread => ({ ...thread, doc: localComments.doc }));
         if (move) {
             if (fs.lstatSync(targetFile, { throwIfNoEntry: false })) fail(409, 'conflict', 'The local destination already exists');
-            stage = fs.mkdtempSync(path.join(path.dirname(targetFile), '.canvas-move-'));
+            stage = stageMove(targetFile);
         }
         const file = createPackage(stage ? path.join(stage, path.basename(targetFile)) : targetFile, tmp => {
             const files = [['document.json', documentOf(tree)], ['widgets.json', envelopeOf(tree)]] as [string, unknown][];
@@ -845,6 +892,7 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
                 if (move && fs.readFileSync(dest, 'utf8') !== bytes) throw new Error(`Move verification failed: ${name} differs`);
             }
             for (const [rel, blob] of Object.entries(state.blobs)) {
+                if (checkBlobPath(rel)) continue;
                 const dest = path.join(tmp, rel);
                 fs.mkdirSync(path.dirname(dest), { recursive: true });
                 fs.copyFileSync(path.join(dir, rel), dest, fs.constants.COPYFILE_FICLONE);
@@ -852,24 +900,29 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
                     throw new Error('Move verification failed: blob hash differs');
             }
         });
-        if (!move) return { file };
+        if (!move) return { file, notice };
+        const makeLocalVisible = () => {
+            keepStage = true;
+            const visible = restoreMovedPackage(file);
+            keepStage = false;
+            return visible;
+        };
         committingMoves.add(source);
         try {
             await commitTransfer(cloud, `${route}/move`, 'DELETE', { seq: manifest.seq, epoch: manifest.epoch, commentsSeq: comments?.seq, token: randomUUID() });
         } catch (error) {
             if (error instanceof MovePendingError) {
-                keepStage = true;
-                throw new MovePendingError(`${error.message}; the verified local copy is at ${file}`);
+                let visible = file;
+                try { visible = makeLocalVisible(); } catch { /* Leave the package for startup recovery. */ }
+                throw new MovePendingError(`${error.message}. The verified local copy is at ${visible}`);
             }
             throw error;
         } finally {
             committingMoves.delete(source);
         }
-        try {
-            if (fs.lstatSync(targetFile, { throwIfNoEntry: false })) throw new Error('The local destination already exists');
-            fs.renameSync(file, targetFile);
-        } catch {
-            keepStage = true;
+        let visible: string;
+        try { visible = makeLocalVisible(); }
+        catch {
             throw new MovePendingError(`The Cloud move completed; the verified local copy is at ${file}`);
         }
         const session = sessions.get(source);
@@ -877,9 +930,12 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
             try { closeSession(source, session, true); }
             catch (error) { fileEvents.problem?.((error as Error).message); }
         }
-        return { file: fs.realpathSync(targetFile), verified: true, moved: true };
+        return { file: fs.realpathSync(visible), verified: true, moved: true };
     } finally {
-        if (stage && !keepStage) fs.rmSync(stage, { recursive: true, force: true });
+        if (stage) {
+            try { if (!keepStage) fs.rmSync(stage, { recursive: true, force: true }); }
+            finally { finishMoveStage(stage); }
+        }
         fs.rmSync(dir, { recursive: true, force: true });
     }
 }
@@ -1020,15 +1076,13 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                     const ops: FileOp[] = [...blobs.map(v => v.op), ...importDocument(doc),
                         ...envelopeFileOps({ widgets: [], extra: {} }, { widgets: env.widgets as Record<string, unknown>[] ?? [],
                             extra: Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'widgets' && k !== 'version')) })];
+                    if (!info.capabilities?.includes(EXTENDED_BLOB_PATHS) && usesExtendedBlobPaths(ops))
+                        fail(426, 'update_host', UPDATE_BLOB_PATHS_HOST);
+                    if (!info.capabilities?.includes(FILE_TRANSFER_PARTS) && blobs.some(blob => blob.bytes.length > IMPORT_BATCH_PAYLOAD))
+                        fail(426, 'update_host', 'Update Canvas on the Mac that hosts this Cloud to move large assets.');
                     importing = id;
-                    await request(cloud, '/v1/files', 'POST', { id, name: title, importing: true, transfer: true, version: doc.version });
-                    const unique = new Map(blobs.map(blob => [blob.op.sha256, blob]));
-                    for (const batch of blobBatches(unique.values(), item => item.bytes.length)) {
-                        const header = Buffer.from(JSON.stringify(batch.map(item => item.op)));
-                        const prefix = Buffer.alloc(4);
-                        prefix.writeUInt32BE(header.length);
-                        await request(cloud, route + '/blobs', 'PUT', Buffer.concat([prefix, header, ...batch.map(item => item.bytes)]));
-                    }
+                    await request(cloud, '/v1/files', 'POST', { id, name: title, importing: true, transfer: true, sourceVisible: true, version: doc.version });
+                    await uploadMoveBlobs(cloud, route, blobs);
                     const actions: Action[] = [];
                     let seq = 0;
                     for (const opsPart of importBatches(ops, 100, 1024 * 1024 - 500)) {
@@ -1065,18 +1119,21 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                 return out(200, moved);
             } catch (error) {
                 fileEvents.problem?.((error as Error).message);
-                if (importing && !(error instanceof MovePendingError)) {
-                    try {
-                        await request(cloud, `/v1/files/${importing}/import`, 'DELETE', {});
-                    } catch (cleanup) {
-                        if (!(cleanup instanceof CloudHttpError) || cleanup.status !== 404)
-                            throw new Error(`${(error as Error).message}; local source kept. Cloud cleanup: ${(cleanup as Error).message}`);
+                if (importing) {
+                    if (!(error instanceof MovePendingError)) {
+                        try {
+                            await request(cloud, `/v1/files/${importing}/import`, 'DELETE', {});
+                        } catch (cleanup) {
+                            if (!(cleanup instanceof CloudHttpError) || cleanup.status !== 404)
+                                throw new Error(`${(error as Error).message}; local source kept. Cloud cleanup: ${(cleanup as Error).message}`);
+                        }
                     }
                     const pkg = path.join(root(), cloudKey(cloud), importing + '.canvas');
                     const file = docFile(pkg), session = sessions.get(file);
                     if (session) closeSession(file, session);
                     fs.rmSync(pkg, { recursive: true, force: true });
                 }
+                if (error instanceof MovePendingError) throw new MovePendingError(`${error.message}. The local source was kept.`);
                 throw error;
             } finally { movingSources.delete(source); }
         }
