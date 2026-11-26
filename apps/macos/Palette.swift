@@ -474,7 +474,8 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
         func applies(_ cmd: String) -> Bool {
             if DrawTool.allCases.contains(where: { $0.command == cmd }) { return model.canDraw }
             switch cmd {
-            case "new", "open", "settings", "zoomIn", "zoomOut", "zoom100", "zoomFit", "zoomSelection", "toggleUI", "toggleProperties", "selectAll", "selectInverse", "collapseLayers": return true
+            case "new", "open", "settings", "zoomIn", "zoomOut", "zoom100", "zoomFit", "zoomSelection", "toggleUI", "selectAll", "selectInverse", "collapseLayers": return true
+            case "toggleProperties": return model.editorChromeShown
             case "closeTab", "copyLink": return model.currentFile != nil
             case "duplicate", "delete", "front", "forward", "backward", "back": return anySel
             case "ungroup": return type == "group" || type == "frame" || (many && type == nil)

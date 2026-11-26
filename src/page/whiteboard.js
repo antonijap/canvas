@@ -4,7 +4,7 @@ import { STICKY_COLORS, STICKY_SIZE, STICKY_GAP, STICKERS, STICKER_SIZE, stackSt
   isStickyColor, isStickerKind, stickyOwner, whiteboardPerson, WHITEBOARD_PAINT } from "./whiteboard-model.js";
 
 const field = "input,textarea,select,[contenteditable]";
-const insideChrome = "button,#rulerTop,#rulerLeft,#rulerCorner,[data-whiteboard-ui]," + field;
+const insideChrome = "button,#rulerTop,#rulerLeft,#rulerCorner,.cm-ui,[data-whiteboard-ui]," + field;
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const round = (n) => Math.round(n * 1000) / 1000;
 const get = (key) => { try { return localStorage.getItem("canvas:whiteboard:" + key); } catch { return null; } };

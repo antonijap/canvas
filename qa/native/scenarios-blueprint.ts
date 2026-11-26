@@ -1,5 +1,6 @@
 import http from "node:http";
 import path from "node:path";
+import { METRICS } from "../../src/tokens.ts";
 import { center, sc, type NT } from "./harness.ts";
 
 sc("blueprint", "blueprint inspector controls and undo", { covers: ["blueprint:inspector", "blueprint:undo"] }, async (t) => {
@@ -253,15 +254,19 @@ sc("tools", "bottom tool palette geometry, sticky flyouts, selection and Hide UI
   }
 });
 
-sc("draw", "native draw palette can leave a focused comment draft", { covers: ["draw:palette"] }, async (t: NT) => {
+async function openCommentComposer(t: NT) {
   await t.showPage("layout");
   await t.settle();
   const { webFrame } = await t.state();
   const left = await t.js<number>("return window.canvasHost.insets.l;");
   await t.key("c");
   await t.click({ x: webFrame.x + left + 70, y: webFrame.y + 200 });
+  await t.waitJs("document.querySelector('.cm-comp .cm-field') === document.activeElement", "comment composer takes focus");
+}
+
+sc("draw", "native draw palette can leave a focused comment draft", { covers: ["draw:palette"] }, async (t: NT) => {
+  await openCommentComposer(t);
   const field = "document.querySelector('.cm-comp .cm-field')";
-  await t.waitJs(`${field} === document.activeElement`, "comment composer takes focus");
   await t.type("Draft note");
   await t.key("r");
   t.eq(await t.js(`return ${field}.value;`), "Draft noter", "the draw shortcut still types in the comment");
@@ -270,6 +275,93 @@ sc("draw", "native draw palette can leave a focused comment draft", { covers: ["
   t.eq(await t.js(`return {draft: ${field}.value, focused: ${field} === document.activeElement,
     commenting: document.getElementById('view').classList.contains('cm-mode')};`),
     { draft: "Draft noter", focused: false, commenting: false }, "the tool takes over the canvas and keeps the draft");
+});
+
+async function clickCommentCard(t: NT, selector: string, padding = false) {
+  const { webFrame } = await t.state();
+  const point = await t.js<{ x: number; y: number }>(`
+    const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+    return ${padding ? "{ x: r.x + 5, y: r.y + r.height / 2 }" : "{ x: r.x + r.width / 2, y: r.y + r.height / 2 }"};
+  `);
+  await t.click({ x: webFrame.x + point.x, y: webFrame.y + point.y });
+}
+
+sc("draw", "draw tools release a reply field and Escape keeps its draft", { covers: ["draw:palette", "draw:cancel"] }, async (t: NT) => {
+  await openCommentComposer(t);
+  await t.type("Review this board");
+  await t.key("Return");
+  await t.waitJs("document.querySelector('.cm-pin') && document.querySelector('.cm-comp').hidden", "posted thread");
+  await t.key("Escape");
+  await clickCommentCard(t, ".cm-pin");
+  const reply = "document.querySelector('.cm-pop .cm-field')";
+  await t.waitJs(`${reply} === document.activeElement && !canvasHost.view.classList.contains('cm-mode')`, "reply focus outside comment mode");
+  await t.type("Keep this reply");
+  for (const label of ["Rectangle", "Sticky", "Sticker"]) {
+    await clickCommentCard(t, ".cm-pop .cm-field");
+    await t.waitJs(`${reply} === document.activeElement`, "reply has focus before " + label);
+    await t.click(center(await t.mark({ id: "draw-tool", label, exact: true })));
+    await t.mark({ id: "draw-tool-selected", label, exact: true });
+    t.eq(await t.js(`return ${reply} === document.activeElement;`), false, label + " releases reply focus");
+    await t.key("Escape");
+    await t.waitFor(async () => !(await t.marks({ id: "draw-tool-selected" })).length, "Escape cancels " + label);
+    t.eq(await t.js(`return !document.querySelector('.cm-pop').hidden && ${reply}.value;`), "Keep this reply", label + " keeps the reply draft");
+  }
+});
+
+sc("draw", "armed draw tools leave comment card presses to the card", { covers: ["draw:palette", "sticky:create", "sticker:place"] }, async (t: NT) => {
+  await openCommentComposer(t);
+  await t.type("Review this board");
+  const arm = async (label: string) => {
+    await t.click(center(await t.mark({ id: "draw-tool", label, exact: true })));
+    await t.mark({ id: "draw-tool-selected", label, exact: true });
+  };
+  const presses = async (selector: string) => {
+    await t.js(`
+      const card = document.querySelector(${JSON.stringify(selector)});
+      card.dataset.qaPresses = "0";
+      card.addEventListener("pointerdown", () => { card.dataset.qaPresses++; }, { once: true });
+    `);
+    await clickCommentCard(t, selector, true);
+    return t.js(`return document.querySelector(${JSON.stringify(selector)})?.dataset.qaPresses;`);
+  };
+  await arm("Frame");
+  t.eq(await presses(".cm-comp .cm-foot"), "1", "Frame leaves the composer footer press to the comment card");
+  await t.mark({ id: "draw-tool-selected", label: "Frame", exact: true });
+  await t.key("Escape");
+  await clickCommentCard(t, ".cm-comp .cm-field");
+  await t.key("Return");
+  await t.waitJs("document.querySelector('.cm-pin') && document.querySelector('.cm-comp').hidden", "posted thread");
+  await clickCommentCard(t, ".cm-pin");
+  await t.waitJs("document.querySelector('.cm-pop .cm-field') === document.activeElement", "reply focus");
+  for (const label of ["Sticky", "Sticker"]) {
+    await arm(label);
+    t.eq(await presses(".cm-pop .cm-row"), "1", label + " leaves the thread padding press to the comment card");
+    await t.mark({ id: "draw-tool-selected", label, exact: true });
+    await t.key("Escape");
+  }
+});
+
+sc("draw", "wide editor sends tool clearance after viewer mode", { covers: ["draw:tool-palette"] }, async (t: NT) => {
+  const { window } = await t.state();
+  const clearance = "parseFloat(document.documentElement.style.getPropertyValue('--native-bottom')) || 0";
+  try {
+    await t.cmd("qa.window", { width: 1320, height: 800 });
+    await t.mark({ id: "tool-palette" });
+    await t.js("canvasHost.post({ cloudFile: { role: 'viewer' } });");
+    await t.waitState(s => s.cloudReadOnly, "viewer mode");
+    await t.waitFor(async () => !(await t.marks({ id: "tool-palette" })).length, "viewer hides the tools");
+    await t.waitJs(`(${clearance}) === 0`, "viewer clearance resets");
+    const before = await t.js("return canvasHost.insets;");
+    await t.js("canvasHost.post({ cloudFile: { role: 'editor' } });");
+    await t.waitState(s => !s.cloudReadOnly, "editor mode");
+    const tools = await t.mark({ id: "tool-palette" });
+    const expected = (await t.state()).webFrame.h - tools.y + METRICS.islandGap;
+    await t.waitJs(`(${clearance}) === ${expected}`, "editor clearance reaches the web view");
+    t.eq(await t.js("return canvasHost.insets;"), before, "the clamped insets stayed the same");
+  } finally {
+    await t.js("canvasHost.post({ cloudFile: null });");
+    await t.cmd("qa.window", { width: window.width, height: window.height });
+  }
 });
 
 sc("draw", "draw tools from the native palette and commands", { covers: ["draw:tool-palette", "draw:menu", "draw:palette"] }, async (t) => {

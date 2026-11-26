@@ -243,7 +243,7 @@ function start(host) {
   bar.addEventListener("keydown", (e) => {
     if (e.target === bar && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); showList(true); }
   });
-  function showList(open) {
+  function showList(open, { restoreFocus = false } = {}) {
     sidebar.hidden = !open;
     document.body.classList.toggle("cm-sidebar-open", open);
     if (host.native) host.post({ commentsSidebar: open });
@@ -251,8 +251,11 @@ function start(host) {
       setMode(false);
       openThread(null);
       sidebar.querySelector(".cm-thread-row.unread")?.scrollIntoView({ block: "nearest" });
+    } else if (restoreFocus) {
+      bar.focus();
+    } else if (bar.contains(document.activeElement)) {
+      document.activeElement.blur();
     }
-    else bar.focus();
     schedule();
   }
   function drawSidebar() {
@@ -262,7 +265,7 @@ function start(host) {
     const close = h("button", "right-sidebar-close");
     close.type = "button";
     close.title = "Close";
-    close.onclick = () => showList(false);
+    close.onclick = () => showList(false, { restoreFocus: true });
     close.setAttribute("aria-label", "Close");
     const read = txtBtn("cm-btn txt cm-read-all", "Mark all as read");
     read.setAttribute("aria-label", "Mark all as read");
@@ -593,7 +596,11 @@ function start(host) {
   host.on("render", schedule);
   host.on("visible", schedule);
   host.on("page", () => { st.open = null; closePinMenu(); closeDraft(); render(); });
-  host.on("draw-tool", () => setMode(false, { keepDraft: true }));
+  host.on("draw-tool", () => {
+    const focused = document.activeElement;
+    if (typing(focused) && (comp.contains(focused) || pop.contains(focused))) focused.blur();
+    setMode(false, { keepDraft: true });
+  });
   host.on("cmd", (c) => {
     if (c && c.cmd === "insets") schedule();
     if (c && c.cmd === "comment") setMode(!st.mode);
@@ -1058,7 +1065,6 @@ function start(host) {
     if (btn) { btn.classList.toggle("on", on); btn.setAttribute("aria-pressed", String(on)); }
     if (!on) {
       if (!keepDraft) closeDraft();
-      else if (comp.contains(document.activeElement)) document.activeElement.blur();
       st.repin = null;
       hovId = null;
       hov.style.display = "none";

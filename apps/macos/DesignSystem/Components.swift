@@ -128,14 +128,6 @@ struct GlassIsland<Content: View>: View {
     }
 }
 
-/// A capsule island that wraps 32pt controls with 4pt around them.
-struct GlassPill<Content: View>: View {
-    var padding: CGFloat = Metric.pillPad
-    @ViewBuilder var content: () -> Content
-
-    var body: some View { GlassIsland(radius: 999, padding: padding, content: content) }
-}
-
 // MARK: Buttons
 
 struct IconButton: View {
@@ -484,7 +476,8 @@ struct KeyValueRow: View {
 
 struct ZoomPill: View {
     private static let percentWidth: CGFloat = 52
-    static let width = 2 * Metric.control + percentWidth + 2 * Metric.pillPad
+    static let width = 2 * Metric.toolbarControl + percentWidth + 2 * Metric.pillPad
+    static let height = Metric.toolbarControl + 2 * Metric.pillPad
 
     let percent: Int
     let zoomOut: () -> Void
@@ -498,15 +491,14 @@ struct ZoomPill: View {
     @Binding var open: Bool
 
     var body: some View {
-        GlassPill {
+        GlassIsland(radius: Metric.toolbarRadius + Metric.pillPad, padding: Metric.pillPad) {
             HStack(spacing: 0) {
-                IconButton(symbol: "minus", help: "Zoom out  \u{21E7}\u{2212}", action: zoomOut)
+                zoomButton("minus", help: "Zoom out", shortcut: "\u{21E7}\u{2212}", action: zoomOut)
                 // The percentage opens a zoom field (type 150 and Return) over the zoom choices.
                 Button { open.toggle() } label: {
-                    Text("\(percent)%").font(Typography.numeric).foregroundStyle(Palette.fg)
-                        .frame(width: Self.percentWidth, height: Metric.control).contentShape(Rectangle())
+                    Text("\(percent)%").font(Typography.numeric)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ToolbarButtonStyle(active: open, width: Self.percentWidth, tint: Palette.fg))
                 .help("Zoom: type a percentage, or pick a zoom")
                 .accessibilityLabel("Zoom \(percent) percent")
                 .qaID("zoom-pill", label: "\(percent)%")
@@ -516,9 +508,16 @@ struct ZoomPill: View {
                               choices: [("Zoom to Fit Page", "\u{21E7}1", fitPage), ("Zoom to Selection", "\u{21E7}2", fitSelection), ("Zoom to 100%", "\u{21E7}0", reset)],
                               close: { open = false })
                 }
-                IconButton(symbol: "plus", help: "Zoom in  \u{21E7}+", action: zoomIn)
+                zoomButton("plus", help: "Zoom in", shortcut: "\u{21E7}+", action: zoomIn)
             }
         }
+    }
+
+    private func zoomButton(_ symbol: String, help: String, shortcut: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Image(systemName: symbol).glyph(Metric.icon) }
+            .buttonStyle(ToolbarButtonStyle())
+            .chromeHelp(help, shortcut: shortcut)
+            .accessibilityLabel(help)
     }
 }
 
@@ -637,7 +636,7 @@ struct Toast: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        GlassPill(padding: 0) {
+        GlassIsland(radius: Metric.control / 2 + Metric.pillPad, padding: 0) {
             HStack(spacing: 8) {
                 Button { onCopy?() } label: { label.contentShape(Rectangle()) }
                     .buttonStyle(.plain)

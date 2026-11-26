@@ -114,7 +114,7 @@ if (host?.file) {
 
   addEventListener("pointerdown", (e) => {
     if (!tool || drag || host.hand || host.readOnly || host.textEdit?.active || !host.cam || e.button !== 0 || !view.contains(e.target)) return;
-    if (e.target.closest("button,#rulerTop,#rulerLeft,#rulerCorner," + field)) return;
+    if (e.target.closest("button,#rulerTop,#rulerLeft,#rulerCorner,.cm-ui," + field)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     const hit = host.pick(e.clientX, e.clientY);

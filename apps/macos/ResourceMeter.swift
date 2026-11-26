@@ -398,8 +398,8 @@ struct ResourcePopover: View {
 
     private func copyReport() {
         let text = meter.report(file: model.currentFile.map { model.name(of: $0) })
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        canvasPasteboard.clearContents()
+        canvasPasteboard.setString(text, forType: .string)
         model.flash("Copied the resource report", level: "success")
     }
 }
@@ -407,22 +407,16 @@ struct ResourcePopover: View {
 /// The popover's 28 pt copy icon (top right), grey like the other chrome icons.
 private struct CopyReportButton: View {
     let action: () -> Void
-    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "doc.on.doc")
-                .font(.system(size: Metric.icon, weight: .medium))
-                .foregroundStyle(hovering ? Palette.fg : Palette.mutedFg)
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(hovering ? Palette.hover : .clear))
-                .contentShape(Circle())
+            Image(systemName: "doc.on.doc").glyph(Metric.icon)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ToolbarButtonStyle())
+        .qaID("resource-copy")
         .chromeHelp("Copy report")
         .accessibilityLabel("Copy report")
         .accessibilityHint("Copies a plain-text snapshot to paste into a chat")
-        .onHover { h in withAnimation(Motion.fast) { hovering = h } }
     }
 }
 

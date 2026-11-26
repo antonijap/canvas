@@ -79,7 +79,7 @@ features:
     name: Pan (Space drag, scroll, arrows with nothing selected) and zoom (Cmd scroll, pinch, Cmd +/-, Shift +/-, Z tool, typed in the zoom pill)
     area: canvas
     driven: [page, native]
-    cases: [mouse, keyboard, tiny, large, 5000-boards, shift-keys, arrows, zoom-tool, typed]
+    cases: [mouse, keyboard, tiny, large, 5000-boards, shift-keys, arrows, zoom-tool, typed, buttons]
   - id: pixel-grid
     name: The pixel grid from 400% up, Cmd+' (View > Pixel Grid) toggles it
     area: canvas

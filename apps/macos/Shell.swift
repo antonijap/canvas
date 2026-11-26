@@ -155,7 +155,7 @@ struct RootView: View {
 
     private var bottomClearance: CGFloat {
         guard toolPaletteShown else { return 0 }
-        return toolClearance + (zoomAboveTools ? Metric.pill + Metric.islandGap : 0)
+        return toolClearance + (zoomAboveTools ? ZoomPill.height + Metric.islandGap : 0)
     }
 
     var body: some View {
@@ -175,7 +175,7 @@ struct RootView: View {
             ZStack {
                 if model.pageEmpty {
                     Text(EmptyPage.hint).font(Typography.body).foregroundStyle(Palette.mutedFg).multilineTextAlignment(.center)
-                        .padding(.leading, insets[0]).padding(.top, insets[1]).padding(.trailing, insets[2]).padding(.bottom, insets[3])
+                        .padding(.leading, insets.l).padding(.top, insets.t).padding(.trailing, insets.r).padding(.bottom, insets.b)
                         .transition(.opacity)
                 }
             }
@@ -216,7 +216,7 @@ struct RootView: View {
                     .overlay(alignment: .bottom) {
                         ToolPalette(model: model, compact: compactTools, tooltipClearance: zoomAboveTools ? bottomClearance : 0)
                             .fixedSize()
-                            .offset(x: (insets[0] - insets[2]) / 2, y: -ToolPalette.bottomMargin)
+                            .offset(x: (insets.l - insets.r) / 2, y: -ToolPalette.bottomMargin)
                     }
                     .ignoresSafeArea()
             }
@@ -232,8 +232,9 @@ struct RootView: View {
         .frame(minWidth: 720, minHeight: 420)
         .ignoresSafeArea()
         .onChange(of: model.revealBoardId) { _, board in if board != nil { model.panelOpen = true } }
-        .onChange(of: insets) { _, v in sendInsets(v) }
-        .onAppear { sendInsets(insets) }
+        .onChange(of: insets, initial: true) { _, v in
+            model.setInsets(l: v.l, t: v.t, r: v.r, b: v.b, bottomClearance: v.bottomClearance)
+        }
     }
 
     private func canvasInsets(bottomClearance: CGFloat = 0) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
@@ -241,14 +242,15 @@ struct RootView: View {
                              gap: Metric.islandGap, pill: Metric.pill, props: Metric.propsWidth, bottomClearance: bottomClearance)
     }
 
-    private func sendInsets(_ v: [CGFloat]) {
-        model.setInsets(l: v[0], t: v[1], r: v[2], b: v[3], bottomClearance: bottomClearance)
+    private struct Insets: Equatable {
+        let l, t, r, b, bottomClearance: CGFloat
     }
 
     /// The free rectangle the canvas should fit into, so boards never hide under an island.
-    private var insets: [CGFloat] {
-        let i = canvasInsets(bottomClearance: bottomClearance)
-        return [i.l, i.t, i.r, i.b]
+    private var insets: Insets {
+        let clearance = bottomClearance
+        let i = canvasInsets(bottomClearance: clearance)
+        return Insets(l: i.l, t: i.t, r: i.r, b: i.b, bottomClearance: clearance)
     }
 }
 

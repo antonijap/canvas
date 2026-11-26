@@ -10,7 +10,7 @@ import http from "node:http";
 import path from "node:path";
 import { decodePng, encodePng } from "../../fidelity/png.ts";
 import { METRICS } from "../../src/tokens.ts";
-import { crop } from "../ink.ts";
+import { crop, inkBox } from "../ink.ts";
 import { copyDir, sleep } from "../lib.ts";
 import { PLAYGROUND } from "../playground.ts";
 import { QaApp } from "./app.ts";
@@ -829,6 +829,113 @@ sc('comments-list-navigation', 'Native comment pill shows list instead of proper
   t.ok(menuRight <= canvasRight, "the pin menu clears the docked sidebar");
   await click('.cm-sidebar-head [aria-label="Close"]');
   await t.waitJs("document.querySelector('.cm-sidebar').hidden", 'list closes');
+  t.eq(await t.js("return document.activeElement === document.querySelector('.cm-bar');"), true, "Close returns focus to the opener");
+  await click(".cm-bar");
+  await t.waitJs("!document.querySelector('.cm-sidebar').hidden", "Comments reopens");
+  await t.click(center(await t.mark({ id: "properties-toggle" })));
+  await t.waitJs("document.querySelector('.cm-sidebar').hidden", "Properties replaces Comments");
+  await t.mark({ id: "right-sidebar-panel" });
+  await t.js(`addEventListener("keydown", (e) => {
+    if (e.code === "Space") canvasHost.view.dataset.qaHand = String(canvasHost.hand);
+  });`);
+  await t.key("Space");
+  await t.waitJs("canvasHost.view.dataset.qaHand === 'true'", "Space starts the hand tool");
+  t.eq(await t.js("return document.querySelector('.cm-sidebar').hidden;"), true, "Space leaves Comments closed");
+});
+
+sc("palette", "Properties Quick Action follows editor chrome visibility", { covers: ["palette:keyboard"] }, async (t: NT) => {
+  const offered = async () => {
+    await t.key("k", ["cmd"]);
+    await t.waitState(s => s.palette.open, "Quick Actions opens");
+    try {
+      const search = await t.waitFor(async () => (await t.views()).find(v =>
+        v.kind === "text" && v.placeholder === "Find layers, text, boards, or run a command"), "Quick Actions search field");
+      await t.click(center(search));
+      await t.type("Properties");
+      const state = await t.waitState(s => s.palette.query === "Properties", "Properties query");
+      return state.palette.items.some((item: string) => item.endsWith(": Show/Hide Properties"));
+    } finally {
+      await t.key("Escape");
+      await t.waitState(s => !s.palette.open, "Quick Actions closes");
+    }
+  };
+  t.eq(await offered(), true, "Properties is offered in the editor");
+  await t.cmd("qa.mainmenu", { title: "Hide UI", perform: true });
+  await t.waitState(s => s.uiHidden, "editor UI hidden");
+  try {
+    t.eq(await offered(), false, "Properties is omitted with hidden editor UI");
+  } finally {
+    await t.cmd("qa.mainmenu", { title: "Show UI", perform: true });
+  }
+  await t.waitState(s => !s.uiHidden, "editor UI restored");
+  await t.click(center(await t.mark({ id: "home-tab" })));
+  await t.waitState(s => s.homeShown, "Home opens");
+  try {
+    t.eq(await offered(), false, "Properties is omitted on Home");
+  } finally {
+    await t.app.openShown(t.file);
+  }
+});
+
+sc("zoom-buttons", "Zoom island uses the toolbar button size and both buttons zoom", { covers: ["pan-zoom:buttons"] }, async (t: NT) => {
+  await t.showPage("layout");
+  await t.settle();
+  const island = await t.mark({ id: "zoom-island" });
+  const padding = METRICS.pillPad;
+  const size = METRICS.toolbarControl;
+  t.near(island.h, size + 2 * padding, 0.5, "zoom island wraps 28 pt controls with equal insets");
+  const before = (await t.state()).zoom;
+  const minus = { x: island.x + padding + 3, y: island.y + padding + 3 };
+  const plus = { x: island.x + island.w - padding - size + 3, y: minus.y };
+  await t.click(minus);
+  await t.waitState(s => s.zoom < before, "Zoom out accepts a press inside the rounded corner");
+  await t.click(plus);
+  await t.waitState(s => s.zoom === before, "Zoom in restores the original zoom");
+  await t.move({ x: plus.x + size / 2 - 3, y: plus.y + size / 2 - 3 });
+  const { theme: initialTheme, window } = await t.state();
+  const audit = path.join(OUT, "..", "button-audit");
+  fs.mkdirSync(audit, { recursive: true });
+  try {
+    for (const theme of ["dark", "light"]) {
+      await t.cmd("qa.theme", { theme });
+      await t.settle();
+      const shot = await t.cmd<{ data: string }>("qa.shot");
+      const img = decodePng(Buffer.from(shot.data, "base64"));
+      const scale = img.width / window.width;
+      const rect = (x: number, y: number, w: number, h: number) => ({ x: x * scale, y: y * scale, w: w * scale, h: h * scale });
+      const file = theme === "dark" ? "after-zoom-island.png" : "after-zoom-island-light.png";
+      fs.writeFileSync(path.join(audit, file), encodePng(crop(img, rect(island.x - 8, island.y - 8, island.w + 16, island.h + 16), 1)));
+      const start = island.x + padding;
+      const y = island.y + padding;
+      for (const [label, x, width] of [
+        ["minus", start, size],
+        ["percentage", start + size, island.w - 2 * (padding + size)],
+        ["plus", island.x + island.w - padding - size, size],
+      ] as const) {
+        t.ok(inkBox(img, rect(x, y, width, size), { inset: 5 * scale, tol: 45 }), `${label} is visible in ${theme} mode`);
+      }
+    }
+  } finally {
+    await t.cmd("qa.theme", { theme: initialTheme });
+  }
+});
+
+sc("resource-copy", "Copy report uses a toolbar button in the Resources popover", { covers: [] }, async (t: NT) => {
+  await t.key("k", ["cmd"]);
+  await t.waitState(s => s.palette.open, "Quick Actions opens");
+  await t.type("Resources");
+  await t.waitState(s => s.palette.items.some((item: string) => item.endsWith(": Resources")), "Resources command appears");
+  await t.key("Return");
+  await t.waitFor(async () => (await t.marks({ id: "resource-copy", window: "popover" }).catch(() => [])).length > 0, "Copy report appears");
+  const copy = await t.mark({ id: "resource-copy", window: "popover" });
+  t.near(copy.w, METRICS.toolbarControl, 0.5, "Copy report width");
+  t.near(copy.h, METRICS.toolbarControl, 0.5, "Copy report height");
+  await t.cmd("qa.pasteboard", { set: "" });
+  await t.click({ x: copy.x + 3, y: copy.y + 3 }, { window: "popover" });
+  await t.waitFor(async () => (await t.cmd("qa.pasteboard")).text?.includes("CPU"), "Copy report accepts a press inside the rounded corner");
+  const audit = path.join(OUT, "..", "button-audit");
+  fs.mkdirSync(audit, { recursive: true });
+  await t.shot(path.join(audit, "after-resource-copy-report.png"), "popover");
 });
 
 sc('home-card-menu', 'Home card copies its file link and duplicates the chosen file', { covers: [] }, async (t: NT) => {
