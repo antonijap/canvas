@@ -16,14 +16,17 @@ import { buildSnapshot, recoverSnapshots, compact, type Manifest } from "../../c
 import { collectGarbage } from "../../core/files/gc.ts";
 import { stateFromFiles, stateOf } from "../../core/files/state.ts";
 import { type ObjectStore, boardKey, versKey, blobKey } from "../../core/files/objects.ts";
-import { LIMITS, supportsPrivateVoteViews } from "../../protocol.ts";
+import { TRANSFER_BATCH_BYTES, TRANSFER_BLOBS, TRANSFER_BLOB_BYTES, TRANSFER_BODY_BYTES, TRANSFER_HEADER_BYTES } from "../../file-transfer.ts";
+import { LIMITS, supportsPrivateVoteViews, type OpEnvelope } from "../../protocol.ts";
 import { voteDesignForTree } from "../../core/votes.ts";
 import { Operations, type OpResult } from "../../core/operations.ts";
 import type { Me } from "./host.ts";
-import { FILE_CAPABILITIES_HEADER, insertsWhiteboard, supportsWhiteboard, WHITEBOARD_UPDATE, type AppliedAction, type FileClientMessage, type Role } from "../../protocol-files.ts";
+import { blobTypeOf, checkBlobPath, FILE_CAPABILITIES_HEADER, type Action, type FileOp, insertsWhiteboard, supportsWhiteboard, WHITEBOARD_UPDATE, type AppliedAction, type FileClientMessage, type Role } from "../../protocol-files.ts";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const SHA = /^[0-9a-f]{64}$/;
 const GB = 1024 ** 3;
+// Four maximum-size files per hour, eight starts and bounded DB work. Reads have a separate budget.
+const TRANSFER_HOURLY = { starts: 8, inBytes: 4 * GB, outBytes: 12 * GB, blobs: 32_768, ops: 100_000, requests: 1_200 };
 function diskBytes(root: string): number {
     let bytes = 0;
     for (const e of fs.readdirSync(root, { withFileTypes: true })) {
@@ -156,6 +159,7 @@ export class MacFiles {
     private readonly dbBytes = new Map<string, number>();
     private readonly partBytes = new Map<string, number>();
     private readonly activeParts = new Set<string>();
+    private readonly activeImports = new Set<string>();
     private readonly sweepTimer: NodeJS.Timeout;
     constructor(root: string, db: SqliteStore, current: (me: Me) => Me | null, role: (person: string) => Role | null, now = Date.now, cap = 20 * GB) {
         this.cap = cap;
@@ -168,6 +172,9 @@ export class MacFiles {
         fs.mkdirSync(path.join(root, 'files'), { recursive: true, mode: 0o700 });
         this.objects = new DiskObjects(path.join(root, 'objects'), bytes => this.capacity(bytes), delta => { this.usedBytes += delta; });
         db.sql.exec(`CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY,name TEXT NOT NULL,state TEXT NOT NULL,created_by TEXT NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)`);
+        db.sql.exec("CREATE TABLE IF NOT EXISTS file_transfer_usage(person TEXT, hour INTEGER, kind TEXT, used INTEGER, PRIMARY KEY(person,hour,kind))");
+        db.sql.exec("CREATE TABLE IF NOT EXISTS file_transfer_moves(file TEXT PRIMARY KEY, token TEXT NOT NULL)");
+        db.sql.exec("CREATE TABLE IF NOT EXISTS file_transfer_imports(file TEXT PRIMARY KEY)");
         this.bank = new LeaseBank(db);
         this.importBank = new LeaseBank(db, { ops: 6000, messages: 120, presence: 0 });
         this.ledger = new StorageLedger(db, cap);
@@ -206,15 +213,16 @@ export class MacFiles {
         const parts = path.join(this.root, 'uploads', file);
         if (fs.existsSync(parts)) { for (const id of fs.readdirSync(parts)) this.removeParts(path.join(parts, id)); fs.rmSync(parts, { recursive: true, force: true }); }
         this.db.sql.exec('DELETE FROM storage_held WHERE key LIKE ?', `${file}/%`);
+        this.db.sql.exec('DELETE FROM file_transfer_imports WHERE file=?', file);
         this.db.sql.exec('DELETE FROM files WHERE id=?', file);
     }
     async expireImports() {
         const cutoff = new Date(this.now() - 24 * 60 * 60 * 1000).toISOString();
         for (const row of this.db.sql.exec<{id:string}>("SELECT id FROM files WHERE state='importing' AND created_at<=?", cutoff).toArray()) {
-            if ([...this.activeParts].some(p => p.startsWith(path.join(this.root, 'uploads', row.id) + path.sep))) continue;
+            if (this.activeImports.has(row.id) || [...this.activeParts].some(p => p.startsWith(path.join(this.root, 'uploads', row.id) + path.sep))) continue;
             const r = this.room(row.id);
             await r.core.exclusive(async () => {
-                if (this.db.sql.exec("SELECT 1 FROM files WHERE id=? AND state='importing' AND created_at<=?", row.id, cutoff).toArray().length) this.discardImport(row.id);
+                if (!this.activeImports.has(row.id) && this.db.sql.exec("SELECT 1 FROM files WHERE id=? AND state='importing' AND created_at<=?", row.id, cutoff).toArray().length) this.discardImport(row.id);
             });
         }
     }
@@ -442,6 +450,110 @@ export class MacFiles {
             }
         });
     }
+    private transferQuota(me: Me, kind: keyof typeof TRANSFER_HOURLY, amount: number) {
+        const hour = Math.floor(this.now() / 3_600_000);
+        this.db.transactionSync(() => {
+            this.db.sql.exec('DELETE FROM file_transfer_usage WHERE hour < ?', hour - 1);
+            const used = this.db.sql.exec<{ used: number }>('SELECT used FROM file_transfer_usage WHERE person=? AND hour=? AND kind=?', me.id, hour, kind).toArray()[0]?.used ?? 0;
+            if (used + amount > TRANSFER_HOURLY[kind]) error(429, 'transfer_quota', 'Cloud file transfer limit reached for this hour');
+            this.db.sql.exec('INSERT INTO file_transfer_usage VALUES(?,?,?,?) ON CONFLICT(person,hour,kind) DO UPDATE SET used=used+excluded.used', me.id, hour, kind, amount);
+        });
+    }
+
+    private async importBlobs(req: http.IncomingMessage, r: Room, me: Me) {
+        const length = Number(req.headers['content-length']);
+        if (!Number.isSafeInteger(length) || length < 5 || length > TRANSFER_BODY_BYTES)
+            error(413, 'quota', 'Invalid import batch length');
+        if (this.bodies >= 4 || this.inFlight + length > 256 * 1024 * 1024)
+            error(503, 'quota', 'Uploads are busy; try again');
+        if (this.disk() < 5 * GB) error(507, 'quota', 'Less than 5 GB free disk');
+        this.transferQuota(me, 'inBytes', length);
+        this.bodies++;
+        this.inFlight += length;
+        try {
+            const bytes = Buffer.allocUnsafe(length);
+            let offset = 0;
+            for await (const chunk of req) {
+                this.edit(me);
+                if (offset + chunk.length > length) error(413, 'quota', 'Import batch is too large');
+                bytes.set(chunk, offset);
+                offset += chunk.length;
+            }
+            const end = 4 + bytes.readUInt32BE();
+            if (offset !== length || end > length || end > TRANSFER_HEADER_BYTES + 4)
+                error(400, 'invalid', 'Invalid import batch header');
+            let list: Extract<FileOp, { k: 'blob' }>[];
+            try { list = JSON.parse(bytes.toString('utf8', 4, end)); }
+            catch { return error(400, 'invalid', 'Invalid import batch JSON'); }
+            if (!Array.isArray(list) || !list.length || list.length > TRANSFER_BLOBS || (list.length > 1 && length - end > TRANSFER_BATCH_BYTES))
+                error(400, 'invalid', 'Invalid import batch size');
+            let total = 0;
+            const hashes = new Set<string>();
+            for (const b of list) {
+                if (!b || b.k !== 'blob' || checkBlobPath(b.path) || blobTypeOf(b.path) !== b.type
+                    || typeof b.sha256 !== 'string' || !SHA.test(b.sha256) || hashes.has(b.sha256)
+                    || !Number.isSafeInteger(b.bytes) || b.bytes <= 0 || b.bytes > TRANSFER_BLOB_BYTES)
+                    error(400, 'invalid', 'Invalid import blob');
+                hashes.add(b.sha256);
+                total += b.bytes;
+            }
+            if (total !== length - end) error(400, 'invalid', 'Import batch byte count differs');
+            this.transferQuota(me, 'blobs', list.length);
+            offset = end;
+            for (const b of list) {
+                const conn = this.conn(this.edit(me)), id = randomUUID();
+                this.capacity(b.bytes);
+                reserveUpload(r.core, this.ledger, conn, { ...b, id });
+                await putUpload(r.core, this.ledger, conn, id, bytes.subarray(offset, offset + b.bytes));
+                offset += b.bytes;
+            }
+        } finally {
+            this.bodies--;
+            this.inFlight -= length;
+        }
+    }
+
+    private sendBlobBatch(res: http.ServerResponse, r: Room, me: Me, hashes: unknown) {
+        if (!Array.isArray(hashes) || !hashes.length || hashes.length > TRANSFER_BLOBS
+            || hashes.some(h => typeof h !== 'string' || !SHA.test(h)) || new Set(hashes).size !== hashes.length)
+            return error(400, 'invalid', 'Invalid blob batch');
+        const objects = hashes.map(sha => {
+            const blob = r.store.sql.exec<{ bytes: number }>('SELECT bytes FROM blobs WHERE sha256=? LIMIT 1', sha).toArray()[0];
+            if (!blob) return error(404, 'not_found', 'Blob is not in this file');
+            const object = this.objects.diskFile(blobKey(r.core.file, sha));
+            if (!object || object.bytes !== blob.bytes) return error(409, 'integrity', 'A stored blob is missing or incomplete');
+            return object;
+        });
+        const bytes = objects.reduce((total, b) => total + b.bytes, 0);
+        if (bytes > (objects.length === 1 ? TRANSFER_BLOB_BYTES : TRANSFER_BATCH_BYTES))
+            error(413, 'quota', 'Blob batch is too large');
+        if (this.bodies >= 4 || this.inFlight + bytes > 256 * 1024 * 1024)
+            error(503, 'quota', 'Downloads are busy; try again');
+        this.transferQuota(me, 'outBytes', bytes);
+        this.bodies++;
+        this.inFlight += bytes;
+        let stream: fs.ReadStream | undefined;
+        this.downloads.set(res, me);
+        res.once('close', () => {
+            this.downloads.delete(res);
+            stream?.destroy();
+            this.bodies--;
+            this.inFlight -= bytes;
+        });
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': String(bytes),
+            'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        const next = (index: number) => {
+            if (res.destroyed || !this.current(me)) { res.destroy(); return; }
+            if (index === objects.length) { res.end(); return; }
+            stream = fs.createReadStream(objects[index].file);
+            stream.once('error', () => res.destroy());
+            stream.once('end', () => next(index + 1));
+            stream.pipe(res, { end: false });
+        };
+        next(0);
+        return true;
+    }
+
     async route(req: http.IncomingMessage, res: http.ServerResponse, url: URL, me: Me, body: () => Promise<any>): Promise<boolean> {
         if (!(url.pathname === '/v1/usage' || url.pathname === '/v1/files' || url.pathname.startsWith('/v1/files/')))
             return false;
@@ -476,7 +588,11 @@ export class MacFiles {
                     return json(400, { code: 'invalid', message: 'A file needs a uuid and name' });
                 if (this.db.sql.exec('SELECT 1 FROM files WHERE id=? UNION SELECT 1 FROM documents WHERE doc=?', id, id).toArray().length)
                     return json(409, { code: 'conflict', message: 'File id is taken' });
-                this.db.sql.exec("INSERT INTO files VALUES(?,?,?,?,?,?)", id, b.name, b.importing === true ? 'importing' : 'live', me.id, new Date(this.now()).toISOString(), new Date(this.now()).toISOString());
+                if (b.importing === true) this.transferQuota(me, 'starts', 1);
+                this.db.transactionSync(() => {
+                    this.db.sql.exec("INSERT INTO files VALUES(?,?,?,?,?,?)", id, b.name, b.importing === true ? 'importing' : 'live', me.id, new Date(this.now()).toISOString(), new Date(this.now()).toISOString());
+                    if (b.importing === true && b.transfer === true) this.db.sql.exec('INSERT INTO file_transfer_imports VALUES(?)', id);
+                });
                 const r = this.room(id);
                 touched = id;
                 r.core.seedState(stateFromFiles({ version: typeof b.version === 'string' && /^2\.\d{1,3}$/.test(b.version) ? b.version : '2.21', children: [] }));
@@ -484,15 +600,27 @@ export class MacFiles {
                 return json(201, { id, name: b.name });
             }
             const m = /^\/v1\/files\/([^/]+)(?:\/(.*))?$/.exec(p)!;
-            const file = m[1], sub = m[2] ?? '', row = this.row(file, me);
+            const file = m[1], sub = m[2] ?? '';
+            const blobBatch = sub === 'blob-batch' && method === 'POST';
+            const importBatch = (sub === 'import/blobs' && method === 'PUT') || (method === 'POST' && ['import/actions', 'import/comments'].includes(sub));
+            if (blobBatch || importBatch) this.transferQuota(me, 'requests', 1);
+            const row = this.row(file, me);
+            const batchImport = this.db.sql.exec('SELECT 1 FROM file_transfer_imports WHERE file=?', file).toArray().length > 0;
             touched = file;
-            if (!['GET', 'HEAD'].includes(method) && sub !== 'sync' && sub !== 'comments')
+            if (!['GET', 'HEAD'].includes(method) && sub !== 'sync' && sub !== 'comments' && !blobBatch)
                 this.edit(me);
-            if (row.state === 'trash')
+            if (row.state === 'trash' && !(sub === 'move' && method === 'DELETE'))
                 return json(404, { code: 'not_found', message: 'File is in Trash' });
             if (!sub && method === 'GET') return json(200, row);
-            if ((sub === 'import' || sub === 'import/complete') && row.state !== 'importing')
+            if (sub === 'import/complete' && method === 'POST' && batchImport && row.created_by === me.id && row.state === 'live')
+                return json(200, { ok: true });
+            if ((sub === 'import' || sub === 'import/complete' || importBatch) && row.state !== 'importing')
                 return json(409, { code: 'conflict', message: 'This file is already published' });
+            if (batchImport && row.state === 'importing' &&
+                (!['', 'manifest', 'import', 'import/complete', 'blob-batch', 'comments', 'import/blobs', 'import/actions', 'import/comments'].includes(sub)
+                    && !/^(boards|vers)\/[0-9a-f]{64}$/.test(sub)
+                    || (sub === 'comments' && method !== 'GET') || (sub === 'import' && method !== 'DELETE')))
+                return json(409, { code: 'conflict', message: 'The file is still importing' });
             if (sub === 'duplicate' && method === 'POST') {
                 await body();
                 return json(201, await this.duplicate(row, me));
@@ -513,24 +641,31 @@ export class MacFiles {
                 return json(200, this.room(file).comments.snapshot());
             }
             if ((!sub || sub === 'move') && method === 'DELETE') {
-                if (row.state !== 'live') return json(404, { code: 'not_found' });
                 if (!canDelete(row, me)) return json(403, { code: 'forbidden' });
                 const expected = sub === 'move' ? await body() : undefined;
+                if (expected?.token !== undefined && (typeof expected.token !== 'string' || !UUID.test(expected.token)))
+                    return json(400, { code: 'invalid', message: 'Invalid move token' });
+                const completed = () => expected?.token && this.db.sql.exec('SELECT 1 FROM file_transfer_moves WHERE file=? AND token=?', file, expected.token).toArray().length;
+                if (row.state === 'trash') return completed() ? json(200, { ok: true }) : json(404, { code: 'not_found' });
+                if (row.state !== 'live') return json(404, { code: 'not_found' });
                 const r = this.room(file);
                 await r.core.exclusive(async () => {
                     const editor = this.edit(me);
                     const current = this.row(file, editor);
-                    if (current.state !== 'live') error(404, 'not_found', 'No such Cloud file');
                     if (!canDelete(current, editor)) error(403, 'forbidden', 'Only the creator or Cloud owner can delete this file');
+                    if (current.state === 'trash' && completed()) return;
+                    if (current.state !== 'live') error(404, 'not_found', 'No such Cloud file');
                     if (sub === 'move') {
                         const { seq, epoch } = r.core.meta();
                         if (expected?.seq !== seq || expected?.epoch !== epoch || expected?.commentsSeq !== r.comments.sequence()) {
                             error(409, 'file_changed', 'The Cloud file changed during the move');
                         }
                     }
-                    this.db.sql.exec("UPDATE files SET state='trash' WHERE id=?", file);
-                    for (const ws of r.sockets.keys())
-                        ws.close(1008, 'File is in Trash');
+                    this.db.transactionSync(() => {
+                        if (expected?.token) this.db.sql.exec('INSERT INTO file_transfer_moves VALUES(?,?)', file, expected.token);
+                        this.db.sql.exec("UPDATE files SET state='trash' WHERE id=?", file);
+                    });
+                    for (const ws of r.sockets.keys()) ws.close(1008, 'File is in Trash');
                 });
                 return json(200, { ok: true });
             }
@@ -538,7 +673,7 @@ export class MacFiles {
                 if(row.created_by !== me.id) return json(403,{code:'forbidden'});
                 const r=this.rooms.get(file) ?? this.room(file);
                 await r.core.exclusive(async () => {
-                    if (this.row(file, me).state !== 'importing' || [...this.activeParts].some(p => p.startsWith(path.join(this.root,'uploads',file)+path.sep))) error(409,'conflict','Import is published or busy');
+                    if (this.row(file, me).state !== 'importing' || this.activeImports.has(file) || [...this.activeParts].some(p => p.startsWith(path.join(this.root,'uploads',file)+path.sep))) error(409,'conflict','Import is published or busy');
                     this.discardImport(file);
                 });
                 return json(200,{ok:true});
@@ -550,17 +685,63 @@ export class MacFiles {
                 this.db.sql.exec("UPDATE files SET state='importing' WHERE id=?", file);
                 return json(200, { ok: true });
             }
-            if (sub === 'import/complete' && method === 'POST') {
-                if (row.created_by !== me.id)
-                    return json(403, { code: 'forbidden' });
-                await buildSnapshot(r.core);
-                this.edit(me);
-                if (this.row(file, me).state !== 'importing') return json(409, { code: 'conflict' });
-                this.db.sql.exec("UPDATE files SET state='live' WHERE id=?", file);
-                r.leases.clear();
-                return json(200, { ok: true });
+            const caps = String(req.headers[FILE_CAPABILITIES_HEADER] ?? '').split(/\s*,\s*/);
+            const whiteboard = supportsWhiteboard(caps);
+            if (importBatch || (sub === 'import/complete' && method === 'POST')) {
+                if (row.created_by !== me.id || (importBatch && !batchImport)) return json(403, { code: 'forbidden' });
+                if (this.activeImports.has(file)) return json(409, { code: 'busy', message: 'Import is busy' });
+                this.activeImports.add(file);
+                try {
+                    if (sub === 'import/blobs') {
+                        await this.importBlobs(req, r, me);
+                        return json(200, { ok: true });
+                    }
+                    const b = batchImport ? await body() : undefined;
+                    const editor = this.edit(me);
+                    if (this.row(file, editor).state !== 'importing') return json(409, { code: 'conflict' });
+                    if (sub === 'import/actions') {
+                        const actions: Action[] = b?.actions;
+                        if (!Array.isArray(actions) || !actions.length || actions.length > 40 ||
+                            actions.some(a => !Array.isArray(a?.ops) || !a.ops.length || a.ops.length > 100))
+                            return json(400, { code: 'invalid', message: 'Invalid batch of import actions' });
+                        this.transferQuota(editor, 'ops', actions.reduce((total, a) => total + a.ops.length, 0));
+                        for (const a of actions) {
+                            const out = this.bounded(r, () => r.core.submit({ ...this.conn(editor), whiteboard }, { type: 'actions', epoch: 1, actions: [a] }, 0, true));
+                            const refused = out.replies.find(m => m.type === 'reject' || m.type === 'error');
+                            if (refused && (refused.type === 'reject' || refused.type === 'error'))
+                                return json(400, { code: refused.code, message: refused.message });
+                        }
+                        return json(200, { ok: true });
+                    }
+                    if (sub === 'import/comments') {
+                        const ops: OpEnvelope[] = b?.ops;
+                        if (!Array.isArray(ops) || !ops.length || ops.length > 1000)
+                            return json(400, { code: 'invalid', message: 'Invalid batch of imported comments' });
+                        this.transferQuota(editor, 'ops', ops.length);
+                        const voting = supportsPrivateVoteViews(caps);
+                        for (let i = 0; i < ops.length; i += LIMITS.opsPerMessage) {
+                            const batch = ops.slice(i, i + LIMITS.opsPerMessage);
+                            const out = this.submitComments(r, batch, editor, batch.length, voting);
+                            if (out.rejected.length) return json(400, { code: 'invalid', message: out.rejected[0].message });
+                        }
+                        this.scheduleVoteExpiry(r);
+                        return json(200, { ...r.comments.snapshot(), ...(voting && r.comments.socialView(editor)) });
+                    }
+                    await buildSnapshot(r.core);
+                    this.edit(me);
+                    const { seq, epoch } = r.core.meta();
+                    if (batchImport && (b?.seq !== seq || b?.epoch !== epoch || b?.commentsSeq !== r.comments.sequence()))
+                        return json(409, { code: 'file_changed', message: 'The Cloud file changed during verification' });
+                    this.db.sql.exec("UPDATE files SET state='live' WHERE id=?", file);
+                    r.leases.clear();
+                    return json(200, { ok: true });
+                } finally { this.activeImports.delete(file); }
             }
-            const whiteboard = supportsWhiteboard(String(req.headers[FILE_CAPABILITIES_HEADER] ?? '').split(/\s*,\s*/));
+            if (blobBatch) {
+                const b = await body();
+                if (this.row(file, me).state === 'trash') return json(404, { code: 'not_found' });
+                return this.sendBlobBatch(res, r, me, b?.hashes);
+            }
             if (sub === 'manifest' && method === 'GET') {
                 if (!whiteboard && r.core.hasWhiteboard()) return json(426, WHITEBOARD_UPDATE);
                 await buildSnapshot(r.core);
@@ -803,8 +984,8 @@ export class MacFiles {
         try {
             if (!this.bank.grant(me.id, 'messages', 1, this.now())) error(429, 'quota', 'Message quota');
             const row = this.row(m[1], me);
-            if (row.state === 'trash')
-                error(404, 'not_found', 'File is in Trash');
+            if (row.state === 'trash' || (row.state === 'importing' && this.db.sql.exec('SELECT 1 FROM file_transfer_imports WHERE file=?', row.id).toArray().length))
+                error(404, 'not_found', 'No visible file');
             const r = this.room(m[1]);
             if ([...r.sockets.values()].filter(s => s.id === me.id).length >= 5 || [...this.rooms.values()].reduce((n, x) => n + x.sockets.size, 0) >= 256)
                 error(429, 'quota', 'Socket limit');

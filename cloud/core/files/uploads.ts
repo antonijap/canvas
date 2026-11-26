@@ -74,10 +74,20 @@ export function sniffType(b: Uint8Array): string | null {
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
   if (s(0, 4) === "GIF8") return "image/gif";
   if (s(0, 4) === "RIFF" && s(8, 4) === "WEBP") return "image/webp";
-  if (s(4, 4) === "ftyp") return s(8, 2) === "qt" ? "video/quicktime" : "video/mp4";
+  if (s(0, 2) === "BM") return "image/bmp";
+  if ((s(0, 2) === "II" && b[2] === 42 && b[3] === 0) || (s(0, 2) === "MM" && b[2] === 0 && b[3] === 42)) return "image/tiff";
+  if (s(4, 4) === "ftyp") {
+    const brand = s(8, 4);
+    if (brand === "avif" || brand === "avis") return "image/avif";
+    if (["heic", "heix", "hevc", "hevx", "heim", "heis", "hevm", "hevs"].includes(brand)) return "image/heic";
+    if (brand === "mif1" || brand === "msf1") return "image/heif";
+    return brand.startsWith("qt") ? "video/quicktime" : "video/mp4";
+  }
   if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return "video/webm";
   if (s(0, 4) === "OTTO") return "font/otf";
   if ((b[0] === 0 && b[1] === 1 && b[2] === 0 && b[3] === 0) || s(0, 4) === "true") return "font/ttf";
+  if (s(0, 4) === "ttcf") return "font/collection";
+  if (s(0, 4) === "wOFF") return "font/woff";
   if (s(0, 4) === "wOF2") return "font/woff2";
   if (b.includes(0)) return null;
   const text = new TextDecoder("utf-8", { fatal: false }).decode(b.subarray(0, 4096)).trimStart();
@@ -126,7 +136,8 @@ export async function putUpload(room: FileRoom, budget: StorageBudget, conn: Con
   if (bytes.length !== up.bytes) refuse(`the upload holds ${bytes.length} bytes, not the ${up.bytes} reserved`);
   if ((await sha256HexAsync(bytes)) !== up.sha256) refuse("the bytes do not match their hash");
   const sniffed = sniffType(bytes);
-  const same = sniffed === up.type || (sniffed === "font/ttf" && up.type === "font/ttf");
+  const heif = (type: string | null) => type === "image/heif" || type === "image/heic";
+  const same = sniffed === up.type || (heif(sniffed) && heif(up.type));
   if (!same) refuse(`the bytes are ${sniffed ?? "of no type Canvas takes"}, not ${up.type}`);
   return room.exclusive(async () => {
     const stored = await room.objects.putIfAbsent(blobKey(room.file, up.sha256), bytes);

@@ -455,16 +455,16 @@ function diffEnvelope(before: Envelope, after: Envelope): FileOp[] {
 // ---------- media ----------
 
 /**
- * The package path a media file of `docFile` takes in a Cloud file: `media/<name>` or `shaders/<name>`. A plain
+ * The package path a media file of `docFile` takes in a Cloud file, including nested subfolders. A plain
  * foo.canvas.json keeps them in foo.media and foo.shaders; those map to the same names. Null: not one of those folders.
  */
 export function blobPathOf(docFile: string, abs: string): string | null {
   const base = path.dirname(docFile);
   const rel = path.relative(base, abs).split(path.sep).join("/");
   const stem = path.basename(docFile).endsWith(".canvas.json") ? path.basename(docFile, ".canvas.json") : null;
-  const m = rel.match(/^([^/]+)\/([^/]+)$/);
+  const m = rel.match(/^([^/]+)\/(.+)$/);
   if (!m) return null;
-  const dir = m[1] === "media" || (stem && m[1] === `${stem}.media`) ? "media" : m[1] === "shaders" || (stem && m[1] === `${stem}.shaders`) ? "shaders" : null;
+  const dir = m[1] === "media" || (stem && m[1] === `${stem}.media`) ? "media" : m[1] === "shaders" || (stem && m[1] === `${stem}.shaders`) ? "shaders" : m[1] === "fonts" ? "fonts" : null;
   return dir ? `${dir}/${m[2]}` : null;
 }
 

@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { createHash } from 'node:crypto';
+import { encodeRecord, headerOf, logPathOf, tieOf } from '../src/doc/doclog.ts';
+import { prepareMove } from '../src/cloud-files-move.ts';
 import { readMoveAsset } from '../src/cloud-files-assets.ts';
 
 test('import reads nested package assets while refusing escapes and links', () => {
@@ -23,8 +26,29 @@ test('import reads nested package assets while refusing escapes and links', () =
         assert.throws(() => readMoveAsset(pkg, 'linked/outside.png'), /linked/);
         fs.linkSync(outside, path.join(pkg, 'assets/hard.png'));
         assert.throws(() => readMoveAsset(pkg, 'assets/hard.png'), /linked/);
-        assert.throws(() => readMoveAsset(pkg, 'assets/pictures'), /linked or changed/);
+        assert.throws(() => readMoveAsset(pkg, 'assets/pictures'), /non-regular/);
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }
+});
+
+test('move imports edits that have only reached the package save log', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-log-'));
+    const pkg = path.join(dir, 'Source.canvas');
+    fs.mkdirSync(pkg);
+    const file = path.join(pkg, 'document.json');
+    const board = { id: 'Board', type: 'frame', name: 'Original', children: [] };
+    const doc = Buffer.from(JSON.stringify({ version: '2.21', children: [board] }));
+    fs.writeFileSync(file, doc);
+    const base = createHash('sha256').update(doc).digest('hex');
+    const record = encodeRecord(1, [Buffer.from(JSON.stringify({ ...board, name: 'Saved edit' }))]);
+    fs.writeFileSync(logPathOf(file), Buffer.concat([headerOf(base, tieOf(fs.statSync(file))), record.bytes]));
+    const stop = new Error('Stop after checking what would be uploaded');
+    try {
+        await assert.rejects(prepareMove(pkg, async (_, document) => {
+            assert.match(JSON.stringify(document), /Saved edit/);
+            throw stop;
+        }), stop);
+        assert.deepEqual(fs.readFileSync(file), doc);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

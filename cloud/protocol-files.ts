@@ -40,8 +40,8 @@ export type DocNode = { [k: string]: Json };
 
 /** Document keys an op may change, one variable at a time. Nothing else at the document's top level. */
 export type DocKey = `variables/${string}` | "variables" | "themes" | "fonts";
-/** A file in the design's package: `media/<name>.<ext>` or `shaders/<name>.wgsl` (checkBlobPath). */
-export type BlobPath = `media/${string}` | `shaders/${string}`;
+/** A file in the design package (see checkBlobPath). */
+export type BlobPath = `media/${string}` | `shaders/${string}` | `fonts/${string}`;
 export type BlobType = (typeof BLOB_TYPES)[keyof typeof BLOB_TYPES];
 /** Envelope keys beside the widgets and pages that ride along whole: the brief, variation sets, agent threads, and the
  *  page list itself when it is not in the shape page ops describe (a hand-edited file). */
@@ -128,28 +128,30 @@ export const BLOB_TYPES = {
   ttf: "font/ttf",
   otf: "font/otf",
   woff2: "font/woff2",
+  woff: "font/woff",
+  ttc: "font/collection",
   wgsl: "text/wgsl",
 } as const;
-const MEDIA_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "heic", "heif", "bmp", "tif", "tiff", "mp4", "m4v", "mov", "webm", "ttf", "otf", "woff2"]);
+const FONT_EXT = new Set(["ttf", "otf", "ttc", "woff", "woff2"]);
+const MEDIA_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "heic", "heif", "bmp", "tif", "tiff", "mp4", "m4v", "mov", "webm", ...FONT_EXT]);
 const NAME_RE = /^[A-Za-z0-9._-]{1,120}$/;
 
-/**
- * Why `p` is not a package file a Cloud file may name (null: it is). Only `media/<name>.<ext>` with an image, video or
- * font extension, or `shaders/<name>.wgsl`; the name is letters, digits, dot, dash and underscore, at most 120, with no
- * `..`, no leading dot and no further folder. Absolute paths, schemes (`http:`, `data:`, `file:`) and backslashes are
- * refused. A symlink at the path is the caller's check (it needs the disk), see src/cloud-files-ops.ts.
- */
+/** Validate a relative package asset path. Callers opening it on disk also check for links. */
 export function checkBlobPath(p: unknown): string | null {
   if (typeof p !== "string" || !p) return "a file path must be a non-empty string";
   if (p.length > 200) return "the file path is too long";
   if (/^[a-z][a-z0-9+.-]*:/i.test(p) || p.startsWith("//")) return `"${p}" names a URL, not a file in the package`;
   if (p.startsWith("/") || p.startsWith("~") || p.includes("\\")) return `"${p}" is not a path inside the package`;
-  const slash = p.indexOf("/");
-  const dir = p.slice(0, slash), name = p.slice(slash + 1);
-  if (slash < 0 || (dir !== "media" && dir !== "shaders")) return `"${p}" is not in media/ or shaders/`;
-  if (!NAME_RE.test(name) || name.startsWith(".") || name.includes("..")) return `"${p}": the file name may hold letters, digits, ".", "-" and "_" only`;
+  const [dir, ...parts] = p.split("/");
+  if (!parts.length || (dir !== "media" && dir !== "shaders" && dir !== "fonts")) return `"${p}" is not in media/, shaders/ or fonts/`;
+  if (parts.some(part => !NAME_RE.test(part) || part.startsWith(".") || part.includes(".."))) {
+    return `"${p}": path segments may hold letters, digits, ".", "-" and "_" only, with no leading dot or consecutive dots`;
+  }
+  const name = parts.at(-1)!;
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
-  if (dir === "shaders" ? ext !== "wgsl" : !MEDIA_EXT.has(ext)) return `"${p}": ${dir}/ does not take .${ext || "(none)"} files`;
+  if (dir === "shaders" ? ext !== "wgsl" : !(dir === "fonts" ? FONT_EXT : MEDIA_EXT).has(ext)) {
+    return `"${p}": ${dir}/ does not take .${ext || "(none)"} files`;
+  }
   return null;
 }
 

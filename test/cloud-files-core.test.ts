@@ -99,7 +99,7 @@ test("allowlists: identity, tree and prototype keys are refused, and so is any d
 test("path refusals: ../, absolute, scheme, data and web image fills, and a symlink in the package", () => {
   const room = seeded();
   const sha = "a".repeat(64);
-  for (const p of ["media/../secret.png", "/etc/passwd.png", "file:///etc/hosts", "https://example.com/a.png", "media/sub/a.png", "media/.hidden.png", "media\\a.png", "shaders/a.png"]) {
+  for (const p of ["media/../secret.png", "/etc/passwd.png", "file:///etc/hosts", "https://example.com/a.png", "media/sub//a.png", "media/.hidden.png", "media\\a.png", "shaders/a.png"]) {
     refused(one(room, anna, [{ k: "blob", path: p as never, sha256: sha, bytes: 1, type: "image/png" }]), "forbidden");
   }
   for (const url of ["https://example.com/a.png", "data:image/png;base64,AAAA", "/Users/you/a.png", "media/missing.png"]) {
@@ -107,7 +107,7 @@ test("path refusals: ../, absolute, scheme, data and web image fills, and a syml
   }
   refused(one(room, anna, [{ k: "widget", id: "w9", value: { v: { id: "w9", kind: "video", config: { src: "/Users/you/movie.mp4" } } } }]), "forbidden");
   // A blob op must name bytes this file holds: no upload, no blob.
-  refused(one(room, anna, [{ k: "blob", path: "media/a.png", sha256: sha, bytes: 1, type: "image/png" }]), "invalid");
+  refused(one(room, anna, [{ k: "blob", path: "media/sub/a.png", sha256: sha, bytes: 1, type: "image/png" }]), "invalid");
 
   const dir = mkdtempSync(join(tmpdir(), "canvas-confine-"));
   try {

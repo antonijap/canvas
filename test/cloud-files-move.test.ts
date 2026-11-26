@@ -39,7 +39,7 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
     };
     try {
         fs.mkdirSync(path.join(dir, 'tunnels'), { recursive: true });
-        for (const fixture of ['playground', 'media', 'empty variables', 'children first', 'package image folder']) {
+        for (const fixture of ['playground', 'media', 'empty variables', 'children first', 'package image folder', 'nested media', 'embedded fonts']) {
             await t.test(fixture, async () => {
                 const host = await call('/api/cloud/host/start', { name: 'Studio', label: 'Editor' });
                 const status = await call('/api/cloud/status?fresh=1&url=' + encodeURIComponent(host.url));
@@ -53,12 +53,13 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 if (fixture === 'playground') fs.cpSync(PLAYGROUND, source, { recursive: true });
                 else {
                     fs.mkdirSync(source);
-                    const imagePath = fixture === 'package image folder' ? 'assets/pictures/image.png' : 'media/image.png';
+                    const imagePath = fixture === 'package image folder' ? 'assets/pictures/Mock Ü.png'
+                        : fixture === 'nested media' ? 'media/paywall/x.png' : 'media/image.png';
                     const doc = fixture === 'children first' ? { children: [], version: '2.21' } : {
                         version: '2.21',
                         themes: { mode: ['light', 'dark'] },
                         variables: fixture === 'empty variables' ? {} : { accent: { type: 'color', value: '#123456' } },
-                        fonts: [],
+                        fonts: fixture === 'embedded fonts' ? [{ name: 'Fixture Font', url: 'fonts/faces/fixture.woff' }] : [],
                         children: [{
                             type: 'frame', id: 'Board', width: 200, height: 200,
                             children: Array.from({ length: 130 }, (_, i) => ({
@@ -71,9 +72,17 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     fs.mkdirSync(path.join(source, 'media'));
                     fs.mkdirSync(path.join(source, 'shaders'));
                     fs.writeFileSync(path.join(source, 'media/image.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1sAAAAASUVORK5CYII=', 'base64'));
-                    if (fixture === 'package image folder') {
+                    if (imagePath !== 'media/image.png') {
                         fs.mkdirSync(path.dirname(path.join(source, imagePath)), { recursive: true });
                         fs.copyFileSync(path.join(source, 'media/image.png'), path.join(source, imagePath));
+                    }
+                    if (fixture === 'nested media') {
+                        fs.mkdirSync(path.join(source, 'media/a/b'), { recursive: true });
+                        fs.copyFileSync(path.join(source, imagePath), path.join(source, 'media/a/b/c.png'));
+                    }
+                    if (fixture === 'embedded fonts') {
+                        fs.mkdirSync(path.join(source, 'fonts/faces'), { recursive: true });
+                        fs.writeFileSync(path.join(source, 'fonts/faces/fixture.woff'), Buffer.from('wOFF\0fixture'));
                     }
                     const video = fs.readdirSync(path.join(PLAYGROUND, 'media')).find(name => name.endsWith('.mp4'))!;
                     fs.copyFileSync(path.join(PLAYGROUND, 'media', video), path.join(source, 'media/clip.mp4'));
@@ -92,9 +101,9 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 }
                 let { document, images } = expectedMove(source);
                 if (fixture === 'package image folder') {
-                    const bytes = fs.readFileSync(path.join(source, 'assets/pictures/image.png'));
+                    const bytes = fs.readFileSync(path.join(source, 'assets/pictures/Mock Ü.png'));
                     const rel = `media/${createHash('sha256').update(bytes).digest('hex')}.png`;
-                    document = document.replaceAll('assets/pictures/image.png', rel);
+                    document = document.replaceAll('assets/pictures/Mock Ü.png', rel);
                     images.push({ rel, bytes });
                 }
                 const envelope = JSON.parse(fs.readFileSync(path.join(source, 'widgets.json'), 'utf8'));
@@ -105,6 +114,10 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 const assets = ['media', 'shaders'].flatMap(folder => fs.readdirSync(path.join(source, folder))
                     .filter(name => fs.statSync(path.join(source, folder, name)).isFile() && !name.includes('.poster-'))
                     .map(name => ({ rel: folder + '/' + name, bytes: fs.readFileSync(path.join(source, folder, name)) })));
+                for (const rel of fixture === 'nested media' ? ['media/paywall/x.png', 'media/a/b/c.png']
+                    : fixture === 'embedded fonts' ? ['fonts/faces/fixture.woff'] : []) {
+                    assets.push({ rel, bytes: fs.readFileSync(path.join(source, rel)) });
+                }
                 const vote = randomUUID();
                 const envelopeFor = (op: object) => ({ opId: randomUUID(), doc: NIL_DOC, at: new Date().toISOString(), op });
                 if (fixture === 'playground') {
@@ -167,6 +180,13 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                 fs.rmSync(moved.file, { recursive: true });
                 const reopened = await call('/api/cloud/files/open', { cloud: host.url, id: moved.id });
                 check(reopened.file);
+                if (fixture === 'nested media' || fixture === 'embedded fonts') {
+                    const target = path.join(dir, 'Returned.canvas');
+                    const returned = await call('/api/cloud/files/download', { cloud: host.url, id: moved.id, target, move: true });
+                    assert.equal(returned.moved, true);
+                    check(returned.file);
+                    fs.rmSync(target, { recursive: true });
+                }
                 if (fixture === 'playground') {
                     const invalid = await call('/api/cloud/files/create', { cloud: host.url, name: 'Invalid manifest' });
                     const db = new DatabaseSync(path.join(dir, 'state', 'cloud-host', 'files', invalid.id + '.sqlite'));
@@ -255,6 +275,28 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
             assert.match(moved.notice, /1 ballot/);
             assert.equal(readCommentsFile(moved.file)?.threads.length, 125);
             assert.equal(fs.existsSync(source), false);
+        });
+        await t.test('move refuses unsafe references and linked subfolders before publication', async () => {
+            const source = path.join(dir, 'Unsafe.canvas');
+            fs.mkdirSync(path.join(source, 'media/a'), { recursive: true });
+            const route = '/api/cloud/files/move?file=' + encodeURIComponent(source);
+            const listed = async () => (await call('/api/cloud/files?cloud=' + encodeURIComponent(rejectionHost.url)))
+                .files.map((row: { id: string }) => row.id);
+            const before = await listed();
+            for (const url of ['media/../x.png', 'media//x.png', 'media/a/../../x', '/media/x.png']) {
+                const document = JSON.stringify({ version: '2.21', children: [
+                    { id: 'Unsafe', type: 'rectangle', fill: { type: 'image', url } },
+                ] });
+                fs.writeFileSync(path.join(source, 'document.json'), document);
+                await call(route, { cloud: rejectionHost.url }, 400);
+                assert.equal(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), document);
+            }
+            const linkedPackage = path.join(dir, 'Alias.canvas');
+            fs.symlinkSync(source, linkedPackage);
+            await call('/api/cloud/files/move?file=' + encodeURIComponent(linkedPackage), { cloud: rejectionHost.url }, 400);
+            fs.symlinkSync(dir, path.join(source, 'media/a/link'));
+            assert.match((await call(route, { cloud: rejectionHost.url }, 400)).error, /linked/);
+            assert.deepEqual(await listed(), before);
         });
         for (const code of ['invalid', 'forbidden']) await t.test(`move returns the host ${code} reason and keeps the source`, async () => {
             const source = path.join(dir, `Rejected-${code}.canvas`);

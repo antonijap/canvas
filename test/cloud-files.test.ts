@@ -72,7 +72,7 @@ for (const key of ["id", "children", "__proto__", "constructor", "variables/__pr
     assert.ok(isReject(send(seed(), [{ k: "doc", key: key as "fonts", value: { v: [] } }])));
   });
 }
-for (const p of ["/media/a.png", "../a.png", "media/../a.png", "media/.a.png", "media/a/b.png", "media/a%2fb.png", "media/a\\b.png", "https://example.test/a.png", "data:image/png,a", "file:///a.png", "//example.test/a.png", "shaders/a.png", "media/a.wgsl", "media/a.html"]) {
+for (const p of ["/media/a.png", "../a.png", "media/../a.png", "media/.a.png", "media//x.png", "media/a/../../x", "media/a/../x.png", "media/a..b/x.png", "media/~x.png", "fonts/test.png", "media/a%2fb.png", "media/a\\b.png", "https://example.test/a.png", "data:image/png,a", "file:///a.png", "//example.test/a.png", "shaders/a.png", "media/a.wgsl", "media/a.html"]) {
   test(`blob refuses ${p}`, () => {
     assert.ok(checkBlobPath(p));
     assert.ok(isReject(send(seed(), [{ k: "blob", path: p as "media/a.png", sha256: "a".repeat(64), bytes: 1, type: "image/png" }])));
@@ -142,7 +142,7 @@ test("pages, board membership, widgets and metadata replay in one action", () =>
 test("blobs and confined media validate without disk access", () => {
   const tree = seed();
   const blob: FileOp = { k: "blob", path: "media/a.png", sha256: "a".repeat(64), bytes: 4, type: blobTypeOf("media/a.png") };
-  assert.equal(checkBlobPath("shaders/a.wgsl"), null);
+  for (const rel of ["media/paywall/x.png", "media/a/b/c.png", "shaders/a/x.wgsl", "fonts/a/font.woff"]) assert.equal(checkBlobPath(rel), null, rel);
   assert.ok(!isReject(applyAction(tree, makeAction([blob, { k: "set", id: "board", props: { fill: { v: { type: "image", url: "media/a.png" } } } }]), { confine: true })));
   assert.ok(isReject(applyAction(tree, makeAction([{ k: "set", id: "board", props: { fill: { v: { type: "image", url: "https://example.test/a.png" } } } }]), { confine: true })));
 });

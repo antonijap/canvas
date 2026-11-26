@@ -74,11 +74,49 @@ test("a permanent timer refusal does not enter the comment or design cooldown", 
 });
 
 import {prepareMove} from '../src/cloud-files-move.ts';
-test('move keeps source edits made while publication is awaited',async()=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-move-publish-')),source=path.join(dir,'Design.canvas'),dest=path.join(dir,'Cloud.canvas');fs.mkdirSync(source);fs.writeFileSync(path.join(source,'document.json'),JSON.stringify({version:'2.21',children:[]}));
- const oldHome=process.env.HOME;process.env.HOME=dir;
- try{await assert.rejects(prepareMove(source,async(name,doc,env)=>{fs.mkdirSync(dest);fs.writeFileSync(path.join(dest,'document.json'),JSON.stringify(doc));fs.writeFileSync(path.join(dest,'widgets.json'),JSON.stringify(env));return{id:crypto.randomUUID(),file:dest,name,cloud:'mac://studio',role:'editor'};},async()=>{await Promise.resolve();fs.writeFileSync(path.join(source,'document.json'),JSON.stringify({version:'2.21',children:[{id:'New',type:'frame'}]}));}),/changed during the move/);assert.match(fs.readFileSync(path.join(source,'document.json'),'utf8'),/New/);
- }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;fs.rmSync(dir,{recursive:true,force:true});}
+test('move keeps source edits made while the Cloud copy is being verified', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-publish-'));
+    const source = path.join(dir, 'Design.canvas'), dest = path.join(dir, 'Cloud.canvas');
+    fs.mkdirSync(source);
+    fs.writeFileSync(path.join(source, 'document.json'), JSON.stringify({ version: '2.21', children: [] }));
+    const oldHome = process.env.HOME;
+    process.env.HOME = dir;
+    try {
+        await assert.rejects(prepareMove(source, async (name, doc, env) => {
+            fs.mkdirSync(dest);
+            fs.writeFileSync(path.join(dest, 'document.json'), JSON.stringify(doc));
+            fs.writeFileSync(path.join(dest, 'widgets.json'), JSON.stringify(env));
+            fs.writeFileSync(path.join(source, 'document.json'), JSON.stringify({ version: '2.21', children: [{ id: 'New', type: 'frame' }] }));
+            return { id: crypto.randomUUID(), file: dest, name, cloud: 'mac://studio', role: 'editor' };
+        }, async () => assert.fail('The changed source must block publication')), /changed during the move/);
+        assert.match(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), /New/);
+    } finally {
+        if (oldHome === undefined) delete process.env.HOME;
+        else process.env.HOME = oldHome;
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('a refused publication restores the hidden local source', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-move-restore-'));
+    const source = path.join(dir, 'Design.canvas'), dest = path.join(dir, 'Cloud.canvas');
+    const document = JSON.stringify({ version: '2.21', children: [] });
+    fs.mkdirSync(source);
+    fs.writeFileSync(path.join(source, 'document.json'), document);
+    const refusal = new Error('Cloud refused publication');
+    try {
+        await assert.rejects(prepareMove(source, async (name, doc, env) => {
+            fs.mkdirSync(dest);
+            fs.writeFileSync(path.join(dest, 'document.json'), JSON.stringify(doc));
+            fs.writeFileSync(path.join(dest, 'widgets.json'), JSON.stringify(env));
+            return { id: crypto.randomUUID(), file: dest, name, cloud: 'mac://studio', role: 'editor' };
+        }, async () => {
+            assert.equal(fs.existsSync(source), false);
+            throw refusal;
+        }), refusal);
+        assert.equal(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), document);
+        assert.ok(!fs.readdirSync(dir).some(name => name.startsWith('.canvas-move-')));
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('multipart total cannot exceed reservation and closed parts are swept',()=>hostTest(async(h,call,dir)=>{

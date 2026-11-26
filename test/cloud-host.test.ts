@@ -654,9 +654,10 @@ test("a Cloud move keeps a file whose design or comments changed during download
   const { id } = await (await post(base, "/v1/files", { name: "Board" }, owner)).json() as { id: string };
   const route = `/v1/files/${id}`;
   const read = (suffix: string, headers = owner) => fetch(base + route + suffix, { headers });
+  const token = crypto.randomUUID();
   const remove = (seq: number, epoch: number, commentsSeq: number, headers = owner) => fetch(base + route + "/move", {
     method: "DELETE", headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify({ seq, epoch, commentsSeq }),
+    body: JSON.stringify({ seq, epoch, commentsSeq, token }),
   });
   const { seq, epoch } = await (await read("/manifest")).json() as { seq: number; epoch: number };
   assert.equal((await read("/move", editor)).status, 403);
@@ -678,7 +679,28 @@ test("a Cloud move keeps a file whose design or comments changed during download
   assert.equal((await remove(afterEdit.seq, epoch, 0)).status, 409);
   assert.equal((await read("")).status, 200);
   assert.equal((await remove(afterEdit.seq, epoch, comments.seq)).status, 200);
+  assert.equal((await remove(afterEdit.seq, epoch, comments.seq)).status, 200, "a lost reply can be retried");
   assert.equal((await read("")).status, 404);
+});
+
+test("a staged import stays private until the verified sequence is published", async () => {
+  const { h, base } = await host();
+  const owner = bearer(h.ownerDevice("Owner device"));
+  const viewer = bearer((await join(base, h.invite("Viewer", "viewer").code)).token);
+  const created = await post(base, "/v1/files", { name: "Board", importing: true, transfer: true }, owner);
+  assert.equal(created.status, 201);
+  const { id } = await created.json() as { id: string };
+  const file = `/v1/files/${id}`;
+  const list = async () => (await (await fetch(base + "/v1/files", { headers: owner })).json() as { files: unknown[] }).files;
+  const complete = (seq: number) => post(base, file + "/import/complete", { seq, epoch: 1, commentsSeq: 0 }, owner);
+  assert.deepEqual(await list(), []);
+  assert.equal((await fetch(base + file + "/manifest", { headers: viewer })).status, 404);
+  assert.equal((await complete(23)).status, 409);
+  assert.deepEqual(await list(), []);
+  assert.equal((await complete(0)).status, 200);
+  assert.equal((await complete(0)).status, 200, "a lost publication reply can be retried");
+  assert.equal((await fetch(base + file + "/manifest", { headers: viewer })).status, 200);
+  assert.equal((await list()).length, 1);
 });
 
 test("duplicate refuses the combined size of its blobs before copying", async t => {

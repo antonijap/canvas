@@ -724,14 +724,15 @@ final class CloudAccount: ObservableObject {
             }
             guard self.busy.insert(chosen.url).inserted else { return }
             defer { self.busy.remove(chosen.url) }
-            let (status, moved) = await CloudAccount.post(model, "api/cloud/files/move", ["cloud": chosen.url], query: [URLQueryItem(name: "file", value: package.path)])
+            let request = CloudMove.requestToCloud(package: package, cloud: chosen.url)
+            let (status, moved) = await CloudAccount.post(model, request.path, request.body, query: request.query)
             if status == 200, let destination = moved["file"] as? String {
                 model.setCloudFileName(moved["name"] as? String, for: destination)
                 self.forgetMovedFiles(model) { CloudMove.localPackage(URL(fileURLWithPath: $0))?.path == package.path }
                 model.open(destination)
                 if let notice = moved["notice"] as? String { model.flash(notice) }
                 else { model.flash("Moved to \(HomeLogic.cloudName(chosen))", level: "success") }
-            } else if moved["code"] as? String == "vote_history", let message = moved["error"] as? String {
+            } else if ["vote_history", "move_pending", "update_move_host"].contains(moved["code"] as? String ?? ""), let message = moved["error"] as? String {
                 model.flash(message)
             } else {
                 model.flash(CloudFilesText.problem(code: moved["code"] as? String, fallback: "Could not move the file. Your local copy is kept."))
@@ -756,9 +757,8 @@ final class CloudAccount: ObservableObject {
             do { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
             catch { model.flash("Could not create the Canvas folder in Documents"); return }
             let target = CloudMove.localTarget(name: file.name, folder: folder, exists: fm.fileExists(atPath:))
-            let (status, result) = await CloudAccount.post(model, "api/cloud/files/download", [
-                "cloud": cloud.url, "id": file.id, "target": target.path, "move": true,
-            ])
+            let request = CloudMove.requestToLocal(file: file, cloud: cloud.url, target: target)
+            let (status, result) = await CloudAccount.post(model, request.path, request.body)
             if status == 200, result["moved"] as? Bool == true, let destination = result["file"] as? String {
                 let key = CloudFilePath.key(for: cloud.url)
                 self.forgetMovedFiles(model) {
@@ -768,9 +768,9 @@ final class CloudAccount: ObservableObject {
                 model.open(destination)
                 model.flash("Moved to Local Files", level: "success")
             } else if result["code"] as? String == "file_changed" {
-                model.flash("The Cloud file changed during the move. A local copy is in Documents/Canvas.")
-            } else if result["file"] is String {
-                model.flash("A local copy is in Documents/Canvas. Could not confirm removal from the Cloud.")
+                model.flash("The file changed during the move. It is still in the Cloud.")
+            } else if result["code"] as? String == "move_pending", let message = result["error"] as? String {
+                model.flash(message)
             } else if result["code"] as? String == "unsynced" {
                 model.flash("Sync this file's edits before moving it.")
             } else if result["code"] as? String == "update_move_host" {

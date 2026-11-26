@@ -279,7 +279,7 @@ export class FileRoom {
   }
 
   /** An `actions` message. Each action applies whole or is refused on its own; nothing is half done. */
-  submit(conn: Conn, msg: ActionsMessage, bytesIn = 0): SubmitResult {
+  submit(conn: Conn, msg: ActionsMessage, bytesIn = 0, importing = false): SubmitResult {
     this.usage.messages++;
     this.usage.bytesIn += bytesIn;
     const replies: FileServerMessage[] = [];
@@ -288,14 +288,14 @@ export class FileRoom {
     if (msg.actions.length > ROOM_LIMITS.actionsPerMessage) return { replies: [{ type: "error", code: "invalid", message: `a message holds at most ${ROOM_LIMITS.actionsPerMessage} actions` }], applied };
     const total = msg.actions.reduce((n, a) => n + (a && Array.isArray(a.ops) ? a.ops.length : 0), 0);
     if (total > ROOM_LIMITS.opsPerMessage) return { replies: [{ type: "error", code: "invalid", message: `a message holds at most ${ROOM_LIMITS.opsPerMessage} ops` }], applied };
-    if (this.leases && !this.leases.take(conn.author.id, "messages", 1)) {
+    if (!importing && this.leases && !this.leases.take(conn.author.id, "messages", 1)) {
       for (const a of msg.actions) replies.push({ type: "reject", id: a && typeof a.id === "string" ? a.id : "", code: "quota", message: "too many messages this minute; your edits wait and go on their own" });
       return { replies, applied };
     }
     for (const a of msg.actions) {
       const id = a && typeof a.id === "string" ? a.id : "";
       try {
-        const r = this.one(conn, msg.epoch, a);
+        const r = this.one(conn, msg.epoch, a, importing);
         if ("duplicate" in r) replies.push({ type: "ack", id, first: r.first, last: r.last });
         else {
           applied.push(r);
@@ -312,7 +312,7 @@ export class FileRoom {
     return { replies, applied };
   }
 
-  private one(conn: Conn, epoch: number, a: Action): AppliedAction | { duplicate: true; first: number; last: number } {
+  private one(conn: Conn, epoch: number, a: Action, importing: boolean): AppliedAction | { duplicate: true; first: number; last: number } {
     const m = this.meta();
     if (epoch !== m.epoch) throw new Refusal("reset", "this file was restored; open it again");
     if (!a || typeof a !== "object" || typeof a.id !== "string" || !a.id || a.id.length > ROOM_LIMITS.actionIdLength) throw new Refusal("invalid", "an action needs an id");
@@ -337,7 +337,7 @@ export class FileRoom {
     if (a.baseSeq < m.receiptFloor) throw new Refusal("expired", "this edit was made on a version older than the Cloud keeps; your version is kept as a copy");
     if (a.baseSeq > m.seq) throw new Refusal("invalid", "this action names a seq the file has not reached");
     if (actionBytes(a) > ROOM_LIMITS.actionBytes) throw new Refusal("invalid", "an action holds at most 1 MB");
-    if (this.leases && !this.leases.take(conn.author.id, "ops", Math.max(1, a.ops.length))) throw new Refusal("quota", "too many edits this minute; they wait and go on their own");
+    if (!importing && this.leases && !this.leases.take(conn.author.id, "ops", Math.max(1, a.ops.length))) throw new Refusal("quota", "too many edits this minute; they wait and go on their own");
 
     const checked: FileOp[] = a.ops.map((op) => {
       if (!op || typeof op !== "object" || op.k !== "text") return op;
@@ -410,8 +410,8 @@ export class FileRoom {
       if (!src) throw new Refusal("invalid", `blob: the bytes of ${String(op.path)} were not uploaded`);
       if (src.bytes !== op.bytes || src.type !== op.type) throw new Refusal("invalid", `blob: ${String(op.path)} names ${op.bytes} bytes of ${op.type}; the stored file is ${src.bytes} bytes of ${src.type}`);
       // A Mac's disk folds case: media/Logo.png and media/logo.png would be one file there.
-      const twin = this.store.sql.exec<{ path: string }>("SELECT path FROM blobs WHERE lower(path) = lower(?) AND path != ? LIMIT 1", op.path, op.path).toArray()[0];
-      if (twin) throw new Refusal("conflict", `blob: ${String(op.path)} and ${twin.path} differ only by case; a Mac would keep one file for both`);
+      const twin = this.store.sql.exec<{ path: string }>("SELECT path FROM blobs WHERE (lower(path) = lower(?) AND path != ?) OR instr(lower(path), lower(?) || '/') = 1 OR instr(lower(?), lower(path) || '/') = 1 LIMIT 1", op.path, op.path, op.path, op.path).toArray()[0];
+      if (twin) throw new Refusal("conflict", `blob: ${String(op.path)} and ${twin.path} conflict on a Mac`);
       if (up) this.store.sql.exec("UPDATE uploads SET state = 'used' WHERE sha256 = ? AND state = 'stored'", op.sha256);
     }
     const web = webAddressIn(ops, (id) => this.tree.node(id)?.type);

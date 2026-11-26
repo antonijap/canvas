@@ -12,14 +12,13 @@ export function resolveInPackage(root: string, rel: string, lstat: Lstat): { pat
   if (bad) return { refused: bad };
   if (!root.startsWith("/") || root.includes("\\")) return { refused: "the package folder must be an absolute path" };
   const base = root.replace(/\/+$/, "");
+  if (lstat(base)?.isSymbolicLink()) return { refused: "the package folder is a link" };
   let at = base;
   for (const part of rel.split("/")) {
     at = `${at}/${part}`;
     const st = lstat(at);
     if (st?.isSymbolicLink()) return { refused: `${rel} goes through a link; Canvas reads only real files in the package` };
   }
-  const top = lstat(base);
-  if (top?.isSymbolicLink()) return { refused: "the package folder is a link" };
   return { path: at };
 }
 
@@ -31,7 +30,7 @@ export interface PackageFs {
   openSync(p: string, flags: number): number;
   closeSync(fd: number): void;
   realpathSync(p: string): string;
-  constants: { O_RDONLY: number; O_NOFOLLOW?: number };
+  constants: { O_RDONLY: number; O_NOFOLLOW?: number; O_NONBLOCK?: number };
 }
 /** macOS: refuse a link at any component of the path, inside the open itself (O_NOFOLLOW_ANY, macOS 11). */
 const O_NOFOLLOW_ANY = 0x20000000;
@@ -55,7 +54,7 @@ export function openInPackage(root: string, rel: string, fs: PackageFs, darwin =
   const seen = lstat(r.path);
   if (!seen) return { refused: `${rel} is not in the package` };
   if (!seen.isFile()) return { refused: `${rel} is not a file` };
-  const base = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+  const base = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
   let fd: number;
   try {
     fd = fs.openSync(r.path, base | (darwin ? O_NOFOLLOW_ANY : 0));
@@ -77,7 +76,7 @@ export function openInPackage(root: string, rel: string, fs: PackageFs, darwin =
   if (!st.isFile()) return refuse(`${rel} is not a file`);
   if (Number(st.nlink) !== 1) return refuse(`${rel} has another name on this disk (a hard link); Canvas reads only files that live in the package`);
   if (st.ino !== seen.ino || st.dev !== seen.dev) return refuse(`${rel} changed while it was opened`);
-  const dir = rel.slice(0, rel.indexOf("/"));
+  const dir = rel.slice(0, rel.lastIndexOf("/"));
   let realDir: string, realRoot: string;
   try {
     realDir = fs.realpathSync(r.path.slice(0, r.path.lastIndexOf("/")));
@@ -85,7 +84,7 @@ export function openInPackage(root: string, rel: string, fs: PackageFs, darwin =
   } catch {
     return refuse(`${rel} moved while it was opened`);
   }
-  if (realDir !== `${realRoot}/${dir}`) return refuse(`${rel} goes through a link; Canvas reads only real files in the package`);
+  if ("refused" in resolveInPackage(root, rel, lstat) || realDir !== `${realRoot}/${dir}`) return refuse(`${rel} goes through a link; Canvas reads only real files in the package`);
   return { fd };
 }
 

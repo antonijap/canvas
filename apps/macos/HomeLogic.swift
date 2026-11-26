@@ -12,6 +12,15 @@ struct CloudFileDrag: Codable {
 }
 
 extension CloudMove {
+    static func requestToCloud(package: URL, cloud: String) -> (path: String, query: [URLQueryItem], body: [String: String]) {
+        ("api/cloud/files/move", [URLQueryItem(name: "file", value: package.path)], ["cloud": cloud])
+    }
+
+    static func requestToLocal(file: CloudFileDrag, cloud: String, target: URL) -> (path: String, body: [String: Any]) {
+        ("api/cloud/files/download", ["cloud": cloud, "id": file.id, "target": target.path, "move": true])
+    }
+
+
     static func localPackage(_ url: URL) -> URL? {
         guard url.isFileURL, CloudFilePath(url.path) == nil else { return nil }
         let file = url.standardizedFileURL

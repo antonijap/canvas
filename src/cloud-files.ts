@@ -6,7 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type http from 'node:http';
-import { setTimeout as delay } from 'node:timers/promises';
 import { target } from './cloud.ts';
 import { cloudConfigs, onCloudsChanged, isConfigured, generation, bump, hostedId, waitForShellCloudList } from './cloud-config.ts';
 import { FileStateStore } from './cloud-files-store.ts';
@@ -16,6 +15,8 @@ import { cloudFileHooks } from './cloud-files-runtime.ts';
 import { asOneAction, adoptWriters, onAction, envelopeFileOps } from './cloud-files-ops.ts';
 import { loadManifest, type Manifest } from '../cloud/core/files/snapshots.ts';
 import { type ObjectStore, fromUtf8 } from '../cloud/core/files/objects.ts';
+import { FILE_TRANSFER, blobBatches } from '../cloud/file-transfer.ts';
+import { openInPackage } from '../cloud/core/files/confine.ts';
 import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, checkBlobPath, FILE_CAPABILITIES_HEADER, hasWhiteboard, insertsWhiteboard, supportsWhiteboard, UPDATE_WHITEBOARD_HOST, WHITEBOARD } from '../cloud/protocol-files.ts';
 import { createPackage, targetPath } from './docpath.ts';
 import { type BlobRow } from '../cloud/core/files/seam.ts';
@@ -23,7 +24,7 @@ import { readBodyText } from './body.ts';
 import { applyOp, VOTE_CLIENT_CAPABILITIES, isRateRefusal, isVoteOp, LIMITS, needsCloudTimers, supportsCloudTimers, supportsCloudVotes, supportsPrivateVoteViews, UPDATE_TIMER_HOST, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type Rejected, type StandaloneTimer, type Thread, type Vote, type VoteView } from '../cloud/protocol.ts';
 import { COMMENTS_FILE, emptyComments, forkComments, readCommentsFile, writeCommentsFile } from './comments-file.ts';
 import { anchorVoteClock, ownLocalVotes, receiveVoteViews, sendableCommentOps, voteOpsForTransfer, voteServerTime, type VoteClock } from './vote-state.ts';
-import { prepareMove } from './cloud-files-move.ts';
+import { MovePendingError, movePackagePath, prepareMove } from './cloud-files-move.ts';
 import { checkPresence, stripIdentity, keep, type Presence, type PeerPresence } from '../cloud/core/presence.ts';
 import { createPresenceSender } from './page/presence-client.js';
 import { pendingStates, retry, discard, type RefusedOp } from './cloud-sync.ts';
@@ -67,8 +68,9 @@ const root = () => path.join(fs.realpathSync(os.homedir()), 'Library', 'Applicat
 const resolveCloud = (cloud: string) => cloudConfigs().find(c => c.url === cloud || cloudKey(c.url) === cloud)?.url ?? fail(404, 'not_found', 'Cloud is not added');
 const fail = (status: number, code: string, message: string): never => { throw Object.assign(new Error(message), { status, code }); };
 const committingMoves = new Set<string>();
+const movingSources = new Set<string>();
 function requireStationaryFile(file: string) {
-    if (committingMoves.size && committingMoves.has(docFile(file))) fail(409, 'moving', 'This file is moving to Local Files');
+    if (committingMoves.size && committingMoves.has(docFile(file))) fail(409, 'moving', 'This file is being moved');
 }
 interface Session {
     store: FileStateStore;
@@ -144,7 +146,7 @@ export function waitForCachedCloudSettings(file: string): Promise<void> | undefi
     if (cloudConfigs().some(c => cloudKey(c.url) === key)) return;
     if (fs.existsSync(path.join(path.dirname(docFile(pkg)), '.cloud', 'state.sqlite'))) return waitForShellCloudList();
 }
-export function fileSession(file: string, importing = false): Session | undefined {
+export function fileSession(file: string, importing = false, deferConnect = false): Session | undefined {
     const f = docFile(file);
     let s = sessions.get(f);
     if (s) {
@@ -177,7 +179,7 @@ export function fileSession(file: string, importing = false): Session | undefine
     sessions.set(f, s);
     store.restoreView();
     checkpointSession(s);
-    s.initialConnect = connect(s);
+    if (!deferConnect) s.initialConnect = connect(s);
     return s;
 }
 cloudFileHooks.isCloud = f => !!fileSession(f);
@@ -262,26 +264,81 @@ async function cacheBlobs(s: Session) {
     const g = generation(cloud);
     await downloadBlobs(cloud, file, s.store.pkg, s.store.replica.tree.state().blobs, () => s.stopped || generation(cloud) !== g);
 }
+function blobDestination(pkg: string, rel: string, makeParents = false) {
+    if (checkBlobPath(rel)) throw new Error('Invalid blob path');
+    const parts = rel.split('/');
+    let dir = pkg;
+    for (const part of ['', ...parts.slice(0, -1)]) {
+        if (part) dir = path.join(dir, part);
+        const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
+        if (stat && !stat.isDirectory()) throw new Error('Cloud cache folder is a link or a file');
+        if (!stat && makeParents) fs.mkdirSync(dir, { mode: 0o700 });
+    }
+    const dest = path.join(dir, parts.at(-1)!);
+    const stat = fs.lstatSync(dest, { throwIfNoEntry: false });
+    if (stat && (!stat.isFile() || stat.nlink !== 1)) throw new Error('Cloud cache asset is a link or a folder');
+    return dest;
+}
+
 async function downloadBlobs(cloud: string, file: string, pkg: string, blobs: Record<string, BlobRow>, cancelled: () => boolean) {
-    for (const [rel, b] of Object.entries(blobs)) {
-        if (checkBlobPath(rel))
-            throw new Error('Invalid blob path');
-        const parent = path.join(pkg, rel.split('/')[0]);
-        for (const p of [pkg, parent, path.join(pkg, rel), path.join(pkg, rel) + '.tmp'])
-            if (fs.lstatSync(p, { throwIfNoEntry: false })?.isSymbolicLink())
-                throw new Error('Cloud cache path is a link');
-        const dest = path.join(pkg, rel);
-        if (fs.existsSync(dest) && !fs.lstatSync(dest).isSymbolicLink() && createHash('sha256').update(fs.readFileSync(dest)).digest('hex') === b.sha256)
-            continue;
-        if (b.bytes > 100 * 1024 * 1024)
-            throw new Error('Blob exceeds limit');
-        const bytes = await boundedBytes(await request(cloud, `/v1/files/${file}/blobs/${b.sha256}`), b.bytes);
-        if (createHash('sha256').update(bytes).digest('hex') !== b.sha256 || bytes.length !== b.bytes)
+    const missing = new Map<string, { blob: BlobRow; paths: string[] }>();
+    for (const [rel, blob] of Object.entries(blobs)) {
+        const dest = blobDestination(pkg, rel);
+        if (fs.existsSync(dest)) {
+            const opened = openInPackage(pkg, rel, fs);
+            if ('refused' in opened) throw new Error(opened.refused);
+            try {
+                if (createHash('sha256').update(fs.readFileSync(opened.fd)).digest('hex') === blob.sha256) continue;
+            } finally { fs.closeSync(opened.fd); }
+        }
+        if (blob.bytes > 100 * 1024 * 1024) throw new Error('Blob exceeds limit');
+        const group = missing.get(blob.sha256);
+        if (group) group.paths.push(rel);
+        else missing.set(blob.sha256, { blob, paths: [rel] });
+    }
+    const save = ({ blob, paths }: { blob: BlobRow; paths: string[] }, bytes: Uint8Array) => {
+        if (createHash('sha256').update(bytes).digest('hex') !== blob.sha256 || bytes.length !== blob.bytes)
             throw new Error('Blob hash mismatch');
         if (cancelled() || revoked.has(cloud)) throw new Error('Cloud membership was removed during download');
-        fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
-        fs.writeFileSync(dest + '.tmp', bytes, { mode: 0o600 });
-        fs.renameSync(dest + '.tmp', dest);
+        for (const rel of paths) {
+            const dest = blobDestination(pkg, rel, true);
+            const tmp = path.join(path.dirname(dest), '.asset-' + randomUUID());
+            const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
+            const fd = fs.openSync(tmp, flags, 0o600);
+            try {
+                blobDestination(pkg, rel);
+                fs.writeFileSync(fd, bytes);
+                blobDestination(pkg, rel);
+                fs.renameSync(tmp, dest);
+            } finally {
+                fs.closeSync(fd);
+                fs.rmSync(tmp, { force: true });
+            }
+        }
+    };
+    const route = `/v1/files/${file}`;
+    let bulk = true;
+    for (const batch of blobBatches(missing.values(), entry => entry.blob.bytes)) {
+        if (bulk) {
+            let response: Response | undefined;
+            try { response = await request(cloud, route + '/blob-batch', 'POST', { hashes: batch.map(e => e.blob.sha256) }); }
+            catch (error) {
+                if (!(error instanceof CloudHttpError) || ![404, 405].includes(error.status)) throw error;
+                bulk = false; // Older hosts only serve one blob per request.
+            }
+            if (response) {
+                const total = batch.reduce((sum, e) => sum + e.blob.bytes, 0);
+                const bytes = await boundedBytes(response, total);
+                if (bytes.length !== total) throw new Error('Incomplete Cloud blob batch');
+                let offset = 0;
+                for (const entry of batch) {
+                    save(entry, bytes.subarray(offset, offset + entry.blob.bytes));
+                    offset += entry.blob.bytes;
+                }
+                continue;
+            }
+        }
+        for (const entry of batch) save(entry, await boundedBytes(await request(cloud, route + '/blobs/' + entry.blob.sha256), entry.blob.bytes));
     }
 }
 function render(s: Session) { if (s.stopped)
@@ -648,7 +705,8 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
     if (revoked.has(cloud))
         fail(403, 'removed', 'Cloud membership was removed');
     const pkg = path.join(root(), cloudKey(cloud), id + '.canvas');
-    const cached = fileSession(pkg, importingName !== undefined);
+    const staged = importingName !== undefined;
+    const cached = fileSession(pkg, staged, staged);
     if (cached) {
         // Give a reachable host time to confirm a cold cached replica while still allowing offline opens.
         if (cached.initialConnect) {
@@ -670,7 +728,7 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
         fail(404, 'not_found', 'No such Cloud file');
     let s = sessions.get(path.join(pkg, 'document.json'));
     if (!s && fs.existsSync(path.join(pkg, '.cloud', 'state.sqlite')))
-        s = fileSession(pkg, importingName !== undefined);
+        s = fileSession(pkg, staged, staged);
     if (!s) {
         const me = await cloudJson(await request(cloud, '/v1/me')) as any;
         const m = await cloudJson(await request(cloud, `/v1/files/${id}/manifest`)) as Manifest;
@@ -684,7 +742,7 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
         store.commit();
         store.materialize();
         store.close();
-        s = fileSession(pkg, importingName !== undefined)!;
+        s = fileSession(pkg, staged, staged)!;
         await cacheBlobs(s);
     }
     if (importingName === undefined && s.store.meta.name !== item.name) {
@@ -694,6 +752,38 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
     evictClosedPackages(root(),new Set([...sessions.values()].map(s=>s.store.pkg)));
     return { id, file: pkg, name: item.name, cloud, role: s.store.meta.role };
 }
+function* importBatches<T>(items: T[], count: number, byteLimit = 1024 * 1024 - 100): Generator<T[]> {
+    let batch: T[] = [], size = 2;
+    for (const item of items) {
+        const bytes = Buffer.byteLength(JSON.stringify(item)) + 1;
+        if (bytes + 2 > byteLimit) throw new Error('One item exceeds the Cloud import size limit');
+        if (batch.length && (size + bytes > byteLimit || batch.length === count)) {
+            yield batch;
+            batch = [];
+            size = 2;
+        }
+        batch.push(item);
+        size += bytes;
+    }
+    if (batch.length) yield batch;
+}
+
+async function commitTransfer(cloud: string, route: string, method: string, body: unknown) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            await request(cloud, route, method, body);
+            return;
+        } catch (error) {
+            const refusal = error instanceof CloudHttpError && error.status < 500;
+            if (!attempt && refusal) throw error;
+            if (attempt) {
+                if (refusal && error.code === 'file_changed') throw error;
+                throw new MovePendingError('The Cloud did not confirm the move');
+            }
+        }
+    }
+}
+
 function requireSyncedMoveSource(pkg: string) {
     const s = fileSession(pkg);
     if (s && (s.store.replica.pending.length || s.store.replica.refused.length || s.commentsPending.length || s.commentsRejected?.length)) {
@@ -711,6 +801,7 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
     const source = docFile(pkg);
     let comments: { seq: number; threads: Thread[] } | undefined;
     if (move) {
+        requireStationaryFile(source);
         let response: Response;
         try { response = await request(cloud, route + '/move'); }
         catch (error) {
@@ -728,6 +819,8 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
     if (manifest.file !== id) throw new Error('Manifest names another file');
     const { state } = await loadManifest(objects(cloud, id), JSON.stringify(manifest));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-cloud-download-'));
+    let stage: string | undefined;
+    let keepStage = false;
     try {
         await downloadBlobs(cloud, id, dir, state.blobs, cancelled);
         await request(cloud, route);
@@ -739,7 +832,11 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
         const tree = DocTree.fromState(state);
         const localComments = comments?.threads.length ? emptyComments() : undefined;
         if (localComments && comments) localComments.threads = comments.threads.map(thread => ({ ...thread, doc: localComments.doc }));
-        const file = createPackage(targetFile, tmp => {
+        if (move) {
+            if (fs.lstatSync(targetFile, { throwIfNoEntry: false })) fail(409, 'conflict', 'The local destination already exists');
+            stage = fs.mkdtempSync(path.join(path.dirname(targetFile), '.canvas-move-'));
+        }
+        const file = createPackage(stage ? path.join(stage, path.basename(targetFile)) : targetFile, tmp => {
             const files = [['document.json', documentOf(tree)], ['widgets.json', envelopeOf(tree)]] as [string, unknown][];
             if (localComments) files.push([COMMENTS_FILE, localComments]);
             for (const [name, json] of files) {
@@ -758,19 +855,31 @@ async function downloadCloudFile(cloud: string, id: string, target: unknown, mov
         if (!move) return { file };
         committingMoves.add(source);
         try {
-            await request(cloud, `${route}/move`, 'DELETE', { seq: manifest.seq, epoch: manifest.epoch, commentsSeq: comments?.seq });
+            await commitTransfer(cloud, `${route}/move`, 'DELETE', { seq: manifest.seq, epoch: manifest.epoch, commentsSeq: comments?.seq, token: randomUUID() });
         } catch (error) {
-            return { file, verified: true, moved: false, code: (error as CloudHttpError).code };
+            if (error instanceof MovePendingError) {
+                keepStage = true;
+                throw new MovePendingError(`${error.message}; the verified local copy is at ${file}`);
+            }
+            throw error;
         } finally {
             committingMoves.delete(source);
+        }
+        try {
+            if (fs.lstatSync(targetFile, { throwIfNoEntry: false })) throw new Error('The local destination already exists');
+            fs.renameSync(file, targetFile);
+        } catch {
+            keepStage = true;
+            throw new MovePendingError(`The Cloud move completed; the verified local copy is at ${file}`);
         }
         const session = sessions.get(source);
         if (session) {
             try { closeSession(source, session, true); }
             catch (error) { fileEvents.problem?.((error as Error).message); }
         }
-        return { file, verified: true, moved: true };
+        return { file: fs.realpathSync(targetFile), verified: true, moved: true };
     } finally {
+        if (stage && !keepStage) fs.rmSync(stage, { recursive: true, force: true });
         fs.rmSync(dir, { recursive: true, force: true });
     }
 }
@@ -881,7 +990,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             const route = `/v1/files/${id}`;
             if (p.endsWith('/download')) {
                 const result = await downloadCloudFile(cloud, id, b.target, b.move === true);
-                return out(result.moved === false ? 409 : 200, result);
+                return out(200, result);
             }
             if (p.endsWith('/duplicate')) return out(201, await cloudJson(await request(cloud, route + '/duplicate', 'POST', {})));
             if (p.endsWith('/delete')) return out(200, await cloudJson(await request(cloud, route, 'DELETE', {})));
@@ -891,77 +1000,85 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
         if (p === '/api/cloud/files/move') {
             if (fileInfo(url.searchParams.get('file')!))
                 return out(409, { code: 'conflict', error: 'This file already belongs to a Cloud' });
+            const cloud = resolveCloud(b.cloud);
+            const info = await cloudJson(await request(cloud, '/v1/info')) as { capabilities?: string[] };
+            if (!info.capabilities?.includes(FILE_TRANSFER)) fail(426, 'update_move_host', 'Update Canvas on the host to move files');
+            const requestedFile = url.searchParams.get('file')!;
+            const source = docFile(movePackagePath(requestedFile));
+            if (movingSources.has(source)) fail(409, 'moving', 'This file is being moved');
+            movingSources.add(source);
             let importing: string | undefined;
             try {
-            const moved = await prepareMove(url.searchParams.get('file')!, async (name, doc, env, blobs, comments) => {
-                if (hasWhiteboard(doc.children) || comments.some(e => isVoteOp(e.op))) {
-                    const info = await cloudJson(await request(b.cloud, '/v1/info')) as { capabilities?: unknown };
+                const moved = await prepareMove(requestedFile, async (name, doc, env, blobs, comments) => {
                     const voting = supportsCloudVotes(info.capabilities);
                     comments = voteOpsForTransfer(comments, voting && supportsCloudTimers(info.capabilities));
                     if (comments.some(e => isVoteOp(e.op)) && !voting) fail(426, 'version', UPDATE_VOTE_HOST);
                     if (hasWhiteboard(doc.children) && !supportsWhiteboard(info.capabilities)) fail(426, 'update_host', UPDATE_WHITEBOARD_HOST);
-                }
-                const created = { id: randomUUID() };
-                await request(b.cloud, '/v1/files', 'POST', { id: created.id, name: b.name || name, importing: true, version: doc.version });
-                importing=created.id;
-                for (const blob of blobs) {
-                    const u = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/uploads`, 'POST', blob.op)) as any;
-                    await request(b.cloud, `/v1/files/${created.id}/uploads/${u.id}`, 'PUT', blob.bytes);
-                }
-                const ops: FileOp[] = [...blobs.map(v => v.op), ...importDocument(doc), ...envelopeFileOps({ widgets: [], extra: {} }, { widgets: env.widgets as Record<string, unknown>[] ?? [], extra: Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'widgets' && k !== 'version')) })];
-                const actions: Action[] = [];
-                let seq = 0;
-                for (let i = 0; i < ops.length; i += 100) {
-                    const a = { id: randomUUID(), baseSeq: seq, epoch: 1, ops: ops.slice(i, i + 100), at: new Date().toISOString() };
-                    const out = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/sync`, 'POST', { type: 'actions', epoch: 1, actions: [a] })) as any;
-                    const rejected = (out.messages as FileServerMessage[]).find(m => m.type === 'reject' || m.type === 'error');
-                    if (rejected && (rejected.type === 'reject' || rejected.type === 'error'))
-                        fail(400, rejected.code, `Cloud refused import (${rejected.code}): ${rejected.message}`);
-                    seq += a.ops.length;
-                    actions.push(a);
-                }
-                let social: { seq: number; threads: Thread[]; votes?: VoteView[]; timer?: StandaloneTimer | null; serverTime?: string } | undefined;
-                for (let i = 0; i < comments.length; i += LIMITS.opsPerMessage) {
-                    let ops = comments.slice(i, i + LIMITS.opsPerMessage).map(e => ({ ...e, doc: created.id }));
-                    while (ops.length) {
-                        const out = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/comments`, 'POST', { ops }));
-                        const hard = out.rejected.find((r: Rejected) => !isRateRefusal(r));
-                        if (hard) throw new Error(hard.message ?? 'Cloud refused imported comments or votes');
-                        social = { seq: out.seq, threads: out.threads, votes: out.votes, timer: out.timer, serverTime: out.serverTime };
-                        const retry = new Set(out.rejected.map((r: { opId: string }) => r.opId));
-                        ops = ops.filter(e => retry.has(e.opId));
-                        if (ops.length) await delay(Math.min(60_100, Math.max(100, Number(out.retryAfterMs) || 60_100)));
+                    const id = randomUUID();
+                    const route = `/v1/files/${id}/import`;
+                    const title = b.name || name;
+                    const ops: FileOp[] = [...blobs.map(v => v.op), ...importDocument(doc),
+                        ...envelopeFileOps({ widgets: [], extra: {} }, { widgets: env.widgets as Record<string, unknown>[] ?? [],
+                            extra: Object.fromEntries(Object.entries(env).filter(([k]) => k !== 'widgets' && k !== 'version')) })];
+                    importing = id;
+                    await request(cloud, '/v1/files', 'POST', { id, name: title, importing: true, transfer: true, version: doc.version });
+                    const unique = new Map(blobs.map(blob => [blob.op.sha256, blob]));
+                    for (const batch of blobBatches(unique.values(), item => item.bytes.length)) {
+                        const header = Buffer.from(JSON.stringify(batch.map(item => item.op)));
+                        const prefix = Buffer.alloc(4);
+                        prefix.writeUInt32BE(header.length);
+                        await request(cloud, route + '/blobs', 'PUT', Buffer.concat([prefix, header, ...batch.map(item => item.bytes)]));
                     }
-                }
-                // Seed the cache from the confirmed import response. The room socket can welcome the file later.
-                const opened = await openCloudFile(b.cloud, created.id, b.name || name);
-                if (social) {
-                    const doc = docFile(opened.file), session = sessions.get(doc)!;
-                    const snapshot = social;
-                    await asOneAction(doc, () => snapshot.seq >= session.commentsSeq
-                        ? receive(session, { type: 'comments.snapshot', ...snapshot }) : undefined);
-                }
-                return opened;
-            }, async dest => {
-                await request(b.cloud, `/v1/files/${dest.id}/import/complete`, 'POST', {});
-                const session = sessions.get(docFile(dest.file));
-                if (session) session.importing = false;
-            });
-            return out(200, moved);
-            } catch(error) {
+                    const actions: Action[] = [];
+                    let seq = 0;
+                    for (const opsPart of importBatches(ops, 100, 1024 * 1024 - 500)) {
+                        actions.push({ id: randomUUID(), baseSeq: seq, epoch: 1, ops: opsPart, at: new Date().toISOString() });
+                        seq += opsPart.length;
+                    }
+                    for (const batch of importBatches(actions, 40)) {
+                        try { await request(cloud, route + '/actions', 'POST', { actions: batch }); }
+                        catch (error) {
+                            if (!(error instanceof CloudHttpError) || error.status !== 400) throw error;
+                            fail(400, error.code, `Cloud refused import (${error.code}): ${error.message}`);
+                        }
+                    }
+                    let social: { seq: number; threads: Thread[]; votes?: VoteView[]; timer?: StandaloneTimer | null; serverTime?: string } | undefined;
+                    for (const ops of importBatches(comments.map(e => ({ ...e, doc: id })), 1000))
+                        social = await cloudJson(await request(cloud, route + '/comments', 'POST', { ops }));
+                    const opened = await openCloudFile(cloud, id, title);
+                    const file = docFile(opened.file), session = sessions.get(file)!;
+                    if (session.store.replica.seq !== seq) throw new Error('Move verification failed: import sequence differs');
+                    if (social) {
+                        const snapshot = social;
+                        await asOneAction(file, () => receive(session, { type: 'comments.snapshot', ...snapshot }));
+                    }
+                    return opened;
+                }, async dest => {
+                    const session = sessions.get(docFile(dest.file))!;
+                    const { seq, epoch } = session.store.replica;
+                    committingMoves.add(source);
+                    try { await commitTransfer(cloud, `/v1/files/${dest.id}/import/complete`, 'POST', { seq, epoch, commentsSeq: session.commentsSeq }); }
+                    finally { committingMoves.delete(source); }
+                    session.importing = false;
+                    session.initialConnect = connect(session);
+                });
+                return out(200, moved);
+            } catch (error) {
                 fileEvents.problem?.((error as Error).message);
-                if(importing) {
-                    // A publication can succeed even when its response is lost. Never cancel a live file.
-                    const state = await cloudJson(await request(b.cloud, `/v1/files/${importing}`));
-                    if (state.state !== 'importing') throw new Error((error as Error).message + '; local source kept. The Cloud file is published');
-                    const pkg=path.join(root(),cloudKey(resolveCloud(b.cloud)),importing+'.canvas'), file=path.join(pkg,'document.json'), s=sessions.get(file);
-                    if(s) {s.stopped=true;clearPresence(s);if(s.timer)clearTimeout(s.timer);s.ws?.close();await s.chain.catch(()=>{});s.store.close();sessions.delete(file);fileEvents.removed?.(file);}
-                    fs.rmSync(pkg,{recursive:true,force:true});
-                    try {await request(b.cloud,`/v1/files/${importing}/import`,'DELETE',{});}
-                    catch(cleanup) {throw new Error((error as Error).message+'; local source kept. Cloud cleanup: '+(cleanup as Error).message);}
+                if (importing && !(error instanceof MovePendingError)) {
+                    try {
+                        await request(cloud, `/v1/files/${importing}/import`, 'DELETE', {});
+                    } catch (cleanup) {
+                        if (!(cleanup instanceof CloudHttpError) || cleanup.status !== 404)
+                            throw new Error(`${(error as Error).message}; local source kept. Cloud cleanup: ${(cleanup as Error).message}`);
+                    }
+                    const pkg = path.join(root(), cloudKey(cloud), importing + '.canvas');
+                    const file = docFile(pkg), session = sessions.get(file);
+                    if (session) closeSession(file, session);
+                    fs.rmSync(pkg, { recursive: true, force: true });
                 }
                 throw error;
-            }
+            } finally { movingSources.delete(source); }
         }
         const s = fileSession(b.file ?? url.searchParams.get('file') ?? '');
         if (!s)

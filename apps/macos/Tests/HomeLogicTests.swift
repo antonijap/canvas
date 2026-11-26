@@ -109,6 +109,17 @@ struct HomeLogicTests {
         check(CloudMove.localPackage(cached) == nil, "a Cloud cache is not a local move source")
         let target = CloudMove.localTarget(name: "Design.canvas", folder: folder, exists: { $0 == package.path })
         check(target.lastPathComponent == "Design 2.canvas", "a move picks a free local filename")
+        let cloud = "canvas-cloud://12345678-abcd-4000-8000-0123456789ab"
+        let upload = CloudMove.requestToCloud(package: package, cloud: cloud)
+        check(upload.path == "api/cloud/files/move", "the upload action uses the move route")
+        check(upload.query == [URLQueryItem(name: "file", value: package.path)] && upload.body["cloud"] == cloud,
+              "the upload passes the selected package and Cloud")
+        let drag = CloudFileDrag(cloud: cloud, id: "12345678-abcd-4000-8000-0123456789ac", name: "Design")
+        let download = CloudMove.requestToLocal(file: drag, cloud: cloud, target: target)
+        check(download.path == "api/cloud/files/download" && download.body["move"] as? Bool == true,
+              "the download action requests a move")
+        check(download.body["id"] as? String == drag.id && download.body["target"] as? String == target.path
+              && download.body["cloud"] as? String == cloud, "the download passes the chosen Cloud file and local path")
         check(CloudMove.localTarget(name: "Invalid/Name", folder: folder, exists: { _ in false }).lastPathComponent == "Cloud File.canvas", "an invalid filename stays inside the local folder")
     }
 

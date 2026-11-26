@@ -155,6 +155,16 @@ test("8. a package file is opened without following links, and a hard link to a 
     assert.ok("fd" in ok);
     assert.equal(fs.readFileSync(ok.fd, "utf8"), "real");
     fs.closeSync(ok.fd);
+    fs.mkdirSync(join(root, "media", "a", "b"), { recursive: true });
+    fs.writeFileSync(join(root, "media", "a", "b", "deep.png"), "deep");
+    fs.symlinkSync(dir, join(root, "media", "a", "link"));
+    const linked = openInPackage(root, "media/a/link/secret.png", fs);
+    assert.ok("refused" in linked);
+    assert.match(linked.refused, /goes through a link/);
+    const nested = openInPackage(root, "media/a/b/deep.png", fs);
+    assert.ok("fd" in nested);
+    assert.equal(fs.readFileSync(nested.fd, "utf8"), "deep");
+    fs.closeSync(nested.fd);
     assert.match((openInPackage(root, "media/hard.png", fs) as { refused: string }).refused, /link/);
     assert.match((openInPackage(root, "media/soft.png", fs) as { refused: string }).refused, /link/);
     // The folder swapped for a link after the check: the open still refuses it.
