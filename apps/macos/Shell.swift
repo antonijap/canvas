@@ -355,7 +355,7 @@ struct TopBar: View {
     private var tabsLead: CGFloat { sidebarWidth == nil ? gap : Metric.sidebarInset }
 
     private var tabRoom: CGFloat {
-        let fixedWidth = Metric.toolbarControl + gap
+        let fixedWidth = ToolbarButtonStyle.newTabWidth
         return max(0, barWidth - actionsWidth - leadingGroupWidth - tabsLead - fixedWidth - Self.minimumDragWidth)
     }
     private func fittedWidths(for files: [String]) -> [CGFloat] {
@@ -494,8 +494,10 @@ struct TopBar: View {
                 }
                 .onPreferenceChange(TabWidthKey.self) { tabWidths = $0 }
             }
-            TopBarIconButton(symbol: "plus", help: "New file", shortcut: "\u{2318}N") { model.newCanvas() }
+            TopBarIconButton(symbol: "plus", help: "New file", shortcut: "\u{2318}N",
+                             width: ToolbarButtonStyle.newTabWidth) { model.newCanvas() }
                 .qaID("tab-new", label: "New file")
+                .padding(.leading, files.isEmpty ? 0 : -gap)
         }
     }
 

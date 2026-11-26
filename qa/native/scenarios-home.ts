@@ -143,7 +143,7 @@ sc("tabs", "Top bar chips align and show selected and hover fills", { covers: ["
       for (let i = 1; i < group.length; i++) {
         const left = group[i - 1].x + group[i - 1].w;
         const right = group[i].x;
-        t.near(right - left, 4, 0.5, (group[i].label ?? group[i].id) + " chip gap");
+        t.near(right - left, group[i] === plus ? 0 : 4, 0.5, (group[i].label ?? group[i].id) + " chip gap");
         for (let x = left + 0.5; x < right; x++) {
           for (const y of [3, midY(home), 34]) {
             t.near(read(x, y), read(emptyX, y), 3, "the gap has no separator or control fill");
@@ -656,7 +656,7 @@ sc("tabs", "File tabs overflow keeps natural widths, scrolls to the active file 
     t.eq((await t.state()).openFiles, files, "overflow tabs start in file order");
     const home = await t.mark({ id: "home-tab" });
     const plus = await t.mark({ id: "tab-new" });
-    t.near(home.w, plus.w, 0.5, "Home and New use the same icon slot");
+    t.near(plus.w, 20, 0.5, "New hugs its plus");
     const actions = await t.mark({ id: "top-bar-actions" });
     t.ok(actions.x - plus.x - plus.w >= 24, "overflow leaves at least 24 points to drag the window");
     t.ok([...single.values()].reduce((a, b) => a + b, 0) > plus.x - home.x - home.w,

@@ -201,6 +201,7 @@ struct TopBarIconButton: View {
     var active = false
     let help: String
     var shortcut: String? = nil
+    var width = Metric.toolbarControl
     let action: () -> Void
 
     var body: some View {
@@ -209,7 +210,7 @@ struct TopBarIconButton: View {
                 .glyph(Metric.icon)
                 .qaID("top-bar-icon", label: symbol)
         }
-        .buttonStyle(ToolbarButtonStyle(active: active, topBarSymbol: symbol))
+        .buttonStyle(ToolbarButtonStyle(active: active, width: width, topBarSymbol: symbol))
         .chromeHelp(help, shortcut: shortcut)
         .accessibilityLabel(help)
         .accessibilityAddTraits(active ? .isSelected : [])
@@ -219,6 +220,9 @@ struct TopBarIconButton: View {
 
 struct ToolbarButtonStyle: ButtonStyle {
     static let chipGap: CGFloat = 4
+    /// The New file button after the last tab. Its plus is 12 pt wide, so this width leaves one chipGap of clear
+    /// space on each side of it; pulled left by chipGap, the plus itself sits one chipGap from the tab.
+    static let newTabWidth: CGFloat = 20
 
     var active = false
     var visible = true
