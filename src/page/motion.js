@@ -26,6 +26,7 @@ if (host) {
       }
       for (const sprite of sprites) ev.engine.removeBoard(sprite.id);
     }
+    host.emit("motionSprites");
     return true;
   }
 
@@ -67,6 +68,7 @@ if (host) {
       ev.motionBoard(board, source.x, source.y, { ...scene, root: hideMotionRoots(scene.root, promoted) });
       e.drawNow(board);
       stats.sprites = made.length;
+      host.emit("motionSprites");
     } catch (err) {
       if (active) stop();
       else for (const sprite of made) e.removeBoard(sprite.id);
@@ -154,22 +156,20 @@ if (host) {
     else playing = true;
   }
 
-  // Return the board accepted for hover playback so the pointer outline can follow it.
   const setHover = (id, time = performance.now()) => {
-    if (preview || active?.preview) return null;
-    if (!id && !desired && !active) return null;
+    if (preview || active?.preview) return;
+    if (!id && !desired && !active) return;
     if (!host.prefs().playHoverMotion || host.motionBlocked() || !host.engineView?.motionSource(id)) id = null;
-    if (desired !== id) {
-      desired = id;
-      entered = time;
-      wake();
-    }
-    return id;
+    if (desired === id) return;
+    desired = id;
+    entered = time;
+    wake();
   };
   host.beforeFrame(tick);
   host.motion = {
     hover: setHover,
     get active() { return !!active; },
+    get spriteBoard() { return active?.board ?? null; },
     invalidate(id) { if (active?.board === id || desired === id) this.cancel(); },
     cancel() { desired = null; preview = false; if (stop()) wake(); },
     preview(id) {

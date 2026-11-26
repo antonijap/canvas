@@ -1,68 +1,132 @@
 import { sc, type T } from "./harness.ts";
 import { sleep } from "./lib.ts";
 
-sc("hover-motion", "the hover box follows board motion eligibility", {
+const hoverBoard = (id: string, x: number, children: object[]) => ({
+  type: "frame", id, name: id, x, y: 10000, width: 220, height: 130, layout: "none", fill: "#203040", children,
+});
+const hoverLayer = (id: string, x = 20) => ({ type: "rectangle", id, x, y: 20, width: 24, height: 24, fill: "#FF8040" });
+const hoverSlide = [{ id: "slide", on: "boardHover", tracks: [{ prop: "translateX", to: 40, duration: 350 }] }];
+const hoverState = (t: T) => t.ev<{ sprites: number; outline: boolean }>(`({
+  sprites: window.__motion.sprites, outline: getComputedStyle(document.getElementById("hov")).display !== "none"
+})`);
+const hoverBoxVisible = async (t: T) => (await hoverState(t)).outline;
+
+async function moveToHoverTarget(t: T, id: string) {
+  const p = await t.center(id);
+  t.eq(await t.ev(`window.canvasHost.pickSelectable(${p.x}, ${p.y}, false)`), id, "pointer hits the layer or board");
+  await t.io.move(p.x, p.y);
+  await t.frames();
+}
+
+async function moveToHoverTitle(t: T, id: string) {
+  const title = await t.ev<{ x: number; y: number }>(`(() => {
+    const r = window.canvasHost.boards.get(${JSON.stringify(id)}).lbl.el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  })()`);
+  t.eq(await t.ev(`window.canvasHost.titleAt(${title.x}, ${title.y})`), id, "pointer hits the board title");
+  await t.io.move(title.x, title.y);
+  await t.frames();
+}
+
+sc("hover-motion", "the hover box follows board sprites through the leave animation", {
   covers: ["hover-motion:suppression"],
   skip: { visual: "Checks the transient hover box directly." },
 }, async (t: T) => {
   const reduce = (value: string) => t.page.send("Emulation.setEmulatedMedia", { features: [
     { name: "prefers-reduced-motion", value }, { name: "prefers-color-scheme", value: "dark" },
   ] });
-  const board = (id: string, x: number, children: object[]) => ({
-    type: "frame", id, name: id, x, y: 10000, width: 220, height: 130, layout: "none", fill: "#203040", children,
-  });
-  const layer = (id: string, x = 20) => ({ type: "rectangle", id, x, y: 20, width: 24, height: 24, fill: "#FF8040" });
   await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [
-    board("qa_hover_board", 10000, [{ ...layer("qa_hover_mover"), motion: [
-      { id: "slide", on: "boardHover", tracks: [{ prop: "translateX", to: 40, duration: 180 }] },
-    ] }, layer("qa_hover_static", 120)]),
-    board("qa_plain_board", 10300, [layer("qa_plain_layer")]),
+    hoverBoard("qa_hover_board", 10000, [{ ...hoverLayer("qa_hover_mover"), motion: hoverSlide }, hoverLayer("qa_hover_static", 120)]),
+    hoverBoard("qa_plain_board", 10300, [hoverLayer("qa_plain_layer")]),
   ] });
   await reduce("no-preference");
   await t.waitFor("window.canvasHost.boards.has('qa_plain_board')", "the hover test boards");
   await t.focus("qa_hover_board");
-  const moveTo = async (id: string) => {
-    const p = await t.center(id);
-    t.eq(await t.ev(`window.canvasHost.pickSelectable(${p.x}, ${p.y}, false)`), id, "pointer hits the layer or board");
-    await t.io.move(p.x, p.y);
-    await t.frames();
-  };
-  const boxVisible = () => t.ev<boolean>(`getComputedStyle(document.getElementById("hov")).display !== "none"`);
-  await moveTo("qa_hover_mover");
+  await moveToHoverTarget(t, "qa_hover_mover");
   await t.waitFor("window.__motion.sprites === 1", "hover playback on the motion board");
-  t.eq(await boxVisible(), false, "the moving layer has no hover box");
+  t.eq(await hoverBoxVisible(t), false, "the moving layer has no hover box");
   await t.select(["qa_hover_mover"]);
-  await moveTo("qa_hover_static");
-  t.eq(await boxVisible(), false, "the stationary layer on the motion board has no hover box");
+  await moveToHoverTarget(t, "qa_hover_static");
+  t.eq(await hoverBoxVisible(t), false, "the stationary layer on the motion board has no hover box");
   t.ok(await t.selBox(), "the selection box still shows");
   await t.clearSel();
-  await moveTo("qa_hover_board");
-  t.eq(await boxVisible(), false, "the motion board has no hover box");
-  await moveTo("qa_plain_layer");
-  t.eq(await boxVisible(), true, "a layer on the plain board has a hover box");
-  await t.waitFor("window.__motion.sprites === 0", "motion to return to rest");
+  await moveToHoverTarget(t, "qa_hover_board");
+  t.eq(await hoverBoxVisible(t), false, "the motion board has no hover box");
+  await sleep(400);
+  await moveToHoverTitle(t, "qa_hover_board");
+  t.eq(await hoverState(t), { sprites: 1, outline: false }, "the title outline stays hidden while the sprite leaves");
+  await t.waitFor("window.__motion.sprites === 0", "the leave animation to finish over the title", 1500);
+  await t.frames();
+  t.eq(await hoverBoxVisible(t), true, "the title outline returns with the pointer still over it");
+  await moveToHoverTarget(t, "qa_plain_layer");
+  t.eq(await hoverBoxVisible(t), true, "a layer on the plain board has a hover box");
 
   await reduce("reduce");
-  await moveTo("qa_hover_static");
+  await moveToHoverTarget(t, "qa_hover_static");
   await t.waitFor("window.__motion.sprites === 1", "the reduced motion end pose");
-  t.eq(await boxVisible(), false, "the reduced motion end pose has no hover box");
-  const title = await t.ev<{ x: number; y: number }>(`(() => {
-    const r = window.canvasHost.boards.get("qa_hover_board").lbl.el.getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-  })()`);
-  t.eq(await t.ev(`window.canvasHost.titleAt(${title.x}, ${title.y})`), "qa_hover_board", "pointer hits the motion board title");
-  await t.io.move(title.x, title.y);
-  await t.frames();
-  t.eq(await boxVisible(), false, "the motion board title has no hover box");
-
-  await moveTo("qa_hover_static");
+  t.eq(await hoverBoxVisible(t), false, "the reduced motion end pose has no hover box");
   await t.ev(`window.canvasCmd({cmd:"prefs",prefs:{playHoverMotion:false}})`);
   await t.frames();
-  t.eq(await boxVisible(), true, "turning off playback shows the hover box");
-  await t.ev(`window.canvasCmd({cmd:"motionWindow",visible:false}); window.canvasCmd({cmd:"prefs",prefs:{playHoverMotion:true}})`);
-  await moveTo("qa_hover_mover");
-  t.eq(await boxVisible(), true, "blocked playback shows the hover box");
+  t.eq(await hoverBoxVisible(t), true, "turning off playback shows the hover box");
+});
+
+sc("hover-motion", "hovering a board title from rest leaves its outline visible", {
+  covers: ["hover-motion:suppression"],
+  skip: { visual: "Checks the transient hover box directly." },
+}, async (t: T) => {
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [
+    hoverBoard("qa_title_board", 10000, [{ ...hoverLayer("qa_title_mover"), motion: hoverSlide }]),
+  ] });
+  await t.waitFor("window.canvasHost.boards.has('qa_title_board')", "the title board");
+  await t.focus("qa_title_board");
+  t.eq(await t.ev("window.__motion.sprites"), 0, "the board starts at rest");
+  await moveToHoverTitle(t, "qa_title_board");
+  t.eq(await hoverState(t), { sprites: 0, outline: true }, "hovering only the title leaves the board at rest and outlined");
+  await t.io.move(6, 90);
+});
+
+sc("hover-motion", "boards without playable sprites keep their hover boxes", {
+  covers: ["hover-motion:suppression"],
+  skip: { visual: "Checks the transient hover box directly." },
+}, async (t: T) => {
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [
+    hoverBoard("qa_named_board", 10000, [{ ...hoverLayer("qa_named_layer"), name: "boardHover" }]),
+    hoverBoard("qa_skipped_board", 10300, [
+      { ...hoverLayer("qa_skipped_layer"), motion: hoverSlide }, hoverLayer("qa_later_paint", 54),
+    ]),
+  ] });
+  await t.waitFor("window.canvasHost.boards.has('qa_skipped_board')", "the boards without playable sprites");
+  await t.focus("qa_named_board");
+  await moveToHoverTarget(t, "qa_named_layer");
+  const named = await hoverState(t);
+  await moveToHoverTarget(t, "qa_skipped_layer");
+  await t.waitFor(`window.__motion.skipped.some(s => s.id === "qa_skipped_layer" && s.reason === "overlaps later paint")`, "the motion track to be skipped");
+  t.eq({ named, skipped: await hoverState(t) }, {
+    named: { sprites: 0, outline: true }, skipped: { sprites: 0, outline: true },
+  }, "a layer name and skipped motion both leave the hover box visible");
+  await t.io.move(6, 90);
+});
+
+sc("hover-motion", "window visibility refreshes the hover box under a stationary pointer", {
+  covers: ["hover-motion:suppression"],
+  skip: { visual: "Checks the transient hover box directly." },
+}, async (t: T) => {
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [
+    hoverBoard("qa_window_board", 10000, [{ ...hoverLayer("qa_window_mover"), motion: hoverSlide }]),
+  ] });
+  await t.waitFor("window.canvasHost.boards.has('qa_window_board')", "the window visibility board");
+  await t.focus("qa_window_board");
+  await moveToHoverTarget(t, "qa_window_mover");
+  await t.waitFor("window.__motion.poses === 1", "the reduced motion pose to be presented");
+  t.eq(await hoverState(t), { sprites: 1, outline: false }, "playback hides the hover box");
+  await t.ev(`window.canvasCmd({cmd:"motionWindow",visible:false})`);
+  await t.frames();
+  t.eq(await hoverState(t), { sprites: 0, outline: true }, "hiding the window cancels playback and restores the hover box");
   await t.ev(`window.canvasCmd({cmd:"motionWindow",visible:true})`);
+  await t.waitFor("window.__motion.sprites === 1", "playback to resume when the window shows");
+  await t.frames();
+  t.eq(await hoverBoxVisible(t), false, "showing the window hides the hover box again");
+  await t.io.move(6, 90);
 });
 
 sc("hover-motion", "sprite playback preserves tiles, clip, paint order and rest pose", {

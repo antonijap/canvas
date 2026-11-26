@@ -2232,11 +2232,16 @@ function putBox(box, w) {
   // Too small on screen for handles (they hide; a press moves it): HANDLE_MIN_PX in /page/live-edit.js.
   if (box === selBox) box.classList.toggle("tiny", w.w * cam.z < 10 && w.h * cam.z < 10);
 }
+function placeHoverBox() {
+  const board = host.motion?.spriteBoard;
+  const suppressed = board && hovId && (hovId === board || ev?.boardOf(hovId) === board);
+  putBox(hovBox, suppressed ? null : hovWorld);
+}
 function placeOverlays() {
   putBox(selBox, selWorld);
   if (selWorld) selDim.textContent = badgeText(selWorld);
   placeMultiBoxes(); // each selected layer's own outline moves with the camera too
-  putBox(hovBox, hovWorld);
+  placeHoverBox();
   queueHover(); // what is under the pointer changes when the world moves under it
 }
 // Re-read the selected node from the live drawing, then place. Call when the selection or a drawing changes.
@@ -2337,20 +2342,17 @@ function queueHover() {
     hovFrame = 0;
     // An auto layout reorder drag (/page/autolayout.js) draws the layer at the pointer: no hover box chasing it a frame behind.
     if (gesturing || drag || mv || space || !ptr || (host.comments && host.comments.mode) || (host.autolayout && host.autolayout.dragging)) { clearHover(); return; }
-    const title = titleAt(ptr.x, ptr.y);
-    let motionBoard = null;
-    if (host.motion && prefs.playHoverMotion && ev?.engine.boardAt) {
-      const board = title || (document.elementFromPoint(ptr.x, ptr.y) === ev.canvas ? ev.engine.boardAt(ptr.x - VL, ptr.y - VT) : null);
+    if (host.motion && prefs.playHoverMotion && ev?.engine.boardAt && document.elementFromPoint(ptr.x, ptr.y) === ev.canvas) {
+      const board = ev.engine.boardAt(ptr.x - VL, ptr.y - VT);
       const r = board && boards.has(board) && ev.rect(board);
-      motionBoard = host.motion.hover(r && Math.min(r.w, r.h) * cam.z >= 48 ? board : null, ptr.time);
+      host.motion.hover(r && Math.min(r.w, r.h) * cam.z >= 48 ? board : null, ptr.time);
     } else host.motion?.hover(null);
-    const id = title || pickSelectable(ptr.x, ptr.y, false);
+    const id = titleAt(ptr.x, ptr.y) || pickSelectable(ptr.x, ptr.y, false);
     if (!id || isW(id) || (sel && id === sel.id)) { clearHover(); return; } // a card shows no hover box
-    if (motionBoard && (id === motionBoard || ev.boardOf(id) === motionBoard)) { clearHover(); return; }
     hovId = id;
     hovBox.classList.toggle("cmp", host.isCmp(id));
     hovWorld = worldRectOf(id);
-    putBox(hovBox, hovWorld);
+    placeHoverBox();
   });
 }
 view.addEventListener("pointermove", (e) => { ptr = { x: e.clientX, y: e.clientY, time: e.timeStamp }; if (!drag) queueHover(); });
@@ -2358,6 +2360,7 @@ view.addEventListener("pointerleave", () => { ptr = null; clearHover(); });
 view.addEventListener("pointerup", () => { if (ptr) queueHover(); });
 host.on("render", () => { if (ptr && !gesturing && !drag) queueHover(); });
 host.on("prefs", () => { if (ptr) queueHover(); });
+host.on("motionSprites", placeHoverBox);
 // Comment mode draws this outline itself (/page/comments.js), for the layer the comment would pin to.
 host.on("commentmode", (on) => { if (on) clearHover(); });
 // Working on the page shown makes it the one this viewer comes back to (see rememberPage).
@@ -4181,7 +4184,12 @@ window.canvasCmd = (c) => {
   if (c.insets && typeof c.insets.l === "number") { insets = { l: c.insets.l, t: c.insets.t, r: c.insets.r, b: c.insets.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); }
   if (c.cmd === "mods") { shellCmd = !!c.meta; cmdHeld = shellCmd; if (c.alt !== undefined && !!c.alt !== altHeld) setAltHeld(!!c.alt); return; }
   // The app shows or hides this page's tab (one web view per tab, apps/macos/Model.swift).
-  if (c.cmd === "motionWindow") { motionWindowVisible = !!c.visible; if (!motionWindowVisible) host.motion?.cancel(); else if (ptr) queueHover(); return; }
+  if (c.cmd === "motionWindow") {
+    motionWindowVisible = !!c.visible;
+    if (!motionWindowVisible) host.motion?.cancel();
+    if (ptr) queueHover();
+    return;
+  }
   if (c.cmd === "tab") { setTabShown(!!c.active); return; }
   if (c.cmd === "resync") { resync(); return; }
   if (c.cmd === "fit") c.id ? fit(c.id) : fitSelectionOrPage();
