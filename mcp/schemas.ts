@@ -19,5 +19,13 @@ export const motionAnimations = z.array(z.object({
   on: z.string().min(1),
   leave: z.string().min(1).optional().describe("reverse, reset or hold. Future names are kept with a warning."),
   origin: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]).optional(),
-  tracks: z.array(z.object({ prop: z.string(), to: z.number().optional() }).passthrough()).min(1).max(8),
+  tracks: z.array(z.object({
+    prop: z.string(),
+    to: z.number().optional(),
+    keys: z.array(z.object({
+      t: z.number().min(0).max(60000),
+      v: z.number(),
+      ease: z.unknown().optional().describe("Easing of the segment ending at this key."),
+    }).passthrough()).min(2).max(16).optional().describe("Strictly increasing times in ms. Use instead of from, to, delay, duration and ease."),
+  }).passthrough()).min(1).max(8),
 }).passthrough()).max(4);

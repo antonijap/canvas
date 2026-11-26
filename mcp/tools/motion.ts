@@ -7,7 +7,7 @@ import { renderNode } from "../render.ts";
 import * as S from "../schemas.ts";
 import { Raw, tool } from "../tool.ts";
 
-type Animation = { id: string; tracks: { delay?: number }[] };
+type Animation = { id: string; tracks: { delay?: number; keys?: { t: number; v: number }[] }[] };
 const enc = encodeURIComponent;
 const storedMotion = (node: DocNode) => (Array.isArray(node.motion) ? node.motion : []) as unknown as Animation[];
 const flush = (file: string) => api<{ fileRevision?: string | null }>("POST", "/api/flush", { file }, { timeoutMs: 30_000 });
@@ -16,13 +16,15 @@ export function mergeMotion(existing: Animation[], incoming: Animation[], remove
   const next = new Map(existing.map(a => [a.id, a]));
   for (const id of remove) next.delete(id);
   for (const a of incoming) {
-    next.set(a.id, delay ? { ...a, tracks: a.tracks.map(t => ({ ...t, delay: (t.delay ?? 0) + delay })) } : a);
+    next.set(a.id, delay ? { ...a, tracks: a.tracks.map(t => t.keys
+      ? { ...t, keys: t.keys.map(key => ({ ...key, t: key.t + delay })) }
+      : { ...t, delay: (t.delay ?? 0) + delay }) } : a);
   }
   return [...next.values()];
 }
 
 export function register(server: McpServer) {
-  tool(server, "set_motion", "Add or replace a layer's animations by id, or remove animation ids. nodeIds are in stagger order. Stagger adds milliseconds per layer to each supplied track's delay. One undo step. Read get_recipe with topic motion for examples.", {
+  tool(server, "set_motion", "Add or replace a layer's animations by id, or remove animation ids. nodeIds are in stagger order. Stagger offsets each track's delay or key times in milliseconds per layer. One undo step. Read get_recipe with topic motion for examples.", {
     file: S.file,
     nodeIds: z.array(z.string().min(1)).min(1).max(256),
     animations: S.motionAnimations.optional(),

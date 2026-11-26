@@ -69,3 +69,14 @@ test("future animation fields on an override stay opaque to Cloud component chec
   assert.ok(!isReject(result), JSON.stringify(result));
   assert.deepEqual(tree.node("instance")?.props.descendants, descendants);
 });
+
+test("Cloud applies sorted keyframes and refuses a mixed track without changing the document", () => {
+  const tree = seed();
+  const keys = [{ t: 0, v: 1 }, { t: 120, v: 0.5, ease: "easeOut" }, { t: 300, v: 0 }];
+  const motion = [{ id: "fade", on: "boardHover", tracks: [{ prop: "opacity", keys }] }];
+  const update = (v: NonNullable<FileOp & { k: "set" }>["props"][string]) => send(tree, [{ k: "set", id: "board", props: { motion: v } }]);
+  assert.ok(!isReject(update({ v: motion as import("../src/engine.ts").Json })));
+  const mixed = [{ ...motion[0], tracks: [{ prop: "opacity", to: 0, keys }] }];
+  assert.ok(isReject(update({ v: mixed as import("../src/engine.ts").Json })));
+  assert.deepEqual(tree.node("board")?.props.motion, motion);
+});

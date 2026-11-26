@@ -153,3 +153,60 @@ test("later backdrop blur samples outside its painted bounds, including in a nes
   assert.equal(plan(25).sprites.length, 1);
   assert.equal(plan(24, false).sprites.length, 1);
 });
+
+const keyed = {
+  prop: "translateX",
+  keys: [{ t: 20, v: 0 }, { t: 60, v: 100, ease: "easeInOut" }, { t: 120, v: 40 }],
+};
+
+test("keyframes validate their times, values and segment easing", () => {
+  const input = (t: object) => ({ ...node, motion: [{ ...animation, tracks: [t as Json] }] });
+  assert.deepEqual(validateNode(input(keyed)), []);
+  assert.deepEqual(unknownKeys(input(keyed)), []);
+  for (const invalid of [
+    { ...keyed, to: 40 }, { ...keyed, delay: 20 }, { ...keyed, ease: "linear" },
+    { ...keyed, keys: [] }, { ...keyed, keys: Array.from({ length: 17 }, (_, t) => ({ t, v: 0 })) },
+    { ...keyed, keys: [{ t: 20, v: 1 }, { t: 20, v: 2 }] },
+    { ...keyed, keys: [{ t: 2, v: 1 }, { t: 1, v: 2 }] },
+    { ...keyed, keys: [{ t: -1, v: 1 }, { t: 2, v: 2 }] },
+    { ...keyed, keys: [{ t: 0, v: 1 }, { t: 60001, v: 2 }] },
+    { ...keyed, keys: [{ t: 0, v: 1 }, { t: 2, v: 2, ease: false }] },
+    { ...keyed, prop: "opacity" },
+  ]) assert.ok(validateNode(input(invalid)).length, JSON.stringify(invalid));
+});
+
+test("keyframe playback matches golden poses and retraces intermediate keys on leave", () => {
+  const vectors = JSON.parse(fs.readFileSync(new URL("./fixtures/motion.json", import.meta.url), "utf8"));
+  for (const { track, samples } of vectors.keyframes) {
+    const motion = compileMotion([{ ...animation, tracks: [track] }]);
+    for (const [time, value] of samples) near(motionPose(motion, time).values.translateX!, value);
+  }
+  const motion = compileMotion([{ ...animation, tracks: [{ ...keyed, repeat: 1, alternate: true }] }]);
+  const pose = motionPose(motion, 90);
+  assert.equal(pose.values.translateX, 70);
+  near(motionPose(motion, 30, { leave: pose }).values.translateX!, 100);
+  assert.equal(motionPose(motion, 70, { leave: pose }).values.translateX, 0);
+  const turning = motionPose(motion, 150);
+  assert.equal(turning.values.translateX, 70);
+  const exit = motionPose(motion, 20, { leave: turning });
+  assert.equal(motionPose(motion, 0, { enter: exit }).values.translateX, exit.values.translateX);
+  assert.equal(motionPose(motion, 220).values.translateX, 0);
+  for (const leave of ["reset", "hold"]) {
+    const compiled = compileMotion([{ ...animation, leave, tracks: [keyed] }]);
+    assert.equal(motionPose(compiled, 20, { leave: pose }).values.translateX, leave === "hold" ? 70 : 0);
+  }
+});
+
+test("sprite lift bounds include a keyframe that goes past both ends", () => {
+  const moving = { id: "moving", motion: [{ ...animation, tracks: [{
+    prop: "translateX", keys: [{ t: 0, v: 0 }, { t: 100, v: 100 }, { t: 200, v: 0 }],
+  }] }] };
+  const later = { id: "later" };
+  const root = { id: "board", children: [moving, later] };
+  const plan = planMotion(root, n => {
+    const box = n === root ? { x: 0, y: 0, w: 200, h: 30 }
+      : { x: n.id === "later" ? 95 : 10, y: 0, w: 20, h: 20 };
+    return { box, ink: box };
+  });
+  assert.deepEqual(plan.skipped, [{ id: "moving", reason: "overlaps later paint" }]);
+});

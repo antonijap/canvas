@@ -1082,6 +1082,18 @@ test("motion tools replace, stagger, warn and render through the shared edit pat
   const recipe = await call("get_recipe", { topic: "motion" });
   assert.match(recipe.text, /staggerChildren/);
   assert.match(recipe.text, /interpolatingSpring/);
+  assert.match(recipe.text, /sixteen keys/);
+  const keys = [{ t: 0, v: 0 }, { t: 150, v: 30, ease: "easeOut" }, { t: 300, v: 52 }];
+  const keyed = [{ id: "slide", on: "boardHover", tracks: [{ prop: "translateY", keys }] }];
+  const changed = await call("set_motion", { link, animations: keyed, stagger: 70 });
+  assert.equal(changed.isError, false, changed.text);
+  const keyedList = await call("get_motion", { file: motionFile, nodeId: "motion-board" });
+  assert.deepEqual(keyedList.json.nodes[0].animations, keyed);
+  assert.deepEqual(keyedList.json.nodes[1].animations[0].tracks[0], {
+    prop: "translateY", keys: keys.map(key => ({ ...key, t: key.t + 70 })),
+  });
+  const mixed = await call("set_motion", { link, animations: [{ ...keyed[0], tracks: [{ ...keyed[0].tracks[0], delay: 2 }] }] });
+  assert.equal(mixed.isError, true);
   const hasChrome = (() => { try { chromePath(); return true; } catch { return false; } })();
   if (hasChrome) {
     const film = await call("render_motion", { file: motionFile, nodeId: "motion-board", frames: [0, 90, 180, 300] });

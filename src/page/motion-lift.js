@@ -42,14 +42,17 @@ function insideRounded(bounds, clip, radius) {
 // Sample each track independently. Combining the ranges also covers tracks with different delays or periods.
 export function motionEnvelope(compiled, pivot, ink) {
   const ranges = {}, low = {}, high = {};
-  for (const { prop, from, to, rest, ease } of compiled.tracks) {
+  for (const { prop, from, to, rest, ease, segments } of compiled.tracks) {
     if (prop === "opacity") continue;
     let lo = Math.min(from, to, rest), hi = Math.max(from, to, rest);
-    for (let i = 1; i < 64; i++) {
-      const t = ease(i / 64);
-      for (const [a, b] of [[from, to], [rest, to]]) {
-        const n = a + (b - a) * t;
-        lo = Math.min(lo, n); hi = Math.max(hi, n);
+    const spans = segments ?? [{ from, to, ease }];
+    for (const [index, span] of spans.entries()) {
+      lo = Math.min(lo, span.to); hi = Math.max(hi, span.to);
+      for (let i = 1; i < 64; i++) {
+        const p = span.ease(i / 64);
+        const n = span.from + (span.to - span.from) * p;
+        const resumed = index === 0 ? rest + (span.to - rest) * p : n;
+        lo = Math.min(lo, n, resumed); hi = Math.max(hi, n, resumed);
       }
     }
     ranges[prop] = [lo, hi]; low[prop] = lo; high[prop] = hi;

@@ -69,6 +69,39 @@ export function springCurve(spring) {
   return { duration: ms, sample: t => t >= ms ? 1 : 1 - displacement(duration === undefined ? t / 1000 : t / ms * hi) };
 }
 
+const springEase = ease => ease?.spring && typeof ease.spring === "object" ? springCurve(ease.spring) : null;
+export function segmentEase(ease, curve = springEase(ease)) {
+  return curve ? p => curve.sample(p * curve.duration) : easeCurve(ease);
+}
+
+const restValue = (prop, opacity) => prop === "opacity" ? finite(opacity, 1) : prop.startsWith("scale") ? 1 : 0;
+const trackDelay = track => clamp(finite(track.delay, 0), 0, 10000);
+const trackDuration = (track, spring) => clamp(finite(track.duration, spring?.duration ?? 300), 0, 60000);
+
+export function motionTrackKeys(track, opacity = 1) {
+  if (Array.isArray(track.keys)) return track.keys;
+  const rest = restValue(track.prop, opacity), delay = trackDelay(track);
+  return [{ t: delay, v: finite(track.from, rest) }, {
+    t: delay + trackDuration(track, springEase(track.ease)), v: finite(track.to, rest), ease: track.ease,
+  }];
+}
+
+function compileKeys(keys) {
+  if (!Array.isArray(keys) || keys.length < 2 || keys.length > 16 ||
+      keys.some((k, i) => !Number.isFinite(k?.t) || !Number.isFinite(k?.v) || k.t < 0 || k.t > 60000 || (i && k.t <= keys[i - 1].t))) return null;
+  const delay = keys[0].t, duration = keys.at(-1).t - delay;
+  const segments = keys.slice(1).map((key, i) => ({
+    from: keys[i].v, to: key.v, start: (keys[i].t - delay) / duration,
+    end: (key.t - delay) / duration, ease: segmentEase(key.ease),
+  }));
+  return { delay, duration, segments };
+}
+
+function sampleKeys(segments, q) {
+  const segment = segments.find(s => q <= s.end) ?? segments.at(-1);
+  return mix(segment.from, segment.to, segment.ease(clamp((q - segment.start) / (segment.end - segment.start))));
+}
+
 export function compileMotion(animations, opacity = 1) {
   // Later declarations of the same property win. Each animation can set its own pivot.
   const tracks = new Map();
@@ -78,14 +111,13 @@ export function compileMotion(animations, opacity = 1) {
     for (const track of animation.tracks.slice(0, 8)) {
       if (!motionProps.includes(track?.prop) || (track.to !== undefined && !Number.isFinite(track.to))) continue;
       const { prop, ease } = track;
-      const spring = ease?.spring;
-      const curve = spring && typeof spring === "object" ? springCurve(spring) : null;
-      const duration = clamp(finite(track.duration, finite(curve?.duration, 300)), 0, 60000);
-      const rest = prop === "opacity" ? finite(opacity, 1) : prop.startsWith("scale") ? 1 : 0;
+      const keyed = compileKeys(track.keys);
+      if (track.keys !== undefined && !keyed) continue;
+      const rest = restValue(prop, opacity), spring = springEase(ease);
       tracks.set(prop, {
-        prop, rest, from: finite(track.from, rest), to: finite(track.to, rest), duration,
-        delay: clamp(finite(track.delay, 0), 0, 10000),
-        ease: curve ? p => curve.sample(p * curve.duration) : easeCurve(ease),
+        prop, rest, from: keyed ? track.keys[0].v : finite(track.from, rest), to: keyed ? track.keys.at(-1).v : finite(track.to, rest),
+        duration: keyed?.duration ?? trackDuration(track, spring), delay: keyed?.delay ?? trackDelay(track),
+        ease: segmentEase(ease, spring), ...(keyed && { segments: keyed.segments }),
         cycles: track.repeat === "infinite" ? Infinity : 1 + Math.max(0, finite(track.repeat, 0)),
         alternate: track.alternate === true, leave: animation.leave ?? "reverse",
       });
@@ -106,24 +138,31 @@ export function motionPose(motion, elapsed, { leave, enter, end } = {}) {
   const values = {}, progress = {};
   let done = true, held = false;
   for (const track of motion.tracks) {
-    const { prop, rest, from, to, duration, delay, cycles, ease, alternate } = track;
+    const { prop, rest, from, to, duration, delay, cycles, ease, alternate, segments } = track;
     if (end) {
       values[prop] = to;
       progress[prop] = 1;
     } else if (leave) {
       const start = leave.values[prop] ?? rest;
-      const displayedProgress = leave.progress[prop] || 1;
-      const time = start === rest ? 0 : Math.max(1, duration * displayedProgress);
+      const displayedProgress = segments ? leave.progress[prop] ?? 0 : leave.progress[prop] || 1;
+      const time = segments
+        ? (displayedProgress || start !== rest ? Math.max(1, duration * (displayedProgress || segments[0].end)) : 0)
+        : (start === rest ? 0 : Math.max(1, duration * displayedProgress));
       const p = time > 0 ? clamp(elapsed / time) : 1;
+      const q = displayedProgress * (1 - p);
       if (track.leave === "hold") {
         values[prop] = start;
         held ||= start !== rest;
       } else if (track.leave === "reset") values[prop] = rest;
       else {
-        values[prop] = mix(rest, start, ease(1 - p));
-        done &&= p === 1 || start === rest;
+        if (segments && p < 1) {
+          const correction = start - sampleKeys(segments, displayedProgress);
+          const restOffset = (rest - from) * (1 - clamp(q / segments[0].end));
+          values[prop] = sampleKeys(segments, q) + correction * (1 - p) + restOffset * p;
+        } else values[prop] = segments ? rest : mix(rest, start, ease(1 - p));
+        done &&= p === 1 || (!segments && start === rest);
       }
-      progress[prop] = 1 - p;
+      progress[prop] = segments ? q : 1 - p;
     } else {
       const time = elapsed - (enter ? 0 : delay);
       const full = time >= 0 && (duration === 0 || time >= cycles * duration);
@@ -131,7 +170,9 @@ export function motionPose(motion, elapsed, { leave, enter, end } = {}) {
       const p = full ? 1 : time > 0 ? time / duration - cycle : 0;
       const q = alternate && cycle % 2 === 1 ? 1 - p : p;
       const start = cycle === 0 ? (enter?.values[prop] ?? from) : from;
-      values[prop] = mix(start, to, ease(q));
+      values[prop] = segments
+        ? sampleKeys(segments, q) + (start - from) * (1 - clamp(q / segments[0].end))
+        : mix(start, to, ease(q));
       progress[prop] = q;
       done &&= full;
     }
