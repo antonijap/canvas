@@ -616,107 +616,33 @@ struct TopBar: View {
 
 // MARK: Left
 
-/// Watches the pointer for SidebarPeek. A tracking area over the whole window that takes no clicks: the edge strip
-/// never gets in the way of the canvas. While the sidebar peeks, a timer checks where the pointer is and whether the
-/// sidebar is in use.
+/// Watches the pointer for SidebarPeek: SidebarPeekTracker.swift.
 private struct SidebarPeekTracker: NSViewRepresentable {
     let model: CanvasModel
     let canPeek: Bool
     let width: CGFloat
 
-    func makeNSView(context: Context) -> TrackerView { TrackerView() }
-    func updateNSView(_ v: TrackerView, context: Context) {
-        v.model = model
+    func makeNSView(context: Context) -> SidebarPeekTrackerView {
+        let v = SidebarPeekTrackerView()
+        v.top = Metric.topBar
+        v.holdWidth = Metric.trafficLights + 2 * Metric.toolbarControl + 24
+        return v
+    }
+    func updateNSView(_ v: SidebarPeekTrackerView, context: Context) {
+        v.peek = { [weak model] in model?.sidebarPeek ?? SidebarPeek() }
+        v.setPeek = { [weak model] in model?.sidebarPeek = $0 }
+        v.heldElsewhere = { [weak model] in
+            guard let model else { return false }
+            #if CANVAS_QA
+            if model.qaPeekHeld { return true }
+            #endif
+            return model.sidebarMenuOpen || model.resizingSidebar
+        }
         v.canPeek = canPeek
         v.panelWidth = width
         v.watch(model.sidebarPeek.shown)
     }
-    static func dismantleNSView(_ v: TrackerView, coordinator: ()) { v.watch(false) }
-
-    final class TrackerView: NSView {
-        weak var model: CanvasModel?
-        var canPeek = false
-        var panelWidth: CGFloat = 0
-        private var tracking: NSTrackingArea?
-        private var timer: Timer?
-        private var menuOpen = false
-        private var buttonWasDown = false
-        private var pressedInside = false
-
-        override var isFlipped: Bool { true }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-        override init(frame: NSRect) {
-            super.init(frame: frame)
-            NotificationCenter.default.addObserver(self, selector: #selector(menuBegan), name: NSMenu.didBeginTrackingNotification, object: nil)
-            NotificationCenter.default.addObserver(self, selector: #selector(menuEnded), name: NSMenu.didEndTrackingNotification, object: nil)
-        }
-        @available(*, unavailable)
-        required init?(coder: NSCoder) { fatalError() }
-
-        @objc private func menuBegan() { menuOpen = true }
-        @objc private func menuEnded() { menuOpen = false }
-
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            if let tracking { removeTrackingArea(tracking) }
-            let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-                                      owner: self, userInfo: nil)
-            addTrackingArea(area)
-            tracking = area
-        }
-
-        override func mouseEntered(with event: NSEvent) { moved(event) }
-        override func mouseMoved(with event: NSEvent) { moved(event) }
-
-        private func moved(_ event: NSEvent) {
-            guard let model, !model.sidebarPeek.shown else { return }
-            let p = convert(event.locationInWindow, from: nil)
-            var peek = model.sidebarPeek
-            peek.moved(x: p.x, y: p.y, top: Metric.topBar,
-                       allowed: canPeek && NSEvent.pressedMouseButtons == 0 && window?.attachedSheet == nil)
-            if peek.shown { model.sidebarPeek = peek }
-        }
-
-        func watch(_ on: Bool) {
-            if !on {
-                timer?.invalidate()
-                timer = nil
-                buttonWasDown = false
-            } else if timer == nil {
-                let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.tick() }
-                }
-                // Common modes: it keeps counting while a menu or a drag runs its own loop.
-                RunLoop.main.add(t, forMode: .common)
-                timer = t
-            }
-        }
-
-        private func tick() {
-            guard let model, let window else { return }
-            let p = convert(window.mouseLocationOutsideOfEventStream, from: nil)
-            // The whole height counts, so the pointer can travel up to the toggle in the title bar.
-            let inside = bounds.contains(p) && p.x <= max(panelWidth, Metric.trafficLights + 2 * Metric.toolbarControl + 24)
-            // Only a press that began on the sidebar holds it; a drag on the canvas does not.
-            let down = NSEvent.pressedMouseButtons != 0
-            if down && !buttonWasDown { pressedInside = inside }
-            buttonWasDown = down
-            var held = menuOpen || window.attachedSheet != nil || model.sidebarMenuOpen || model.resizingSidebar
-                || (down && pressedInside)
-            // A name or search field being typed in on the sidebar.
-            if let field = window.firstResponder as? NSTextView {
-                let f = convert(field.visibleRect, from: field)
-                if f.midX <= panelWidth && f.midY >= Metric.topBar { held = true }
-            }
-            #if CANVAS_QA
-            if model.qaPeekHeld { held = true }
-            #endif
-            var peek = model.sidebarPeek
-            peek.tick(inside: inside, held: held, allowed: canPeek, now: ProcessInfo.processInfo.systemUptime)
-            if peek != model.sidebarPeek { model.sidebarPeek = peek }
-        }
-    }
+    static func dismantleNSView(_ v: SidebarPeekTrackerView, coordinator: ()) { v.stop() }
 }
 
 private struct SidebarToggleButton: View {
