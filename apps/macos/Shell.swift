@@ -736,8 +736,8 @@ struct LeftColumn: View {
                 column(width: width)
                     .background(alignment: .trailing) {
                         if floating {
-                            LinearGradient(colors: [.black.opacity(0.16), .clear], startPoint: .leading, endPoint: .trailing)
-                                .frame(width: 14).offset(x: 14)
+                            LinearGradient(colors: [.black.opacity(0.05), .clear], startPoint: .leading, endPoint: .trailing)
+                                .frame(width: 10).offset(x: 10)
                                 .allowsHitTesting(false)
                         }
                     }
@@ -745,7 +745,7 @@ struct LeftColumn: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: panelWidth != nil)
+        .animation(reduceMotion ? nil : .easeOut(duration: floating ? 0.12 : 0.2), value: panelWidth != nil)
         .onChange(of: panelWidth != nil) { _, shown in
             if !shown { model.sidebarMenuOpen = false; closeSearch() }
         }
