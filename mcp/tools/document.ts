@@ -5,6 +5,7 @@ import { z } from "zod";
 import { api, cmd, ensureServer, resolveFile, ToolError } from "../client.ts";
 import * as S from "../schemas.ts";
 import { tool } from "../tool.ts";
+import { ownMotionCount } from "../../src/summary.ts";
 import { variableEdit } from "../../src/doc/variables.ts";
 
 const enc = encodeURIComponent;
@@ -22,7 +23,7 @@ export async function renderedFor(ids: string[], file: string, client?: string):
 }
 
 export function register(server: McpServer) {
-  tool(server, "get_document_summary", "One screenful about a Canvas file: boards (position, size, node counts), components, variables, themes, fonts in use, revision. Works with Canvas closed. Start here.", { file: S.file }, async (a) => {
+  tool(server, "get_document_summary", "One screenful about a Canvas file: boards (position, size, node and animation counts), components, variables, themes, fonts in use, revision. Works with Canvas closed. Start here.", { file: S.file }, async (a) => {
     await ensureServer();
     return api("GET", `/api/summary?file=${enc(await resolveFile(a.file))}`);
   }, { readOnlyHint: true });
@@ -81,7 +82,7 @@ export function register(server: McpServer) {
     return r;
   }, { readOnlyHint: true });
 
-  tool(server, "inspect_node", "Full JSON of one node (children cut off below depth), its parent, and its revision. Omit id to inspect the node selected in Canvas. includeRendered adds its on-screen box.", {
+  tool(server, "inspect_node", "Full JSON of one node (children cut off below depth), its parent, motionCount, and its revision. Omit id to inspect the node selected in Canvas. includeRendered adds its on-screen box.", {
     file: S.file,
     id: z.string().optional().describe("Node id or instance path; default: the current selection"),
     depth: S.depth,
@@ -98,7 +99,7 @@ export function register(server: McpServer) {
     }
     file = await resolveFile(file);
     const n = await api<any>("GET", `/api/node?file=${enc(file)}&id=${enc(id)}&depth=${a.depth ?? 4}`);
-    const out: any = { id, ...n };
+    const out: any = { id, ...n, motionCount: ownMotionCount(n.resolved ?? n.node) };
     if (a.includeRendered) {
       const { boxes, note } = await renderedFor([id], file);
       out.rendered = boxes[id] ?? null;

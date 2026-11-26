@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 
-export const topics = ['taste', 'feed', 'onboarding', 'permission', 'paywall', 'settings', 'profile', 'search', 'checkout', 'website', 'dashboard', 'checks', 'all'] as const;
+export const topics = ['taste', 'feed', 'onboarding', 'permission', 'paywall', 'settings', 'profile', 'search', 'checkout', 'website', 'dashboard', 'motion', 'checks', 'all'] as const;
 export type Topic = typeof topics[number];
+const motion = fs.readFileSync(new URL('./motion.md', import.meta.url), 'utf8');
 const rules = fs.readFileSync(new URL('./rules.md', import.meta.url), 'utf8');
 const taste = rules.slice(rules.indexOf('## Taste'), rules.indexOf('## 1.'));
 const supporting = rules.slice(rules.indexOf('## 3.'), rules.indexOf('## 5.'));
@@ -10,7 +11,8 @@ const recipes = rules.slice(rules.indexOf('### 6.1 '), rules.indexOf('## 7.')).s
 const lines = rules.split('\n').filter(l => /^- `R-/.test(l));
 
 export function getRecipe(topic: Topic = 'all'): string {
-  if (topic === 'all') return rules;
+  if (topic === 'motion') return motion;
+  if (topic === 'all') return rules + '\n' + motion;
   if (topic === 'taste') return taste;
   if (topic === 'checks') return taste + checks;
   const recipe = recipes[topics.indexOf(topic) - 1];

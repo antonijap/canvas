@@ -91,7 +91,7 @@ after(async () => {
 });
 
 const TOOLS = [
-  "get_recipe", "insert_component", "add_image", "check_design",
+  "get_recipe", "insert_component", "add_image", "check_design", "set_motion", "get_motion", "render_motion",
   "list_clouds", "list_cloud_files", "create_cloud_file",
   "canvas_status", "launch_canvas", "list_tabs", "open_file", "close_tab", "get_current_file", "get_theme", "set_theme",
   "get_document_summary", "set_variables", "get_fonts", "list_installed_fonts", "lookup_nodes", "inspect_node",
@@ -1055,4 +1055,47 @@ describe("canvas:// links (Cmd+L)", () => {
     await call("select_nodes", { link: link(["Ttl01"]), ids: ["Scr02"] });
     assert.deepEqual(p.cmds[2].args.ids, ["Scr02"]);
   });
+});
+
+test("motion tools replace, stagger, warn and render through the shared edit path", async () => {
+  const motionFile = path.join(dir, "motion.canvas.json");
+  fs.writeFileSync(motionFile, JSON.stringify({ version: "2.23", children: [{
+    id: "motion-board", type: "frame", name: "Motion", layout: "none", width: 200, height: 120, fill: "#111827",
+    children: [
+      { id: "marker-left", type: "rectangle", name: "Left marker", x: 20, y: 20, width: 24, height: 24, fill: "#34D399" },
+      { id: "marker-right", type: "rectangle", name: "Right marker", x: 120, y: 20, width: 24, height: 24, fill: "#FB923C" },
+    ],
+  }] }));
+  const animations = [{ id: "slide", on: "boardHover", tracks: [{ prop: "translateY", to: 52, duration: 300, future: true }] }];
+  const link = buildLink({ file: motionFile, nodes: ["marker-left", "marker-right"] });
+  const added = await call("set_motion", { link, animations, stagger: 70 });
+  assert.equal(added.isError, false, added.text);
+  assert.equal(added.json.warnings.length, 2);
+  const listed = await call("get_motion", { file: motionFile, nodeId: "motion-board" });
+  assert.equal(listed.json.count, 2, listed.text);
+  assert.equal(listed.json.nodes[1].animations[0].tracks[0].delay, 70);
+  const inspected = await call("inspect_node", { file: motionFile, id: "marker-left" });
+  assert.equal(inspected.json.motionCount, 1, inspected.text);
+  const summary = await call("get_document_summary", { file: motionFile });
+  assert.equal(summary.json.counts.animations, 2, summary.text);
+  assert.equal(summary.json.boards[0].animations, 2);
+  const recipe = await call("get_recipe", { topic: "motion" });
+  assert.match(recipe.text, /staggerChildren/);
+  assert.match(recipe.text, /interpolatingSpring/);
+  const hasChrome = (() => { try { chromePath(); return true; } catch { return false; } })();
+  if (hasChrome) {
+    const film = await call("render_motion", { file: motionFile, nodeId: "motion-board", frames: [0, 90, 180, 300] });
+    assert.equal(film.isError, false, film.text);
+    const png = film.content.find((c: any) => c.type === "image");
+    assert.equal(png?.mimeType, "image/png");
+    if (process.env.CANVAS_MOTION_EVIDENCE) fs.writeFileSync(process.env.CANVAS_MOTION_EVIDENCE, Buffer.from(png.data, "base64"));
+  }
+  const duplicate = await call("set_motion", { file: motionFile, nodeIds: ["marker-left"], animations: [...animations, ...animations] });
+  assert.equal(duplicate.isError, true);
+  await call("finish_work", { file: motionFile, sound: false });
+  const removed = await call("set_motion", { file: motionFile, nodeIds: ["marker-left", "marker-right"], remove: ["slide"] });
+  assert.deepEqual(removed.json.counts, [0, 0], removed.text);
+  const undone = await call("undo", { file: motionFile });
+  assert.equal(undone.isError, false, undone.text);
+  assert.equal((await call("get_motion", { file: motionFile, nodeId: "motion-board" })).json.count, 2);
 });

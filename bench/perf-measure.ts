@@ -15,6 +15,8 @@ import { gpuWarm, measureOpen, NATIVE_APP, openSeven } from "./native-open.ts";
 import { measureOpeningPicture } from "./native-opening-picture.ts";
 import { INSTRUMENT } from "./page.ts";
 import { startHost } from "./server.ts";
+import { motionFixture } from "./fixtures/motion.ts";
+import { openMotion, hoverMotion, idleMotion } from "./motion.ts";
 import { NATIVE_METRICS, type Metric } from "./perf-budgets.ts";
 
 export const hasNativeBuild = () => process.platform === "darwin" && fs.existsSync(path.join(NATIVE_APP, "Contents/MacOS/Canvas"));
@@ -35,7 +37,7 @@ export function measurements(imageSeedDir?: string) {
     let host: Awaited<ReturnType<typeof startHost>> | undefined;
     let tab: Tab | undefined;
     try {
-      const f = scratchCopy(fixture(large ? 2000 : 200), dir);
+      const f = id === "hover-motion-frames" ? { dir: motionFixture(dir, true), heroBoards: [] } : scratchCopy(fixture(large ? 2000 : 200), dir);
       const port = await freePort();
       // Browser startup is outside the file-open measurement.
       if (id !== "server-memory") tab = new Tab(await openTab((await browser()).port));
@@ -58,6 +60,11 @@ export function measurements(imageSeedDir?: string) {
         const doc = await response.json();
         if (!response.ok || !doc) throw new Error(`document request returned ${response.status}`);
         return (await host.stats(true)).heapUsed / 2 ** 20;
+      }
+      if (id === "hover-motion-frames") {
+        await openMotion(tab!, base, file);
+        await idleMotion(tab!);
+        return (await hoverMotion(tab!)).p95;
       }
       await tab!.open(base, file, "page-1", id === "open-2000" ? 0 : 60_000);
       if (id === "open-2000") {

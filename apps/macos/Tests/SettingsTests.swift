@@ -73,13 +73,13 @@ struct SettingsTests {
         check(s.snapshotMB == 200, "200 MB of snapshots")
         check(s.runCapMin == 10, "runs stop after 10 minutes")
         check(s.claudeModel.isEmpty && s.claudeEffort.isEmpty && s.codexModel.isEmpty && s.codexEffort.isEmpty, "each agent runs its own default model")
-        check(s.boardLabels && s.openView == .restore && !s.scrollZooms, "canvas defaults")
+        check(s.boardLabels && s.playHoverMotion && s.openView == .restore && !s.scrollZooms, "canvas defaults")
     }
 
     static func roundTrip() {
         let d = fresh()
         var s = AppSettings()
-        s.openView = .fit; s.scrollZooms = true; s.boardLabels = false
+        s.openView = .fit; s.scrollZooms = true; s.boardLabels = false; s.playHoverMotion = false
         s.harness = .codex; s.agentCursor = false; s.cursorSpeed = .fast; s.runCapMin = 25
         s.setModel(.claude, "opus"); s.setEffort(.claude, "high"); s.setModel(.codex, "gpt-a"); s.setEffort(.codex, "xhigh")
         s.finishSound = false; s.soundVolume = 0.3; s.keptTabs = 5; s.snapshotMB = 400; s.commentName = "Ana Test"

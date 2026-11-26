@@ -93,6 +93,13 @@
           "tolerance": 0.46712619300106045,
           "date": "2026-11-22",
           "commit": "3493f317e9837177a1d234f705e68a7545e7037c"
+        },
+        "hover-motion-frames": {
+          "value": 17.5,
+          "spread": 0.045714285714285756,
+          "tolerance": 0.09142857142857151,
+          "date": "2026-11-26",
+          "commit": "6c58eef53c56ec97f9272210dcb77e26e442dbe6"
         }
       }
     }

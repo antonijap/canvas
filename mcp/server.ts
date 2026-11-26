@@ -23,6 +23,7 @@ import { register as layout } from "./tools/layout.ts";
 import { register as variations } from "./tools/variations.ts";
 import { register as links } from "./tools/links.ts";
 import { register as design } from "./tools/design.ts";
+import { register as motion } from "./tools/motion.ts";
 import { register as comments } from "./tools/comments.ts";
 
 process.on("unhandledRejection", (e) => process.stderr.write(`[canvas-mcp] ${e}\n`));
@@ -59,7 +60,7 @@ const server = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS });
 // "Connected" on the Welcome card and in Settings > Agents.
 server.server.oninitialized = () => { setAgentName(server.server.getClientVersion()?.name); sayHello(); };
 
-for (const r of [app, document, selection, camera, visuals, edits, structure, layout, widgets, shaders, videos, pages, ux, variations, links, comments, design]) r(server);
+for (const r of [app, document, selection, camera, visuals, edits, structure, layout, widgets, shaders, videos, pages, ux, variations, links, comments, design, motion]) r(server);
 
 server.registerResource("state", "canvas://state", { title: "Canvas state", description: "Server, app, open pages and the current selection", mimeType: "application/json" }, async (uri) => {
   if (background()) {

@@ -299,6 +299,7 @@ final class BridgeClient {
   }
 
   private func stateChanged() {
+    model.run("{cmd:'motionWindow',visible:\(windowVisible)}")
     pending?.cancel()
     pending = Task { [weak self] in
       try? await Task.sleep(nanoseconds: 100_000_000)

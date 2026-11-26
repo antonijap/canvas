@@ -7,6 +7,7 @@ import * as S from '../schemas.ts';
 import { getRecipe, topics } from '../recipe/index.ts';
 import { componentPlan, id, statusBar, walk, type Node } from '../design/components.ts';
 import { copyImage, badgeImage } from '../design/media.ts';
+import { planMotion } from "../../src/page/motion-lift.js";
 import { checkDesign } from '../design/checks.ts';
 
 async function snapshot(file:string) {
@@ -21,7 +22,18 @@ export async function designIssues(file?:string,boards?:string[]) {
   const pageList=await api<any>('GET','/api/pages?file='+encodeURIComponent(f));
   const pages:Record<string,string>={};
   for(const p of pageList.pages ?? []) for(const b of p.boards ?? []) pages[b]=p.id;
-  return checkDesign(doc,boards,boxes,pages);
+  const issues = checkDesign(doc,boards,boxes,pages);
+  for (const root of roots) {
+    if (boards && !boards.includes(String(root.id))) continue;
+    const { skipped } = planMotion(root, n => {
+      const r = boxes[String(n.id)];
+      if (!r) return;
+      const box = { x: r.pageX, y: r.pageY, w: r.width, h: r.height };
+      return { box, ink: box };
+    });
+    for (const { id, reason } of skipped) issues.push({ rule: "motion-lift", nodeId: id, message: `Hover animation skipped: ${reason}.` });
+  }
+  return issues;
 }
 async function add(file:string,nodes:Node[],parent?:string) {
   return api<any>('POST','/api/structure',{file,op:'add',nodes,place:{parent:parent ?? null}});

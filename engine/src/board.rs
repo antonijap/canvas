@@ -64,6 +64,9 @@ pub struct Board {
     /// Parked (a page not shown): kept laid out, with whatever textures the caches still hold, but not drawn,
     /// hit-tested or listed in view, so going back to its page needs no layout, decode or render.
     pub hidden: bool,
+    /// Transient sprite boards paint above their owner and are ignored by hit testing.
+    pub sprite: Option<(String, Option<Rect>)>,
+    pub transform: Option<([f64; 6], f32)>,
     /// Per node (board space): what it and its subtree draw (`Painted::node_ink`).
     pub node_ink: Vec<Rect>,
     /// What each recent generation changed (board space), newest last: None when it may have changed anything.
@@ -137,6 +140,8 @@ impl Board {
             layout_ms: t1 - t0,
             paint_ms: t2 - t1,
             hidden: false,
+            sprite: None,
+            transform: None,
             node_ink: painted.node_ink,
             dirty_log: VecDeque::new(),
             fills: painted.fills,

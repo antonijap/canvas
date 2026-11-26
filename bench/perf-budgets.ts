@@ -8,6 +8,7 @@ export const UNITS = {
   "open-warm-7": "ms",
   "server-memory": "MiB",
   "drag-frames": "ms",
+  "hover-motion-frames": "ms",
   "pan-zoom-frames": "ms",
   "edit-latency": "ms",
   "native-launch": "ms",

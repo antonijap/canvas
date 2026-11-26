@@ -12,3 +12,12 @@ export const timeoutMs = (max: number, def: number) => z.number().int().min(100)
 export const themeMode = z.enum(["light", "dark", "system"]);
 export const highlightStyle = z.enum(["pulse", "outline", "flash"]);
 export const toastLevel = z.enum(["info", "success", "warn", "error"]);
+
+// The document validator checks known track fields and keeps fields from newer versions.
+export const motionAnimations = z.array(z.object({
+  id: z.string().min(1),
+  on: z.string().min(1),
+  leave: z.enum(["reverse", "reset", "hold"]).optional(),
+  origin: z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)]).optional(),
+  tracks: z.array(z.object({ prop: z.string(), to: z.number().optional() }).passthrough()).min(1).max(8),
+}).passthrough()).max(4);

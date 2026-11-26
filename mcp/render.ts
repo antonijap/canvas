@@ -4,6 +4,7 @@
 // shows is on disk (`settle`, POST /api/flush) and draws only bytes whose hash is that state's file revision.
 
 import { buildIndex, defaultTheme, expand, findNode, loadDoc, resolveDocPath, revisionOf, screenshots, stateHashOf, warmRenderer, type LoadedDoc, type DocNode } from "../src/engine.ts";
+import { motionStrip } from "../src/doc/render/index.ts";
 import { ToolError } from "./client.ts";
 
 export type RenderOpts = {
@@ -32,7 +33,7 @@ async function loadSettled(o: RenderOpts): Promise<LoadedDoc> {
   }
 }
 
-export async function renderNode(o: RenderOpts): Promise<{ image: Buffer; mime: string; id: string; warnings: string[] }> {
+export async function renderNode(o: RenderOpts & { motionTimes?: number[] }): Promise<{ image: Buffer; mime: string; id: string; warnings: string[] }> {
   const loaded = await loadSettled(o);
   const doc = loaded.doc;
   const id = o.id ?? String(doc.children[0]?.id ?? "");
@@ -47,10 +48,12 @@ export async function renderNode(o: RenderOpts): Promise<{ image: Buffer; mime: 
   }
   const warnings: string[] = [];
   const expanded = expand(buildIndex(doc), top, warnings);
-  const format = o.format ?? "png";
+  const format = o.motionTimes ? "png" : o.format ?? "png";
   warmRenderer();
   try {
-    const [image] = screenshots([{ root: expanded, targetId: id }], { doc, file: loaded.path, theme: defaultTheme(doc), warnings }, { format, scale: o.scale, maxSide: o.maxSide });
+    const input = { doc, file: loaded.path, theme: defaultTheme(doc), warnings };
+    const image = o.motionTimes ? motionStrip(expanded, id, input, o.motionTimes, o.maxSide)
+      : screenshots([{ root: expanded, targetId: id }], input, { format, scale: o.scale, maxSide: o.maxSide })[0];
     return { image, mime: `image/${format}`, id, warnings };
   } catch (e) {
     const m = (e as Error).message;

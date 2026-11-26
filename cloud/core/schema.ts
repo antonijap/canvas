@@ -1,8 +1,9 @@
-// Node validation for Canvas documents: the node types and properties of the document format, version 2.21/2.22.
+// Node validation for Canvas documents: the node types and properties of the document format, version 2.23.
 // Only new or changed properties are checked. Keys that already sit in a file are never touched.
 // Pure (no Node APIs): the Canvas server (src/doc/schema.ts re-exports it) and a Cloud's shared apply
 // (cloud/core/files/apply.ts) use the same rules. The span and list checks are the page's own pure modules.
 
+import { checkMotion, checkMotionOverrides } from "./motion.ts";
 import { spanErrors } from "../../src/page/text-spans.js";
 import { listErrors, paragraphCount } from "../../src/page/text-paras.js";
 
@@ -11,7 +12,7 @@ import { isStickerKind, isStickyColor, stickerAnchor, whiteboardPerson } from ".
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export type DocNode = { [k: string]: Json } & { id?: string; type?: string; children?: DocNode[] };
 
-const ENTITY = ["id", "type", "name", "context", "reusable", "theme", "enabled", "locked", "mask", "opacity", "blendMode", "flipX", "flipY", "layoutPosition", "metadata", "rotation", "x", "y"];
+const ENTITY = ["id", "type", "name", "context", "reusable", "theme", "enabled", "locked", "mask", "opacity", "blendMode", "flipX", "flipY", "layoutPosition", "metadata", "motion", "rotation", "x", "y"];
 const SIZE = ["width", "height"];
 const STROKE = ["stroke", "strokeWidth", "strokeLinecap", "strokeLinejoin", "strokeAlignment"];
 const GRAPHICS = ["fill", "effect", ...STROKE];
@@ -35,7 +36,7 @@ export const NODE_KEYS: Record<string, Set<string>> = {
   icon: new Set([...ENTITY, ...SIZE, "effect", "library", "icon", "weight", "fill"]),
   script: new Set([...ENTITY, ...SIZE, "clip", "scriptUri", "inputs"]),
   browser: new Set([...ENTITY, ...SIZE, "effect", ...STROKE, "url", "deviceId", "zoom", "scrollX", "scrollY", "cornerRadius"]),
-  ref: new Set(), // instances accept any property override
+  ref: new Set(["motion"]), // instances accept any property override
 };
 
 export const NODE_TYPES = Object.keys(NODE_KEYS);
@@ -162,6 +163,9 @@ export function validateNode(node: DocNode, opts: { keys?: string[]; path?: stri
     if ((k === "width" || k === "height") && !(numOrVar(v) || (typeof v === "string" && SIZING_RE.test(v)))) {
       errs.push(`${where}: ${k} must be a number, $variable, "fit_content", "fill_container" (optionally with a fallback like "fill_container(320)")`);
     }
+    if (k === "motion") checkMotion(v, where, errs);
+    if (type === "ref" && k === "descendants") checkMotionOverrides(v, where, errs);
+    if (type === "ref" && k.startsWith("descendants/") && v && typeof v === "object" && !Array.isArray(v) && v.motion !== undefined) checkMotion(v.motion, `${where}.${k}`, errs);
     if (k === "fill" || k === "stroke") checkFill(v, `${where}.${k}`, errs);
     if (k === "padding" && !(numOrVar(v) || (Array.isArray(v) && (v.length === 2 || v.length === 4) && v.every(numOrVar)))) {
       errs.push(`${where}: padding must be a number, [vertical, horizontal] or [top, right, bottom, left]`);
@@ -222,6 +226,8 @@ export function unknownKeys(node: DocNode, deep = true, path?: string): string[]
     const allowed = NODE_KEYS[type];
     for (const k of Object.keys(node)) if (node[k] !== undefined && !allowed.has(k) && !KNOWN_KEYS.has(k)) out.push(`${where}: "${k}" is a property this version of Canvas does not know; kept as it is`);
   }
+  if (node.motion !== undefined) checkMotion(node.motion, where, [], out);
+  if (type === "ref") checkMotionOverrides(node.descendants, where, [], out);
   if (deep && Array.isArray(node.children)) node.children.forEach((c, i) => out.push(...unknownKeys(c, true, path ? `${where}.children[${i}]` : undefined)));
   return out;
 }

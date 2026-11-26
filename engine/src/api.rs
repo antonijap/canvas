@@ -266,6 +266,13 @@ fn json<T: serde::Serialize>(v: &T) -> JsValue {
     serde_json::to_string(v).ok().and_then(|s| js_sys::JSON::parse(&s).ok()).unwrap_or(JsValue::NULL)
 }
 
+fn crop_quad(rect: Rect, uv: [f32; 4], cover: Rect) -> (Rect, [f32; 4]) {
+    let r = rect.intersect(cover);
+    let u = |x| uv[0] + ((x - rect.x0) / rect.width()) as f32 * (uv[2] - uv[0]);
+    let v = |y| uv[1] + ((y - rect.y0) / rect.height()) as f32 * (uv[3] - uv[1]);
+    (r, [u(r.x0), v(r.y0), u(r.x1), v(r.y1)])
+}
+
 fn rect_json(r: Rect) -> serde_json::Value {
     serde_json::json!({ "x": r.x0, "y": r.y0, "w": r.width(), "h": r.height() })
 }
@@ -1027,6 +1034,39 @@ impl Engine {
         true
     }
 
+    /// World-space affine and premultiplied alpha for compositing a cached board.
+    #[wasm_bindgen(js_name = setBoardTransform)]
+    pub fn set_board_transform(&mut self, id: &str, a: f64, b: f64, c: f64, d: f64, e: f64, f: f64, alpha: f32) -> bool {
+        let Some(p) = self.pos_of(id) else { return false };
+        let matrix = [a, b, c, d, e, f];
+        if !matrix.iter().all(|x| x.is_finite()) || !alpha.is_finite() { return false; }
+        let alpha = alpha.clamp(0., 1.);
+        let transform = (matrix != [1., 0., 0., 1., 0., 0.] || alpha != 1.).then_some((matrix, alpha));
+        if self.boards[p].transform != transform {
+            self.boards[p].transform = transform;
+            self.dirty = true;
+        }
+        true
+    }
+
+    /// A transient board belonging to an existing board. Clip edges, when present, are in world coordinates.
+    #[wasm_bindgen(js_name = setBoardSprite)]
+    pub fn set_board_sprite(&mut self, id: &str, parent: &str, clip: Vec<f64>) -> bool {
+        let Some(p) = self.pos_of(id) else { return false };
+        if id == parent || self.pos_of(parent).is_none() { return false; }
+        let clip = match clip.as_slice() {
+            [] => None,
+            [x, y, w, h] if clip.iter().all(|v| v.is_finite()) && *w >= 0. && *h >= 0. => Some(Rect::new(*x, *y, x + w, y + h)),
+            _ => return false,
+        };
+        self.boards[p].sprite = Some((parent.to_string(), clip));
+        self.dirty = true;
+        true
+    }
+
+    #[wasm_bindgen(js_name = textureBudget)]
+    pub fn texture_budget(&self) -> f64 { self.gpu.tiles.budget as f64 }
+
     #[wasm_bindgen(js_name = setBoardHidden)]
     pub fn set_board_hidden(&mut self, id: &str, hidden: bool) -> bool {
         let Some(p) = self.pos_of(id) else { return false };
@@ -1176,7 +1216,7 @@ impl Engine {
         let near = view.inflate(view.width() * 0.5, view.height() * 0.5);
         let mut near_ink: Vec<Rect> = Vec::new();
         for b in &mut self.boards {
-            if !b.hidden && !b.ink.is_zero_area() && b.world_ink().overlaps(near) {
+            if !b.hidden && b.sprite.is_none() && !b.ink.is_zero_area() && b.world_ink().overlaps(near) {
                 b.seen_frame = frame;
                 near_ink.push(b.ink);
             }
@@ -1195,7 +1235,8 @@ impl Engine {
         for (bi, b) in self.boards.iter().enumerate() {
             let wink = b.world_ink();
             // An empty board cannot produce a base tile. Keeping it in work would keep the frame loop alive.
-            if b.hidden || b.ink.is_zero_area() || !wink.overlaps(near) {
+            let sprite = b.sprite.as_ref().is_some_and(|(parent, _)| self.pos_of(parent).is_some_and(|p| !self.boards[p].hidden));
+            if b.hidden || b.ink.is_zero_area() || (b.sprite.is_some() && !sprite) || (!sprite && b.transform.is_none() && !wink.overlaps(near)) {
                 continue;
             }
             let pos = kurbo::Vec2::new(b.x, b.y);
@@ -1207,7 +1248,7 @@ impl Engine {
             let org = fit.world_origin(s_exact);
             // The board's own key at this scale: a fitted board's pixels are its own.
             let desired = if zooming { desired } else { ScaleKey::fitted(s, fit.code) };
-            let tiles = fit_tiles(b.ink, s, fit.k, (view - org).inflate(px, px));
+            let tiles = fit_tiles(b.ink, s, fit.k, if sprite || b.transform.is_some() { b.ink } else { (view - org).inflate(px, px) });
             for t in &tiles {
                 reach[bi] = reach[bi].union(t.rect + pos);
             }
@@ -1215,7 +1256,7 @@ impl Engine {
             // how big base textures are (`base_px_for`), and each step down rendered every one of them again.
             // At overview scale, a fully visible board's tiles already cover it. Drawing a second
             // picture at a larger scale spends time and cache space on pixels the view never uses.
-            if !(base.scale() >= s && view.contains_rect(wink)) && !(base == desired && !tiles.is_empty()) {
+            if !sprite && !(base.scale() >= s && view.contains_rect(wink)) && !(base == desired && !tiles.is_empty()) {
                 if t0 - self.last_added < BASE_WAIT_MS {
                     bases_waiting = true;
                 } else if !self.gpu.tiles.fresh(&base_key, b.generation) && !failed(&base_key) {
@@ -1227,7 +1268,7 @@ impl Engine {
             let is_ok = |key: &TileKey| if moving { self.gpu.tiles.fresh(key, b.generation) } else { self.gpu.tiles.sharp(key, b.generation) };
             // Ahead of the view: what a pan shows next, and half a tile around a view at rest. Not during a zoom
             // (its textures are for the gesture only), and never drawn, so never counted as missing.
-            if !zooming && wink.overlaps(ring) {
+            if !sprite && !zooming && wink.overlaps(ring) {
                 for t in fit_tiles(b.ink, s, fit.k, ring - org) {
                     let seen = fit.world(t.rect, s_exact).intersect(view.inflate(px, px));
                     let key = TileKey { board: b.uid, scale: desired, tx: t.tx, ty: t.ty };
@@ -1310,7 +1351,7 @@ impl Engine {
             // Over budget already: stop before the decode and repaint that prepare this tile, not after.
             // A tile costs its pixels and its part of the scene (a render draws only the items that meet it).
             let t_mpx = f64::from(t.w) * f64::from(t.h) / 1e6 + self.boards[bi].part_mpx(t.rect);
-            let small = !force && self.debug & (DEBUG_NO_BATCH | DEBUG_NO_CULL) == 0 && u64::from(t.w) * u64::from(t.h) <= BATCH_TILE_PX && self.pending.as_ref().is_none_or(|p| p.0 != key);
+            let small = (!force || self.boards[bi].sprite.is_some()) && self.debug & (DEBUG_NO_BATCH | DEBUG_NO_CULL) == 0 && u64::from(t.w) * u64::from(t.h) <= BATCH_TILE_PX && self.pending.as_ref().is_none_or(|p| p.0 != key);
             let joining = small && batch.len() > 0;
             // A busy GPU (DEBUG_ONE_TILE): one render a frame, the first.
             let one_tile = self.debug & DEBUG_ONE_TILE != 0 && admit.attempts > 0;
@@ -1561,7 +1602,7 @@ impl Engine {
         for line in self.blueprint.chunks_exact(3) {
             let [axis, at, a] = [line[0], line[1], line[2]];
             let rect = if axis == 0.0 { [at, 0.0, at + 1.0, height] } else { [0.0, at, width, at + 1.0] };
-            quads.push((Source::White, Quad { rect, uv: [0.0, 0.0, 1.0, 1.0], tint: [r * a, g * a, b * a, a], scissor: None, extra: [0.0; 4] }));
+            quads.push((Source::White, Quad { rect, uv: [0.0, 0.0, 1.0, 1.0], tint: [r * a, g * a, b * a, a], scissor: None, extra: [0.0; 4], transform: None }));
         }
         let white = [1.0, 1.0, 1.0, 1.0];
         let (dw, dh) = self.gpu.size();
@@ -1571,13 +1612,30 @@ impl Engine {
         let mut blank_dbg: Vec<serde_json::Value> = Vec::new();
         // Urgent boards with a slot in view that is not fresh after this frame (they stay urgent).
         let mut still_urgent: Vec<bool> = vec![false; self.boards.len()];
-        for sd in &slots {
+        // Insert each sprite after its owner and before any board that paints above it.
+        let mut stacked: Vec<&SlotDraw> = Vec::new();
+        let uses_sprites = self.boards.iter().any(|b| b.sprite.is_some());
+        if uses_sprites {
+            stacked.extend(&slots);
+            stacked.sort_by_key(|sd| self.boards[sd.bi].sprite.as_ref()
+                .and_then(|(parent, _)| self.pos_of(parent)).map_or((sd.bi, 0), |p| (p, sd.bi + 1)));
+        }
+        for i in 0..slots.len() {
+            let sd = if uses_sprites { stacked[i] } else { &slots[i] };
             let b = &self.boards[sd.bi];
             // Board space to device px: the board's place in the world (fitted to whole pixels at rest) and the
             // camera, on whole pixels too then, the same for every board.
             let fit = &fits[sd.bi];
             let cam_dev = if zooming { (cx * dpr, cy * dpr) } else { ((cx * dpr).round(), (cy * dpr).round()) };
             let dev = |r: Rect| fit.device(r, s_exact, cam_dev);
+            let (transform, tint) = b.transform.map_or((None, white), |([a, b, c, d, e, f], alpha)| {
+                let (x, y) = cam_dev;
+                (Some([a, b, c, d, e * s_exact + (1. - a) * x - c * y, f * s_exact - b * x + (1. - d) * y].map(|v| v as f32)), [alpha; 4])
+            });
+            let clip = b.sprite.as_ref().and_then(|(_, clip)| *clip).map(|clip| {
+                scissor_px(Rect::new(clip.x0 * s_exact + cam_dev.0, clip.y0 * s_exact + cam_dev.1,
+                    clip.x1 * s_exact + cam_dev.0, clip.y1 * s_exact + cam_dev.1), dw, dh).unwrap_or([0; 4])
+            });
             let slot_dev = dev(sd.t.rect);
             let mut fresh_now = is_fresh(&self.gpu.tiles, &sd.key, b.generation);
             // A lowres texture at rest is still the best picture of its slot while it renders again.
@@ -1605,15 +1663,22 @@ impl Engine {
                 still_urgent[sd.bi] = true;
             }
             if let Some(cv) = &cover {
-                for (k, clip) in &cv.pieces {
+                for (k, piece) in &cv.pieces {
                     let Some(slot) = self.gpu.tiles.get(k) else { continue };
-                    let Some(sc) = scissor_px(dev(*clip), dw, dh) else { continue };
+                    let cover_rect = dev(*piece);
                     let d = dev(slot.rect);
                     let uv = interior_uv(slot.px);
+                    let (d, uv, scissor) = if transform.is_some() || b.sprite.is_some() {
+                        let (d, uv) = crop_quad(d, uv, cover_rect);
+                        (d, uv, clip)
+                    } else {
+                        let Some(sc) = scissor_px(cover_rect, dw, dh) else { continue };
+                        (d, uv, Some(sc))
+                    };
                     self.gpu.tiles.touch(k, frame);
                     st.fallbacks += 1;
                     st.board_pixels = true;
-                    quads.push((Source::Tile(*k), Quad { rect: r32(d), uv, tint: white, scissor: Some(sc), extra: [0.0; 4] }));
+                    quads.push((Source::Tile(*k), Quad { rect: r32(d), uv, tint, scissor, extra: [0.0; 4], transform }));
                     if self.debug & DEBUG_TILES != 0 {
                         outline(&mut quads, d, [0.9, 0.6, 0.0, 0.9]);
                     }
@@ -1626,7 +1691,7 @@ impl Engine {
                         let r = r.intersect(root);
                         if r.width() > 0.0 && r.height() > 0.0 {
                             grey = true;
-                            quads.push((Source::White, Quad { rect: r32(dev(r)), uv: [0.0, 0.0, 1.0, 1.0], tint: [0.4, 0.4, 0.4, 0.4], scissor: None, extra: [0.0; 4] }));
+                            quads.push((Source::White, Quad { rect: r32(dev(r)), uv: [0.0, 0.0, 1.0, 1.0], tint: [0.4, 0.4, 0.4, 0.4], scissor: None, extra: [0.0; 4], transform: None }));
                         }
                     }
                     if grey {
@@ -1647,7 +1712,7 @@ impl Engine {
                     d = Rect::new(x0, y0, x0 + f64::from(px.0), y0 + f64::from(px.1));
                 }
                 st.board_pixels = true;
-                quads.push((Source::Tile(sd.key), Quad { rect: r32(d), uv: interior_uv(px), tint: white, scissor: None, extra: [0.0; 4] }));
+                quads.push((Source::Tile(sd.key), Quad { rect: r32(d), uv: interior_uv(px), tint, scissor: clip, extra: [0.0; 4], transform }));
                 if self.debug & DEBUG_TILES != 0 {
                     outline(&mut quads, d, if zooming { [0.0, 0.3, 0.9, 0.9] } else { [0.9, 0.1, 0.1, 0.9] });
                 }
@@ -2653,7 +2718,7 @@ impl Engine {
             }
             let d = to_device(c.world(), self.cam, self.dpr);
             let r = (c.radius * z * self.dpr) as f32;
-            quads.push((Source::Premul(t.bind.clone()), Quad { rect: r32(d), uv: [0.0, 0.0, 1.0, 1.0], tint: [1.0, 1.0, 1.0, 1.0], scissor: None, extra: [d.width() as f32, d.height() as f32, r, 0.0] }));
+            quads.push((Source::Premul(t.bind.clone()), Quad { rect: r32(d), uv: [0.0, 0.0, 1.0, 1.0], tint: [1.0, 1.0, 1.0, 1.0], scissor: None, extra: [d.width() as f32, d.height() as f32, r, 0.0], transform: None }));
         }
     }
 
@@ -2668,7 +2733,7 @@ impl Engine {
         let s = z * self.dpr;
         let fitted = now() - self.last_zoom >= SETTLE_MS;
         let (dev, cam_dev) = ((screen_x * self.dpr, screen_y * self.dpr), ((cx * self.dpr).round(), (cy * self.dpr).round()));
-        self.boards.iter().rev().filter(|b| !b.hidden).find_map(|b| {
+        self.boards.iter().rev().filter(|b| !b.hidden && b.sprite.is_none()).find_map(|b| {
             let q = if fitted {
                 let f = b.layout.aabb.first().copied().unwrap_or(Rect::ZERO);
                 let at = fit_board((b.x, b.y), (f.x1, f.y1), b.ink, s).board_point(dev, s, cam_dev);
@@ -2689,7 +2754,7 @@ impl Engine {
         self.boards
             .iter()
             .rev()
-            .filter(|b| !b.hidden && (b.world_ink().contains(p) || b.world_root().contains(p)))
+            .filter(|b| !b.hidden && b.sprite.is_none() && (b.world_ink().contains(p) || b.world_root().contains(p)))
             .flat_map(|b| b.hit_all(p).into_iter().map(str::to_string).collect::<Vec<_>>())
             .collect()
     }
@@ -2742,12 +2807,39 @@ impl Engine {
         self.pos_of(board).and_then(|p| self.boards[p].node_rect(id)).map_or_else(|| self.node_rect(id), |r| json(&rect_json(r)))
     }
 
+    /// Untransformed box size at the node's world origin. Used for sprite placement and pivots.
+    #[wasm_bindgen(js_name = nodeMotionRect)]
+    pub fn node_motion_rect(&self, board: &str, id: &str) -> JsValue {
+        let Some(b) = self.pos_of(board).map(|p| &self.boards[p]) else { return JsValue::NULL };
+        let Some(i) = b.doc.index_of(id) else { return JsValue::NULL };
+        let at = b.layout.world[i] * Point::ORIGIN;
+        let bb = &b.layout.boxes[i];
+        json(&rect_json(Rect::new(b.x + at.x, b.y + at.y, b.x + at.x + bb.w, b.y + at.y + bb.h)))
+    }
+
+    /// Top board whose resting box contains the point, even if its fill is transparent.
+    #[wasm_bindgen(js_name = boardAt)]
+    pub fn board_at(&self, x: f64, y: f64) -> Option<String> {
+        let (cx, cy, z) = self.cam;
+        let point = Point::new((x - cx) / z, (y - cy) / z);
+        self.boards.iter().rev().find(|b| !b.hidden && b.sprite.is_none() && b.world_root().contains(point)).map(|b| b.id.clone())
+    }
+
+    /// The paint bounds of a subtree, including effects and protruding children.
+    #[wasm_bindgen(js_name = nodeInkIn)]
+    pub fn node_ink_in(&self, board: &str, id: &str) -> JsValue {
+        let Some(b) = self.pos_of(board).map(|p| &self.boards[p]) else { return JsValue::NULL };
+        let Some(i) = b.doc.index_of(id) else { return JsValue::NULL };
+        let r = b.node_ink.get(i).copied().unwrap_or(Rect::ZERO);
+        json(&rect_json(r + kurbo::Vec2::new(b.x, b.y)))
+    }
+
     /// Ids of the boards intersecting the viewport.
     #[wasm_bindgen(js_name = boardsInView)]
     pub fn boards_in_view(&self) -> Vec<String> {
         let (cx, cy, z) = self.cam;
         let view = Rect::new(-cx / z, -cy / z, (self.css.0 - cx) / z, (self.css.1 - cy) / z);
-        self.boards.iter().filter(|b| !b.hidden && b.world_ink().overlaps(view)).map(|b| b.id.clone()).collect()
+        self.boards.iter().filter(|b| !b.hidden && b.sprite.is_none() && b.world_ink().overlaps(view)).map(|b| b.id.clone()).collect()
     }
 
     /// What the page's timing poll asks every 16 ms: [tiles missing, slots blank, exact scale, board pixels] (flags are 0 or 1)
@@ -2969,7 +3061,7 @@ fn outline(quads: &mut Vec<(Source, Quad)>, d: Rect, c: [f32; 4]) {
     let tint = [c[0] * c[3], c[1] * c[3], c[2] * c[3], c[3]];
     let full = [0.0, 0.0, 1.0, 1.0];
     for r in [Rect::new(d.x0, d.y0, d.x1, d.y0 + 2.0), Rect::new(d.x0, d.y1 - 2.0, d.x1, d.y1), Rect::new(d.x0, d.y0, d.x0 + 2.0, d.y1), Rect::new(d.x1 - 2.0, d.y0, d.x1, d.y1)] {
-        quads.push((Source::White, Quad { rect: r32(r), uv: full, tint, scissor: None, extra: [0.0; 4] }));
+        quads.push((Source::White, Quad { rect: r32(r), uv: full, tint, scissor: None, extra: [0.0; 4], transform: None }));
     }
 }
 

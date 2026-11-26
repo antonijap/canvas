@@ -1,0 +1,13 @@
+export type MotionProp = "translateX" | "translateY" | "scale" | "scaleX" | "scaleY" | "rotate" | "opacity";
+export type Spring = { stiffness: number; damping: number; mass: number } | { duration: number; bounce: number } | { response: number; dampingFraction: number };
+export type Pose = { values: Partial<Record<MotionProp, number>>; progress: Partial<Record<MotionProp, number>>; done: boolean; held: boolean };
+export type MotionOrigins = Partial<Record<MotionProp, [number, number]>>;
+export type CompiledMotion = { tracks: { prop: MotionProp; rest: number; from: number; to: number; duration: number; delay: number; ease: (t: number) => number; cycles: number; alternate: boolean; leave: string }[]; origins: MotionOrigins };
+export const motionProps: MotionProp[];
+export function easeCurve(ease: unknown): (x: number) => number;
+export function springCurve(spring: Spring): { duration: number; sample(t: number): number };
+export function compileMotion(animations: unknown, opacity?: number): CompiledMotion;
+export function motionPose(motion: CompiledMotion, elapsed: number, options?: { leave?: Pose; enter?: Pose; end?: boolean }): Pose;
+export type MotionAffine = [number, number, number, number, number, number, number];
+export function poseAffine(values: Pose["values"], rect: { x: number; y: number; w: number; h: number }, origins?: MotionOrigins | [number, number]): MotionAffine;
+export function composeAffine(parent: MotionAffine, child: MotionAffine): MotionAffine;

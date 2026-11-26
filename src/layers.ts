@@ -21,7 +21,7 @@ export type LayerKind =
   | "vector" | "line" | "polygon" | "icon" | "note" | "other";
 
 /** One row's worth of a layer: id, name, kind, hidden (enabled false), locked, container (frame or group), first on top, children. */
-export type LayerOutline = { i: string; n: string; k: LayerKind; h?: 1; l?: 1; ct?: 1; ft?: 1; c?: LayerOutline[] };
+export type LayerOutline = { i: string; n: string; k: LayerKind; h?: 1; l?: 1; ct?: 1; ft?: 1; m?: 1; c?: LayerOutline[] };
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -70,13 +70,18 @@ const outlines = boardCache<{ key: string; o: LayerOutline }>();
 export function outlineOf(n: DocNode, index?: Index, inside = false): LayerOutline {
   const o: LayerOutline = { i: String(n.id), n: layerName(n), k: layerKind(n) };
   if (n.enabled === false) o.h = 1;
+  if (Array.isArray(n.motion) && n.motion.length) o.m = 1;
   if (n.locked === true) o.l = 1;
   if (!inside && (n.type === "frame" || n.type === "group")) o.ct = 1;
   const meta = n.metadata as unknown;
   if (isObj(meta) && isObj(meta.canvasLayout) && meta.canvasLayout.stacking === "first") o.ft = 1;
   let kids: DocNode[] | undefined = n.type !== "ref" && Array.isArray(n.children) ? (n.children as DocNode[]) : undefined;
   if (n.type === "ref" && index && !inside) {
-    try { kids = expand(index, n, []).children as DocNode[] | undefined; } catch { kids = undefined; /* a missing or looping component */ }
+    try {
+      const instance = expand(index, n, []);
+      kids = instance.children;
+      if (Array.isArray(instance.motion) && instance.motion.length) o.m = 1;
+    } catch { kids = undefined; /* a missing or looping component */ }
     inside = true;
   }
   if (kids && kids.length) o.c = kids.filter((k) => isObj(k) && k.id !== undefined).map((k) => outlineOf(k, index, inside));

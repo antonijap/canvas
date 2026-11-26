@@ -11,6 +11,7 @@
 // an instance of itself. `if` preconditions name the action that must have written a key last (0: none since load).
 
 import { whiteboardPerson } from "../../../src/page/whiteboard-model.js";
+import { checkMotionOverrides } from "../motion.ts";
 import { docKeyError, setKeyError, validateNode, validateVariable, DESCENDANTS_PREFIX, PROTO_KEYS, type DocNode, type Json } from "../schema.ts";
 import { shift as shiftSpans } from "../../../src/page/text-spans.js";
 import { shiftLists, type ListItem } from "../../../src/page/text-paras.js";
@@ -327,6 +328,13 @@ class Run {
     }
     if (op.order) props = nextProps(props, {}, op.order);
     const changed = keys.filter((k) => !k.startsWith(DESCENDANTS_PREFIX) && whole[k] !== null);
+    if (Object.keys(paths).length) {
+      const errors: string[] = [];
+      for (const [path, value] of Object.entries(paths)) {
+        if (value) checkMotionOverrides({ [path]: value.v }, `node ${n.id}`, errors);
+      }
+      if (errors.length) this.fail("invalid", errors.slice(0, 3).join("; "));
+    }
     const sticker = n.type === "sticker" && !this.ctx.replay;
     if (changed.length || sticker) {
       const probe = { ...props };

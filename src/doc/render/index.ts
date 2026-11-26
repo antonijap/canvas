@@ -5,9 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { MessageChannel, type MessagePort, receiveMessageOnPort, Worker } from "node:worker_threads";
 import type { CanvasDoc } from "../docfile.ts";
-import { defaultTheme, type Theme } from "../resolve.ts";
+import { defaultTheme, resolveProps, type Theme } from "../resolve.ts";
 import type { DocNode } from "../schema.ts";
-import { documentHtml, type HtmlOptions } from "./html.ts";
+import { documentHtml, MOTION_STRIP_SCRIPT, type HtmlOptions } from "./html.ts";
+import { compileMotion, motionPose, poseAffine } from "../../page/motion-logic.js";
 import { SVG_SCRIPT } from "./svg.ts";
 
 export type Rect = { x: number; y: number; width: number; height: number; pageX: number; pageY: number; problems?: string };
@@ -185,4 +186,35 @@ export function exportHtml(roots: DocNode[], i: RenderInput, o: { outFile: strin
   }
   if (o.scaffold === false) html = html.replace(/^[\s\S]*<body>/, "").replace(/<\/body><\/html>$/, "");
   return html;
+}
+
+/** Render a fitted board at explicit timestamps, cropped to the target's resting box. */
+export function motionStrip(root: DocNode, targetId: string, i: RenderInput, times: number[], maxSide = 2400): Buffer {
+  const o = options(i);
+  const rects: Record<string, Rect> = call({ op: "layout", html: documentHtml([root], o) }).rects;
+  const target = Object.hasOwn(rects, targetId) ? rects[targetId] : undefined;
+  if (!target || target.width <= 0 || target.height <= 0) throw new Error(`nothing drawn for "${targetId}" (it may be hidden or empty)`);
+  const frames = times.map(time => ({ time, poses: Object.create(null) as Record<string, (number | null)[]> }));
+  const walk = (node: DocNode, theme: Theme) => {
+    const active = node.theme ? { ...theme, ...(node.theme as Theme) } : theme;
+    const n = resolveProps(i.doc, node, active, o.warnings);
+    if (n.enabled === false) return;
+    const id = String(n.id);
+    const box = Object.hasOwn(rects, id) ? rects[id] : undefined;
+    if (box && Array.isArray(n.motion)) {
+      const motion = compileMotion(n.motion, typeof n.opacity === "number" ? n.opacity : 1);
+      if (motion.tracks.length) for (const frame of frames) {
+        const { values } = motionPose(motion, frame.time);
+        const affine: (number | null)[] = poseAffine(values, { x: 0, y: 0, w: box.width, h: box.height }, motion.origins);
+        if (values.opacity === undefined) affine[6] = null;
+        if (affine.every(v => v === null || Number.isFinite(v))) frame.poses[id] = affine;
+      }
+    }
+    for (const child of node.children ?? []) walk(child, active);
+  };
+  walk(root, o.theme);
+  const spec = { x: target.pageX, y: target.pageY, width: target.width, height: target.height, frames };
+  const { width, height } = call({ op: "eval", expression: `(${MOTION_STRIP_SCRIPT})(${JSON.stringify(spec)})` }).value;
+  const shots = call({ op: "shot", clips: [{ x: 0, y: 0, width, height, scale: Math.min(1, maxSide / Math.max(width, height)) }], format: "png" }).images;
+  return Buffer.from(shots[0], "base64");
 }

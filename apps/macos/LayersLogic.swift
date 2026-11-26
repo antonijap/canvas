@@ -11,6 +11,7 @@ struct LayerNode: Equatable {
     var name: String
     let kind: String
     var hidden: Bool
+    var motion = false
     /// Locked: the canvas does not pick it or anything inside it.
     var locked: Bool
     /// A frame or a group: layers can be dropped inside it.
@@ -29,6 +30,7 @@ struct LayerNode: Equatable {
         self.id = id
         name = json["n"] as? String ?? id
         kind = json["k"] as? String ?? "other"
+        motion = (json["m"] as? NSNumber)?.boolValue ?? false
         hidden = (json["h"] as? NSNumber)?.boolValue ?? false
         locked = (json["l"] as? NSNumber)?.boolValue ?? false
         container = (json["ct"] as? NSNumber)?.boolValue ?? false
@@ -54,6 +56,7 @@ struct LayerRow: Identifiable, Equatable {
     let dimmed: Bool
     /// The layer itself is locked: its padlock shows closed and stays visible.
     var locked = false
+    var motion = false
     /// A parent is locked, so this layer is too (it cannot be unlocked on its own).
     var lockedAbove = false
     let container: Bool
@@ -67,6 +70,7 @@ struct LayerBoard {
     let id: String
     let name: String
     let tree: LayerNode?
+    var motion = false
 }
 
 enum LayerDropZone: Equatable { case above, inside, below }
@@ -85,6 +89,7 @@ enum LayersLogic {
     /// What VoiceOver says after the name: the kind, and whether it is hidden or open.
     static func accessibilityValue(_ row: LayerRow) -> String {
         var parts: [String] = [kindName(row.kind)]
+        if row.motion { parts.append("animated") }
         if row.hidden { parts.append("hidden") }
         if row.locked || row.lockedAbove { parts.append("locked") }
         if row.hasChildren { parts.append(row.expanded ? "expanded" : "collapsed") }
@@ -108,7 +113,7 @@ enum LayersLogic {
         func add(_ n: LayerNode, depth: Int, parent: String?, board: String, dimmed: Bool, lockedAbove: Bool, name: String? = nil) {
             let open = expanded.contains(n.id) && !n.children.isEmpty
             out.append(LayerRow(id: n.id, name: name ?? n.name, kind: n.kind, depth: depth, parent: parent, board: board, hidden: n.hidden,
-                                dimmed: dimmed || n.hidden, locked: n.locked, lockedAbove: lockedAbove,
+                                dimmed: dimmed || n.hidden, locked: n.locked, motion: n.motion, lockedAbove: lockedAbove,
                                 container: n.container, hasChildren: !n.children.isEmpty, expanded: open))
             guard open else { return }
             for c in n.shownChildren { add(c, depth: depth + 1, parent: n.id, board: board, dimmed: dimmed || n.hidden, lockedAbove: lockedAbove || n.locked) }
@@ -117,7 +122,7 @@ enum LayersLogic {
             if let t = b.tree { add(t, depth: 0, parent: nil, board: b.id, dimmed: false, lockedAbove: false, name: b.name) }
             else {
                 // Not loaded yet: the row shows, with a triangle that loads it.
-                out.append(LayerRow(id: b.id, name: b.name, kind: "frame", depth: 0, parent: nil, board: b.id, hidden: false, dimmed: false,
+                out.append(LayerRow(id: b.id, name: b.name, kind: "frame", depth: 0, parent: nil, board: b.id, hidden: false, dimmed: false, motion: b.motion,
                                     container: true, hasChildren: true, expanded: false))
             }
         }

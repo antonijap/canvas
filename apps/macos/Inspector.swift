@@ -292,11 +292,39 @@ struct InspectorBody: View {
             if str(n["type"]) == "text" { typography.modifier(resetMenu(.typography)) }
             strokeSection
             effectsSection
+            motionSection
             selectionColorsSection
             layoutGuideSection
             exportSection
         }
         .modifier(LayoutProbeRefresh(probe: probe, model: model, s: s))
+    }
+
+    @ViewBuilder private var motionSection: some View {
+        let stored = s.node["motion"] as? [[String: Any]] ?? []
+        let animations = stored.compactMap(MotionAnimation.init)
+        if !multi && !animations.isEmpty {
+            InspectorSection(title: "Motion") {
+                FieldButton(title: "Preview", symbol: "play.fill") {
+                    model.run("{cmd:'motionPreview',id:\(JSONText.string(s.id))}")
+                }
+                ForEach(animations) { animation in
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(animation.trigger).font(Typography.micro).foregroundStyle(Palette.fg)
+                            ForEach(Array(animation.tracks.enumerated()), id: \.offset) { _, track in
+                                Text(track).font(Typography.micro).foregroundStyle(Palette.mutedFg)
+                            }
+                        }
+                        Spacer()
+                        MiniButton(symbol: "minus", help: "Remove animation", enabled: !model.cloudReadOnly) {
+                            let keep = stored.filter { ($0["id"] as? String) != animation.id }
+                            model.update(["motion": keep])
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // MARK: header

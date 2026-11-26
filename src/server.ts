@@ -1570,7 +1570,7 @@ addEventListener("keydown", (e) => {
 // Settings the app owns (Canvas > Settings, apps/macos/SettingsLogic.swift): the shell sends them as {cmd: "prefs"}
 // (with the snapping ones, whenever the page says snapHello) and the page keeps a copy, so the next load starts with
 // them. A browser has the defaults.
-const PREF_DEFAULTS = { whiteboardName: ${JSON.stringify(cleanName(process.env.CANVAS_COMMENT_NAME)).replace(/</g, "\\u003c")}, boardLabels: true, openView: "restore", scrollZooms: false, agentCursor: true, agentCursorSpeed: 1, snapshotMB: 200 };
+const PREF_DEFAULTS = { whiteboardName: ${JSON.stringify(cleanName(process.env.CANVAS_COMMENT_NAME)).replace(/</g, "\\u003c")}, boardLabels: true, openView: "restore", scrollZooms: false, playHoverMotion: true, agentCursor: true, agentCursorSpeed: 1, snapshotMB: 200 };
 let prefs = Object.assign({}, PREF_DEFAULTS, native ? store.get("canvas:prefs") || {} : {});
 document.documentElement.classList.toggle("no-labels", !prefs.boardLabels);
 function setPrefs(p) {
@@ -1615,12 +1615,15 @@ const host = {
   restoreBoards: (ids) => { for (const id of ids) { const b = boards.get(id); if (!b || !b.gone) continue; b.gone = false; b.loadedKey = null; b.failedKey = null; if (b.el) b.el.style.display = ""; b.lbl.el.style.visibility = ""; } scheduleVisible(); requestFlush(); },
   get viewBox() { return { l: VL, t: VT }; },
   prefs: () => prefs,
+  motionBlocked: () => document.hidden || !motionWindowVisible || !tabShown || gesturing || !!tween || !!drag || !!mv || space
+    || !!host.marqueeActive?.() || !!host.autolayout?.dragging || !!host.live?.busy || !!host.textEdit?.active
+    || !!host.comments?.mode,
   get selGen() { return selGen; },
 };
 window.canvasHost = host;
 const isW = (id) => typeof id === "string" && id.startsWith("widget:");
 const pageMetas = () => (doc ? doc.boards.filter((b) => pageBoards.has(b.id)) : []);
-const docMsg = () => doc && ({ name: doc.name, revision: doc.revision, boards: pageMetas().map((b) => ({ id: b.id, name: b.name, width: b.width, height: b.height })), components: doc.components, styles: doc.styles, variables: doc.variables, tokens: doc.tokens });
+const docMsg = () => doc && ({ name: doc.name, revision: doc.revision, boards: pageMetas().map((b) => ({ id: b.id, name: b.name, width: b.width, height: b.height, motion: b.motion })), components: doc.components, styles: doc.styles, variables: doc.variables, tokens: doc.tokens });
 const pagesMsg = () => ({ active: activePage, implicit: pageImplicit, list: pageList.map((p) => ({ id: p.id, name: p.name, count: p.boards.length, background: p.background ?? null, pattern: p.pattern ?? null })) });
 
 // ---------- camera loop ----------
@@ -1648,7 +1651,7 @@ function applyCam() { gestureTick(); requestFlush(); }
 // A gesture is any camera change. It ends 150 ms after the last one: will-change goes off so text re-rasters crisp,
 // and hover hit testing resumes.
 function gestureTick() {
-  if (!gesturing) { gesturing = true; if (WILLCHANGE) world.style.willChange = "transform"; clearHover(); }
+  if (!gesturing) { gesturing = true; host.motion?.cancel(); if (WILLCHANGE) world.style.willChange = "transform"; clearHover(); }
   clearTimeout(settleT);
   settleT = setTimeout(settle, 150);
 }
@@ -1714,6 +1717,7 @@ function flushCam() {
     if (more && !document.hidden) camRaf = requestAnimationFrame(flushCam);
     else shaderWake();
     if (!more) { for (const b of boards.values()) if (b.ph && b.loadedKey) syncPh(b); scheduleSnap(); }
+    host.motion?.afterFrame();
   }
   if (tween && !camRaf) { if (document.hidden) { endTween(false); requestFlush(); } else camRaf = requestAnimationFrame(flushCam); }
 }
@@ -2324,6 +2328,11 @@ function queueHover() {
     hovFrame = 0;
     // An auto layout reorder drag (/page/autolayout.js) draws the layer at the pointer: no hover box chasing it a frame behind.
     if (gesturing || drag || mv || space || !ptr || (host.comments && host.comments.mode) || (host.autolayout && host.autolayout.dragging)) { clearHover(); return; }
+    if (host.motion && prefs.playHoverMotion && ev?.engine.boardAt && document.elementFromPoint(ptr.x, ptr.y) === ev.canvas) {
+      const board = ev.engine.boardAt(ptr.x - VL, ptr.y - VT);
+      const r = board && boards.has(board) && ev.rect(board);
+      host.motion.hover(r && Math.min(r.w, r.h) * cam.z >= 48 ? board : null, ptr.time);
+    } else host.motion?.hover(null);
     const id = titleAt(ptr.x, ptr.y) || pickSelectable(ptr.x, ptr.y, false);
     if (!id || isW(id) || (sel && id === sel.id)) { clearHover(); return; } // a card shows no hover box
     hovId = id;
@@ -2332,8 +2341,10 @@ function queueHover() {
     putBox(hovBox, hovWorld);
   });
 }
-view.addEventListener("pointermove", (e) => { ptr = { x: e.clientX, y: e.clientY }; if (!drag) queueHover(); });
+view.addEventListener("pointermove", (e) => { ptr = { x: e.clientX, y: e.clientY, time: e.timeStamp }; if (!drag) queueHover(); });
 view.addEventListener("pointerleave", () => { ptr = null; clearHover(); });
+view.addEventListener("pointerup", () => { if (ptr) queueHover(); });
+host.on("render", () => { if (ptr && !gesturing && !drag) queueHover(); });
 // Comment mode draws this outline itself (/page/comments.js), for the layer the comment would pin to.
 host.on("commentmode", (on) => { if (on) clearHover(); });
 // Working on the page shown makes it the one this viewer comes back to (see rememberPage).
@@ -2548,6 +2559,7 @@ async function startEngine() {
       posOf: (id) => { const b = boards.get(id); return b ? { x: b.meta.x, y: b.meta.y } : null; },
       orderOf: (id) => { const b = boards.get(id); return b ? b.idx : 1e9; },
       onLayout: () => { syncSel(); host.emit("render", null); },
+      beforeBoardChange: (id) => host.motion?.invalidate(id),
       rebase: (id, scene, t) => (host.live ? host.live.rebase(id, scene, t) : false),
     });
     if (mode !== "pending") { v.destroy(); return; }
@@ -2624,7 +2636,7 @@ function openingView() {
 }
 // Capture only a settled camera and assets that the shell can validate as part of the package.
 function canCaptureOpeningView() {
-  if (!ev || (rememberedPage && rememberedPage !== activePage) ||
+  if (!ev || host.motion?.active || (rememberedPage && rememberedPage !== activePage) ||
       camDirty || tween || gesturing || drag || host.live?.busy || host.textEdit?.active ||
       host.widgetsShown?.().length || prefs.openView !== "restore" || ev.imagesPending()) return false;
   const state = ev.pictureState();
@@ -2707,7 +2719,7 @@ function snapshotsCmd(op) {
 }
 /** Boards near the view that the engine has not laid out yet: their snapshots, if any. */
 function showSnaps() {
-  if (blueprint || !snaps || !cam || mode === "dom") return;
+  if (host.motion?.active || blueprint || !snaps || !cam || mode === "dom") return;
   const L = -VW * PREFETCH, T = -VH * PREFETCH, R = VW * (1 + PREFETCH), B = VH * (1 + PREFETCH), bg = bgNow();
   for (const b of boards.values()) {
     if (b.gone || b.snap) continue;
@@ -4140,6 +4152,7 @@ es.addEventListener('presence', e => {
 // widgets.js is a deferred module; keep what the stream says before it starts listening.
 for (const n of ["hello", "widgets", "wdata"]) es.addEventListener(n, (e) => { if (host.early) host.early.push([n, e.data]); });
 if (file) connectDoc();
+let motionWindowVisible = true;
 function setTabShown(on) {
   if (on === tabShown) return;
   tabShown = on;
@@ -4155,6 +4168,7 @@ window.canvasCmd = (c) => {
   if (c.insets && typeof c.insets.l === "number") { insets = { l: c.insets.l, t: c.insets.t, r: c.insets.r, b: c.insets.b }; VW = view.clientWidth; VH = view.clientHeight; readViewBox(); }
   if (c.cmd === "mods") { shellCmd = !!c.meta; cmdHeld = shellCmd; if (c.alt !== undefined && !!c.alt !== altHeld) setAltHeld(!!c.alt); return; }
   // The app shows or hides this page's tab (one web view per tab, apps/macos/Model.swift).
+  if (c.cmd === "motionWindow") { motionWindowVisible = !!c.visible; if (!motionWindowVisible) host.motion?.cancel(); else if (ptr) queueHover(); return; }
   if (c.cmd === "tab") { setTabShown(!!c.active); return; }
   if (c.cmd === "resync") { resync(); return; }
   if (c.cmd === "fit") c.id ? fit(c.id) : fitSelectionOrPage();
@@ -4290,6 +4304,7 @@ function historyStep(dir, plain) {
 <script type="module" src="/page/widgets.js"></script>
 <script type="module" src="/page/drops.js"></script>
 <script type="module" src="/page/shaders.js"></script>
+<script type="module" src="/page/motion.js"></script>
 <script type="module" src="/page/videos.js"></script>
 <script type="module" src="/page/context.js"></script>
 <script type="module" src="/page/structure.js"></script>

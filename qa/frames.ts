@@ -30,7 +30,7 @@ export const RECORDER_JS = String.raw`(() => {
   };
   e.frame = function () {
     const more = own.call(e);
-    if (rec && rec.frames.length < rec.max) {
+    if (rec && rec.frames.length < rec.max && rec.seen++ % rec.every === 0) {
       if (!rec.region) { rec.frames.push({ t: performance.now() }); return more; }
       // Where the drag drew its layer (autolayout.js state.drawn) and where the pointer was, in world units.
       const st = h.autolayout && h.autolayout.state, c = h.cam, vr = h.view.getBoundingClientRect();
@@ -40,7 +40,7 @@ export const RECORDER_JS = String.raw`(() => {
   };
   window.__frames = {
     dpr: () => canvas.width / Math.max(1, canvas.clientWidth),
-    start(region = null, max = 900) { rec = { region, frames: [], max }; return true; },
+    start(region = null, max = 900, every = 1) { rec = { region, frames: [], max, every, seen: 0 }; return true; },
     stop() { const r = rec; rec = null; return r; },
     // The pictures the frames are checked against: before the gesture (A) and after it settled (B). Composited once
     // more and copied in the same task (engine-view's capture): outside a frame the drawing buffer may be cleared.

@@ -629,7 +629,7 @@ export class MacFiles {
                 });
                 const r = this.room(id);
                 touched = id;
-                r.core.seedState(stateFromFiles({ version: typeof b.version === 'string' && /^2\.\d{1,3}$/.test(b.version) ? b.version : '2.21', children: [] }));
+                r.core.seedState(stateFromFiles({ version: typeof b.version === 'string' && /^2\.\d{1,3}$/.test(b.version) ? b.version : '2.23', children: [] }));
                 await buildSnapshot(r.core);
                 return json(201, { id, name: b.name });
             }

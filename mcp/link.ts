@@ -10,13 +10,14 @@ import { parseLink, type CanvasLink } from "../src/page/link-logic.js";
 export { parseLink, type CanvasLink };
 
 /** Where a link's nodes go, per tool: an id list, one id, the lookup scope, the page, or nowhere (file only). */
-export type LinkTarget = "ids" | "id" | "nodeId" | "within" | "page" | "file";
+export type LinkTarget = "ids" | "nodeIds" | "id" | "nodeId" | "within" | "page" | "file";
 export const LINK_TARGETS: Record<string, LinkTarget> = {
   select_nodes: "ids", highlight_nodes: "ids", fit_view: "ids", export_nodes: "ids", scale_nodes: "ids",
   delete_nodes: "ids", duplicate_nodes: "ids", group_nodes: "ids", ungroup_nodes: "ids", reorder_nodes: "ids",
   place_nodes: "ids", add_auto_layout: "ids", remove_auto_layout: "ids", make_variations: "ids", get_design_context: "ids",
   inspect_node: "id", render_node: "id", set_node_props: "id", check_variation: "id",
   swap_instance: "ids", reset_overrides: "id", push_overrides: "id",
+  set_motion: "nodeIds", get_motion: "nodeId", render_motion: "nodeId",
   pan_view: "nodeId",
   lookup_nodes: "within",
   set_active_page: "page",
@@ -71,7 +72,7 @@ export function expandLink(name: string, shape: Record<string, ZodType>, args: R
   const link = links[0];
   if (a.file === undefined && "file" in shape) a.file = link.file;
   const nodes = nodesFromArg ?? [...new Set(links.flatMap((l) => l.nodes))];
-  if (target === "ids" && a.ids === undefined && nodes.length) a.ids = nodes;
+  if ((target === "ids" || target === "nodeIds") && a[target] === undefined && nodes.length) a[target] = nodes;
   else if ((target === "id" || target === "nodeId" || target === "within") && a[target] === undefined && nodes.length) {
     if (nodes.length > 1) throw new ToolError("invalid", `The link names ${nodes.length} nodes and ${name} takes one`, "Call resolve_link to see them, then pass one id.");
     a[target] = nodes[0];

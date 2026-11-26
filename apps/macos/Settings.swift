@@ -233,6 +233,7 @@ struct CanvasSettings: View {
             }
             SettingsCard(title: "Boards") {
                 SettingsRow("Show board names") { SettingsSwitch(isOn: $model.prefs.boardLabels) }
+                SettingsRow("Play animations on hover") { SettingsSwitch(isOn: $model.prefs.playHoverMotion) }
             }
         }
     }

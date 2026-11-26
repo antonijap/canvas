@@ -782,3 +782,36 @@ fn canvas_noise(uv: vec2<f32>) -> vec4<f32> { return textureSampleLevel(canvas_n
     el.width=tw;el.height=th;el.getContext('2d').putImageData(new ImageData(px,tw,th),0,0);
   }
 };`;
+
+// Poses are computed on the server with the same evaluator as the canvas. The fitted stage is cloned
+// for each timestamp, so its layout, fonts and mask wrappers stay in place while its layers move.
+export const MOTION_STRIP_SCRIPT = `(spec) => {
+  const stage = document.querySelector(".stage");
+  const strip = document.createElement("div");
+  const width = Math.ceil(spec.width), height = Math.ceil(spec.height);
+  const columns = Math.min(4, spec.frames.length);
+  strip.style.cssText = "display:grid;gap:8px;padding:8px;background:#22262c;color:white;box-sizing:border-box;width:max-content";
+  strip.style.gridTemplateColumns = "repeat(" + columns + "," + width + "px)";
+  for (const frame of spec.frames) {
+    const cell = document.createElement("div"), crop = document.createElement("div"), label = document.createElement("div");
+    crop.style.cssText = "position:relative;overflow:hidden;background:#f0f1f3;width:" + width + "px;height:" + height + "px";
+    const copy = stage.cloneNode(true);
+    copy.style.cssText = "position:absolute;margin:0;left:" + (-spec.x) + "px;top:" + (-spec.y) + "px";
+    for (const el of copy.querySelectorAll("[data-id]")) {
+      const pose = frame.poses[el.dataset.id];
+      if (!pose || !Object.hasOwn(frame.poses, el.dataset.id)) continue;
+      const [a,b,c,d,e,f,alpha] = pose;
+      if ([a,b,c,d,e,f].some((n, i) => n !== [1,0,0,1,0,0][i])) {
+        el.style.transformOrigin = "0 0";
+        el.style.transform = "matrix(" + [a,b,c,d,e,f].join(",") + ") " + (el.style.transform === "none" ? "" : el.style.transform);
+      }
+      if (alpha !== null) el.style.opacity = alpha;
+    }
+    label.textContent = frame.time + " ms";
+    label.style.cssText = "font:12px system-ui;line-height:24px;padding-left:6px";
+    crop.append(copy); cell.append(crop, label); strip.append(cell);
+  }
+  document.body.replaceChildren(strip);
+  const box = strip.getBoundingClientRect();
+  return { width: box.width, height: box.height };
+}`;

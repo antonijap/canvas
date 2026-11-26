@@ -39,7 +39,7 @@ export const SMALL_IMAGE_SIDE = 512;
  *         orderOf(id) -> its index in the document (paint order), onLayout() (boards were laid out again),
  *         rebase(id, scene, fetchedAt) -> true when it put live edits on a server scene (src/page/live.js) }
  */
-export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, nativePreviews = false, showOverview = () => true, rebase = () => false }) {
+export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = false, onChange, onLost, getCam, isIdle = () => true, posOf = () => null, orderOf = () => 0, onLayout = () => {}, nativePreviews = false, showOverview = () => true, rebase = () => false, beforeBoardChange = () => {} }) {
   if (!navigator.gpu) throw new Error("no WebGPU");
   const canvas = document.createElement("canvas");
   canvas.id = "engine";
@@ -702,6 +702,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     // Where the page has the board now: a move (docdiff) that landed while this scene was in flight wins.
     const at = posOf(meta.id) || scene;
     const fresh = !rec.content;
+    if (content !== rec.content || at.x !== rec.x || at.y !== rec.y) beforeBoardChange(meta.id);
     // Back from the parking lot (a page shown again): the engine still holds it laid out, hidden.
     const wasParked = rec.parked;
     rec.parked = false;
@@ -718,6 +719,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       for (const id of rec.ids) if (nodeIndex.get(id) && nodeIndex.get(id).board === meta.id) nodeIndex.delete(id);
       const uses = [];
       rec.ids = indexScene(scene.root, meta.id, nodeIndex, uses);
+      rec.motionText = text.includes('"boardHover"') ? text : null;
       rec.content = content;
       rec.overview = bulkOverview && !overviewDone ? imageOverviewBoard(scene.root) : null;
       if (!rec.overview && bulkOverview && !overviewDone) endOverview();
@@ -751,6 +753,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   function park(id) {
     const rec = loaded.get(id);
     if (!rec) return;
+    beforeBoardChange(id);
     if (!rec.content || !engine.setBoardHidden(id, true)) return removeBoard(id);
     loaded.delete(id);
     rec.seq++; // a load in flight for it is stale now
@@ -782,6 +785,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     if (parked.has(id)) return dropParked(id);
     const rec = loaded.get(id);
     if (!rec) return;
+    beforeBoardChange(id);
     loaded.delete(id);
     const pi = paint.indexOf(id);
     if (pi >= 0) paint.splice(pi, 1);
@@ -796,6 +800,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   function moveBoard(id, x, y) {
     const rec = loaded.get(id);
     if (!rec || (rec.x === x && rec.y === y) || !rec.content) return;
+    beforeBoardChange(id);
     engine.moveBoard(id, x, y);
     if (rec.rect) rec.rect = { ...rec.rect, x: rec.rect.x + x - rec.x, y: rec.rect.y + y - rec.y };
     rec.x = x; rec.y = y;
@@ -841,12 +846,14 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     // a live edit was a millisecond on a 1,300-node board).
     const { text, content } = sceneTextAndKey(scene);
     if (content === rec.content) return engine.nodeRectIn(id, id);
+    beforeBoardChange(id);
     if (simpleOverview) endOverview();
     const at = posOf(id) || { x: rec.x, y: rec.y };
     const root = engine.setBoard(id, at.x, at.y, engineText(scene, text)).root;
     rec.rect = root;
     for (const n of rec.ids) if (nodeIndex.get(n) && nodeIndex.get(n).board === id) nodeIndex.delete(n);
     rec.ids = indexScene(scene.root, id, nodeIndex);
+    rec.motionText = text.includes('"boardHover"') ? text : null;
     rec.content = content;
     rec.x = at.x; rec.y = at.y;
     onChange();
@@ -861,6 +868,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   function moveNode(board, id, x, y) {
     const rec = loaded.get(board);
     if (!rec || !rec.content || dead || !engine.moveNode) return false;
+    beforeBoardChange(board);
     let ok = false;
     try { ok = engine.moveNode(board, id, x, y); } catch { ok = false; }
     if (!ok) return false;
@@ -878,6 +886,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   function updateNode(board, id, node) {
     const rec = loaded.get(board);
     if (!rec || !rec.content || dead || !engine.updateNode) return false;
+    beforeBoardChange(board);
     let ok = false;
     try { ok = engine.updateNode(board, id, JSON.stringify(whiteboardScene(node))); } catch { ok = false; }
     if (!ok) return false;
@@ -972,6 +981,14 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     isLoaded: (id) => loaded.has(id),
     loadBoards, removeBoard, park, pruneParked, moveBoard, parkedCount: () => parked.size, isParked: (id) => parked.has(id), freeze, thaw, capture, syncBg, refineImages, imageStats, imagesPending, warmFonts, reorder,
     sceneText, fetchScene, install, moveNode, updateNode,
+    motionSource(id) {
+      const r = loaded.get(id);
+      return r?.motionText && r.content !== -1 ? { text: r.motionText, content: r.content, x: r.x, y: r.y } : null;
+    },
+    motionBoard(id, x, y, scene, originalText) {
+      const text = originalText ?? JSON.stringify(scene);
+      return engine.setBoard(id, x, y, engineText(scene, text));
+    },
     compactOverview: () => !!simpleOverview?.canvas.isConnected,
     stats() {
       const s = engine.stats();

@@ -1,0 +1,18 @@
+{
+  "eases": [
+    {"ease":"linear","time":0.3,"value":0.3},
+    {"ease":"ease","time":0.5,"value":0.8024033876},
+    {"ease":"easeInOut","time":0.5,"value":0.5},
+    {"ease":[0.5,0,0.5,1],"time":0.25,"value":0.105892543}
+  ],
+  "springs": [
+    {"spring":{"stiffness":100,"damping":20,"mass":1},"time":100,"value":0.2642411177},
+    {"spring":{"duration":500,"bounce":0},"time":100,"value":0.5509083742},
+    {"spring":{"response":0.6283185307179586,"dampingFraction":1},"time":100,"value":0.2642411177},
+    {"spring":{"stiffness":100,"damping":0,"mass":1},"time":100,"value":0.4596976941}
+  ],
+  "poses": [
+    {"values":{"translateX":10,"translateY":-5,"rotate":90,"scaleX":2,"opacity":0.5},"rect":{"x":10,"y":20,"w":80,"h":40},"origin":[0.5,0.5],"affine":[0,2,-1,0,100,-65,0.5]},
+    {"values":{"scale":2,"scaleX":0.5},"rect":{"x":4,"y":6,"w":20,"h":10},"origin":[0,0],"affine":[1,0,0,2,0,-6,1]}
+  ]
+}

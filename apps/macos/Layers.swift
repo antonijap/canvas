@@ -70,7 +70,7 @@ final class LayersStore: ObservableObject {
 
     private func rebuild() {
         guard let model else { return }
-        let boards = model.boards.map { LayerBoard(id: $0.id, name: $0.name, tree: trees[$0.id]?.node) }
+        let boards = model.boards.map { LayerBoard(id: $0.id, name: $0.name, tree: trees[$0.id]?.node, motion: $0.motion) }
         let next = LayersLogic.rows(boards, expanded: expanded)
         if next != rows { rows = next }
     }
@@ -523,6 +523,10 @@ struct LayerRowView: View, Equatable {
                 Text(row.name).font(SidebarStyle.text).foregroundStyle(Palette.fg).lineLimit(1).truncationMode(.tail)
             }
             Spacer(minLength: 4)
+            if row.motion && !editing {
+                Image(systemName: "waveform.path").font(.system(size: 10)).foregroundStyle(Palette.mutedFg)
+                    .help("Motion").accessibilityHidden(true)
+            }
             // The padlock's spot always takes a press (it shows on hover or while locked), so the press that locks
             // never lands on the row; the eye keeps its slot, so the padlock does not jump when the eye shows.
             if !editing && !LayersLogic.insideInstance(row.id) { lock.opacity(hovering || lockShown || lockPressed ? 1 : 0.001).allowsHitTesting(!model.cloudReadOnly) }

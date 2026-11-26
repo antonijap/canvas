@@ -52,8 +52,23 @@ export function boardOf(index: Map<string, string>, id: string): string | undefi
   return index.get(id) ?? index.get(id.split("/")[0]);
 }
 
-function countNodes(n: DocNode): number {
-  return 1 + ((n.children as DocNode[] | undefined) ?? []).reduce((a, c) => a + countNodes(c), 0);
+export function ownMotionCount(n: DocNode): number {
+  return (Array.isArray(n.motion) ? n.motion.length : 0);
+}
+
+function boardCounts(n: DocNode): { nodes: number; animations: number } {
+  const counts = { nodes: 1, animations: ownMotionCount(n) };
+  if (n.descendants && typeof n.descendants === "object" && !Array.isArray(n.descendants)) {
+    for (const props of Object.values(n.descendants)) {
+      if (props && typeof props === "object" && !Array.isArray(props)) counts.animations += ownMotionCount(props as DocNode);
+    }
+  }
+  for (const c of n.children ?? []) {
+    const next = boardCounts(c);
+    counts.nodes += next.nodes;
+    counts.animations += next.animations;
+  }
+  return counts;
 }
 
 export type Summary = {
@@ -61,8 +76,8 @@ export type Summary = {
   name: string;
   revision: string;
   version: unknown;
-  boards: (Pick<BoardMeta, "id" | "name" | "x" | "y"> & { width?: number; height?: number; type: string; children: number; nodes: number })[];
-  counts: { topLevel: number; nodes: number; byType: Record<string, number>; components: number; instances: number; variables: number };
+  boards: (Pick<BoardMeta, "id" | "name" | "x" | "y"> & { width?: number; height?: number; type: string; children: number; nodes: number; animations: number })[];
+  counts: { topLevel: number; nodes: number; byType: Record<string, number>; components: number; instances: number; variables: number; animations: number };
   components: { id: string; name: string; type: string }[];
   variables: { name: string; type: unknown; value: unknown }[];
   themes: Record<string, unknown>;
@@ -79,16 +94,17 @@ export function summaryOf(snap: Snapshot): Summary {
     if (n.type === "ref") instances++;
   });
   const top = new Map(snap.doc.children.map((n) => [String(n.id), n]));
+  const boards = snap.boards.map((b) => {
+    const n = top.get(b.id)!;
+    return { id: b.id, name: b.name, x: b.x, y: b.y, width: b.width, height: b.height, type: String(n.type), children: n.children?.length ?? 0, ...boardCounts(n) };
+  });
   return {
     file: snap.path,
     name: snap.name,
     revision: snap.revision,
     version: snap.doc.version,
-    boards: snap.boards.map((b) => {
-      const n = top.get(b.id)!;
-      return { id: b.id, name: b.name, x: b.x, y: b.y, width: b.width, height: b.height, type: String(n.type), children: ((n.children as DocNode[] | undefined) ?? []).length, nodes: countNodes(n) };
-    }),
-    counts: { topLevel: snap.doc.children.length, nodes, byType, components: snap.components.length, instances, variables: Object.keys(snap.variables).length },
+    boards,
+    counts: { topLevel: snap.doc.children.length, nodes, byType, components: snap.components.length, instances, variables: Object.keys(snap.variables).length, animations: snap.doc.children.reduce((count, n) => count + boardCounts(n).animations, 0) },
     components: snap.components.map((c) => ({ id: c.id, name: c.name, type: c.type })),
     variables: Object.entries(snap.variables).map(([name, def]) => {
       const d = def as { type?: unknown; value?: unknown };

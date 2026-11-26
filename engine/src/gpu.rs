@@ -137,6 +137,26 @@ pub struct Quad {
     pub tint: [f32; 4],
     pub scissor: Option<[u32; 4]>,
     pub extra: [f32; 4],
+    pub transform: Option<[f32; 6]>,
+}
+
+/// Convert an affine in device pixels (y down) to the shader's clip coordinates (y up).
+fn quad_affine(transform: Option<[f32; 6]>, w: f32, h: f32) -> [f32; 8] {
+    let Some([a, b, c, d, e, f]) = transform else { return [1., 0., 0., 1., 0., 0., 1., 0.] };
+    let filter = f32::from(a == 1. && b == 0. && c == 0. && d == 1.);
+    [a, -b * w / h, -c * h / w, d, a + c * h / w + 2. * e / w - 1., 1. - d - b * w / h - 2. * f / h, filter, 0.]
+}
+
+#[cfg(test)]
+#[test]
+fn quad_affine_in_clip_space() {
+    assert_eq!(quad_affine(None, 100., 50.), [1., 0., 0., 1., 0., 0., 1., 0.]);
+    let [a, b, c, d, e, f, filter, _] = quad_affine(Some([0., 1., -1., 0., 40., 0.]), 100., 50.);
+    // Device (10, 20) becomes (20, 10), on a 100 x 50 surface.
+    let (x, y) = (-0.8, 0.2);
+    assert!((a * x + c * y + e + 0.6).abs() < 1e-6);
+    assert!((b * x + d * y + f - 0.6).abs() < 1e-6);
+    assert_eq!(filter, 0.);
 }
 
 /// A render of part of a board's scene into one texture, in as many vello renders as its content needs
@@ -319,13 +339,15 @@ thread_local! {
 }
 
 const SHADER: &str = r#"
-struct VOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) tint: vec4<f32>, @location(2) extra: vec4<f32>, @location(3) local: vec2<f32> };
+struct VOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) tint: vec4<f32>, @location(2) extra: vec4<f32>, @location(3) local: vec2<f32>, @location(4) @interpolate(flat) sampling: f32 };
 @group(0) @binding(0) var t: texture_2d<f32>;
-@vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) tint: vec4<f32>, @location(3) extra: vec4<f32>) -> VOut {
+@vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) tint: vec4<f32>, @location(3) extra: vec4<f32>, @location(6) axes: vec4<f32>, @location(7) place: vec4<f32>) -> VOut {
   var c = array<vec2<f32>, 6>(vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 1.0));
   let p = c[vi];
   var o: VOut;
-  o.pos = vec4<f32>(mix(rect.xy, rect.zw, p), 0.0, 1.0);
+  let q = mix(rect.xy, rect.zw, p);
+  o.pos = vec4<f32>(axes.xy * q.x + axes.zw * q.y + place.xy, 0.0, 1.0);
+  o.sampling = place.z;
   o.uv = mix(uv.xy, uv.zw, p);
   o.tint = tint;
   o.extra = extra;
@@ -395,7 +417,7 @@ fn footprint(uv: vec2<f32>) -> vec2<f32> {
   return vec2<f32>(abs(dpdx(uv.x)), abs(dpdy(uv.y))) * vec2<f32>(textureDimensions(t));
 }
 @fragment fn fs(i: VOut) -> @location(0) vec4<f32> {
-  let fp = footprint(i.uv);
+  let fp = footprint(i.uv) * i.sampling;
   let pm = i.extra.w > 0.0;
   var cover = 1.0;
   if (pm) {
@@ -413,13 +435,15 @@ fn footprint(uv: vec2<f32>) -> vec2<f32> {
 /// and clamped exactly as a texture of its own of that size is, and `clip` (device px x0, y0, x1, y1) stands in
 /// for the scissor rect (a run of quads with different clips is one draw).
 const ATLAS_SHADER: &str = r#"
-struct VOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) tint: vec4<f32>, @location(2) @interpolate(flat) cell: vec4<f32>, @location(3) @interpolate(flat) clip: vec4<f32>, @location(4) @interpolate(flat) layer: i32 };
+struct VOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32>, @location(1) tint: vec4<f32>, @location(2) @interpolate(flat) cell: vec4<f32>, @location(3) @interpolate(flat) clip: vec4<f32>, @location(4) @interpolate(flat) layer: i32, @location(5) @interpolate(flat) sampling: f32 };
 @group(0) @binding(0) var t: texture_2d_array<f32>;
-@vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) tint: vec4<f32>, @location(3) extra: vec4<f32>, @location(4) cell: vec4<f32>, @location(5) clip: vec4<f32>) -> VOut {
+@vertex fn vs(@builtin(vertex_index) vi: u32, @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) tint: vec4<f32>, @location(3) extra: vec4<f32>, @location(4) cell: vec4<f32>, @location(5) clip: vec4<f32>, @location(6) axes: vec4<f32>, @location(7) place: vec4<f32>) -> VOut {
   var c = array<vec2<f32>, 6>(vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 1.0));
   let p = c[vi];
   var o: VOut;
-  o.pos = vec4<f32>(mix(rect.xy, rect.zw, p), 0.0, 1.0);
+  let q = mix(rect.xy, rect.zw, p);
+  o.pos = vec4<f32>(axes.xy * q.x + axes.zw * q.y + place.xy, 0.0, 1.0);
+  o.sampling = place.z;
   o.uv = mix(uv.xy, uv.zw, p);
   o.tint = tint;
   o.cell = cell;
@@ -481,15 +505,15 @@ fn sample_fp(uv: vec2<f32>, fp: vec2<f32>, cell: vec4<f32>, layer: i32) -> vec4<
   return acc / max(wsum, 1e-6);
 }
 @fragment fn fs(i: VOut) -> @location(0) vec4<f32> {
-  let fp = vec2<f32>(abs(dpdx(i.uv.x)), abs(dpdy(i.uv.y))) * i.cell.zw;
+  let fp = vec2<f32>(abs(dpdx(i.uv.x)), abs(dpdy(i.uv.y))) * i.cell.zw * i.sampling;
   let inside = i.pos.x >= i.clip.x && i.pos.y >= i.clip.y && i.pos.x < i.clip.z && i.pos.y < i.clip.w;
   let c = sample_fp(i.uv, fp, i.cell, i.layer) * i.tint;
   return select(vec4<f32>(0.0), c, inside);
 }
 "#;
 
-/// Per quad: rect, uv, tint, extra (pipelines `fs` and `fs_pm` read these four), cell and clip (the atlas's).
-const FLOATS: usize = 24;
+/// Per quad: rect, uv, tint, extra, atlas cell and clip, and two vectors for affine and filter.
+const FLOATS: usize = 32;
 
 impl Gpu {
     pub async fn new(canvas: web_sys::HtmlCanvasElement) -> Result<Gpu, String> {
@@ -557,7 +581,7 @@ impl Gpu {
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: (FLOATS * 4) as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4],
                 })],
             },
             fragment: Some(wgpu::FragmentState {
@@ -593,7 +617,7 @@ impl Gpu {
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: (FLOATS * 4) as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4],
                 })],
             },
             fragment: Some(wgpu::FragmentState {
@@ -1414,6 +1438,7 @@ impl Gpu {
                     how.push(bind.filter(|_| sc[2] > 0 && sc[3] > 0).map(|b| (0, b, sc)));
                 }
             }
+            data.extend_from_slice(&quad_affine(q.transform, w, h));
         }
         let need = (data.len() * 4) as u64;
         if need > self.inst_cap {

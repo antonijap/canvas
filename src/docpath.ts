@@ -23,7 +23,7 @@ export const FILE_EXT = ".canvas.json";
 /** A single-file document's path without FILE_EXT: its sidecars (widgets, shaders, media) are named from it. */
 export const stemOf = (file: string): string => (file.endsWith(FILE_EXT) ? file.slice(0, -FILE_EXT.length) : file);
 export const WIDGETS_FILE = "widgets.json";
-const EMPTY_DOC = { version: "2.21", children: [] };
+const EMPTY_DOC = { version: "2.23", children: [] };
 const EMPTY_WIDGETS = { version: 1, widgets: [] };
 
 export type DocRef = {

@@ -1,3 +1,4 @@
+import { checkMotion } from "../cloud/core/motion.ts";
 import { isCloudFile, cloudAsset } from "./cloud-files-runtime.ts";
 // The GPU engine's input: one board as a fully resolved tree. Resolution stays here in TypeScript,
 // exactly as html.ts does it: component instances expanded (path ids), $variables resolved for the
@@ -213,6 +214,7 @@ function sceneNode(raw: DocNode, theme: Theme, c: Ctx): DocNode | undefined {
   if (n.enabled === false) return undefined;
   const out: Record<string, Json> = {};
   for (const [k, v] of Object.entries(n)) if (!DROP.has(k) && v !== undefined && v !== null) out[k] = v as Json;
+  if (n.motion !== undefined) checkMotion(n.motion, `node ${n.id}`, [], c.warnings);
   // An instance names its component, so the page never offers a drop into the component it would draw.
   if (typeof raw.__ref === "string") out.component = raw.__ref;
   const layoutExtras = canvasLayoutOf(raw, c.doc, active, c.warnings);

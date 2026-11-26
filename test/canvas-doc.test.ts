@@ -142,7 +142,7 @@ describe("save-as and new", () => {
     const target = path.join(dir, "Fresh.canvas");
     const r = await post("/api/canvas/new", { target });
     assert.equal(r.status, 200);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(target, "document.json"), "utf8")), { version: "2.21", children: [] });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(target, "document.json"), "utf8")), { version: "2.23", children: [] });
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(target, "widgets.json"), "utf8")), { version: 1, widgets: [] });
     assert.equal((await post("/api/canvas/new", { target })).status, 409);
     const d = await get(`/api/doc?file=${encodeURIComponent(target)}`);

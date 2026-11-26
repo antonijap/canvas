@@ -20,7 +20,7 @@ const numOr = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v :
 /** `stickyScopes`: the board and frames containing enabled stickies, including on boards that are offscreen.
  * `layoutGuides`: the frames in the board (itself included) that have layout guides (metadata.canvasLayoutGuides,
  * src/page/layout-guides-logic.js), with their guides; the page draws them over the canvas. */
-export type BoardMeta = { id: string; name: string; type: string; x: number; y: number; width?: number; height?: number; key: string; stickers?: Sticker[]; stickyScopes?: string[]; guides?: { axis: "x" | "y"; at: number }[]; layoutGuides?: { id: string; guides: LayoutGuide[] }[] };
+export type BoardMeta = { id: string; name: string; type: string; x: number; y: number; width?: number; height?: number; motion?: true; key: string; stickers?: Sticker[]; stickyScopes?: string[]; guides?: { axis: "x" | "y"; at: number }[]; layoutGuides?: { id: string; guides: LayoutGuide[] }[] };
 
 /** A board's ruler guides, when it has any: well-formed ones only. */
 function guidesOf(n: Record<string, any>): { guides?: { axis: "x" | "y"; at: number }[] } {
@@ -93,6 +93,7 @@ export function boardsOf(doc: CanvasDoc): BoardMeta[] {
       y: numOr(n.y) ?? 0,
       width: numOr(n.width),
       height: numOr(n.height),
+      ...(Array.isArray(n.motion) && n.motion.length ? { motion: true as const } : {}),
       key: sha1(`${shared}:${f!.hasRef ? comps : ""}:${f!.digest}`),
       ...(f!.stickers.length ? { stickers: f!.stickers.map((s) => layers?.has(s.on.layer.split("/")[0]) ? s : { ...s, missingTarget: true }) } : {}),
       ...(f!.stickyScopes.length ? { stickyScopes: f!.stickyScopes } : {}),

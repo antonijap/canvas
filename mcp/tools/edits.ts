@@ -5,10 +5,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { api, ensureServer, resolveFile, ToolError } from "../client.ts";
 import * as S from "../schemas.ts";
+import { checkMotion } from "../../cloud/core/motion.ts";
 import { tool } from "../tool.ts";
 
 export function register(server: McpServer) {
-  tool(server, "set_node_props", "Set properties on one node (shallow merge; remove deletes properties), the same write the inspector does. Omit id to edit the selected node. Pass the revision from get_selection as expectedRevision: if the file changed since, nothing is written and you get stale_revision. Delete, duplicate, group or reorder with delete_nodes, duplicate_nodes, group_nodes, reorder_nodes; add new nodes with add_nodes.", {
+  tool(server, "set_node_props", "Set properties on one node, including a whole motion array (shallow merge; remove deletes properties), the same write the inspector does. Omit id to edit the selected node. Pass the revision from get_selection as expectedRevision: if the file changed since, nothing is written and you get stale_revision. Delete, duplicate, group or reorder with delete_nodes, duplicate_nodes, group_nodes, reorder_nodes; add new nodes with add_nodes.", {
     file: S.file,
     id: z.string().optional().describe("Node id; default: the selected node"),
     props: z.record(z.string(), z.any()).describe("e.g. {content:'New text', fill:'#0766EB', width:'fill_container'}. A shader fill (frames, rectangles, ellipses; animates in the layer, clipped to its shape): fill:['#FFFFFF', {type:'shader', shader:'mesh-gradient', preset:'Ink', params:{speed:0.5}}] (ids, presets and params from list_shader_presets; the last fill paints on top), or {type:'shader', source:'fn shade(p: vec2<f32>) -> vec4<f32> {...}', uniforms:[...]} for your own WGSL. An image fill: {type:'image', url:'media/x.png', mode:'fill'}. Style part of a text: spans:[{start:6, end:11, fontWeight:'700', fill:'#E5484D'}] (start and end count UTF-16 units of content, end exclusive, sorted, no overlaps; keys fontFamily, fontSize, fontWeight, fontStyle, fill, underline, strikethrough, letterSpacing; each says only what differs from the layer). A key set on the whole layer (fontWeight, fill...) takes it off the spans; new content carries them along. Truncate text: textTruncation:'ending', maxLines:2. enabled:false hides a layer; locked:true locks it (canvas clicks and the marquee pass through it and its children; the Layers panel still selects it); remove ['locked'] unlocks"),
@@ -30,7 +31,9 @@ export function register(server: McpServer) {
     file = await resolveFile(file);
     try {
       const r = await api<any>("POST", "/api/update", { file, id, props: a.props, remove: a.remove, expectedRevision: a.expectedRevision });
-      return { id, revision: r.revision, node: r.node };
+      const warnings: string[] = [];
+      if (a.props.motion !== undefined) checkMotion(a.props.motion, `node ${id}`, [], warnings);
+      return { id, revision: r.revision, node: r.node, ...(warnings.length ? { warnings } : {}) };
     } catch (e) {
       if (e instanceof ToolError && e.code === "stale_revision") throw new ToolError("stale_revision", e.message, "Read again (get_selection or inspect_node), then redo the change with the new revision.");
       throw e;

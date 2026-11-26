@@ -6,7 +6,7 @@ import WebKit
 import UniformTypeIdentifiers
 
 struct Board: Identifiable {
-    let id: String; var name: String; let width: Double?; let height: Double?
+    let id: String; var name: String; let width: Double?; let height: Double?; var motion = false
 }
 struct Component: Identifiable { let id: String; let name: String; let type: String; let isText: Bool; var board: String = ""; var instances = 0 }
 struct TextStyle: Identifiable { let id = UUID(); let title: String; let count: Int; let color: Color? }
@@ -547,7 +547,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         openingSidebar = nil
         boards = (doc["boards"] as? [[String: Any]] ?? []).map {
             Board(id: $0["id"] as? String ?? "", name: $0["name"] as? String ?? ($0["id"] as? String ?? ""),
-                  width: ($0["width"] as? NSNumber)?.doubleValue, height: ($0["height"] as? NSNumber)?.doubleValue)
+                  width: ($0["width"] as? NSNumber)?.doubleValue, height: ($0["height"] as? NSNumber)?.doubleValue, motion: $0["motion"] as? Bool ?? false)
         }
         components = (doc["components"] as? [[String: Any]] ?? []).map {
             Component(id: $0["id"] as? String ?? "", name: $0["name"] as? String ?? ($0["type"] as? String ?? ""),
@@ -1499,6 +1499,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func deselect() { run("{cmd:'deselect'}") }
     /// Settings for the page: the shown tab, or (a setting just changed) every live tab, hidden ones too.
     func pushPrefs(everywhere: Bool = false) {
+        if let window = webView.window {
+            let visible = window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible)
+            run("{cmd:'motionWindow',visible:\(visible)}")
+        }
         let js = "window.canvasCmd && window.canvasCmd({cmd:'prefs',prefs:\(prefs.pagePrefsJSON)})"
         let views = everywhere ? Array(live.values) : []
         for wv in views { wv.evaluateJavaScript(js) }

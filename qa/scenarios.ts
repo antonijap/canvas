@@ -1,4 +1,5 @@
 import "./scenarios-blueprint.ts";
+import "./scenarios-motion.ts";
 import "./scenarios-whiteboard.ts";
 import "./scenarios-whiteboard-cloud.ts";
 

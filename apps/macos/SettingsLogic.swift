@@ -53,6 +53,7 @@ struct AppSettings: Equatable {
     var openView = OpenView.restore
     var scrollZooms = false
     var boardLabels = true
+    var playHoverMotion = true
     /// The name on the comments made here (Settings > General). Starts as the Mac's full user name; empty: the server says "Me".
     var commentName = ""
     var showWhiteboardName = true
@@ -88,6 +89,7 @@ struct AppSettings: Equatable {
         let has = { (name: String) in d.object(forKey: k(name)) != nil }
         if let v = d.string(forKey: k("openView")).flatMap(OpenView.init) { s.openView = v }
         if has("scrollZooms") { s.scrollZooms = d.bool(forKey: k("scrollZooms")) }
+        if has("playHoverMotion") { s.playHoverMotion = d.bool(forKey: k("playHoverMotion")) }
         if has("boardLabels") { s.boardLabels = d.bool(forKey: k("boardLabels")) }
         s.commentName = d.string(forKey: k("commentName")) ?? NSFullUserName()
         if has("showWhiteboardName") { s.showWhiteboardName = d.bool(forKey: k("showWhiteboardName")) }
@@ -114,6 +116,7 @@ struct AppSettings: Equatable {
         let k = { (name: String) in AppSettings.prefix + name }
         d.set(openView.rawValue, forKey: k("openView"))
         d.set(scrollZooms, forKey: k("scrollZooms"))
+        d.set(playHoverMotion, forKey: k("playHoverMotion"))
         d.set(boardLabels, forKey: k("boardLabels"))
         d.set(commentName, forKey: k("commentName"))
         d.set(showWhiteboardName, forKey: k("showWhiteboardName"))
@@ -148,7 +151,7 @@ struct AppSettings: Equatable {
 
     /// What the page reads (`prefs` in the page script, src/server.ts), as a JS object literal for {cmd: "prefs"}.
     var pagePrefs: [String: Any] {
-        ["boardLabels": boardLabels, "openView": openView.rawValue, "scrollZooms": scrollZooms,
+        ["boardLabels": boardLabels, "playHoverMotion": playHoverMotion, "openView": openView.rawValue, "scrollZooms": scrollZooms,
          "agentCursor": agentCursor, "agentCursorSpeed": cursorSpeed.multiplier, "snapshotMB": snapshotMB,
          "whiteboardName": showWhiteboardName ? commentName : ""]
     }

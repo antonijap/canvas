@@ -30,8 +30,8 @@ struct LayersLogicTests {
     static let boards = [LayerBoard(id: "B", name: "Home", tree: B), LayerBoard(id: "C", name: "Other", tree: nil)]
 
     static func parse() {
-        let n = LayerNode(json: ["i": "x", "n": "X", "k": "frameH", "h": 1, "ct": 1, "ft": 1, "c": [["i": "y", "n": "Y", "k": "text"], ["n": "no id"]]])
-        check(n?.id == "x" && n?.hidden == true && n?.container == true && n?.firstOnTop == true, "flags read")
+        let n = LayerNode(json: ["i": "x", "n": "X", "k": "frameH", "h": 1, "m": 1, "ct": 1, "ft": 1, "c": [["i": "y", "n": "Y", "k": "text"], ["n": "no id"]]])
+        check(n?.id == "x" && n?.hidden == true && n?.motion == true && n?.container == true && n?.firstOnTop == true, "flags read")
         check(n?.children.map(\.id) == ["y"], "children without an id are skipped")
         check(LayerNode(json: ["n": "x"]) == nil, "no id, no node")
     }
