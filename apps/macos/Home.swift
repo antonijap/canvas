@@ -337,7 +337,8 @@ struct HomeSidebar: View {
                         let word = HomeLogic.word(status: s.known ? s.status : nil)
                         HomeRow(symbol: HomeLogic.rowSymbol(kind: e.kind), title: HomeLogic.cloudName(e), selected: store.section == .cloud(e.id),
                                 word: word, muted: word?.tone == .muted) {
-                            store.section = .cloud(e.id)
+                            // A second click, on the row that already shows, answers its word ("Sign in").
+                            if store.section == .cloud(e.id) { account.answerPrompt(model, e) } else { store.section = .cloud(e.id) }
                         }
                         .help(e.adapterTooltip)
                         .contextMenu {
@@ -661,9 +662,7 @@ private struct HomeCloudHeader: View {
                 if entry.adapterAlpha { Badge(text: "Alpha").qaID("cloud-alpha-badge", label: "Alpha") }
                 // A pill only when the Cloud needs the person (Sign in, Down): a Cloud that works says nothing.
                 if let word {
-                    CloudPill(text: word.text, tone: word.tone) {
-                        if s.status == "signedOut" || s.status == "signInAgain", entry.kind == .server { account.signIn(model, entry) }
-                    }
+                    CloudPill(text: HomeLogic.pillText(word.text, name: name), tone: word.tone) { account.answerPrompt(model, entry) }
                     .help(CloudStatusText.detail(s.status, name: name) ?? CloudStatusText.line(s.status, configured: true))
                 }
                 Spacer(minLength: 8)

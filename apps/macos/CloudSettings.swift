@@ -510,10 +510,27 @@ final class CloudAccount: ObservableObject {
 
     // MARK: Signing in
 
+    /// A click on a Cloud's word ("Sign in", "Down"): never nothing. It signs in, or says what is wrong.
+    func answerPrompt(_ model: CanvasModel, _ e: CloudEntry) {
+        let s = state(e)
+        let status = s.known ? s.status : nil
+        switch HomeLogic.prompt(status: status, kind: e.kind) {
+        case .signIn: signIn(model, e)
+        case .explain: model.flash(CloudStatusText.detail(s.status, name: HomeLogic.cloudName(e)) ?? CloudStatusText.line(s.status, configured: true))
+        case nil: break
+        }
+    }
+
     /// A local development server needs no window: its DEV mode takes the email in Settings. Any other server shows its login.
     func signIn(_ model: CanvasModel, _ e: CloudEntry) {
         guard e.kind == .server else { return }
         if CloudURL.isLocal(e.url) {
+            if e.devEmail.trimmingCharacters(in: .whitespaces).isEmpty {
+                selected = e.id
+                SettingsWindow.shared.show(model, tab: .cloud)
+                model.flash("Enter the development email to sign in to \(HomeLogic.cloudName(e))")
+                return
+            }
             Task {
                 _ = await waitListed(model, e.url)
                 await refresh(model, fresh: true)
@@ -523,7 +540,7 @@ final class CloudAccount: ObservableObject {
         }
         signIns.removeValue(forKey: e.url)?.close()
         let id = e.id, url = e.url
-        let w = CloudSignInWindow(origin: url) { [weak self] token in
+        let w = CloudSignInWindow(origin: url, name: HomeLogic.cloudName(e)) { [weak self] token in
             guard let self else { return }
             self.signIns.removeValue(forKey: url)
             // The sign-in finished late: the Cloud was removed (or replaced) meanwhile, so the token goes nowhere.
@@ -746,16 +763,18 @@ final class CloudSignInWindow: NSObject, WKNavigationDelegate, NSWindowDelegate 
     private let web: WKWebView
     private let window: NSWindow
     private var finished = false
+    private let title: String
 
-    init(origin: String, done: @escaping (String) -> Void) {
+    init(origin: String, name: String, done: @escaping (String) -> Void) {
         self.origin = origin
+        title = "Sign in to \(name)"
         self.done = done
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .nonPersistent()
         web = WKWebView(frame: NSRect(x: 0, y: 0, width: 460, height: 620), configuration: cfg)
         window = NSWindow(contentRect: web.frame, styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         super.init()
-        window.title = "Sign in to \(CloudURL.host(origin))"
+        window.title = title + " (loading\u{2026})"
         window.contentView = web
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -770,7 +789,26 @@ final class CloudSignInWindow: NSObject, WKNavigationDelegate, NSWindowDelegate 
     }
     func close() { finished = true; window.close() }
 
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { fail(error) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { fail(error) }
+
+    private func fail(_ error: Error) {
+        let e = error as NSError
+        // A redirect that replaces a load is not a failure.
+        if e.code == NSURLErrorCancelled || (e.domain == "WebKitErrorDomain" && e.code == 102) { return }
+        show(problem: e.localizedDescription)
+    }
+
+    /// The error takes the window's place, so a sign-in that cannot go on says so.
+    private func show(problem: String) {
+        guard !finished else { return }
+        window.title = title
+        let text = problem.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+        web.loadHTMLString("<meta charset=\"utf-8\"><body style=\"font: 13px -apple-system; padding: 32px; color-scheme: light dark\"><p><b>Canvas couldn't sign in.</b></p><p>\(text)</p><p>Close this window and click Sign in to try again.</p>", baseURL: nil)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        if !finished { window.title = title }
         guard !finished, webView.url?.path == "/v1/me", webView.url.map({ "\($0.scheme ?? "")://\($0.host ?? "")" + ($0.port.map { ":\($0)" } ?? "") }) == origin else { return }
         // The Access login also ends here once it lets the person through; only a JSON answer with an email counts.
         webView.evaluateJavaScript("document.body ? document.body.innerText : ''") { [weak self] result, _ in
@@ -779,7 +817,10 @@ final class CloudSignInWindow: NSObject, WKNavigationDelegate, NSWindowDelegate 
             let host = webView.url?.host ?? ""
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                 let c = cookies.first { $0.name == "CF_Authorization" && host.hasSuffix($0.domain.hasPrefix(".") ? String($0.domain.dropFirst()) : $0.domain) }
-                guard let token = c?.value, !token.isEmpty else { return }
+                guard let token = c?.value, !token.isEmpty else {
+                    DispatchQueue.main.async { self?.show(problem: "The Cloud answered without a Cloudflare Access session. Check that Access protects this address.") }
+                    return
+                }
                 DispatchQueue.main.async {
                     guard let self, !self.finished else { return }
                     self.finished = true
@@ -936,7 +977,8 @@ struct CloudPage: View {
                 Text(name).font(.system(size: 17, weight: .semibold)).foregroundStyle(Palette.fg).lineLimit(1).qaText(name)
                 if e.adapterAlpha { Badge(text: "Alpha").qaID("cloud-alpha-badge", label: "Alpha") }
                 let pill = pill(e, s)
-                CloudPill(text: pill.text, tone: pill.tone).help(CloudStatusText.detail(s.status, name: name) ?? "")
+                CloudPill(text: HomeLogic.pillText(pill.text, name: name), tone: pill.tone) { account.answerPrompt(model, e) }
+                    .help(CloudStatusText.detail(s.status, name: name) ?? "")
                 Spacer(minLength: 0)
             }
             .padding(.leading, -4)

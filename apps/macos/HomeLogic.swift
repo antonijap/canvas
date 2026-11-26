@@ -247,6 +247,17 @@ enum HomeLogic {
         }
     }
 
+    /// What a click on that word does: start the sign-in, or say what is wrong. Nil when there is no word. Only a
+    /// server has a login; a Cloud on a Mac lets people in by invite.
+    enum Prompt: Equatable { case signIn, explain }
+    static func prompt(status: String?, kind: CloudKind) -> Prompt? {
+        guard word(status: status) != nil else { return nil }
+        return kind == .server && (status == "signedOut" || status == "signInAgain") ? .signIn : .explain
+    }
+
+    /// The word on a Cloud's pill: "Sign in" also says to which Cloud.
+    static func pillText(_ word: String, name: String) -> String { word == "Sign in" ? "Sign in to \(name)" : word }
+
     /// The row's glyph says where a Cloud lives: a laptop for a Cloud on a Mac (hosted here or joined), a cloud for a
     /// server.
     static func rowSymbol(kind: CloudKind) -> String { kind == .server ? "cloud" : "laptopcomputer" }

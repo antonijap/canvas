@@ -15,7 +15,7 @@ struct HomeLogicTests {
     }
 
     static func main() {
-        fileNames(); cloudMenu(); recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles()
+        fileNames(); cloudMenu(); recents(); comments(); servers(); cards(); empty(); labels(); thumbnails(); cloudFiles(); signInPrompt()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -34,6 +34,19 @@ struct HomeLogicTests {
         recent.cloudName = "Marketing site"
         check(HomeLogic.search([recent], "site mark") == [recent], "recents search uses the Cloud name")
         check(HomeLogic.search([recent], id).isEmpty, "recents search hides the Cloud ID")
+    }
+
+    /// A "Sign in" prompt names its Cloud, and a click on any prompt does something.
+    static func signInPrompt() {
+        for status in ["signedOut", "signInAgain"] {
+            check(HomeLogic.prompt(status: status, kind: .server) == .signIn, "\(status): a click signs in")
+            check(HomeLogic.prompt(status: status, kind: .joined) == .explain, "\(status): a Cloud with no login says why")
+        }
+        check(HomeLogic.prompt(status: "down", kind: .server) == .explain, "another word explains itself")
+        check(HomeLogic.prompt(status: "connected", kind: .server) == nil, "no prompt while it works")
+        check(HomeLogic.prompt(status: nil, kind: .server) == nil, "no prompt before the first answer")
+        check(HomeLogic.pillText("Sign in", name: "Studio") == "Sign in to Studio", "the pill names the Cloud")
+        check(HomeLogic.pillText("Down", name: "Studio") == "Down", "other words stay")
     }
 
     static func cloudMenu() {
