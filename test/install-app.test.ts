@@ -11,11 +11,17 @@ const plist = (exe: string) => `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict><key>CFBundleExecutable</key><string>${exe}</string>
 <key>CFBundleIdentifier</key><string>test.install-app</string></dict></plist>`;
 
+// A bundle layout without the .app name, so LaunchServices and Gatekeeper never take it for an app (a copied
+// /bin/sleep in a Fake.app made macOS show a "damaged" dialog). The binary is ad-hoc signed, with no extended
+// attributes, and only ever spawned directly: nothing here calls `open`, and --verify never opens anything.
 function fakeApp(dir: string): string {
-  const app = path.join(dir, "Fake.app");
-  mkdirSync(path.join(app, "Contents", "MacOS"), { recursive: true });
+  const app = path.join(dir, "Fake.bundle");
+  const bin = path.join(app, "Contents", "MacOS", "Fake");
+  mkdirSync(path.dirname(bin), { recursive: true });
   writeFileSync(path.join(app, "Contents", "Info.plist"), plist("Fake"));
-  cpSync("/bin/sleep", path.join(app, "Contents", "MacOS", "Fake"));
+  cpSync("/bin/sleep", bin);
+  spawnSync("xattr", ["-cr", app]);
+  spawnSync("codesign", ["--force", "--sign", "-", bin]);
   return app;
 }
 const verify = (pid: number, app: string) => spawnSync("bash", [script, "--verify", String(pid), app], { encoding: "utf8" });
@@ -29,7 +35,7 @@ test("verify tells a process on the installed binary from one left on a replaced
     spawnSync("sleep", ["0.3"]);
     assert.equal(verify(old.pid!, app).status, 0, "the process runs the installed binary");
     // The install: the old bundle moves aside, the new one takes its place, the old process keeps running.
-    renameSync(app, path.join(dir, "Old.app"));
+    renameSync(app, path.join(dir, "Old.bundle"));
     fakeApp(dir);
     const stale = verify(old.pid!, app);
     assert.notEqual(stale.status, 0, "a process left on the old binary is not the installed build");

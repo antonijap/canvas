@@ -2,7 +2,8 @@
 # Put a built Canvas.app in /Applications and prove the app that runs afterwards is that build.
 #   scripts/install-app.sh <built.app> [--no-open]   quit the installed app, replace it, open it, verify
 #   scripts/install-app.sh --verify <pid> <app>      exit 0 only if <pid> runs <app>'s binary (the same file)
-#   CANVAS_INSTALL_DIR overrides /Applications (tests).
+#   CANVAS_INSTALL_DIR overrides /Applications; CANVAS_INSTALL_NO_OPEN=1 is --no-open. Tests use only --verify,
+#   which never quits, opens or launches anything.
 #
 # Why the check: an app that is still running when its bundle is replaced keeps running the old binary (moved to
 # the Trash, still mapped), and a launch that races the swap starts the old one. The Info.plist on disk then names
@@ -34,7 +35,7 @@ verify() {
 if [ "${1:-}" = "--verify" ]; then verify "$2" "$3"; exit $?; fi
 
 SRC="${1:?usage: scripts/install-app.sh <built.app> [--no-open]}"
-OPEN=1; [ "${2:-}" = "--no-open" ] && OPEN=0
+OPEN=1; { [ "${2:-}" = "--no-open" ] || [ "${CANVAS_INSTALL_NO_OPEN:-}" = 1 ]; } && OPEN=0
 DEST="${CANVAS_INSTALL_DIR:-/Applications}/$(basename "$SRC")"
 EXE="$(exe_of "$SRC")"
 BIN="$DEST/Contents/MacOS/$EXE"
