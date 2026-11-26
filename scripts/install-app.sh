@@ -2,6 +2,7 @@
 # Put a built Canvas.app in /Applications and prove the app that runs afterwards is that build.
 #   scripts/install-app.sh <built.app> [--no-open]   quit the installed app, replace it, open it, verify
 #   scripts/install-app.sh --verify <pid> <app>      exit 0 only if <pid> runs <app>'s binary (the same file)
+#   scripts/install-app.sh --stop-helpers <app>      stop processes left running from <app>/Contents/Resources
 #   CANVAS_INSTALL_DIR overrides /Applications; CANVAS_INSTALL_NO_OPEN=1 is --no-open. Tests use only --verify,
 #   which never quits, opens or launches anything.
 #
@@ -32,7 +33,24 @@ verify() {
   fi
 }
 
+# Processes started from inside a bundle other than its main binary, like the bundled node server. They can outlive
+# the app (parent launchd) and keep serving the replaced bundle's files: the new app then talks to the old server and
+# its engine fails to import. Command lines that start with <app>/Contents/Resources/.
+helpers_of() { pgrep -f "^$1/Contents/Resources/" || true; }
+
+# Stop them: TERM, up to 10 s to exit (the server saves on TERM), then KILL.
+stop_helpers() {
+  local app="$1" pids
+  pids="$(helpers_of "$app")"; [ -n "$pids" ] || return 0
+  kill $pids 2>/dev/null || true
+  for _ in $(seq 20); do [ -z "$(helpers_of "$app")" ] && return 0; sleep 0.5; done
+  pids="$(helpers_of "$app")"; [ -n "$pids" ] && kill -9 $pids 2>/dev/null || true
+  sleep 0.5
+  [ -z "$(helpers_of "$app")" ] || { echo "install-app: helpers of $app still running: $(helpers_of "$app" | tr '\n' ' ')" >&2; return 1; }
+}
+
 if [ "${1:-}" = "--verify" ]; then verify "$2" "$3"; exit $?; fi
+if [ "${1:-}" = "--stop-helpers" ]; then stop_helpers "$2"; exit $?; fi
 
 SRC="${1:?usage: scripts/install-app.sh <built.app> [--no-open]}"
 OPEN=1; { [ "${2:-}" = "--no-open" ] || [ "${CANVAS_INSTALL_NO_OPEN:-}" = 1 ]; } && OPEN=0
@@ -47,6 +65,8 @@ if pgrep -f "^$BIN" >/dev/null; then
   for _ in $(seq 120); do pgrep -f "^$BIN" >/dev/null || break; sleep 0.5; done
   if pgrep -f "^$BIN" >/dev/null; then echo "install-app: $DEST is still running; quit it and run again" >&2; exit 1; fi
 fi
+
+stop_helpers "$DEST"
 
 OLD=""
 if [ -e "$DEST" ]; then OLD="$(mktemp -d)/$(basename "$DEST")"; mv "$DEST" "$OLD"; fi

@@ -50,3 +50,24 @@ test("verify tells a process on the installed binary from one left on a replaced
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A bundled server outlived the app it belonged to; the reinstalled app talked to it and its engine failed to import.
+test("stop-helpers ends a process left running from the bundle's Resources", { skip: process.platform !== "darwin" }, () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "install-app-"));
+  const app = fakeApp(dir);
+  const helper = path.join(app, "Contents", "Resources", "node", "helper");
+  mkdirSync(path.dirname(helper), { recursive: true });
+  cpSync(path.join(app, "Contents", "MacOS", "Fake"), helper);
+  const proc = spawn(helper, ["30"]);
+  const running = () => spawnSync("pgrep", ["-f", `^${path.join(app, "Contents", "Resources")}/`], { encoding: "utf8" }).stdout.trim();
+  try {
+    spawnSync("sleep", ["0.3"]);
+    assert.equal(running(), String(proc.pid), "the helper runs from the bundle");
+    const r = spawnSync("bash", [script, "--stop-helpers", app], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(running(), "", "the helper is gone");
+  } finally {
+    proc.kill("SIGKILL");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
