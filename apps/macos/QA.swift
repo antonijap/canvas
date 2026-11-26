@@ -286,6 +286,10 @@ enum QA {
         case "qa.marks": return try marks(a)
         case "qa.find": return try await find(a)
         case "qa.shot": return try await shot(a)
+        case "qa.peek":
+            model.qaPeekHeld = a["on"] as? Bool ?? true
+            if model.qaPeekHeld { model.sidebarPeek.open() } else { model.sidebarPeek.close() }
+            return ["shown": model.sidebarPeek.shown]
         case "qa.js": return try await js(a)
         case "qa.pixels": return try await pixels(a)
         case "qa.menu": return try menuOp(a)

@@ -18,11 +18,38 @@ struct ShellLogicTests {
     static func main() {
         docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); serverCode(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
-        fieldMath(); mixedEach(); menuSpec(); drawToolPalette(); panelMemory(); tabPool(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
+        fieldMath(); mixedEach(); menuSpec(); drawToolPalette(); panelMemory(); tabPool(); sidebarPeek(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
         sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
         updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress(); tabRenameFocus(); recentlyClosedTabs()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
+    }
+
+    static func sidebarPeek() {
+        var peek = SidebarPeek()
+        peek.moved(x: 20, y: 300, top: 38, allowed: true)
+        check(!peek.shown, "away from the edge stays hidden")
+        peek.moved(x: 3, y: 10, top: 38, allowed: true)
+        check(!peek.shown, "the title bar does not peek")
+        peek.moved(x: 3, y: 300, top: 38, allowed: false)
+        check(!peek.shown, "no peek while dragging, pinned or with the UI hidden")
+        peek.moved(x: 8, y: 300, top: 38, allowed: true)
+        check(peek.shown, "the edge strip peeks")
+        peek.tick(inside: true, held: false, allowed: true, now: 1)
+        peek.tick(inside: false, held: false, allowed: true, now: 2)
+        peek.tick(inside: false, held: false, allowed: true, now: 2.2)
+        check(peek.shown, "it waits after the pointer leaves")
+        peek.tick(inside: true, held: false, allowed: true, now: 2.25)
+        peek.tick(inside: false, held: false, allowed: true, now: 2.4)
+        check(peek.shown, "coming back restarts the wait")
+        peek.tick(inside: false, held: true, allowed: true, now: 5)
+        peek.tick(inside: false, held: false, allowed: true, now: 5.1)
+        check(peek.shown, "a menu or name field holds it")
+        peek.tick(inside: false, held: false, allowed: true, now: 5.41)
+        check(!peek.shown, "peeking goes back to hidden")
+        peek.open()
+        peek.tick(inside: true, held: true, allowed: false, now: 6)
+        check(!peek.shown, "pinning ends the peek at once")
     }
 
     static func recentlyClosedTabs() {

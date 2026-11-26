@@ -170,6 +170,10 @@ struct RootView: View {
     /// The left sidebar is the same panel on Home and in a file (only its rows change).
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden }
     private var inspectorShown: Bool { model.propertiesShown }
+    /// Hidden by the toggle (not by Hide UI, nor for lack of room): the left edge may reveal it. The canvas insets
+    /// and the top bar follow `panelOpen` alone, so a peek moves nothing.
+    private var canPeek: Bool { !model.panelOpen && !model.uiHidden && panelWidth != nil }
+    private var peeking: Bool { canPeek && model.sidebarPeek.shown }
     private var toolPaletteShown: Bool { model.currentFile != nil && !model.homeShown && !model.cloudReadOnly && !model.uiHidden }
     private var zoomShown: Bool { !model.uiHidden && !model.homeShown && !model.pageEmpty }
 
@@ -248,7 +252,13 @@ struct RootView: View {
             .animation(Motion.fast, value: model.pageEmpty)
             .ignoresSafeArea()
 
-            LeftColumn(model: model, panelWidth: panelOpen ? panelWidth : nil, panelMax: panelMax)
+            // Above the canvas and its islands while it floats there, under the top bar.
+            LeftColumn(model: model, panelWidth: panelOpen || peeking ? panelWidth : nil, panelMax: panelMax, floating: peeking)
+                .zIndex(model.panelOpen ? 0 : 1)
+
+            SidebarPeekTracker(model: model, canPeek: canPeek, width: panelWidth ?? 0)
+                .allowsHitTesting(false)
+                .ignoresSafeArea()
 
             if inspectorShown { Inspector(model: model, fonts: model.fonts).disabled(model.cloudReadOnly) }
 
@@ -285,16 +295,18 @@ struct RootView: View {
                     .ignoresSafeArea()
             }
 
-            TopBar(model: model, sidebarWidth: panelOpen ? panelWidth : nil).ignoresSafeArea(edges: .top)
+            TopBar(model: model, sidebarWidth: panelOpen ? panelWidth : nil).ignoresSafeArea(edges: .top).zIndex(2)
 
             // Rename Layers (Cmd+R with several layers): Layers.swift.
-            BatchRenameLayer(model: model)
+            BatchRenameLayer(model: model).zIndex(3)
             // Quick actions (Cmd+K, Cmd+/): Palette.swift.
-            CommandPaletteLayer(model: model)
+            CommandPaletteLayer(model: model).zIndex(3)
         }
         .coordinateSpace(name: "canvas")
         .frame(minWidth: 720, minHeight: 420)
         .ignoresSafeArea()
+        // Pinned, hidden by Hide UI or out of room: the peek is over.
+        .onChange(of: canPeek) { _, can in if !can { model.sidebarPeek.close() } }
         .onChange(of: model.revealBoardId) { _, board in if board != nil { model.panelOpen = true } }
         .onChange(of: insets, initial: true) { _, v in
             model.setInsets(l: v.l, t: v.t, r: v.r, b: v.b, bottomClearance: v.bottomClearance)
@@ -604,6 +616,109 @@ struct TopBar: View {
 
 // MARK: Left
 
+/// Watches the pointer for SidebarPeek. A tracking area over the whole window that takes no clicks: the edge strip
+/// never gets in the way of the canvas. While the sidebar peeks, a timer checks where the pointer is and whether the
+/// sidebar is in use.
+private struct SidebarPeekTracker: NSViewRepresentable {
+    let model: CanvasModel
+    let canPeek: Bool
+    let width: CGFloat
+
+    func makeNSView(context: Context) -> TrackerView { TrackerView() }
+    func updateNSView(_ v: TrackerView, context: Context) {
+        v.model = model
+        v.canPeek = canPeek
+        v.panelWidth = width
+        v.watch(model.sidebarPeek.shown)
+    }
+    static func dismantleNSView(_ v: TrackerView, coordinator: ()) { v.watch(false) }
+
+    final class TrackerView: NSView {
+        weak var model: CanvasModel?
+        var canPeek = false
+        var panelWidth: CGFloat = 0
+        private var tracking: NSTrackingArea?
+        private var timer: Timer?
+        private var menuOpen = false
+        private var buttonWasDown = false
+        private var pressedInside = false
+
+        override var isFlipped: Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            NotificationCenter.default.addObserver(self, selector: #selector(menuBegan), name: NSMenu.didBeginTrackingNotification, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(menuEnded), name: NSMenu.didEndTrackingNotification, object: nil)
+        }
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError() }
+
+        @objc private func menuBegan() { menuOpen = true }
+        @objc private func menuEnded() { menuOpen = false }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let tracking { removeTrackingArea(tracking) }
+            let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                      owner: self, userInfo: nil)
+            addTrackingArea(area)
+            tracking = area
+        }
+
+        override func mouseEntered(with event: NSEvent) { moved(event) }
+        override func mouseMoved(with event: NSEvent) { moved(event) }
+
+        private func moved(_ event: NSEvent) {
+            guard let model, !model.sidebarPeek.shown else { return }
+            let p = convert(event.locationInWindow, from: nil)
+            var peek = model.sidebarPeek
+            peek.moved(x: p.x, y: p.y, top: Metric.topBar,
+                       allowed: canPeek && NSEvent.pressedMouseButtons == 0 && window?.attachedSheet == nil)
+            if peek.shown { model.sidebarPeek = peek }
+        }
+
+        func watch(_ on: Bool) {
+            if !on {
+                timer?.invalidate()
+                timer = nil
+                buttonWasDown = false
+            } else if timer == nil {
+                let t = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.tick() }
+                }
+                // Common modes: it keeps counting while a menu or a drag runs its own loop.
+                RunLoop.main.add(t, forMode: .common)
+                timer = t
+            }
+        }
+
+        private func tick() {
+            guard let model, let window else { return }
+            let p = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            // The whole height counts, so the pointer can travel up to the toggle in the title bar.
+            let inside = bounds.contains(p) && p.x <= max(panelWidth, Metric.trafficLights + 2 * Metric.toolbarControl + 24)
+            // Only a press that began on the sidebar holds it; a drag on the canvas does not.
+            let down = NSEvent.pressedMouseButtons != 0
+            if down && !buttonWasDown { pressedInside = inside }
+            buttonWasDown = down
+            var held = menuOpen || window.attachedSheet != nil || model.sidebarMenuOpen || model.resizingSidebar
+                || (down && pressedInside)
+            // A name or search field being typed in on the sidebar.
+            if let field = window.firstResponder as? NSTextView {
+                let f = convert(field.visibleRect, from: field)
+                if f.midX <= panelWidth && f.midY >= Metric.topBar { held = true }
+            }
+            #if CANVAS_QA
+            if model.qaPeekHeld { held = true }
+            #endif
+            var peek = model.sidebarPeek
+            peek.tick(inside: inside, held: held, allowed: canPeek, now: ProcessInfo.processInfo.systemUptime)
+            if peek != model.sidebarPeek { model.sidebarPeek = peek }
+        }
+    }
+}
+
 private struct SidebarToggleButton: View {
     @ObservedObject var model: CanvasModel
 
@@ -661,6 +776,8 @@ struct LeftColumn: View {
     /// From RootView: the stored width clamped to the window; nil hides the panel.
     let panelWidth: CGFloat?
     let panelMax: CGFloat
+    /// Peeking over the canvas: a shadow on its right edge.
+    var floating = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private struct ScrollKey: Hashable {
         let file: String?
@@ -681,7 +798,14 @@ struct LeftColumn: View {
             }
             if let width = panelWidth {
                 column(width: width)
-                    .transition(reduceMotion ? .identity : .offset(x: -width - 1))
+                    .background(alignment: .trailing) {
+                        if floating {
+                            LinearGradient(colors: [.black.opacity(0.16), .clear], startPoint: .leading, endPoint: .trailing)
+                                .frame(width: 14).offset(x: 14)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .transition(reduceMotion ? .identity : .offset(x: -width - 15))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

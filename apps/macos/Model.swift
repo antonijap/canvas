@@ -262,6 +262,12 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var panelOpen = true
     /// View > Hide UI: only the canvas and the tabs show.
     @Published var uiHidden = false
+    /// The hidden left panel shown over the canvas by a hover at the window's left edge (SidebarPeekTracker).
+    @Published var sidebarPeek = SidebarPeek()
+    #if CANVAS_QA
+    /// qa.peek holds the peek open without a pointer, for screenshots.
+    var qaPeekHeld = false
+    #endif
     /// The left panel's section per file: a tab keeps the one it showed (PanelMemory).
     private var sectionByFile: [String: SidebarSection] = [:]
     /// The last drawn size of each layer, per file: a hidden Hug or Fill layer has no drawn box (KnownSize).

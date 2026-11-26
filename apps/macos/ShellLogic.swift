@@ -115,6 +115,42 @@ enum ShellLayout {
     }
 }
 
+/// The hidden left sidebar shown over the canvas while the pointer is at the window's left edge. Points are
+/// window points from the top left; times are seconds.
+struct SidebarPeek: Equatable {
+    static let edge: CGFloat = 8
+    static let delay = 0.3
+
+    private(set) var shown = false
+    private var leftAt: Double?
+
+    /// The pointer moved. `allowed`: the sidebar is hidden, may peek, and no mouse button is down.
+    mutating func moved(x: CGFloat, y: CGFloat, top: CGFloat, allowed: Bool) {
+        if !shown && allowed && x >= 0 && x <= Self.edge && y >= top { open() }
+    }
+
+    mutating func open() {
+        shown = true
+        leftAt = nil
+    }
+
+    /// While shown. `inside`: the pointer is over the sidebar. `held`: it is in use (a menu, a name field, a drag).
+    /// It goes `delay` after the pointer left and nothing holds it, and at once when it may no longer show.
+    mutating func tick(inside: Bool, held: Bool, allowed: Bool, now: Double) {
+        guard shown else { return }
+        if !allowed { close() }
+        else if inside || held { leftAt = nil }
+        else if let leftAt { if now - leftAt >= Self.delay { close() } }
+        else { leftAt = now }
+    }
+
+    /// Also what pinning does: the sidebar is then shown the normal way.
+    mutating func close() {
+        shown = false
+        leftAt = nil
+    }
+}
+
 /// Resizing a sidebar by its edge: the editor panel and the Home sidebar follow the same rules.
 enum SidebarSize {
     /// The edge's grab strip: it straddles the edge, half over the sidebar and half over what lies beside it.
