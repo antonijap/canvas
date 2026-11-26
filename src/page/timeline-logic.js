@@ -1,4 +1,4 @@
-import { compileMotion, motionPose, motionProps, motionTrackKeys } from "./motion-logic.js";
+import { compileMotion, motionPose, motionProps, motionTrackKeys, withKeyframeFallback } from "./motion-logic.js";
 
 export const axisInset = 24;
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
@@ -18,7 +18,7 @@ export function availableTimelineProperties(motion) {
 export function addTimelineProperty(layer, prop, id) {
   if (!availableTimelineProperties(layer.motion).includes(prop)) return null;
   const from = keyValue(prop, motionTrackKeys({ prop }, layer.opacity)[0].v);
-  const track = { prop, keys: [{ t: 0, v: from }, { t: 300, v: endValues.get(prop) }] };
+  const track = withKeyframeFallback({ prop }, [{ t: 0, v: from }, { t: 300, v: endValues.get(prop) }]);
   const hover = hoverAnimation(layer.motion);
   const animation = hover ? { ...hover, tracks: [...hover.tracks, track] } : { id, on: "boardHover", leave: "reverse", tracks: [track] };
   const motion = hover ? layer.motion.map(a => a === hover ? animation : a) : [...layer.motion, animation];
@@ -64,10 +64,7 @@ export function trackValue(compiled, time) {
 }
 
 export function editTrack(track, before, keys) {
-  if (Array.isArray(track.keys) || keys.length > 2) {
-    const { from, to, duration, delay, ease, ...other } = track;
-    return { ...other, keys };
-  }
+  if (Array.isArray(track.keys) || keys.length > 2) return withKeyframeFallback(track, keys);
   const next = { ...track };
   if (keys[0].v !== before[0].v) next.from = keys[0].v;
   if (keys[1].v !== before[1].v) next.to = keys[1].v;
@@ -117,7 +114,7 @@ export function moveKeys(keys, indices, time, { legacy = false, snap = false } =
 export function addKey(track, keys, time, opacity) {
   if (!Number.isFinite(time) || time < 0 || time > 60000 || keys.length >= 16 || keys.at(-1).t > 60000 ||
       keys.some((key, i) => key.t === time || (i && key.t === keys[i - 1].t))) return keys;
-  const compiled = compileTrack(track, opacity);
+  const compiled = compileTrack({ ...track, keys }, opacity);
   const ease = keys.find(key => key.t > time)?.ease;
   const v = keyValue(track.prop, trackValue(compiled, time));
   return [...keys, { t: time, v, ...(ease !== undefined && { ease }) }].sort((a, b) => a.t - b.t);

@@ -1,4 +1,5 @@
-import { motionProps } from "../../src/page/motion-logic.js";
+import { motionProps, withKeyframeFallback, type MotionKey } from "../../src/page/motion-logic.js";
+import type { Json } from "./schema.ts";
 
 export const UPDATE_MOTION_HOST = "The Cloud host runs an older Canvas and must be updated to save motion.";
 
@@ -11,6 +12,7 @@ const eases = new Set(["linear", "ease", "easeIn", "easeOut", "easeInOut"]);
 const leaves = new Set(["reverse", "reset", "hold"]);
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const number = (v: unknown, min = -Infinity, max = Infinity): v is number => typeof v === "number" && Number.isFinite(v) && v >= min && v <= max;
+const validTrackValue = (prop: unknown, value: unknown) => prop === "opacity" ? number(value, 0, 1) : number(value);
 
 function validEase(v: unknown): boolean {
   if (typeof v === "string") return !!v.trim();
@@ -28,21 +30,72 @@ function checkEase(ease: unknown, loc: string, errors: string[], warnings?: stri
   else if (typeof ease === "string" && !eases.has(ease)) warnings?.push(`${loc}: unknown ease "${ease}", kept as it is`);
 }
 
-function checkKeys(keys: unknown, valueOK: (v: unknown) => boolean, loc: string, errors: string[], warnings?: string[]) {
+function checkKeys(keys: unknown, prop: unknown, loc: string, errors: string[], warnings?: string[]): keys is MotionKey[] {
   if (!Array.isArray(keys) || keys.length < 2 || keys.length > 16) {
     errors.push(`${loc}: keys must contain 2 to 16 keyframes`);
-    return;
+    return false;
   }
+  const before = errors.length;
   let last = -Infinity;
   for (const [i, key] of keys.entries()) {
     const at = `${loc}.keys[${i}]`;
     if (!object(key)) { errors.push(`${at}: expected a keyframe object`); continue; }
     if (!number(key.t, 0, 60000) || key.t <= last) errors.push(`${at}: t must be 0 to 60000 ms and strictly increasing`);
     else last = key.t;
-    if (!valueOK(key.v)) errors.push(`${at}: v must be a finite number (opacity 0 to 1)`);
+    if (!validTrackValue(prop, key.v)) errors.push(`${at}: v must be a finite number (opacity 0 to 1)`);
     checkEase(key.ease, at, errors, warnings);
     if (warnings) for (const k of Object.keys(key)) if (!keyFields.has(k)) warnings.push(`${at}: unknown field "${k}", kept as it is`);
   }
+  return errors.length === before;
+}
+
+function matchingEase(a: unknown = "linear", b: unknown = "linear"): boolean {
+  if (!validEase(a)) return false;
+  if (a === b) return true;
+  if (Array.isArray(a)) return Array.isArray(b) && a.every((v, i) => v === b[i]);
+  if (!object(a) || !object(b) || !object(a.spring) || !object(b.spring)) return false;
+  const right = b.spring;
+  return Object.keys(a.spring).length === Object.keys(right).length && Object.entries(a.spring).every(([k, v]) => right[k] === v);
+}
+
+const hasFallback = (t: Record<string, unknown>) => [t.from, t.to, t.duration, t.delay, t.ease].some(v => v !== undefined);
+
+function matchingFallback(track: Record<string, unknown>, fallback: ReturnType<typeof withKeyframeFallback>) {
+  const { from, to, delay, duration, ease } = fallback;
+  return track.from === from && track.to === to && track.delay === delay && number(track.duration, Number.MIN_VALUE, 60000) &&
+    Math.abs(track.duration - duration) <= Number.EPSILON * (delay + duration) && matchingEase(track.ease, ease);
+}
+
+export function normalizeMotionFallbacks(value: Json, repairOnly = false): Json {
+  if (!Array.isArray(value)) return value;
+  return value.map(a => {
+    if (!object(a) || !Array.isArray(a.tracks)) return a;
+    const tracks = a.tracks.map(t => {
+      if (!object(t) || t.keys === undefined || (repairOnly && !hasFallback(t)) || !checkKeys(t.keys, t.prop, "", [])) return t;
+      const fallback = withKeyframeFallback(t, t.keys);
+      return matchingFallback(t, fallback) ? t : fallback as Json;
+    });
+    return { ...a, tracks };
+  });
+}
+
+// History can restore motion directly or inside an instance's stored override.
+export function repairMotionFallbacks(key: string, value: Json): Json {
+  if (key === "motion") return normalizeMotionFallbacks(value, true);
+  if (key === "descendants" && object(value)) {
+    return Object.fromEntries(Object.entries(value).map(([id, props]) => [id, repairOverrideFallbacks(props)]));
+  }
+  if (key.startsWith("descendants/")) return repairOverrideFallbacks(value);
+  return value;
+}
+
+function repairOverrideFallbacks(props: Json): Json {
+  if (!object(props)) return props;
+  const next = { ...props };
+  if (props.motion !== undefined) next.motion = repairMotionFallbacks("motion", props.motion);
+  if (props.descendants !== undefined) next.descendants = repairMotionFallbacks("descendants", props.descendants);
+  if (Array.isArray(props.children)) next.children = props.children.map(repairOverrideFallbacks);
+  return next;
 }
 
 export function checkMotion(value: unknown, where: string, errors: string[], warnings?: string[]) {
@@ -52,8 +105,9 @@ export function checkMotion(value: unknown, where: string, errors: string[], war
   }
   const ids = new Set<string>();
   for (const [i, a] of value.entries()) {
-    const at = `${where}.motion[${i}]`;
-    if (!object(a)) { errors.push(`${at}: expected an animation object`); continue; }
+    const entry = `${where}.motion[${i}]`;
+    if (!object(a)) { errors.push(`${entry}: expected an animation object`); continue; }
+    const at = typeof a.id === "string" ? `${entry} (${JSON.stringify(a.id)})` : entry;
     if (typeof a.id !== "string" || !a.id.trim() || a.id.includes("/") || ids.has(a.id)) errors.push(`${at}: id must be unique, non-empty and contain no "/"`);
     else ids.add(a.id);
     if (typeof a.on !== "string" || !a.on.trim()) errors.push(`${at}: on must be a trigger name`);
@@ -73,17 +127,18 @@ export function checkMotion(value: unknown, where: string, errors: string[], war
       else if (!props.has(t.prop)) warnings?.push(`${loc}: unknown prop "${t.prop}", kept as it is`);
       else if (used.has(t.prop)) errors.push(`${loc}: use each supported prop at most once (${motionProps.join(", ")})`);
       else used.add(t.prop);
-      const valueOK = (v: unknown) => t.prop === "opacity" ? number(v, 0, 1) : number(v);
       if (t.keys !== undefined) {
-        if ([t.from, t.to, t.duration, t.delay, t.ease].some(v => v !== undefined)) errors.push(`${loc}: keys cannot be combined with from, to, duration, delay or ease`);
-        checkKeys(t.keys, valueOK, loc, errors, warnings);
+        if (checkKeys(t.keys, t.prop, loc, errors, warnings) && hasFallback(t) && !matchingFallback(t, withKeyframeFallback({}, t.keys))) {
+          errors.push(`${loc}: from, to, duration, delay and ease must match the keyframe fallback`);
+        }
+      } else {
+        if ((t.to !== undefined && !validTrackValue(t.prop, t.to)) || (t.from !== undefined && !validTrackValue(t.prop, t.from))) errors.push(`${loc}: to and from must be finite numbers (opacity 0 to 1)`);
+        if (t.duration !== undefined && !number(t.duration, 0, 60000)) errors.push(`${loc}: duration must be 0 to 60000 ms`);
+        if (t.delay !== undefined && !number(t.delay, 0, 10000)) errors.push(`${loc}: delay must be 0 to 10000 ms`);
+        checkEase(t.ease, loc, errors, warnings);
       }
-      if ((t.to !== undefined && !valueOK(t.to)) || (t.from !== undefined && !valueOK(t.from))) errors.push(`${loc}: to and from must be finite numbers (opacity 0 to 1)`);
-      if (t.duration !== undefined && !number(t.duration, 0, 60000)) errors.push(`${loc}: duration must be 0 to 60000 ms`);
-      if (t.delay !== undefined && !number(t.delay, 0, 10000)) errors.push(`${loc}: delay must be 0 to 10000 ms`);
       if (t.repeat !== undefined && t.repeat !== "infinite" && !(Number.isSafeInteger(t.repeat) && number(t.repeat, 0))) errors.push(`${loc}: repeat must be a non-negative integer or "infinite"`);
       if (t.alternate !== undefined && typeof t.alternate !== "boolean") errors.push(`${loc}: alternate must be boolean`);
-      checkEase(t.ease, loc, errors, warnings);
       if (warnings) for (const k of Object.keys(t)) if (!trackKeys.has(k)) warnings.push(`${loc}: unknown field "${k}", kept as it is`);
     }
   }

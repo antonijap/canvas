@@ -73,6 +73,13 @@ test('an older host refusing a motion write leaves an actionable error in the re
         assert.ok(!('reject' in c));
         await store.receive({ type: 'reject', id: c.id, code: 'invalid', message: 'insert: "motion" is not a rectangle property' }, new MemoryObjects());
         assert.match(store.replica.refused.at(-1)!.message, /Cloud host runs an older Canvas and must be updated/);
+        const d = store.propose([{ k: 'set', id: 'Title', props: { motion: { v: [{ id: 'fade', on: 'boardHover', tracks: [
+            { prop: 'opacity', keys: [{ t: 12000, v: 1 }, { t: 13000, v: 0.5 }], from: 1, to: 0.5, delay: 12000, duration: 1000 },
+        ] }] } } }]);
+        assert.ok(!('reject' in d));
+        await store.receive({ type: 'reject', id: d.id, code: 'invalid', message: 'node Title.motion[0].tracks[0]: delay must be 0 to 10000 ms' }, new MemoryObjects());
+        assert.match(store.replica.refused.at(-1)!.message, /Cloud host runs an older Canvas and must be updated/);
+        assert.equal(store.replica.view().node('Title')?.props.motion, undefined);
     } finally {
         store.close();
         fs.rmSync(pkg, { recursive: true, force: true });

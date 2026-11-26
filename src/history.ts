@@ -13,6 +13,7 @@
 // first, so a refused step writes nothing. Ids stay the same through undo and redo.
 
 import type http from "node:http";
+import { repairMotionFallbacks } from "../cloud/core/motion.ts";
 import { cloudFileHooks } from './cloud-files-runtime.ts';
 import { allIds, buildIndex, findNode, loadDoc, revisionOf, stateHashOf, StaleFileError, updateNode, type Json, type DocNode } from "./engine.ts";
 import { currentDoc, editDoc, pendingEdits, writerHooks } from "./docwriter.ts";
@@ -305,7 +306,12 @@ function mergeOps(into: Op[], ops: Op[]): Op[] {
   }
   return out.filter((o) => {
     if (o.t === "node") {
-      for (const [k, d] of Object.entries(o.props)) if (sameVal(d.b, d.a)) delete o.props[k];
+      for (const [k, d] of Object.entries(o.props)) {
+        // Undo restores the previous keys with a valid fallback, even if the original was hand-edited.
+        const b = d.b === null ? null : { v: repairMotionFallbacks(k, d.b.v) };
+        if (sameVal(b, d.a)) delete o.props[k];
+        else o.props[k] = { b, a: d.a };
+      }
       return Object.keys(o.props).length > 0 || !!(o.keys && !same(o.keys.b, o.keys.a));
     }
     if (o.t === "widget") return !same(o.b, o.a);

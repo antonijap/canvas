@@ -6,6 +6,7 @@ import { movePackagePath, recoverMoveStages } from "./cloud-files-move.ts";
 import { readOnlyRoute } from "./cloud-files-gate.ts";
 import { applyView, docKeysEffect } from "./docwriter.ts";
 import { updateVariables, variableEditBody } from "./doc/variables.ts";
+import { normalizeMotionFallbacks } from "../cloud/core/motion.ts";
 // Canvas: a lightweight local design surface for .canvas documents.
 // Agents design through Canvas MCP (it edits the file through this server); Canvas watches the file and
 // redraws the changed boards in place. Pan by drag or scroll, zoom by pinch or Cmd+scroll,
@@ -911,6 +912,9 @@ try {
         // `rel`: which keys changed from the layer's own value ({key: {op, by}}), so Repeat does the same change (src/repeat.ts).
         const b = JSON.parse(raw) as UpdateBody;
         if (b.each && (typeof b.each !== "object" || Array.isArray(b.each))) return json(res, { error: "each must map ids to props" }, 400);
+        for (const props of [b.props, ...Object.values(b.each ?? {})]) {
+          if (props?.motion !== undefined) props.motion = normalizeMotionFallbacks(props.motion);
+        }
         // A layer inside a component instance: the edit is an override on the instance (src/overrides.ts).
         if (b.file && [b.id, ...(Array.isArray(b.ids) ? b.ids : [])].some((i) => typeof i === "string" && i.includes("/"))) {
           try {

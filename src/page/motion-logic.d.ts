@@ -2,12 +2,16 @@ export type MotionProp = "translateX" | "translateY" | "scale" | "scaleX" | "sca
 export type Spring = { stiffness: number; damping: number; mass: number } | { duration: number; bounce: number } | { response: number; dampingFraction: number };
 export type Pose = { values: Partial<Record<MotionProp, number>>; progress: Partial<Record<MotionProp, number>>; done: boolean; held: boolean };
 export type MotionOrigins = Partial<Record<MotionProp, [number, number]>>;
+export type MotionKey = { t: number; v: number; ease?: unknown };
 type Segment = { from: number; to: number; start: number; end: number; ease: (t: number) => number };
 export type CompiledMotion = { tracks: { prop: MotionProp; rest: number; from: number; to: number; duration: number; delay: number; ease: (t: number) => number; cycles: number; alternate: boolean; leave: string; segments?: Segment[] }[]; origins: MotionOrigins };
 export const motionProps: MotionProp[];
 export function easeCurve(ease: unknown): (x: number) => number;
 export function segmentEase(ease: unknown): (x: number) => number;
-export function motionTrackKeys(track: { prop: string }, opacity?: number): { t: number; v: number; ease?: unknown }[];
+export function motionTrackKeys(track: { prop: string }, opacity?: number): MotionKey[];
+export function withKeyframeFallback<T>(track: T, keys: MotionKey[]): Omit<T, "keys" | "from" | "to" | "delay" | "duration" | "ease"> & {
+  keys: MotionKey[]; from: number; to: number; delay: number; duration: number; ease?: unknown;
+};
 export function springCurve(spring: Spring): { duration: number; sample(t: number): number };
 export function compileMotion(animations: unknown, opacity?: number): CompiledMotion;
 export function hasHoverMotion(node: unknown): boolean;

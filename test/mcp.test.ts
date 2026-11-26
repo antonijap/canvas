@@ -1083,17 +1083,24 @@ test("motion tools replace, stagger, warn and render through the shared edit pat
   assert.match(recipe.text, /staggerChildren/);
   assert.match(recipe.text, /interpolatingSpring/);
   assert.match(recipe.text, /sixteen keys/);
-  const keys = [{ t: 0, v: 0 }, { t: 150, v: 30, ease: "easeOut" }, { t: 300, v: 52 }];
+  const keys = [{ t: 0, v: 0 }, { t: 150, v: 30 }, { t: 300, v: 52, ease: "easeOut" }];
   const keyed = [{ id: "slide", on: "boardHover", tracks: [{ prop: "translateY", keys }] }];
   const changed = await call("set_motion", { link, animations: keyed, stagger: 70 });
   assert.equal(changed.isError, false, changed.text);
   const keyedList = await call("get_motion", { file: motionFile, nodeId: "motion-board" });
-  assert.deepEqual(keyedList.json.nodes[0].animations, keyed);
+  const fallback = { from: 0, to: 52, delay: 0, duration: 300, ease: "easeOut" };
+  assert.deepEqual(keyedList.json.nodes[0].animations, [{ ...keyed[0], tracks: [{ ...keyed[0].tracks[0], ...fallback }] }]);
   assert.deepEqual(keyedList.json.nodes[1].animations[0].tracks[0], {
-    prop: "translateY", keys: keys.map(key => ({ ...key, t: key.t + 70 })),
+    prop: "translateY", keys: keys.map(key => ({ ...key, t: key.t + 70 })), ...fallback, delay: 70,
   });
   const mixed = await call("set_motion", { link, animations: [{ ...keyed[0], tracks: [{ ...keyed[0].tracks[0], delay: 2 }] }] });
   assert.equal(mixed.isError, true);
+  assert.match(mixed.text, /slide/);
+  const late = [{ ...keyed[0], tracks: [{ prop: "translateY", keys: [{ t: 0, v: 0 }, { t: 60000, v: 52 }] }] }];
+  const overflow = await call("set_motion", { link, animations: late, stagger: 70 });
+  assert.equal(overflow.isError, true);
+  assert.match(overflow.text, /slide.*stagger.*60000/i);
+  assert.deepEqual((await call("get_motion", { file: motionFile, nodeId: "motion-board" })).json.nodes, keyedList.json.nodes);
   const hasChrome = (() => { try { chromePath(); return true; } catch { return false; } })();
   if (hasChrome) {
     const film = await call("render_motion", { file: motionFile, nodeId: "motion-board", frames: [0, 90, 180, 300] });
@@ -1115,4 +1122,34 @@ test("motion tools replace, stagger, warn and render through the shared edit pat
   const undone = await call("undo", { file: motionFile });
   assert.equal(undone.isError, false, undone.text);
   assert.equal((await call("get_motion", { file: motionFile, nodeId: "motion-board" })).json.count, 2);
+});
+
+test("motion edits repair a hand-edited fallback when saving another animation", async () => {
+  const motionFile = path.join(dir, "motion-fallback.canvas.json");
+  const keys = [{ t: 20, v: 0 }, { t: 120, v: 40, ease: "easeOut" }];
+  const motion = [{ id: "slide", on: "boardHover", tracks: [{ prop: "translateX", keys, from: -10, to: -5, delay: 0, duration: 300, ease: "easeIn" }] }];
+  fs.writeFileSync(motionFile, JSON.stringify({ version: "2.23", children: [{
+    id: "board", type: "frame", width: 200, height: 120, children: [
+      { id: "mcp-layer", type: "rectangle", width: 24, height: 24, motion },
+      { id: "panel-layer", type: "rectangle", width: 24, height: 24, motion },
+    ],
+  }] }));
+  const fade = { id: "fade", on: "boardHover", tracks: [{ prop: "opacity", to: 0.5 }] };
+  const saved = await call("set_motion", { file: motionFile, nodeIds: ["mcp-layer"], animations: [fade] });
+  assert.equal(saved.isError, false, saved.text);
+  const panel = await postJson(base, "/api/update", { file: motionFile, id: "panel-layer", props: { motion: [...motion, fade] } });
+  assert.equal(panel.status, 200, panel.body.error);
+  const normalized = [{ ...motion[0], tracks: [{ prop: "translateX", keys, from: 0, to: 40, delay: 20, duration: 100, ease: "easeOut" }] }, fade];
+  const list = async () => {
+    const result = await call("get_motion", { file: motionFile, nodeId: "board" });
+    return result.json.nodes.map((n: { animations: unknown }) => n.animations);
+  };
+  assert.deepEqual(await list(), [normalized, normalized]);
+  const query = "?file=" + encodeURIComponent(motionFile);
+  const undone = await postJson(base, "/api/history/undo" + query, {});
+  assert.equal(undone.status, 200, undone.body.error);
+  assert.deepEqual(await list(), [normalized, [normalized[0]]]);
+  const redone = await postJson(base, "/api/history/redo" + query, {});
+  assert.equal(redone.status, 200, redone.body.error);
+  assert.deepEqual(await list(), [normalized, normalized]);
 });

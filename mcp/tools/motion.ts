@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { checkMotion, UPDATE_MOTION_HOST } from "../../cloud/core/motion.ts";
+import { checkMotion, normalizeMotionFallbacks, UPDATE_MOTION_HOST } from "../../cloud/core/motion.ts";
 import { buildIndex, expand, findNode, loadDoc, resolveDocPath, revisionOf, stateHashOf, type DocNode, type Json } from "../../src/engine.ts";
 import { api, ensureServer, resolveFile, ToolError } from "../client.ts";
 import { renderNode } from "../render.ts";
@@ -16,9 +16,13 @@ export function mergeMotion(existing: Animation[], incoming: Animation[], remove
   const next = new Map(existing.map(a => [a.id, a]));
   for (const id of remove) next.delete(id);
   for (const a of incoming) {
-    next.set(a.id, delay ? { ...a, tracks: a.tracks.map(t => t.keys
-      ? { ...t, keys: t.keys.map(key => ({ ...key, t: key.t + delay })) }
-      : { ...t, delay: (t.delay ?? 0) + delay }) } : a);
+    next.set(a.id, delay ? { ...a, tracks: a.tracks.map(t => {
+      if (!t.keys) return { ...t, delay: (t.delay ?? 0) + delay };
+      if (t.keys.at(-1)!.t + delay > 60000) {
+        throw new ToolError("invalid", `Animation ${JSON.stringify(a.id)}: stagger of ${delay} ms puts a keyframe past 60000 ms.`);
+      }
+      return { ...t, keys: t.keys.map(key => ({ ...key, t: key.t + delay })) };
+    }) } : a);
   }
   return [...next.values()];
 }
@@ -46,9 +50,10 @@ export function register(server: McpServer) {
       const r = await api<{ node: DocNode; resolved?: DocNode; revision: string }>("GET", `/api/node?file=${enc(file)}&id=${enc(id)}&depth=0`);
       revision ??= a.expectedRevision ?? r.revision;
       if (revision !== r.revision) throw new ToolError("stale_revision", "The document changed. Read it again before editing.");
-      const values = mergeMotion(storedMotion(r.resolved ?? r.node), (a.animations ?? []) as unknown as Animation[], a.remove ?? [], index * (a.stagger ?? 0));
+      const merged = mergeMotion(storedMotion(r.resolved ?? r.node), (a.animations ?? []) as unknown as Animation[], a.remove ?? [], index * (a.stagger ?? 0));
+      const values = normalizeMotionFallbacks(merged as unknown as Json);
       checkMotion(values, `node ${id}`, errors, warnings);
-      each[id] = { motion: values as unknown as Json };
+      each[id] = { motion: values };
     }
     if (errors.length) throw new ToolError("invalid", errors.join("; "));
     const r = await api<{ revision: string; cloud?: { actionId: string; status: "pending" } }>("POST", "/api/update", { file, ids, props: {}, each, expectedRevision: revision });

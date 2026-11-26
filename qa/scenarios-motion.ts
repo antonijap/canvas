@@ -659,7 +659,7 @@ sc("motion-timeline", "timeline entry points add the first property in one undo 
   await t.flush();
   const first = await savedMotion();
   t.eq(first, [{ id: first?.[0]?.id, on: "boardHover", leave: "reverse", tracks: [
-    { prop: "opacity", keys: [{ t: 0, v: 0.8 }, { t: 300, v: 0.5 }] },
+    { prop: "opacity", keys: [{ t: 0, v: 0.8 }, { t: 300, v: 0.5 }], from: 0.8, to: 0.5, delay: 0, duration: 300 },
   ] }], "the first property saves a hover animation with two keys");
   await pick("translateX");
   await t.waitFor(`document.querySelector('${timelineKey}')?.getAttribute('aria-label') === 'Translate X keyframe 2, 300 ms'`, "the second property's last keyframe to be selected");
@@ -747,7 +747,7 @@ sc("motion-timeline", "timeline adds sampled keys and deletes down to two", {
   await openTimeline(t);
   const p = await timelinePoint(t, ".mt-segment", 0.4);
   await t.io.dblclick(p.x, p.y);
-  await waitTimelineTrack(t, "track.keys?.length === 3 && track.keys[1].t === 200 && track.keys[1].v === 40 && track.duration === undefined");
+  await waitTimelineTrack(t, "track.keys?.length === 3 && track.keys[1].t === 200 && track.keys[1].v === 40 && track.from === 0 && track.to === 100 && track.delay === 0 && track.duration === 500");
   await t.io.key("Delete");
   await waitTimelineTrack(t, "track.keys?.length === 2");
   await t.io.key("Delete");
@@ -768,7 +768,7 @@ sc("motion-timeline", "timeline adds sampled keys and deletes down to two", {
   })()`);
   await t.io.type("75");
   await t.io.key("Enter");
-  await waitTimelineTrack(t, "track.keys?.[1]?.v === 75");
+  await waitTimelineTrack(t, "track.keys?.[1]?.v === 75 && track.to === 75 && track.ease?.[0] === track.keys[1].ease[0]");
   const ruler = await timelinePoint(t, ".mt-ruler", 0.6);
   const left = await t.ev("document.querySelector('.mt-label').getBoundingClientRect().x");
   await t.page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: ruler.x, y: ruler.y, deltaX: 0, deltaY: -400, modifiers: 4 });

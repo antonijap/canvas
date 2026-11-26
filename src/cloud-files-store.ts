@@ -23,9 +23,10 @@ function carriesMotion(node: unknown): boolean {
     return n.motion != null || (Array.isArray(n.children) && n.children.some(carriesMotion));
 }
 
+// The previous motion validator capped delay at 10000 ms and omitted the animation id.
+const oldMotionDelay = /\.motion\[\d+\]\.tracks\[\d+\]: delay must be 0 to 10000 ms\b/;
 export function isOlderMotionRefusal(code: string, message: string): boolean {
-    // Older hosts reject a set of a property outside the layer's allowlist.
-    return code === 'invalid' && /"motion" is not an? [\w-]+ property\b/.test(message);
+    return code === 'invalid' && (oldMotionDelay.test(message) || /"motion" is not an? [\w-]+ property\b/.test(message));
 }
 
 export interface FileMeta {
@@ -167,7 +168,9 @@ export class FileStateStore {
             if (msg.type === 'reject' && isOlderMotionRefusal(msg.code, msg.message)) {
                 const { id } = msg;
                 const action = this.replica.pending.find(p => p.action.id === id)?.action;
-                if (action?.ops.some(op => (op.k === 'set' && op.props.motion != null) || (op.k === 'insert' && carriesMotion(op.node)))) msg = { ...msg, message: UPDATE_MOTION_HOST };
+                if (action && (oldMotionDelay.test(msg.message) || action.ops.some(op => (op.k === 'set' && op.props.motion != null) || (op.k === 'insert' && carriesMotion(op.node))))) {
+                    msg = { ...msg, message: UPDATE_MOTION_HOST };
+                }
             }
             // joined is transport state, deliberately not restored after a process restart.
             const result = await this.replica.receive(msg, objects);

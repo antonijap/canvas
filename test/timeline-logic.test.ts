@@ -34,13 +34,19 @@ test("adding a key samples the track and converts legacy once", () => {
   const next = addKey(track, before, 70, 1);
   assert.deepEqual(next, [{ t: 20, v: 0 }, { t: 70, v: 20, ease: "easeInOut" }, { t: 120, v: 40, ease: "easeInOut" }]);
   const keyed = editTrack(track, before, next);
-  assert.deepEqual(keyed, { prop: track.prop, repeat: 1, keys: next });
+  assert.deepEqual(keyed, { ...track, keys: next });
   const after = removeKey(next, 1);
   assert.deepEqual(editTrack(keyed, next, after), { ...keyed, keys: after });
   assert.strictEqual(removeKey(after, 0), after);
   assert.strictEqual(addKey(track, before, 20, 1), before);
   const opacity = { prop: "opacity", keys: [{ t: 0, v: 0 }, { t: 100, v: 1, ease: [0, 2, 1, 2] }] };
   assert.equal(addKey(opacity, opacity.keys, 75, 1)[1].v, 1);
+});
+
+test("adding a key samples the current keys instead of the stored track", () => {
+  const track = { ...legacy, keys };
+  const edited = [{ t: 20, v: 0 }, { t: 120, v: 100 }];
+  assert.deepEqual(addKey(track, edited, 70, 1)[1], { t: 70, v: 50 });
 });
 
 test("board tracks retain animation identity and adaptive ruler steps", () => {
@@ -68,7 +74,7 @@ test("adding a property uses its rest value and extends an existing hover animat
   for (const [prop, from, to] of [["translateX", 0, 8], ["translateY", 0, 8], ["scale", 1, 1.05], ["rotate", 0, 5], ["opacity", 0.8, 0.5]] as const) {
     const added = addTimelineProperty({ id: "layer", motion: [], opacity: 0.8 }, prop, "new");
     assert.deepEqual(added?.motion, [{ id: "new", on: "boardHover", leave: "reverse", tracks: [
-      { prop, keys: [{ t: 0, v: from }, { t: 300, v: to }] },
+      { prop, from, to, delay: 0, duration: 300, keys: [{ t: 0, v: from }, { t: 300, v: to }] },
     ] }]);
     assert.equal(added?.rowId, JSON.stringify(["layer", "new", prop]));
   }
@@ -77,6 +83,6 @@ test("adding a property uses its rest value and extends an existing hover animat
   const layer = { id: "layer", motion: [press, hover] };
   assert.equal(addTimelineProperty(layer, "translateX", "new"), null);
   assert.deepEqual(addTimelineProperty(layer, "rotate", "new")?.motion, [press, { ...hover, tracks: [legacy,
-    { prop: "rotate", keys: [{ t: 0, v: 0 }, { t: 300, v: 5 }] },
+    { prop: "rotate", from: 0, to: 5, delay: 0, duration: 300, keys: [{ t: 0, v: 0 }, { t: 300, v: 5 }] },
   ] }]);
 });

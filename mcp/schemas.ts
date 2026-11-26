@@ -26,6 +26,6 @@ export const motionAnimations = z.array(z.object({
       t: z.number().min(0).max(60000),
       v: z.number(),
       ease: z.unknown().optional().describe("Easing of the segment ending at this key."),
-    }).passthrough()).min(2).max(16).optional().describe("Strictly increasing times in ms. Use instead of from, to, delay, duration and ease."),
+    }).passthrough()).min(2).max(16).optional().describe("Strictly increasing times in ms. Keys take precedence. If fallback fields are supplied, they must match the first and last keys."),
   }).passthrough()).min(1).max(8),
 }).passthrough()).max(4);

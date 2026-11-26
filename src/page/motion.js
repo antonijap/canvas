@@ -139,12 +139,14 @@ if (host) {
     }
     if (active.phase === "still" || active.phase === "settled") return;
     const elapsed = seek?.time ?? Math.max(0, now - active.at);
+    const singleCycle = active.preview || !!seek;
+    const leaving = active.phase === "leave";
+    const options = { end: reduced && active.phase === "enter" };
     let done = true, held = false;
     for (const s of active.sprites) {
       // An explicit preview runs one cycle, including tracks that normally loop indefinitely.
-      const compiled = active.preview || seek ? s.previewMotion ??= { ...s.compiled, tracks: s.compiled.tracks.map(t => ({ ...t, cycles: 1 })) } : s.compiled;
-      const options = { end: reduced && active.phase === "enter" };
-      if (active.phase === "leave") options.leave = s.basis;
+      const compiled = singleCycle ? s.previewMotion ??= { ...s.compiled, tracks: s.compiled.tracks.map(t => ({ ...t, cycles: 1 })) } : s.compiled;
+      if (leaving) options.leave = s.basis;
       else options.enter = s.basis;
       const pose = motionPose(compiled, elapsed, options);
       stats.evaluations++;

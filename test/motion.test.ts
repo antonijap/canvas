@@ -163,8 +163,18 @@ test("keyframes validate their times, values and segment easing", () => {
   const input = (t: object) => ({ ...node, motion: [{ ...animation, tracks: [t as Json] }] });
   assert.deepEqual(validateNode(input(keyed)), []);
   assert.deepEqual(unknownKeys(input(keyed)), []);
+  const fallback = { from: 0, to: 40, delay: 20, duration: 100 };
+  assert.deepEqual(validateNode(input({ ...keyed, ...fallback })), []);
+  const spring = { spring: { stiffness: 320, damping: 18, mass: 1 } };
+  const eased = { ...keyed, keys: [...keyed.keys.slice(0, -1), { ...keyed.keys.at(-1), ease: spring }] };
+  assert.deepEqual(validateNode(input({ ...eased, ...fallback, ease: { spring: { mass: 1, damping: 18, stiffness: 320 } } })), []);
+  const late = { prop: "translateX", keys: [{ t: 12000, v: 0 }, { t: 60000, v: 40 }] };
+  assert.deepEqual(validateNode(input({ ...late, ...fallback, delay: 12000, duration: 48000 })), []);
+  const fractional = { prop: "translateX", keys: [{ t: 0.1, v: 0 }, { t: 0.3, v: 40 }] };
+  assert.deepEqual(validateNode(input({ ...fractional, ...fallback, delay: 0.1, duration: 0.2 })), []);
   for (const invalid of [
     { ...keyed, to: 40 }, { ...keyed, delay: 20 }, { ...keyed, ease: "linear" },
+    { ...keyed, ...fallback, duration: 99 }, { ...keyed, ...fallback, ease: "easeIn" },
     { ...keyed, keys: [] }, { ...keyed, keys: Array.from({ length: 17 }, (_, t) => ({ t, v: 0 })) },
     { ...keyed, keys: [{ t: 20, v: 1 }, { t: 20, v: 2 }] },
     { ...keyed, keys: [{ t: 2, v: 1 }, { t: 1, v: 2 }] },
@@ -173,6 +183,18 @@ test("keyframes validate their times, values and segment easing", () => {
     { ...keyed, keys: [{ t: 0, v: 1 }, { t: 2, v: 2, ease: false }] },
     { ...keyed, prop: "opacity" },
   ]) assert.ok(validateNode(input(invalid)).length, JSON.stringify(invalid));
+  assert.match(validateNode(input({ ...keyed, ...fallback, delay: 21 })).join("\n"), new RegExp(animation.id));
+});
+
+test("keyframes win over hand-edited fallback values in playback", () => {
+  const motion = compileMotion([{ ...animation, tracks: [{ ...keyed, from: -20, to: "stale", delay: 0, duration: 10 }] }]);
+  assert.equal(motionPose(motion, 60).values.translateX, 100);
+});
+
+test("keyframe playback tolerates opaque easing saved by an older host", () => {
+  const keys = [{ t: 0, v: 0 }, { t: 100, v: 40, ease: { toString: null } }];
+  const motion = compileMotion([{ ...animation, tracks: [{ prop: "translateX", keys }] }]);
+  assert.equal(motionPose(motion, 50).values.translateX, 20);
 });
 
 test("keyframe playback matches golden poses and retraces intermediate keys on leave", () => {

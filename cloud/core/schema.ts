@@ -163,10 +163,12 @@ export function validateNode(node: DocNode, opts: { keys?: string[]; path?: stri
     if ((k === "width" || k === "height") && !(numOrVar(v) || (typeof v === "string" && SIZING_RE.test(v)))) {
       errs.push(`${where}: ${k} must be a number, $variable, "fit_content", "fill_container" (optionally with a fallback like "fill_container(320)")`);
     }
-    if (k === "motion") checkMotion(v, where, errs);
-    if (type === "ref" && !opts.replay) {
-      if (k === "descendants") checkMotionOverrides(v, where, errs);
-      else if (k.startsWith("descendants/")) checkMotionOverride(v, `${where}.${k}`, errs);
+    if (!opts.replay) {
+      if (k === "motion") checkMotion(v, where, errs);
+      if (type === "ref") {
+        if (k === "descendants") checkMotionOverrides(v, where, errs);
+        else if (k.startsWith("descendants/")) checkMotionOverride(v, `${where}.${k}`, errs);
+      }
     }
     if (k === "fill" || k === "stroke") checkFill(v, `${where}.${k}`, errs);
     if (k === "padding" && !(numOrVar(v) || (Array.isArray(v) && (v.length === 2 || v.length === 4) && v.every(numOrVar)))) {

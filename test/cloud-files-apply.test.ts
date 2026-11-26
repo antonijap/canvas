@@ -4,6 +4,7 @@ import { applyAction, isReject } from "../cloud/core/files/apply.ts";
 import { DocTree } from "../src/cloud-files-tree.ts";
 import { makeAction } from "../src/cloud-files-ops.ts";
 import type { FileOp } from "../cloud/protocol-files.ts";
+import type { Json } from "../cloud/core/schema.ts";
 
 const seed = () => new DocTree({ children: [
   { id: "board", type: "frame", children: [] },
@@ -70,13 +71,19 @@ test("future animation fields on an override stay opaque to Cloud component chec
   assert.deepEqual(tree.node("instance")?.props.descendants, descendants);
 });
 
-test("Cloud applies sorted keyframes and refuses a mixed track without changing the document", () => {
+test("Cloud applies keyframes with or without matching fallback fields", () => {
   const tree = seed();
-  const keys = [{ t: 0, v: 1 }, { t: 120, v: 0.5, ease: "easeOut" }, { t: 300, v: 0 }];
+  const keys: Json[] = [{ t: 0, v: 1 }, { t: 120, v: 0.5 }, { t: 300, v: 0, ease: "easeOut" }];
   const motion = [{ id: "fade", on: "boardHover", tracks: [{ prop: "opacity", keys }] }];
   const update = (v: NonNullable<FileOp & { k: "set" }>["props"][string]) => send(tree, [{ k: "set", id: "board", props: { motion: v } }]);
-  assert.ok(!isReject(update({ v: motion as import("../src/engine.ts").Json })));
-  const mixed = [{ ...motion[0], tracks: [{ prop: "opacity", to: 0, keys }] }];
-  assert.ok(isReject(update({ v: mixed as import("../src/engine.ts").Json })));
-  assert.deepEqual(tree.node("board")?.props.motion, motion);
+  assert.ok(!isReject(update({ v: motion })));
+  const compatible = [{ ...motion[0], tracks: [{ prop: "opacity", keys, from: 1, to: 0, delay: 0, duration: 300, ease: "easeOut" }] }];
+  assert.ok(!isReject(update({ v: compatible })));
+  const mixed = [{ ...motion[0], tracks: [{ ...compatible[0].tracks[0], to: 0.5 }] }];
+  assert.ok(isReject(update({ v: mixed })));
+  assert.deepEqual(tree.node("board")?.props.motion, compatible);
+  const oldAction = makeAction([{ k: "set", id: "board", props: { motion: { v: mixed } } }]);
+  assert.ok(!isReject(applyAction(tree, oldAction, { replay: true })));
+  assert.deepEqual(tree.node("board")?.props.motion, mixed);
+  assert.ok(!isReject(update({ v: compatible })));
 });

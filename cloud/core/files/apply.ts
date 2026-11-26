@@ -71,7 +71,7 @@ export interface TreeAccess {
 
 export type ApplyCtx = {
   by?: Author;
-  /** A previously accepted action can predate the current whiteboard write rules. */
+  /** A previously accepted action can predate the current whiteboard and motion write rules. */
   replay?: boolean;
   /** The seq the action's first op takes (the room's next); 0 on the Mac before the server answers. */
   seq?: number;

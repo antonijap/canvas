@@ -6,7 +6,7 @@ const mix = (a, b, t) => a + (b - a) * t;
 const finite = (n, fallback) => Number.isFinite(n) ? n : fallback;
 
 export function easeCurve(ease) {
-  const points = Array.isArray(ease) ? ease : Object.hasOwn(beziers, ease) ? beziers[ease] : null;
+  const points = Array.isArray(ease) ? ease : typeof ease === "string" && Object.hasOwn(beziers, ease) ? beziers[ease] : null;
   if (!points) return x => x;
   const [x1, y1, x2, y2] = points;
   const ax = 1 - 3 * x2 + 3 * x1, bx = 3 * x2 - 6 * x1, cx = 3 * x1;
@@ -78,6 +78,15 @@ const restValue = (prop, opacity) => prop === "opacity" ? finite(opacity, 1) : p
 const trackDelay = track => clamp(finite(track.delay, 0), 0, 10000);
 const trackDuration = (track, spring) => clamp(finite(track.duration, spring?.duration ?? 300), 0, 60000);
 
+export function withKeyframeFallback(track, keys) {
+  const first = keys[0], last = keys.at(-1);
+  const { ease, ...fields } = track;
+  return {
+    ...fields, keys, from: first.v, to: last.v, delay: first.t, duration: last.t - first.t,
+    ...(last.ease !== undefined && { ease: last.ease }),
+  };
+}
+
 export function motionTrackKeys(track, opacity = 1) {
   if (Array.isArray(track.keys)) return track.keys;
   const rest = restValue(track.prop, opacity), delay = trackDelay(track);
@@ -109,10 +118,11 @@ export function compileMotion(animations, opacity = 1) {
   for (const animation of Array.isArray(animations) ? animations.slice(0, 4) : []) {
     if (animation?.on !== "boardHover" || !Array.isArray(animation.tracks)) continue;
     for (const track of animation.tracks.slice(0, 8)) {
-      if (!motionProps.includes(track?.prop) || (track.to !== undefined && !Number.isFinite(track.to))) continue;
-      const { prop, ease } = track;
+      if (!motionProps.includes(track?.prop)) continue;
+      const { prop } = track;
       const keyed = compileKeys(track.keys);
-      if (track.keys !== undefined && !keyed) continue;
+      if (!keyed && (track.keys !== undefined || (track.to !== undefined && !Number.isFinite(track.to)))) continue;
+      const ease = keyed ? undefined : track.ease;
       const rest = restValue(prop, opacity), spring = springEase(ease);
       tracks.set(prop, {
         prop, rest, from: keyed ? track.keys[0].v : finite(track.from, rest), to: keyed ? track.keys.at(-1).v : finite(track.to, rest),
