@@ -8,6 +8,7 @@ if (host) {
   let desired = null, entered = 0, active = null, preview = false, playing = false, trace = null;
   let rejected = null;
   let wasReduced = reduce.matches;
+  let seek = null;
   const wake = () => { stats.wakes++; host.requestFrame(); };
 
   function stop() {
@@ -102,7 +103,7 @@ if (host) {
     // A queued playback frame can see the new preference before the change event arrives.
     const reduced = reduce.matches, becameReduced = reduced && !wasReduced;
     wasReduced = reduced;
-    if (!active && !desired) return;
+    if (!active && !desired && !seek) return;
     if (host.motionBlocked()) {
       desired = null; preview = false; rejected = null;
       stop();
@@ -113,10 +114,16 @@ if (host) {
       const { ev, board, source } = active, next = ev.motionSource(board);
       if (host.engineView !== ev || !host.boards.has(board) || !next || next.content !== source.content || next.x !== source.x || next.y !== source.y || host.live?.touched(board)) stop();
     }
-    if (active && desired && (active.board !== desired || (preview && !active.preview))) stop();
-    if (!active && desired) start(desired);
+    const target = seek?.board ?? desired;
+    if (active && target && (active.board !== target || (preview && !active.preview))) stop();
+    if (!active && target) start(target);
     if (!active) return;
-    if (becameReduced) {
+    if (seek) {
+      if (!seek.dirty && active.phase === "seek") return;
+      seek.dirty = false;
+      active.phase = "seek";
+    }
+    if (!seek && becameReduced) {
       if (!desired) { stop(); return; }
       phase("enter", now);
     }
@@ -131,11 +138,11 @@ if (host) {
       phase("leave", now);
     }
     if (active.phase === "still" || active.phase === "settled") return;
-    const elapsed = Math.max(0, now - active.at);
+    const elapsed = seek?.time ?? Math.max(0, now - active.at);
     let done = true, held = false;
     for (const s of active.sprites) {
       // An explicit preview runs one cycle, including tracks that normally loop indefinitely.
-      const compiled = active.preview ? s.previewMotion ??= { ...s.compiled, tracks: s.compiled.tracks.map(t => ({ ...t, cycles: 1 })) } : s.compiled;
+      const compiled = active.preview || seek ? s.previewMotion ??= { ...s.compiled, tracks: s.compiled.tracks.map(t => ({ ...t, cycles: 1 })) } : s.compiled;
       const options = { end: reduced && active.phase === "enter" };
       if (active.phase === "leave") options.leave = s.basis;
       else options.enter = s.basis;
@@ -153,6 +160,7 @@ if (host) {
       done &&= pose.done;
       held ||= pose.held;
     }
+    if (seek) return;
     if (done && active.phase === "leave") {
       if (held && !active.preview) {
         active.phase = "still";
@@ -175,7 +183,7 @@ if (host) {
 
   const canHover = id => !!id && host.prefs().playHoverMotion && !host.motionBlocked() && !!host.engineView?.motionSource(id);
   const setHover = (id, time = performance.now()) => {
-    if (preview || active?.preview) return;
+    if (seek || preview || active?.preview) return;
     if (!id && !desired && !active) return;
     if (!canHover(id)) id = null;
     if (desired === id) return;
@@ -190,9 +198,22 @@ if (host) {
     canHover,
     get active() { return !!active; },
     get outlineBoard() { return active && (active.phase !== "still" || active.preview) ? active.board : null; },
-    invalidate(id) { if (active?.board === id || desired === id) this.cancel(); },
-    cancel() { desired = null; preview = false; rejected = null; if (stop()) wake(); },
+    invalidate(id) {
+      if (seek?.board === id) { stop(); seek.dirty = true; }
+      else if (active?.board === id || desired === id) this.cancel();
+    },
+    cancel() { desired = null; preview = false; seek = null; rejected = null; if (stop()) wake(); },
+    seek(board, time) {
+      if (!seek) {
+        desired = null; preview = false; rejected = null; stop();
+        entered = performance.now();
+      }
+      seek = { board, time, dirty: true };
+      wake();
+    },
+    clearSeek() { if (seek) this.cancel(); },
     preview(id) {
+      if (seek) this.clearSeek();
       const ev = host.engineView, board = host.boards.has(id) ? id : ev?.boardOf(id);
       const rect = board && ev?.rect(board);
       if (rect && Math.min(rect.w, rect.h) * host.cam.z >= 48 && ev.motionSource(board) && !host.motionBlocked()) {

@@ -14,7 +14,7 @@ export function bottomOverlayArea(width, height, insets = {}, zoom = null, pill 
 }
 
 export function installBottomOverlays(host) {
-  let zoom = null, nativeToast = false, bottomClearance = 0, frame = 0, sent = '';
+  let zoom = null, nativeToast = false, bottomClearance = 0, timeline = 0, frame = 0, sent = '';
   const selectors = ['#msg', '#webhint', '[data-bottom-toast]', '#scaleBadge', '.cm-hint.on'];
   const schedule = () => { if (!frame) frame = requestAnimationFrame(place); };
   function place() {
@@ -25,7 +25,8 @@ export function installBottomOverlays(host) {
     const inset = parseFloat(style.getPropertyValue('--c-inset')) || 10;
     const gap = parseFloat(style.getPropertyValue('--c-island-gap')) || 10;
     const z = zoom && { left: zoom.left - vr.left, bottom: zoom.bottom - vr.top, height: zoom.height };
-    const area = bottomOverlayArea(vr.width, vr.height, host.insets, z, pill, inset, gap, bottomClearance);
+    const clearance = Math.max(bottomClearance, timeline ? timeline + inset : 0);
+    const area = bottomOverlayArea(vr.width, vr.height, host.insets, z, pill, inset, gap, clearance);
     let offset = nativeToast ? pill + 10 : 0;
     if (host.native) {
       const geometry = { x: vr.left + area.x, y: vr.top + area.y, width: area.width };
@@ -60,6 +61,7 @@ export function installBottomOverlays(host) {
     }
     schedule();
   });
+  host.on('timeline', height => { timeline = height; schedule(); });
   host.on('tab', shown => { if (shown) { sent = ''; schedule(); } });
   // The native shell may have sent its first frame before this module loaded.
   if (host.native) host.post({ bottomOverlayReady: true });

@@ -1145,6 +1145,29 @@ try {
         for (const b of (snap.doc.children ?? []) as any[]) if (!want.size || want.has(String(b.id))) walk(b);
         return json(res, { ids });
       }
+      if (url.pathname === "/api/motion-timeline" && req.method === "GET") {
+        const id = url.searchParams.get("id") ?? "";
+        let found;
+        try { found = findNode(snap.doc, id.split("/")[0]); }
+        catch { return json(res, { board: null }); }
+        const top = found.ancestors[0] ?? found.node;
+        const board = snap.boards.find(b => b.id === top.id);
+        if (!board) return json(res, { board: null });
+        const children: { id: string; name: Json; type?: string; motion: Json[]; opacity?: number }[] = [];
+        let selected = false;
+        const visit = (n: DocNode, theme: Record<string, string>) => {
+          selected ||= n.id === id;
+          const active = n.theme ? { ...theme, ...n.theme as Record<string, string> } : theme;
+          if (n.id && Array.isArray(n.motion) && n.motion.length) {
+            const opacity = typeof n.opacity === "string" && n.opacity.startsWith("$")
+              ? resolveVariable(snap.doc, n.opacity.slice(1), active) : n.opacity;
+            children.push({ id: n.id, name: n.name, type: n.type, motion: n.motion, ...(typeof opacity === "number" && { opacity }) });
+          }
+          n.children?.forEach(c => visit(c, active));
+        };
+        visit(expand(buildIndex(snap.doc), top, []), defaultTheme(snap.doc));
+        return json(res, selected ? { board: board.id, key: board.key, revision: snap.revision, root: { children } } : { board: null });
+      }
       if (url.pathname === "/api/node") {
         const hit = nodeAt(snap, url.searchParams.get("id") ?? "", nodeDepth(url.searchParams.get("depth")));
         if (!hit) return json(res, { error: `no node "${url.searchParams.get("id")}"` }, 404);
@@ -1257,6 +1280,7 @@ const PAGE = `<!doctype html>
 <link rel="stylesheet" href="/page/whiteboard.css">
 <link rel="stylesheet" href="/page/charts.css">
 <link rel="stylesheet" href="/page/sidebar.css">
+<link rel="stylesheet" href="/page/timeline.css">
 <style>
 ${cssVariables()}
 html,body{margin:0;height:100%;overflow:hidden;background:var(--c-canvas-bg);color:var(--c-fg);font:var(--c-size-sm)/1.45 var(--c-font-sans)}
@@ -1599,7 +1623,7 @@ const host = {
   get readOnly() { return cloudReadOnly; },
   get cam() { return cam; }, get insets() { return insets; }, get sel() { return sel && sel.id; },
   selectId: (id) => select(id), clearSel: () => deselect(), syncSel: () => syncSel(), get hand() { return space; }, setCam: (c) => { endTween(true); firstFit = null; cam = c; applyCam(); }, flushCam: () => flushNow(),
-  on(n, f) { if (!bus.has(n)) bus.set(n, []); bus.get(n).push(f); },
+  on(n, f) { if (!bus.has(n)) bus.set(n, new Set()); bus.get(n).add(f); return () => bus.get(n).delete(f); },
   emit(n, a) { for (const f of bus.get(n) || []) { try { f(a); } catch (err) { console.error(err); } } },
   get doc() { return doc; }, get boards() { return boards; }, isCmp: (id) => !!doc && isComponentish(doc.marks, id),
   boxOf: (id) => { const b = boards.get(id); return b ? boxOf(b) : null; },
@@ -4137,13 +4161,20 @@ es.addEventListener("cloudfile", (e) => {
   cloudWait.hidden = !cloudWait.textContent;
   if (native) post({ file, cloudFile: info });
   document.querySelectorAll("#props input, #props textarea, #props select, #props button").forEach(el => { el.disabled = cloudReadOnly; });
+  host.emit("readOnly", cloudReadOnly);
 });
 es.addEventListener("cloudremoved", () => {
   cloudWait.hidden = true;
   world.replaceChildren(); doc = null; es.close();
+  deselect();
   if (native) post({ cloudRemoved: true });
 });
-document.addEventListener("keydown", e => { if (cloudReadOnly && (e.key === "Delete" || e.key === "Backspace" || (!e.metaKey && !e.ctrlKey && e.key.length === 1) || ((e.metaKey || e.ctrlKey) && /[zvx]/i.test(e.key)))) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+document.addEventListener("keydown", e => {
+  if (!cloudReadOnly || (e.code === "Space" && e.target.closest?.(".motion-timeline"))) return;
+  if (e.key === "Delete" || e.key === "Backspace" || (!e.metaKey && !e.ctrlKey && e.key.length === 1) || ((e.metaKey || e.ctrlKey) && /[zvx]/i.test(e.key))) {
+    e.stopImmediatePropagation(); e.preventDefault();
+  }
+}, true);
 es.addEventListener("docsame", () => { if (doc && native) post({ file, doc: docMsg(), pages: pagesMsg() }); });
 const applyDocDiff = ${applyDocDiff};
 es.addEventListener("docdiff", (e) => {
@@ -4329,6 +4360,7 @@ function historyStep(dir, plain) {
 <script type="module" src="/page/drops.js"></script>
 <script type="module" src="/page/shaders.js"></script>
 <script type="module" src="/page/motion.js"></script>
+<script type="module" src="/page/timeline.js"></script>
 <script type="module" src="/page/videos.js"></script>
 <script type="module" src="/page/context.js"></script>
 <script type="module" src="/page/structure.js"></script>

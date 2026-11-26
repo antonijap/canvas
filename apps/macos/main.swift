@@ -783,6 +783,13 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
   model.showSidebarSection(section)
   return nil
 }
+NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+  guard e.window === window, window.attachedSheet == nil, !model.homeShown,
+        e.charactersIgnoringModifiers == "t",
+        e.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command, .option] else { return e }
+  if !e.isARepeat { model.run("{cmd:'motionTimeline'}") }
+  return nil
+}
 // Canvas keys (1/2/0/F/Esc/Delete/Space) belong to the canvas whenever no text field is being typed in: a click
 // in the rail, the inspector or the toolbar leaves SwiftUI holding keyboard focus, so the key would go nowhere.
 // The first key there hands focus back to the web view and is delivered to it. Command keys go through the menus

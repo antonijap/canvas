@@ -165,6 +165,7 @@ final class ControlHostingController<Content: View>: NSHostingController<Content
 
 struct RootView: View {
     @ObservedObject var model: CanvasModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var windowWidth: CGFloat = 0
     private var propsReserve: CGFloat { model.commentsSidebarOpen ? Metric.sidebarWidth : Metric.propsWidth }
     /// The left sidebar is the same panel on Home and in a file (only its rows change).
@@ -213,7 +214,10 @@ struct RootView: View {
             paletteWidth: toolPaletteShown ? ToolPalette.width(compact: compactTools) : nil,
             zoomWidth: zoomShown ? ZoomPill.width : nil, height: ToolPalette.height(compact: compactTools),
             zoomHeight: ToolPalette.height(compact: false), gap: Metric.islandGap)
-        let insets = insets(bottomClearance: bottomBars.clearance)
+        let timelineHeight = model.timelineHeight
+        let timelineLift = timelineHeight > 0 ? timelineHeight + 20 - BottomBarLayout.bottomMargin : 0
+        let timelineAnimation: Animation? = reduceMotion ? nil : .easeOut(duration: 0.14)
+        let insets = insets(bottomClearance: bottomBars.clearance + timelineLift)
 
         ZStack(alignment: .topLeading) {
             WebCanvas(host: model.tabHost).ignoresSafeArea()
@@ -257,10 +261,11 @@ struct RootView: View {
                 if let zoom = bottomBars.zoom {
                     ZoomCorner(model: model, height: zoom.height)
                         .padding(.trailing, zoomRightInset)
-                        .padding(.bottom, -zoom.maxY)
+                        .padding(.bottom, timelineLift - zoom.maxY)
                 }
             }
             .transaction { if model.resizingSidebar { $0.animation = nil } }
+            .animation(timelineAnimation, value: timelineHeight)
             .animation(Motion.island, value: model.uiHidden)
             .ignoresSafeArea()
 
@@ -287,8 +292,9 @@ struct RootView: View {
                         ToolPalette(model: model, compact: compactTools,
                                     tooltipClearance: bottomBars.zoomAboveTools ? bottomBars.clearance : 0)
                             .fixedSize()
-                            .offset(x: palette.midX - windowWidth / 2, y: palette.maxY)
+                            .offset(x: palette.midX - windowWidth / 2, y: palette.maxY - timelineLift)
                     }
+                    .animation(timelineAnimation, value: timelineHeight)
                     .ignoresSafeArea()
             }
 

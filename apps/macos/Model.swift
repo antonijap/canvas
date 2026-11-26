@@ -244,6 +244,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var livePeople: [LivePerson] = []
     @Published var peopleStatus = "connected"
     @Published var bottomOverlay = CGRect.zero
+    @Published var timelineHeight: CGFloat = 0
     @Published var toast: String?
     @Published var toastKind: Toast.Kind = .plain
     /// The toast's buttons (Undo from the page, Ask agent on an error) and what a click on it copies (ToastLogic).
@@ -448,6 +449,10 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         }
         if let p = m["bottomOverlay"] as? [String: Double], let x = p["x"], let y = p["y"], let width = p["width"] {
             bottomOverlay = CGRect(x: x - width / 2, y: y, width: width, height: 0)
+        }
+        if let height = m["timelineHeight"] as? Double, height.isFinite {
+            let next = CGFloat(min(280, max(0, height)))
+            if timelineHeight != next { timelineHeight = next }
         }
         if let msg = m["toast"] as? String {
             let acts = (m["toastActions"] as? [[String: Any]] ?? []).compactMap { a -> ToastAction? in
@@ -934,6 +939,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
 
     func clearDocumentState() {
         clearDrawTool()
+        timelineHeight = 0
         selection = nil; selectedWidgetId = nil; widgetStatus = nil; selectedBoard = nil; renamingBoard = nil
         activeUsage = nil; usage = nil; gestureTarget = nil
         // A page that went away mid-edit never says the edit ended: Undo would stay "Undo Typing" and Delete,

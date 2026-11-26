@@ -566,3 +566,164 @@ for (const demo of demos) sc("hover-motion", `every hover frame preserves the ${
   t.eq([result.entersAtRest, result.firstSprites, result.maxMoves, result.leavesAtRest], [true, demo.layers.length, demo.layers.length, true], "covered the sprite handover at each end");
   t.eq([result.flashes.length, result.outlines.length, result.restFailures, result.poseFailures], [0, 0, 0, 0], "no hover outline or missing, doubled or offset paint");
 });
+
+const timelinePanel = ".motion-timeline[data-open]";
+const timelineKey = ".mt-key[data-selected]";
+const timelineAnimation = { id: "move", on: "boardHover", tracks: [{ prop: "translateX", from: 0, to: 100, duration: 500 }] };
+
+async function openTimeline(t: T) {
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [{
+    id: "tl_board", name: "Timeline sample", type: "frame", width: 220, height: 160, x: 10000, y: 10000, layout: "none", fill: "#203040",
+    children: [
+      { id: "tl_marker", name: "Marker", type: "rectangle", x: 24, y: 24, width: 24, height: 24, fill: "#FF8040", motion: [timelineAnimation] },
+      { id: "tl_plain", name: "Plain", type: "rectangle", x: 24, y: 100, width: 24, height: 24, fill: "#DFDFFF" },
+    ],
+  }] });
+  await t.open({ native: true });
+  await t.focus("tl_board");
+  await t.ev("window.canvasCmd({cmd:'prefs',prefs:{playHoverMotion:false}})");
+  await t.select(["tl_marker"]);
+  await t.waitFor(`document.querySelector(${JSON.stringify(timelinePanel)})`, "the timeline to open");
+}
+
+function timelinePoint(t: T, selector: string, fraction = 0.5) {
+  return t.ev<{ x: number; y: number }>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.x + r.width * ${fraction}, y: r.y + r.height/2 }; })()`);
+}
+
+function waitTimelineTrack(t: T, expr: string) {
+  return t.waitFor(`(async () => {
+    const h = window.canvasHost;
+    const j = await (await fetch(h.api("/api/node") + "&id=tl_marker&depth=0")).json();
+    const track = j.node.motion[0].tracks[0];
+    return ${expr};
+  })()`, "the saved motion track");
+}
+
+sc("motion-timeline", "timeline follows board selection and respects side insets", {
+  covers: ["motion-timeline:selection"], skip: { visual: "Asserts panel geometry and selection with real keyboard input." },
+}, async (t: T) => {
+  await openTimeline(t);
+  await t.ev("window.canvasCmd({cmd:'insets',l:90,t:40,r:280,b:60})");
+  t.eq(await t.ev(`(() => { const p = document.querySelector(${JSON.stringify(timelinePanel)}).getBoundingClientRect(); return [p.x, innerWidth-p.right, innerHeight-p.bottom, p.height]; })()`),
+    [90, 280, 0, 280], "the panel clears both sidebars");
+  t.eq(await t.ev("getComputedStyle(document.querySelector('.motion-timeline')).transitionDuration"), "0s", "reduced motion skips the slide");
+  for (const id of ["tl_board", "tl_plain"]) {
+    await t.select([id]);
+    await t.waitFor(`document.querySelector(${JSON.stringify(timelinePanel)})`, "the selected layer's board timeline");
+    t.eq(await t.ev("document.querySelector('.mt-group-label').textContent"), "Marker", "the board's animated layer is listed");
+  }
+  await t.io.key("t", { meta: true, alt: true });
+  t.eq(await t.ev(`!!document.querySelector(${JSON.stringify(timelinePanel)})`), false, "the shortcut closes the timeline");
+  await t.io.key("t", { meta: true, alt: true });
+  await t.waitFor(`document.querySelector(${JSON.stringify(timelinePanel)})`, "the shortcut reopens the timeline");
+  await t.clearSel();
+  t.eq(await t.ev(`!!document.querySelector(${JSON.stringify(timelinePanel)})`), false, "deselecting closes the timeline");
+});
+
+sc("motion-timeline", "timeline key and segment drags each undo in one step", {
+  covers: ["motion-timeline:drag"], skip: { visual: "Uses real pointer drags and reads the saved track after Undo." },
+}, async (t: T) => {
+  await openTimeline(t);
+  const key = await timelinePoint(t, timelineKey);
+  await t.io.drag(key.x, key.y, key.x + 54, key.y, { mods: { shift: true } });
+  await waitTimelineTrack(t, "track.duration === 550 && !track.keys");
+  await t.io.key("ArrowLeft");
+  await waitTimelineTrack(t, "track.duration === 549");
+  await t.a.post("/api/history/undo");
+  await waitTimelineTrack(t, "track.duration === 550");
+  await t.a.post("/api/history/undo");
+  await waitTimelineTrack(t, "track.duration === 500 && !track.keys");
+  await t.waitFor("document.querySelector('.mt-key[data-selected]')?.getAttribute('aria-label').includes('500 ms')", "the timeline to reflect Undo");
+  const segment = await timelinePoint(t, ".mt-segment");
+  await t.io.drag(segment.x, segment.y, segment.x + 36, segment.y, { mods: { shift: true } });
+  await waitTimelineTrack(t, "track.delay === 40 && track.duration === 500");
+  await t.a.post("/api/history/undo");
+  await waitTimelineTrack(t, "track.delay === undefined && track.duration === 500");
+});
+
+sc("motion-timeline", "timeline scrubbing poses the cached sprite and holds it", {
+  covers: ["motion-timeline:scrub"], skip: { visual: "Samples rendered canvas pixels at the scrubbed position." },
+}, async (t: T) => {
+  await openTimeline(t);
+  const start = await timelinePoint(t, ".mt-head"), at = await timelinePoint(t, ".mt-key[data-selected]");
+  await t.io.drag(start.x, start.y, (start.x + at.x) / 2, start.y);
+  await t.waitFor("Number(document.querySelector('.mt-head').getAttribute('aria-valuenow')) > 245 && window.__motion.sprites === 1", "the middle pose to paint");
+  const pixel = await t.ev<number[]>(`(() => {
+    const h = window.canvasHost, ev = h.engineView, r = h.worldRectOf("tl_board"), cam = h.cam;
+    const d = ev.canvas.width / ev.canvas.clientWidth;
+    const sx = Math.floor(((r.x + 86) * cam.z + cam.x) * d);
+    const sy = Math.floor(((r.y + 36) * cam.z + cam.y) * d);
+    return [...ev.capture([{sx,sy,sw:1,sh:1,w:1,h:1}])[0].getContext("2d").getImageData(0,0,1,1).data];
+  })()`);
+  t.eq(pixel, [255, 128, 64, 255], "the moving marker is visible at 250 ms");
+  const wakes = await t.ev("window.__motion.wakes");
+  await sleep(120);
+  t.eq(await t.ev("window.__motion.wakes"), wakes, "a scrubbed pose sleeps");
+  await t.io.key("Space");
+  await t.waitFor("Number(document.querySelector('.mt-head').getAttribute('aria-valuenow')) > 260", "Space to play");
+  await t.io.key("Space");
+  const paused = await t.ev("document.querySelector('.mt-head').getAttribute('aria-valuenow')");
+  await sleep(80);
+  t.eq(await t.ev("document.querySelector('.mt-head').getAttribute('aria-valuenow')"), paused, "Space pauses");
+});
+
+sc("motion-timeline", "timeline adds sampled keys and deletes down to two", {
+  covers: ["motion-timeline:keys"], skip: { visual: "Exercises double-click, Delete and external edits." },
+}, async (t: T) => {
+  await openTimeline(t);
+  const p = await timelinePoint(t, ".mt-segment", 0.4);
+  await t.io.dblclick(p.x, p.y);
+  await waitTimelineTrack(t, "track.keys?.length === 3 && track.keys[1].t === 200 && track.keys[1].v === 40 && track.duration === undefined");
+  await t.io.key("Delete");
+  await waitTimelineTrack(t, "track.keys?.length === 2");
+  await t.io.key("Delete");
+  await waitTimelineTrack(t, "track.keys?.length === 2");
+  await t.a.post("/api/update", { file: t.file, id: "tl_marker", props: {
+    motion: [{ ...timelineAnimation, tracks: [{ prop: "translateX", keys: [{ t: 0, v: 0 }, { t: 360, v: 72 }] }] }],
+  } });
+  await t.waitFor("document.querySelector('.mt-key[data-selected]')?.getAttribute('aria-label').includes('360 ms')", "an external edit to refresh the panel");
+  const curve = await timelinePoint(t, ".mt-segmented button:nth-child(4)");
+  await t.io.click(curve.x, curve.y);
+  await waitTimelineTrack(t, "Array.isArray(track.keys?.[1]?.ease)");
+  const handle = await timelinePoint(t, ".mt-handle");
+  await t.io.drag(handle.x, handle.y, handle.x + 20, handle.y - 8);
+  await waitTimelineTrack(t, "track.keys?.[1]?.ease?.[0] > 0.3 && track.keys[1].ease[1] > 0.1");
+  await t.ev(`(() => {
+    const field = document.querySelector(".mt-field input");
+    field.focus(); field.select();
+  })()`);
+  await t.io.type("75");
+  await t.io.key("Enter");
+  await waitTimelineTrack(t, "track.keys?.[1]?.v === 75");
+  const ruler = await timelinePoint(t, ".mt-ruler", 0.6);
+  const left = await t.ev("document.querySelector('.mt-label').getBoundingClientRect().x");
+  await t.page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: ruler.x, y: ruler.y, deltaX: 0, deltaY: -400, modifiers: 4 });
+  await t.waitFor("document.querySelector('.mt-tracks').scrollLeft > 0", "Cmd scroll to zoom and scroll the time axis");
+  t.eq(await t.ev("document.querySelector('.mt-label').getBoundingClientRect().x"), left, "layer names stay fixed while time scrolls");
+});
+
+sc("motion-timeline", "timeline close releases the pose and adds no frames", {
+  covers: ["motion-timeline:idle"], skip: { visual: "Measures inactive frame and request counters." },
+}, async (t: T) => {
+  await openTimeline(t);
+  const at = await timelinePoint(t, ".mt-ruler", 0.25);
+  await t.io.click(at.x, at.y);
+  await t.waitFor("window.__motion.sprites === 1", "a held timeline pose");
+  const close = await timelinePoint(t, ".mt-close");
+  await t.io.click(close.x, close.y);
+  await t.waitFor("!document.querySelector('.motion-timeline[data-open]') && window.__motion.sprites === 0", "the pose to restore on close");
+  await t.settle();
+  await t.ev(`(() => {
+    const h = window.canvasHost, frame = h.requestFrame, fetch = window.fetch;
+    let wakes = 0, reads = 0;
+    h.requestFrame = () => { wakes++; frame(); };
+    window.fetch = (...args) => { if (String(args[0]).includes("/api/motion-timeline")) reads++; return fetch(...args); };
+    window.timelineIdle = () => [wakes, reads, window.__motion.evaluations];
+  })()`);
+  const idle = await t.ev("window.timelineIdle()");
+  await t.a.post("/api/update", { file: t.file, id: "tl_marker", props: { motion: [{ ...timelineAnimation, leave: "hold" }] } });
+  await sleep(150);
+  t.eq(await t.ev("window.timelineIdle()"), idle, "closing removes the timeline's work");
+  await t.select(["tl_plain"]);
+  await t.waitFor("document.querySelector('.motion-timeline[data-open]')", "a new selection to clear dismissal");
+});
