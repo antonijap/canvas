@@ -36,7 +36,7 @@
   },
   "dependencies": {
     "@iconify-json/feather": "1.2.1",
-    "@iconify-json/lucide": "1.2.151",
+    "@iconify-json/lucide": "1.2.157",
     "@iconify-json/material-symbols": "1.2.101",
     "@iconify-json/ph": "1.2.2",
     "@modelcontextprotocol/sdk": "1.32.2",
