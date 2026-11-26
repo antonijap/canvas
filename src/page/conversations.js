@@ -1,17 +1,11 @@
-// All conversations, in one place (the sparkle button at the top right, or the app's toolbar). A right sidebar lists the
-// runs a person started from a selected layer or board (src/agent-run.ts, kept in the file's sidecar by src/threads.ts):
+// The Conversations section of the Comments sidebar lists the runs started from a layer or board:
 // the layer, the prompt, the state (running, done, stopped, failed), when, and the page. A click flies to the layer,
 // selects it and reopens its thread (the spark's askOpen). A running row has Stop. Runs going come first.
 // The server half is GET /api/agent/conversations; the rows' words are in /page/conversations-logic.js (node-tested).
-// It takes the comments sidebar's place on the right (one of the two at a time) and, in the app, tells the shell so the
-// canvas keeps clear of it (conversationsSidebar).
 
 import * as L from "/page/conversations-logic.js";
 
-const host = window.canvasHost;
-if (host && host.file) start(host);
-
-function start(host) {
+export function installConversations(host, section, toggle) {
   const { file } = host;
   const api = (p, body) => fetch(p, body === undefined ? {} : { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify(body) })
     .then((r) => r.json().then((j) => { if (!r.ok) throw new Error(j.error || r.statusText); return j; }));
@@ -19,7 +13,6 @@ function start(host) {
 
   const css = document.createElement("style");
   css.textContent = `
-.cv-empty{margin:0;padding-inline:calc(var(--c-sidebar-label-inset) - var(--c-sidebar-inset));color:var(--c-muted-fg)}
 .cv-row[aria-disabled=true]{cursor:default;opacity:.7}
 .cv-l1{display:flex;align-items:center;gap:8px;min-width:0}
 .cv-l1 b{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -35,49 +28,42 @@ function start(host) {
 .cv-stop{margin-left:auto;flex:none;border:0;border-radius:6px;padding:4px 8px;background:var(--c-accent);color:var(--c-fg);font:inherit;cursor:pointer}
 .cv-stop:hover{background:var(--c-hover)}
 .cv-btn{position:fixed;top:8px;right:8px;z-index:13;width:28px;height:28px;border:0;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:0;background:var(--c-popover);color:var(--c-fg);cursor:pointer;box-shadow:0 0 0 .5px #0000000f,0 1px 3px #00000014}
-body.cm-sidebar-open .cv-btn{top:2px;right:calc(var(--c-sidebar-inset) + var(--c-sidebar-row) + 4px);z-index:15;background:transparent;box-shadow:none}
-body.cm-sidebar-open .cv-btn:hover{background:var(--c-hover)}
-body.cm-sidebar-open:not(.native) .cm-sidebar-head{position:sticky;top:0;z-index:1;background:var(--c-sidebar-surface)}
+.cv-btn[aria-expanded=true]{top:2px;right:calc(var(--c-sidebar-inset) + var(--c-sidebar-row) + 4px);z-index:15;background:var(--c-sidebar-selected);box-shadow:none}
+.cv-btn:hover{background:var(--c-hover)}
+.cv-btn .cm-unread-dot{position:absolute;top:3px;right:3px}
 body.cm-sidebar-open:not(.native) .cm-sidebar-head .right-sidebar-close{margin-inline-start:32px}
-.native .cv-btn{display:none}
 @keyframes cv-pulse{50%{opacity:.35}}
 `;
   document.head.appendChild(css);
 
-  const side = h("aside", "cv-sidebar right-sidebar");
-  side.hidden = true;
-  side.setAttribute("aria-label", "Conversations");
-  const spark = `<svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 2l1 2.9 2.9 1-2.9 1-1 2.9-1-2.9-2.9-1 2.9-1zM10.8 8.6l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/></svg>`;
-  const btn = h("button", "cv-btn");
-  btn.type = "button";
-  btn.title = "Conversations";
-  btn.setAttribute("aria-label", "Conversations");
-  btn.innerHTML = spark;
-  btn.onclick = () => toggle();
-  document.body.append(side, btn);
+  const btn = host.native ? null : h("button", "cv-btn");
+  const dot = h("span", "cm-unread-dot");
+  dot.hidden = true;
+  if (btn) {
+    btn.type = "button";
+    btn.title = "Comments";
+    btn.setAttribute("aria-controls", "comments-sidebar");
+    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M9 18H6l-3 3V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2z"/></svg>`;
+    btn.append(dot);
+    btn.onclick = () => toggle();
+    document.body.append(btn);
+  }
 
   let list = [];
+  let request = 0;
   let current = null;
   let timer = 0;
   let es = null;
 
   async function load() {
-    try { list = (await api(`/api/agent/conversations?${new URLSearchParams({ file })}`)).conversations || []; } catch { return; }
-    draw();
-  }
-  function draw() {
-    if (side.hidden) return;
-    side.replaceChildren();
-    const head = h("div", "cv-head right-sidebar-header");
-    const close = h("button", "right-sidebar-close");
-    close.title = "Close conversations";
-    close.type = "button";
-    close.setAttribute("aria-label", "Close conversations");
-    close.onclick = () => toggle(false);
-    head.append(h("strong", "", "Conversations"), close);
-    side.append(head);
-    if (!list.length) { side.append(h("p", "cv-empty", "No conversations yet. Select a layer and ask the agent about it.")); return; }
-    for (const c of L.runningFirst(list)) side.append(rowEl(L.rowOf(c)));
+    const id = ++request;
+    try {
+      const result = await api(`/api/agent/conversations?${new URLSearchParams({ file })}`);
+      if (id !== request) return;
+      list = result.conversations || [];
+    } catch { return; }
+    section.hidden = !list.length;
+    section.replaceChildren(h("h3", "", "Conversations"), ...L.runningFirst(list).map(c => rowEl(L.rowOf(c))));
   }
   function rowEl(r) {
     const row = h("div", "cv-row right-sidebar-row");
@@ -104,7 +90,7 @@ body.cm-sidebar-open:not(.native) .cm-sidebar-head .right-sidebar-close{margin-i
     const open = () => {
       if (!r.canOpen) return;
       current = r.run;
-      for (const el of side.querySelectorAll(".cv-row")) el.setAttribute("aria-current", String(el.dataset.run === r.run));
+      for (const el of section.querySelectorAll(".cv-row")) el.setAttribute("aria-current", String(el.dataset.run === r.run));
       if (window.canvasCmd) window.canvasCmd({ cmd: "askOpen", key: r.key, ids: r.ids, board: r.board, page: r.page });
     };
     row.onclick = open;
@@ -112,15 +98,6 @@ body.cm-sidebar-open:not(.native) .cm-sidebar-head .right-sidebar-close{margin-i
     return row;
   }
 
-  function toggle(open = side.hidden) {
-    if (open === !side.hidden) return;
-    if (open) document.querySelector('.cm-sidebar:not([hidden]) [aria-label="Close"]')?.click();
-    side.hidden = !open;
-    document.body.classList.toggle("cv-open", open);
-    if (host.native) host.post({ conversationsSidebar: open });
-    if (open) { load(); connect(); } else disconnect();
-    window.dispatchEvent(new Event("resize"));
-  }
   // Live: a run's progress and end arrive on the file's stream; reload the list a moment after, at most once a second.
   const soon = () => { if (!timer) timer = setTimeout(() => { timer = 0; load(); }, 600); };
   function connect() {
@@ -133,10 +110,22 @@ body.cm-sidebar-open:not(.native) .cm-sidebar-head .right-sidebar-close{margin-i
       soon();
     };
   }
-  function disconnect() { if (es) { es.close(); es = null; } }
-  // The comments sidebar took the place: step aside.
-  new MutationObserver(() => { if (document.body.classList.contains("cm-sidebar-open") && !side.hidden) toggle(false); }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
-  addEventListener("keydown", (e) => { if (e.key === "Escape" && !side.hidden && !e.defaultPrevented && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) toggle(false); });
-  host.on("cmd", (c) => { if (c && c.cmd === "conversations") toggle(c.open === undefined ? undefined : !!c.open); });
-  host.on("resync", () => { if (host.native) host.post({ conversationsSidebar: !side.hidden }); if (!side.hidden) load(); });
+  return {
+    button: btn,
+    load,
+    setOpen(open) {
+      btn?.setAttribute("aria-expanded", String(open));
+      if (open) { load(); connect(); }
+      else {
+        es?.close();
+        es = null;
+        clearTimeout(timer);
+        timer = 0;
+      }
+    },
+    setUnread(unread) {
+      dot.hidden = !unread;
+      btn?.setAttribute("aria-label", unread ? `Comments, ${unread} unread` : "Comments");
+    },
+  };
 }

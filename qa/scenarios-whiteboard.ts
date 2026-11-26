@@ -20,14 +20,15 @@ sc("sticker", "Sticker strip and toolbar popovers stay clear of comments and pla
   await t.open({ native: true });
   const problems: string[] = [];
   const shots = process.env.CANVAS_UI_SHOTS;
-  const tray = "[data-sticker-tray]", bar = ".cm-bar.on";
+  const tray = "[data-sticker-tray]", sidebar = ".cm-sidebar";
   const stickerGhost = ".sticker-ghost", stickyGhost = "[data-sticky-ghost]";
   const rect = (selector: string) => t.ev<DOMRect>(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`);
   const visible = (selector: string) => `document.querySelector(${JSON.stringify(selector)})?.offsetWidth > 0`;
   const intersects = (a: DOMRect, b: DOMRect) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
   const report = (ok: boolean, message: string) => { if (!ok) problems.push(message); };
   const insets = (bottomClearance: number) => t.ev(`window.canvasCmd({ cmd: "insets", l: 80, t: 64, r: 280, b: ${bottomClearance}, bottomClearance: ${bottomClearance} })`);
-  await t.waitFor(`document.querySelector("${bar}")?.textContent.includes("Show 1 resolved")`, "resolved comment in the bar");
+  await t.ev('window.canvasCmd({ cmd: "commentsSidebar", open: true })');
+  await t.waitFor("document.querySelector('.cm-show-resolved')?.textContent === 'Show 1 resolved'", "resolved comment in the sidebar");
   if (shots) {
     fs.mkdirSync(shots, { recursive: true });
     await t.page.send("Emulation.setEmulatedMedia", { features: [
@@ -40,11 +41,11 @@ sc("sticker", "Sticker strip and toolbar popovers stay clear of comments and pla
     const shot = async (name: string) => {
       if (shots) fs.writeFileSync(path.join(shots, `${width}-${name}.png`), await t.shot());
     };
-    // A native toast occupies the first bottom overlay slot and raises the comments bar into the popover area.
+    // A native toast occupies the first bottom overlay slot.
     await t.ev('window.canvasCmd({ cmd: "bottomToast", shown: true })');
-    await t.waitFor(visible(bar), "comments bar before opening");
+    await t.waitFor(visible(sidebar), "Comments stays open");
     await t.io.move(250, 450);
-    await shot("comments-bar");
+    await shot("comments-sidebar");
     for (const [name, key, shift, selector] of [
       ["sticker", "s", true, tray],
       ["sticky", "s", false, '[aria-label="Sticky colours"]'],
@@ -55,9 +56,8 @@ sc("sticker", "Sticker strip and toolbar popovers stay clear of comments and pla
       await t.waitFor(visible(selector), `${name} popover`);
       if (name === "sticker") await t.io.key("1");
       await t.frames();
-      const barRect = await rect(bar), popRect = await rect(selector);
-      report(!intersects(barRect, popRect) || !barRect.width, `${width}px: comments overlap the ${name} popover`);
-      report(!barRect.width, `${width}px: comments bar stays visible with ${name} open`);
+      const sidebarRect = await rect(sidebar), popRect = await rect(selector);
+      report(!intersects(sidebarRect, popRect), `${width}px: Comments overlaps the ${name} popover`);
       await shot(name === "sticker" ? "sticker-default" : name);
       if (name === "sticker") {
         const inspect = async (state: string) => {
@@ -126,7 +126,7 @@ sc("sticker", "Sticker strip and toolbar popovers stay clear of comments and pla
       }
       await t.io.key("Escape");
       if (name === "sticky") await t.io.up();
-      await t.waitFor(`!(${visible(selector)}) && ${visible(bar)}`, `comments bar returns after ${name} closes`);
+      await t.waitFor(`!(${visible(selector)}) && ${visible(sidebar)}`, `Comments stays open after ${name} closes`);
     }
     await t.ev('window.canvasCmd({ cmd: "bottomToast", shown: false })');
   }

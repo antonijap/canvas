@@ -256,8 +256,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     @Published var agentReady = false
     @Published var inspectorOpen = true
     @Published var commentsSidebarOpen = false
-    /// The conversations sidebar (src/page/conversations.js) is open: it takes the properties column's place, like comments.
-    @Published var conversationsSidebarOpen = false
+    @Published var unreadComments = 0
     /// The left panel is open (the sidebar toggle and Rename can open it).
     @Published var panelOpen = true
     /// View > Hide UI: only the canvas and the tabs show.
@@ -403,7 +402,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
             #endif
         }
         if let open = m["commentsSidebar"] as? Bool { commentsSidebarOpen = open }
-        if let open = m["conversationsSidebar"] as? Bool { conversationsSidebarOpen = open }
+        if let unread = m["unreadComments"] as? Int { unreadComments = unread }
         if m["cloudRemoved"] as? Bool == true, let file = currentFile { close(file); flash("Your access to this Cloud was removed"); return }
         if let file = m["file"] as? String, file != currentFile { noteOpened(file) }
         if m.keys.contains("cloudFile") {
@@ -927,7 +926,7 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     /// The lists the left panel shows, emptied: the shown tab's page fills them again (apply, or resync).
     func clearSidebarState() {
         commentsSidebarOpen = false
-        conversationsSidebarOpen = false
+        unreadComments = 0
         sidebarWidgetsLoaded = false
         boards = []; pages = []; activePage = nil; components = []; styles = []; variables = []; tokenSections = []; styleEntries = []; widgets = []; revision = ""
         selectedBoard = nil
@@ -1458,13 +1457,12 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
 
     func showPage(_ id: String) { run("{cmd:'page',id:\(jsString(id))}"); focusCanvas() }
     var editorChromeShown: Bool { currentFile != nil && !homeShown && !uiHidden }
-    var propertiesShown: Bool { editorChromeShown && inspectorOpen && !commentsSidebarOpen && !conversationsSidebarOpen }
+    var propertiesShown: Bool { editorChromeShown && inspectorOpen && !commentsSidebarOpen }
 
     func toggleProperties() {
         guard editorChromeShown else { return }
         inspectorOpen = !propertiesShown
         if commentsSidebarOpen { run("{cmd:'commentsSidebar',open:false}") }
-        if conversationsSidebarOpen { run("{cmd:'conversations',open:false}") }
     }
 
     var canDraw: Bool { currentFile != nil && !homeShown && !cloudReadOnly && !textEditing }

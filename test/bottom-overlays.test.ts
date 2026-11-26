@@ -61,17 +61,16 @@ test('bottom overlays stay inside the docked panels when zoom fills the gap', ()
   assert.ok(area.y + 20 < 750, 'the notices clear the zoom pill');
 });
 
-test('bottom overlays move above zoom when the comment controls need more width', () => {
-  const area = bottomOverlayArea(900, 420, { l: 248, r: 294 }, { left: 477, bottom: 410, height: 40 }, 40, 10, 10, 0, 210);
+test('bottom overlays use the space beside zoom once the toolbar is gone', () => {
+  const area = bottomOverlayArea(900, 420, { l: 248, r: 294 }, { left: 477, bottom: 410, height: 40 }, 40);
   assert.equal(area.x, 427);
-  assert.equal(area.width, 338);
-  assert.ok(area.y + 20 < 370, 'the full comment pill clears zoom');
+  assert.equal(area.width, 80);
+  assert.equal(area.y, 390);
 });
 
-test('the comments bar sits at the top, not in the bottom stack with the tool palette', async () => {
+test('the bottom overlays still position the comment mode hint', async () => {
   const fs = await import('node:fs');
   const source = fs.readFileSync(new URL('../src/page/bottom-overlays.js', import.meta.url), 'utf8');
-  const stack = source.slice(source.indexOf('const selectors'), source.indexOf('];', source.indexOf('const selectors')));
-  assert.ok(!stack.includes('.cm-bar'));
-  assert.ok(source.includes("set('top', ((host.insets && host.insets.t) || 0) + inset + 'px')"));
+  assert.ok(!source.includes('.cm-bar'));
+  assert.ok(source.includes('.cm-hint.on'));
 });

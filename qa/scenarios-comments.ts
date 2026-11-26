@@ -234,12 +234,14 @@ sc("comments", "reply, resolve and Show resolved", { covers: ["comments:reply", 
   await until(t, () => !!file(t).threads[0].resolvedAt, "resolved on disk");
   await t.waitFor(`![...document.querySelectorAll(".cm-pin")].some((e) => e.dataset.thread === ${JSON.stringify(id)} && e.style.display !== "none")`, "the pin hidden");
   // Show resolved brings it back, faded; Reopen puts it back.
-  await t.waitFor(`document.querySelector(".cm-bar.on")?.innerText.includes("0 comments")`, "the bar says 0 comments");
-  await t.ev(`[...document.querySelectorAll(".cm-bar button")].find((b) => b.textContent.startsWith("Show 1 resolved")).click()`);
+  await t.ev(`document.querySelector(".cv-btn").click()`);
+  await t.waitFor(`document.querySelector(".cm-show-resolved")?.textContent === "Show 1 resolved"`, "the resolved count in the sidebar");
+  await t.ev(`document.querySelector(".cm-show-resolved").click()`);
   await t.waitFor(`(() => { const p = document.querySelector('.cm-pin[data-thread="${id}"]'); return p?.classList.contains("resolved") && p.style.display !== "none"; })()`, "the resolved pin shown");
   await openThread(t, id);
   t.ok(/Resolved by/.test(await t.ev<string>(`document.querySelector(".cm-pop").innerText`)), "the thread says who resolved it");
   t.eq(await t.ev(`document.querySelector('.cm-pop .cm-res').title`), "Reopen", "the check says Reopen on a resolved thread");
+  await t.ev(`document.querySelector('.cm-sidebar-head [aria-label="Close"]').click()`);
   await t.ev(`document.querySelector('.cm-pop [aria-label="Reopen thread"]').click()`);
   await until(t, () => !file(t).threads[0].resolvedAt, "reopened on disk");
   // Delete: a reply goes (its tombstone stays), then the thread.
@@ -449,16 +451,21 @@ sc("comments", "Unread comments and the pin menu", { covers: ["comments:unread",
     };
     const x = await t.ev<number>(`(${r.x} - window.canvasHost.cam.x) / window.canvasHost.cam.z`);
     const own = await create("Anna's note", x - 90);
-    await name("Ben");
+    t.eq((await name("Ben")).status, 200, "Ben is the local commenter");
     const id = await create("Ben's note", x);
-    await name("Anna");
+    t.eq(file(t).threads.find((item: { id: string }) => item.id === id).createdBy.name, "Ben", "the second thread belongs to Ben");
+    t.eq((await name("Anna")).status, 200, "Anna is the local commenter again");
+    const loaded = await (await fetch(api)).json();
+    t.eq(loaded.unread, [id], "the server gives Anna one unread thread");
     await t.ev("window.canvasHost.comments.reload()");
     const pin = `.cm-pin[data-thread="${id}"]`;
     await t.waitFor(`document.querySelector('${pin}')?.classList.contains("unread")`, "Ben's unread pin for Anna");
     t.ok(await t.ev(`!document.querySelector('.cm-pin[data-thread="${own}"]').classList.contains('unread')`), "Anna's pin stays read");
-    await t.waitFor(`document.querySelector('.cm-bar .cm-new')?.textContent === '1 new'`, "the count pill shows one new thread");
-    await t.ev(`document.querySelector('.cm-bar .cm-new').click()`);
+    const badge = `document.querySelector('.cv-btn').getAttribute('aria-label') === 'Comments, 1 unread'`;
+    await t.waitFor(badge, "the Comments button shows one unread thread");
+    await t.ev(`document.querySelector('.cv-btn').click()`);
     await t.waitFor(`document.querySelector('.cm-sidebar .cm-thread-row.unread')?.dataset.thread === "${id}"`, "the unread row sorts first");
+    t.eq(await t.ev(`document.querySelector('.cm-thread-row.unread').closest('section').querySelector('h3').textContent`), "Unread", "the unread section");
     for (const theme of ["light", "dark"]) {
       await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: theme }] });
       await t.frames(3);
@@ -466,6 +473,7 @@ sc("comments", "Unread comments and the pin menu", { covers: ["comments:unread",
     }
     await t.ev(`document.querySelector('.cm-sidebar [data-thread="${id}"]').click()`);
     await t.waitFor(`!document.querySelector('${pin}')?.classList.contains("unread") && !document.querySelector('.cm-pop').hidden`, "opening clears unread");
+    t.eq(await t.ev(`document.querySelector('.cm-thread-row[aria-current="true"]')?.dataset.thread`), id, "the open thread stays selected");
     await t.io.type("Anna's reply");
     await t.io.key("Enter");
     await until(t, () => file(t).threads.find((item: { id: string }) => item.id === id).comments.length === 2, "Anna's reply");
@@ -492,18 +500,23 @@ sc("comments", "Unread comments and the pin menu", { covers: ["comments:unread",
     await choose("Resolve");
     await until(t, () => !!file(t).threads.find((item: { id: string }) => item.id === id).resolvedAt, "resolved from the pin menu");
     await t.waitFor(`!document.querySelector('${pin}')`, "resolved pin is hidden");
-    await t.ev(`[...document.querySelectorAll('.cm-bar button')].find(b => b.textContent === 'Show 1 resolved').click()`);
+    await t.ev(`document.querySelector('.cv-btn').click(); document.querySelector('.cm-show-resolved').click()`);
     await t.waitFor(`!!document.querySelector('${pin}.resolved')`, "resolved pin is visible");
+    t.eq(await t.ev(`document.querySelector('.cm-show-resolved').textContent`), "Hide 1 resolved", "the footer toggled");
+    await t.ev(`document.querySelector('.cm-show-resolved').click()`);
+    await t.waitFor(`!document.querySelector('${pin}')`, "Hide resolved removes the pin again");
+    await t.ev(`document.querySelector('.cm-show-resolved').click(); document.querySelector('.cm-sidebar-head [aria-label="Close"]').click()`);
+    await t.waitFor(`document.querySelector('${pin}')?.offsetWidth > 0`, "the resolved pin is positioned again");
     await openMenu();
     await choose("Reopen");
     await until(t, () => !file(t).threads.find((item: { id: string }) => item.id === id).resolvedAt, "reopened from the pin menu");
     await t.waitFor(`!document.querySelector('${pin}')?.classList.contains('resolved')`, "reopened pin is updated");
     await openMenu();
     await choose("Mark as Unread");
-    await t.waitFor(`document.querySelector('.cm-bar').innerText.includes('1 new')`, "the count pill shows unread threads");
+    await t.waitFor(badge, "the Comments badge shows unread threads");
     await openMenu();
     await choose("Mark as Read");
-    await t.waitFor(`!document.querySelector('.cm-bar .cm-new')`, "the pin menu clears unread");
+    await t.waitFor(`!(${badge})`, "the pin menu clears unread");
     await openMenu();
     await choose("Mark as Unread");
     await t.waitFor(`document.querySelector('${pin}').classList.contains('unread')`, "the pin becomes unread again");
@@ -513,13 +526,15 @@ sc("comments", "Unread comments and the pin menu", { covers: ["comments:unread",
     await t.io.key("Escape");
     await openMenu();
     await choose("Mark as Unread");
-    await t.waitFor(`!!document.querySelector('.cm-bar .cm-new')`, "unread is saved");
+    await t.waitFor(badge, "unread is saved");
     await t.open();
-    await t.waitFor(`document.querySelector('.cm-bar').innerText.includes('1 new')`, "the read mark survives reload");
-    await t.ev(`document.querySelector('.cm-bar').click()`);
-    await t.ev(`document.querySelector('.cm-sidebar-head [aria-label="Mark all as read"]').click()`);
-    await t.waitFor(`!document.querySelector('.cm-bar').innerText.includes('1 new')`, "mark all clears the count");
-    await t.ev(`document.querySelector('.cm-sidebar-head [aria-label="Close"]').click()`);
+    await t.waitFor(badge, "the unread mark survives reload");
+    await t.ev(`document.querySelector('.cv-btn').click()`);
+    await t.waitFor(`!document.querySelector('.cm-read-all').hidden`, "Mark all as read is available");
+    await t.ev(`document.querySelector('.cm-read-all').click()`);
+    await t.waitFor(`!(${badge}) && document.querySelector('.cm-read-all').hidden`, "mark all clears the badge and the action");
+    await t.open();
+    await t.waitFor(`window.canvasHost.comments.threads.length === 2 && !(${badge})`, "read threads stay read after reload");
     await t.focus("lay_nest");
     await openMenu();
     await choose("Delete Thread");
@@ -535,4 +550,70 @@ sc("comments", "Unread comments and the pin menu", { covers: ["comments:unread",
     await name("").catch(() => {});
     shell.abort();
   }
+});
+
+sc("comments", "The sidebar lists comment threads and agent conversations together", {
+  covers: ["comments:unread", "comments:show-resolved", "conversations:list", "conversations:open-row"],
+  skip: { visual: "The populated sidebar has a dedicated screenshot in qa/out.", undo: "Agent runs are seeded directly in the saved file." },
+}, async (t: T) => {
+  const doc = crypto.randomUUID(), now = Date.now();
+  const anna = { name: "Anna" }, ben = { name: "Ben" }, agent = { name: "Agent", agent: true };
+  const makeThread = (author: { name: string }, body: string, minutes: number, resolved = false) => {
+    const id = crypto.randomUUID(), at = new Date(now - minutes * 60_000).toISOString();
+    return {
+      id, doc, anchor: { nodeId: "r_free", board: "lay_nest", x: .5, y: .5, preview: { name: "Free rect" } },
+      createdBy: author, createdAt: at,
+      ...(resolved ? { resolvedAt: at, resolvedBy: author } : {}),
+      comments: [{ id: crypto.randomUUID(), thread: id, author, createdAt: at, body }],
+    };
+  };
+  const newest = makeThread(ben, "Can we give the heading a little more space?", 5);
+  const older = makeThread(agent, "I checked how this layout wraps at narrower widths.", 18);
+  const open = makeThread(anna, "Keep the card labels aligned.", 48);
+  open.comments.push({ id: crypto.randomUUID(), thread: open.id, author: ben, createdAt: new Date(now - 30 * 60_000).toISOString(), body: "Aligned with the header now." });
+  const resolved = makeThread(ben, "Use the same blue on both cards.", 90, true);
+  fs.writeFileSync(path.join(t.file, "comments.json"), JSON.stringify({ format: 1, doc, seq: 5, outbox: [], threads: [older, open, newest, resolved] }));
+
+  const widgetsFile = path.join(t.file, "widgets.json");
+  const widgets = JSON.parse(fs.readFileSync(widgetsFile, "utf8"));
+  widgets.threads = [{
+    key: "lay_nest", ids: ["lay_nest"], name: "Nest", harness: "codex", createdAt: now - 120_000, updatedAt: now - 115_000,
+    runs: [{ id: "review-spacing", prompt: "Review the spacing between the cards", at: now - 120_000, endedAt: now - 115_000, status: "done", steps: [] }],
+  }];
+  fs.writeFileSync(widgetsFile, JSON.stringify(widgets));
+
+  const headers = { "x-canvas": "1", "content-type": "application/json" };
+  const read = (payload: object) => fetch(t.srv.base + "/api/comments/read?file=" + encodeURIComponent(t.file), { method: "POST", headers, body: JSON.stringify(payload) });
+  t.eq((await read({})).status, 200, "start with everything read");
+  for (const thread of [newest, older]) t.eq((await read({ thread: thread.id, unread: true })).status, 200, "mark the thread unread");
+
+  await t.open();
+  await t.focus("lay_nest");
+  await t.waitFor(`document.querySelector('.cv-btn')?.getAttribute('aria-label') === 'Comments, 2 unread'`, "the toolbar unread count");
+  await t.ev(`document.querySelector('.cv-btn').click()`);
+  await t.waitFor(`!!document.querySelector('.cm-sidebar:not([hidden]) .cv-row')`, "the conversation in the Comments sidebar");
+  t.eq(await t.ev(`document.querySelectorAll('.right-sidebar:not([hidden])').length`), 1, "one visible sidebar");
+  t.ok(await t.ev(`!document.querySelector('.cm-bar')`), "no floating comments toolbar");
+  await t.ev(`document.querySelector('.cm-show-resolved').click()`);
+  t.eq(await t.ev(`[...document.querySelectorAll('.cm-sidebar h3')].map(h => [h.textContent, h.parentElement.querySelectorAll('.right-sidebar-row').length])`),
+    [["Unread", 2], ["Open", 1], ["Resolved", 1], ["Conversations", 1]], "sections and counts");
+  t.eq(await t.ev(`[...document.querySelectorAll('.cm-thread-row.unread')].map(r => r.dataset.thread)`),
+    [newest.id, older.id], "unread threads are newest first");
+  t.eq(await t.ev(`document.querySelector('.cm-thread-row[data-thread="${open.id}"] .cm-thread-meta').textContent`),
+    "1 reply, Free rect", "reply count and layer");
+  t.ok(await t.ev(`!!document.querySelector('.cm-thread-row[data-thread="${older.id}"] .cm-agent')`), "agent avatar");
+  t.eq(await t.ev(`document.querySelector('.cv-row .cv-prompt').textContent`), "Review the spacing between the cards", "conversation prompt");
+  t.ok(await t.ev(`document.querySelector('.cm-read-all .cm-t').getBoundingClientRect().height < 16`), "Mark all as read fits on one line");
+  await t.ev("document.getElementById('rev').style.visibility = 'hidden'");
+  await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", value: "light" }, { name: "prefers-reduced-motion", value: "reduce" }] });
+  await t.frames(3);
+  await shot(t, "comments-sidebar");
+  await t.ev("document.querySelector('.cv-row').click()");
+  await t.waitFor("window.canvasHost.spark?.state.open && window.canvasHost.spark.state.ids.includes('lay_nest')", "the conversation opens on its layer");
+  await t.ev("window.canvasHost.spark.close()");
+  await t.open();
+  await t.ev(`window.canvasCmd({cmd:"commentsSidebar",open:true})`);
+  await t.waitFor(`document.querySelector('.cm-show-resolved')?.textContent === 'Hide 1 resolved' && !!document.querySelector('.cm-pin.resolved')`,
+    "the footer setting and resolved pin survive reload");
+  await t.ev(`document.querySelector('.cm-show-resolved').click(); window.canvasCmd({cmd:"commentsSidebar",open:false})`);
 });

@@ -399,21 +399,22 @@ sc("comments", "alignment: in the app's page, the pins, the bars, the thread's h
   await t.js(`return window.canvasHost.comments.reload();`);
   const b = await t.js<{ x: number; y: number }>(`return window.__canvas.boardPos("lay_nest");`);
   await t.look(b.x, b.y);
-  await t.waitJs(`document.querySelectorAll(".cm-pin").length >= 1 && document.querySelector(".cm-bar.on")`, "the pin and the count bar");
+  await t.waitJs(`document.querySelectorAll(".cm-pin").length >= 1`, "the pin");
   const pin = `.cm-pin[data-thread="${A}"]`;
   const bad: string[] = [];
   try {
     for (const theme of ["light", "dark"]) {
       await t.cmd("qa.theme", { theme });
-      // The pin, the count bar.
+      // The pin and the sidebar footer.
+      await t.js("window.canvasCmd({cmd:'commentsSidebar',open:true});");
       let s = await grab(t);
-      let m = await pageMeasure(t, s, { av: `b:${pin} .cm-av`, avT: `t:${pin} .cm-av`, bar: "b:.cm-bar", barIcon: "b:.cm-bar > span:first-child svg", barT: "t:.cm-bar > span:nth-child(2)", show: "b:.cm-bar .cm-btn", showT: "t:.cm-bar .cm-btn" });
+      let m = await pageMeasure(t, s, { av: `b:${pin} .cm-av`, avT: `t:${pin} .cm-av`, show: "b:.cm-show-resolved", showT: "t:.cm-show-resolved .cm-t", showIcon: "b:.cm-show-resolved svg" });
       let k = new AlignChecker("native-page", theme, s.img, s.k);
       k.label("app-pin-avatar", m.av, m.avT, { inset: 1.5 });
-      k.label("app-bar-show-resolved", m.show, m.showT);
-      k.near("app count bar: the bubble's middle on the bar's centre line", midY(k.ink("app-bar-icon", bare(m.barIcon), { inset: 0 })), cy(m.bar));
-      k.near("app count bar: the count's cap middle on the bar's centre line", m.barT?.cap, cy(m.bar));
+      k.label("app-sidebar-show-resolved", m.show, m.showT);
+      k.near("app sidebar footer: the icon sits on the button's centre line", midY(k.ink("app-sidebar-resolved-icon", bare(m.showIcon), { inset: 0 })), cy(m.show));
       bad.push(...k.bad);
+      await t.js("window.canvasCmd({cmd:'commentsSidebar',open:false});");
       // The thread: the first comment (its Resolve check) and the reply row.
       const p = (await pageMeasure(t, s, { pin: `b:${pin}` })).pin as Box;
       await t.click({ x: p.x + p.w / 2, y: p.y + p.h / 2 });

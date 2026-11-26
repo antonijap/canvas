@@ -177,7 +177,8 @@
 }
 .right-sidebar[hidden] { display: none; }
 .native .right-sidebar { top: var(--c-top-bar); }
-body:is(.cm-sidebar-open, .cv-open) #props { visibility: hidden; }
+body.cm-sidebar-open #props { visibility: hidden; }
+body.cm-sidebar-open:not(.native) { --c-props-width: var(--c-sidebar-width); }
 .right-sidebar * { box-sizing: border-box; }
 .right-sidebar-header {
   display: flex;

@@ -704,7 +704,7 @@ features:
     driven: [page, native]
     cases: [one, many, card-note, keyboard]
   - id: conversations
-    name: Sparkle button in the toolbar opens a sidebar of every agent run; a row selects its layer, a running one has Stop
+    name: The Comments sidebar lists agent runs and lets you select their layers or stop a run
     area: agent
     driven: [page, native]
     cases: [list, open-row, stop]

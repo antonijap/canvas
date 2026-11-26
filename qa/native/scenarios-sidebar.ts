@@ -50,64 +50,50 @@ sc("sidebar", "right panels dock and align with the Layers header", { covers: ["
   await t.settle();
   const { window } = await t.state();
   const leftHeader = await header(t);
-  const docked = (panel: { x: number; y: number; w: number; h: number }, title: { y: number; h: number }, name: string) => {
+  const docked = (panel: { x: number; y: number; w: number; h: number }, title: { y: number; h: number }, name: string, width: number) => {
     t.near(panel.x + panel.w, window.width, 1, name + " reaches the right edge");
     t.near(panel.y, METRICS.topBar, 1, name + " starts below the top bar");
     t.near(panel.y + panel.h, window.height, 1, name + " reaches the bottom");
-    t.near(panel.w, METRICS.propsWidth, 1, name + " has the shared width");
+    t.near(panel.w, width, 1, name + " panel width");
     t.near(title.h, METRICS.control, 1, name + " header height");
     t.near(title.y + title.h / 2, center(leftHeader).y, 1, name + " header centre");
   };
   const inspector = await t.mark({ id: "right-sidebar-panel" });
-  docked(inspector, await t.mark({ id: "right-sidebar-header" }), "Inspector");
+  docked(inspector, await t.mark({ id: "right-sidebar-header" }), "Inspector", METRICS.propsWidth);
   const action = await t.mark({ id: "inspector-header-action" });
   t.near(action.w, 28, 0.5, "the inspector action is 28 pt wide");
   t.near(action.h, 28, 0.5, "the inspector action is 28 pt high");
   const trailingX = center(action).x;
-  const checkZoom = async (name: string) => {
+  const checkZoom = async (name: string, width: number) => {
     const zoom = await t.mark({ id: "zoom-island" });
-    t.near(zoom.x + zoom.w, window.width - METRICS.propsWidth - METRICS.inset, 1, name + " leaves the normal gap before zoom");
-    await t.waitFor(async () => await t.js("return canvasHost.insets.r;") === METRICS.propsWidth + METRICS.gap,
+    t.near(zoom.x + zoom.w, window.width - width - METRICS.inset, 1, name + " leaves the normal gap before zoom");
+    await t.waitFor(async () => await t.js("return canvasHost.insets.r;") === width + METRICS.gap,
       name + " reserves its width and gap on the canvas");
   };
-  await checkZoom("Inspector");
-  await t.click(center(await t.mark({ id: "conversations-toggle" })));
-  const checkWeb = async (panel: string, head: string, name: string) => {
-    await t.waitFor(() => t.js(`return !!document.querySelector('${panel}:not([hidden]) ${head}');`), name + " opens");
-    const rects = await t.js<{ panel: typeof inspector; title: typeof leftHeader; close: typeof leftHeader }>(`
-      const rect = (selector) => {
-        const { x, y, width: w, height: h } = document.querySelector(selector).getBoundingClientRect();
-        return { x, y, w, h };
-      };
-      return { panel: rect('${panel}'), title: rect('${head}'), close: rect('${head} .right-sidebar-close') };
-    `);
-    docked(rects.panel, rects.title, name);
-    t.near(rects.close.w, 28, 0.5, name + " close is 28 pt wide");
-    t.near(rects.close.h, 28, 0.5, name + " close is 28 pt high");
-    t.near(center(rects.close).x, trailingX, 1, name + " close aligns with the inspector action");
-    await checkZoom(name);
-  };
-  await checkWeb(".cv-sidebar", ".cv-head", "Conversations");
-  const close = await t.js<{x: number; y: number}>(`
-    const r = document.querySelector('.cv-head [aria-label^="Close"]').getBoundingClientRect();
-    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  await checkZoom("Inspector", METRICS.propsWidth);
+  await t.click(center(await t.mark({ id: "comments-toggle" })));
+  await t.waitJs("!!document.querySelector('.cm-sidebar:not([hidden]) .cm-sidebar-head')", "Comments opens");
+  const rects = await t.js<{ panel: typeof inspector; title: typeof leftHeader; close: typeof leftHeader }>(`
+    const rect = (selector) => {
+      const { x, y, width: w, height: h } = document.querySelector(selector).getBoundingClientRect();
+      return { x, y, w, h };
+    };
+    return { panel: rect('.cm-sidebar'), title: rect('.cm-sidebar-head'), close: rect('.cm-sidebar-head .right-sidebar-close') };
   `);
-  await t.click(close);
-  await t.waitJs("document.querySelector('.cv-sidebar').hidden", "Conversations closes");
-  await t.js(`document.querySelector('[aria-label^="Open comments"]').click(); return true;`);
-  await checkWeb(".cm-sidebar", ".cm-sidebar-head", "Comments");
+  docked(rects.panel, rects.title, "Comments", METRICS.sidebarWidth);
+  t.near(rects.close.w, 28, 0.5, "Close is 28 pt wide");
+  t.near(rects.close.h, 28, 0.5, "Close is 28 pt high");
+  t.near(center(rects.close).x, trailingX, 1, "Close aligns with the inspector action");
+  await checkZoom("Comments", METRICS.sidebarWidth);
+  await t.click(center(rects.close));
+  await t.waitJs("document.querySelector('.cm-sidebar').hidden", "Comments closes");
 });
 
-sc("sidebar", "Properties switches back from Conversations and Comments", { covers: ["sidebar:properties"] }, async (t: NT) => {
+sc("sidebar", "Properties switches back from Comments", { covers: ["sidebar:properties"] }, async (t: NT) => {
   const properties = async () => center(await t.mark({ id: "properties-toggle" }));
   if (!(await t.state()).inspectorOpen) await t.click(await properties());
   await t.mark({ id: "right-sidebar-panel" });
-  await t.click(center(await t.mark({ id: "conversations-toggle" })));
-  await t.waitJs("!document.querySelector('.cv-sidebar').hidden", "Conversations opens");
-  await t.click(await properties());
-  await t.waitJs("document.querySelector('.cv-sidebar').hidden", "Properties closes Conversations", 3500);
-  await t.mark({ id: "right-sidebar-panel" });
-  await t.js(`document.querySelector('[aria-label^="Open comments"]').click(); return true;`);
+  await t.click(center(await t.mark({ id: "comments-toggle" })));
   await t.waitJs("!document.querySelector('.cm-sidebar').hidden", "Comments opens");
   await t.click(await properties());
   await t.waitJs("document.querySelector('.cm-sidebar').hidden", "Properties closes Comments", 3500);
@@ -405,9 +391,10 @@ for (const width of [720, 900]) {
         }],
       }));
       await t.js("return canvasHost.comments.reload();");
-      await t.waitJs("document.querySelector('.cm-bar.on')?.style.top", "the positioned comment pill");
+      await t.click(center(await t.mark({ id: "comments-toggle" })));
+      await t.waitJs("!document.querySelector('.cm-sidebar').hidden", "Comments opens");
       if (narrow) {
-        await t.js(`document.querySelector('.cm-bar').click(); document.querySelector('.cm-thread-row').click();`);
+        await t.js(`document.querySelector('.cm-thread-row').click();`);
         await t.waitJs("!!document.querySelector('.cm-pop:not([hidden]) [aria-label=Reply]')", "the reply field");
         await t.js(`
           const field = document.querySelector('[aria-label=Reply]');
@@ -427,15 +414,17 @@ for (const width of [720, 900]) {
         await t.waitJs(`canvasHost.comments.threads.find(t => t.id === "${id}").comments.length === ${comments.length + 1}`, "the reply to post");
       } else {
         const zoom = await t.mark({ id: "zoom-island" });
-        const resolved = await t.js<{ x: number; y: number; right: number; bottom: number }>(`
-          const r = document.querySelector('.cm-bar [aria-pressed]').getBoundingClientRect();
-          return { x: r.x + r.width / 2, y: r.y + r.height / 2, right: r.right, bottom: r.bottom };
+        const resolved = await t.js<{ x: number; y: number; left: number; bottom: number }>(`
+          const r = document.querySelector('.cm-show-resolved').getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2, left: r.left, bottom: r.bottom };
         `);
-        t.ok(resolved.right <= zoom.x || resolved.bottom <= zoom.y, "Show resolved overlaps Zoom");
+        t.ok(resolved.left >= zoom.x + zoom.w || resolved.bottom <= zoom.y, "Show resolved overlaps Zoom");
         await t.click(resolved);
-        await t.waitJs("document.querySelector('.cm-bar [aria-pressed]')?.getAttribute('aria-pressed') === 'true'", "resolved comments to show");
+        await t.waitJs("document.querySelector('.cm-show-resolved').getAttribute('aria-pressed') === 'true'", "resolved comments to show");
+        await t.js("document.querySelector('.cm-show-resolved').click();");
       }
     } finally {
+      await t.js("window.canvasCmd({cmd:'commentsSidebar',open:false});");
       await t.cmd("qa.window", { width: original.window.width, height: original.window.height });
       if (narrow) await t.doubleClick(center(await t.mark({ id: "sidebar-resize" })));
       if (!original.inspectorOpen) await t.click(center(await t.mark({ id: "properties-toggle" })));

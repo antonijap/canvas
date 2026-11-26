@@ -54,25 +54,28 @@ sc("comments", "alignment: every comment control is optically centred, light and
     return window.canvasHost.comments.reload(); })()`);
   await t.waitFor(`document.querySelector(".cm-shared")?.classList.contains("on") && document.querySelectorAll(".cm-pin").length >= 2`, "the shared bar and the pins");
   await t.waitFor(`document.querySelector('.cm-pin[data-thread="${C}"]')?.classList.contains("gone")`, "the deleted layer's pin");
-  // No caret in a focused field: it is ink a measurement would count.
-  await t.ev(`document.head.appendChild(Object.assign(document.createElement("style"), { textContent: ".cm-field{caret-color:transparent!important}" }))`);
+  // Keep the caret and the blurred canvas backdrop out of the ink measurements.
+  await t.ev(`document.head.appendChild(Object.assign(document.createElement("style"), {
+    textContent: ".cm-field{caret-color:transparent!important}.cm-hint{background:#242427!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}"
+  }))`);
   const pin = (id: string) => `.cm-pin[data-thread="${id}"]`;
   const bad: string[] = [];
   for (const th of ["light", "dark"]) {
     await theme(t, th);
-    // ---- the count bar, the shared bar, the pins
+    // ---- the sidebar footer, the shared bar, the pins
     await sleep(400); // colours ease to the new theme
+    await t.ev("window.canvasCmd({cmd:'commentsSidebar',open:true})");
+    const footer = ".cm-show-resolved";
     let img = await grab(t);
     let m = resolve(img, await measure(t, {
-      bar: "b:.cm-bar", barIcon: "b:.cm-bar > span:first-child svg", barText: "t:.cm-bar > span:nth-child(2)", show: "b:.cm-bar .cm-btn", showT: "t:.cm-bar .cm-btn",
+      show: `b:${footer}`, showT: `t:${footer} .cm-t`, showIcon: `b:${footer} svg`,
       shared: "b:.cm-shared", av: "b:.cm-shared .cm-av:last-child", avT: "t:.cm-shared .cm-av:last-child",
       pin: `b:${pin(A)}`, pinAv: `b:${pin(A)} .cm-av`, pinAvT: `t:${pin(A)} .cm-av`, gonePin: `b:${pin(C)}`, gonePinT: `t:${pin(C)}`,
     }));
     let k = new AlignChecker("page", th, img, K);
-    k.label("bar-show-resolved", m.show, m.showT);
-    const barIcon = k.ink("bar-icon", bare(m.barIcon), { inset: 0 });
-    k.near("count bar: the bubble's middle on the bar's centre line", midY(barIcon), cy(m.bar));
-    k.near("count bar: the count's cap middle on the bar's centre line", m.barText?.cap, cy(m.bar));
+    k.label("sidebar-show-resolved", m.show, m.showT);
+    const showIcon = k.ink("sidebar-resolved-icon", bare(m.showIcon), { inset: 0 });
+    k.near("sidebar footer: the icon sits on the button's centre line", midY(showIcon), cy(m.show));
     k.label("shared-avatar", m.av, m.avT, { inset: 1.5 });
     k.near("shared bar: avatar on the toolbar center line", cy(m.av), cy(m.shared));
     k.label("pin-avatar", m.pinAv, m.pinAvT, { inset: 1.5 });
@@ -80,12 +83,21 @@ sc("comments", "alignment: every comment control is optically centred, light and
     k.near("pin: the avatar centred down the pin", cy(m.pinAv), cy(m.pin));
     k.label("pin-count", m.gonePin, m.gonePinT, { inset: 4 });
     bad.push(...k.bad);
+    await t.ev("window.canvasCmd({cmd:'commentsSidebar',open:false})");
     // ---- the thread card
     await t.ev(`document.querySelector('${pin(A)}').click()`);
     await t.waitFor(`!!document.querySelector(".cm-pop:not([hidden]) .cm-field")`, "the thread");
+    // The thread card overlaps the pin's lower corner. Isolate the pin ink for its count measurement.
+    await t.ev("document.querySelector('.cm-pop').style.visibility = 'hidden'");
+    img = await grab(t);
+    m = resolve(img, await measure(t, { openPin: `b:${pin(A)}`, openPinT: `t:${pin(A)}` }));
+    k = new AlignChecker("page", th, img, K);
+    k.label("open-pin-count", m.openPin, m.openPinT, { inset: 4 });
+    bad.push(...k.bad);
+    await t.ev("document.querySelector('.cm-pop').style.visibility = ''");
     img = await grab(t);
     m = resolve(img, await measure(t, {
-      pop: "b:.cm-pop", openPin: `b:${pin(A)}`, openPinT: `t:${pin(A)}`,
+      pop: "b:.cm-pop",
       resolve: "b:.cm-item .cm-res", resolveIcon: "b:.cm-item .cm-res svg",
       av: "b:.cm-item .cm-av", avT: "t:.cm-item .cm-av", agent: "b:.cm-item .cm-agent", who: "t:.cm-item .cm-who b", time: "t:.cm-item .cm-who time",
       stIcon: "b:.cm-item .cm-state svg", stT: "t:.cm-item .cm-state", stWho: "t:.cm-item:nth-child(4) .cm-who b",
@@ -93,7 +105,6 @@ sc("comments", "alignment: every comment control is optically centred, light and
       field: "t:.cm-row .cm-field", send: "b:.cm-row .cm-send",
     }));
     k = new AlignChecker("page", th, img, K);
-    k.label("open-pin-count", m.openPin, m.openPinT, { inset: 4 });
     const resolveIcon = k.ink("thread-resolve-icon", bare(m.resolveIcon), { inset: 0 });
     k.near("Resolve: the check's middle on the button's centre line", midY(resolveIcon), cy(m.resolve));
     k.near("Resolve: the button's centre line on the first name's cap middle", cy(m.resolve), m.who?.cap);

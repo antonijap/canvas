@@ -166,7 +166,7 @@ final class ControlHostingController<Content: View>: NSHostingController<Content
 struct RootView: View {
     @ObservedObject var model: CanvasModel
     @State private var windowWidth: CGFloat = 0
-    private static let propsReserve = Metric.propsWidth
+    private var propsReserve: CGFloat { model.commentsSidebarOpen ? Metric.sidebarWidth : Metric.propsWidth }
     /// The left sidebar is the same panel on Home and in a file (only its rows change).
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden }
     private var inspectorShown: Bool { model.propertiesShown }
@@ -177,12 +177,12 @@ struct RootView: View {
     private var toolPaletteShown: Bool { model.currentFile != nil && !model.homeShown && !model.cloudReadOnly && !model.uiHidden }
     private var zoomShown: Bool { !model.uiHidden && !model.homeShown && !model.pageEmpty }
 
-    private var rightSidebarShown: Bool { inspectorShown || ((model.commentsSidebarOpen || model.conversationsSidebarOpen) && !model.uiHidden && !model.homeShown) }
+    private var rightSidebarShown: Bool { inspectorShown || (model.editorChromeShown && model.commentsSidebarOpen) }
     /// What the open file reserves beside the left sidebar. Home sizes the sidebar by the same numbers, so it never
     /// changes width on the way between Home and the file.
     private var fileOpen: Bool { model.currentFile != nil && !model.uiHidden }
     private var fileRightSidebar: Bool {
-        fileOpen && (model.inspectorOpen || model.commentsSidebarOpen || model.conversationsSidebarOpen)
+        fileOpen && (model.inspectorOpen || model.commentsSidebarOpen)
     }
     private var minimumCanvasWidth: CGFloat {
         fileOpen && !model.cloudReadOnly ? max(ShellLayout.minCanvas, ToolPalette.width(compact: true) + Metric.pillPad) : ShellLayout.minCanvas
@@ -192,7 +192,7 @@ struct RootView: View {
     private var panelWidth: CGFloat? {
         guard windowWidth > 0 else { return model.sidebarWidth }
         return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, rightSidebar: fileRightSidebar,
-                                        inset: Metric.inset, gap: Metric.islandGap, props: Self.propsReserve, minWidth: Metric.sidebarMin,
+                                        inset: Metric.inset, gap: Metric.islandGap, props: propsReserve, minWidth: Metric.sidebarMin,
                                         minimumCanvas: minimumCanvasWidth)
     }
 
@@ -200,14 +200,14 @@ struct RootView: View {
     private var panelMax: CGFloat {
         guard windowWidth > 0 else { return Metric.sidebarMax }
         let room = ShellLayout.room(window: windowWidth, rightSidebar: fileRightSidebar, inset: Metric.inset,
-                                    gap: Metric.islandGap, props: Self.propsReserve, minimumCanvas: minimumCanvasWidth)
+                                    gap: Metric.islandGap, props: propsReserve, minimumCanvas: minimumCanvasWidth)
         return min(Metric.sidebarMax, room)
     }
 
     var body: some View {
         let i = canvasInsets()
         let compactTools = toolPaletteShown && windowWidth > 0 && windowWidth - i.l - i.r < ToolPalette.width(compact: false) + 8
-        let zoomRightInset = Metric.inset + (rightSidebarShown ? Self.propsReserve : 0)
+        let zoomRightInset = Metric.inset + (rightSidebarShown ? propsReserve : 0)
         let bottomBars = BottomBarLayout(windowWidth: windowWidth, leftInset: i.l, rightInset: i.r,
             zoomRightInset: zoomRightInset,
             paletteWidth: toolPaletteShown ? ToolPalette.width(compact: compactTools) : nil,
@@ -312,7 +312,7 @@ struct RootView: View {
 
     private func canvasInsets(bottomClearance: CGFloat = 0) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
         CanvasInsets.compute(panel: panelOpen ? panelWidth : nil, rightSidebar: rightSidebarShown,
-                             inset: Metric.inset, gap: Metric.islandGap, pill: Metric.pill, props: Self.propsReserve,
+                             inset: Metric.inset, gap: Metric.islandGap, pill: Metric.pill, props: propsReserve,
                              bottomClearance: bottomClearance)
     }
 
@@ -558,8 +558,18 @@ struct TopBar: View {
             HStack(spacing: gap) {
                 TopBarIconButton(symbol: "magnifyingglass", help: "Quick actions", shortcut: "\u{2318}K") { PaletteController.shared.toggle() }
                 if model.currentFile != nil && !model.homeShown {
-                    TopBarIconButton(symbol: "sparkles.2", active: model.conversationsSidebarOpen, help: "Conversations") { model.run("{cmd:\"conversations\"}") }
-                        .qaID("conversations-toggle")
+                    TopBarIconButton(symbol: "bubble.left", active: model.commentsSidebarOpen, help: "Comments") {
+                        model.run("{cmd:\"commentsSidebar\"}")
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if model.unreadComments > 0 {
+                            Circle().fill(Palette.sel).frame(width: 6, height: 6).padding(3)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .accessibilityValue(model.unreadComments > 0 ? "\(model.unreadComments) unread" : "")
+                    .qaID("comments-toggle")
                 }
                 if model.editorChromeShown {
                     TopBarIconButton(symbol: "sidebar.right", active: model.propertiesShown,

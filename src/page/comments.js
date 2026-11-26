@@ -15,6 +15,7 @@
 // camera and the layers stand still.
 
 import { installBottomOverlays } from "/page/bottom-overlays.js";
+import { installConversations } from "/page/conversations.js";
 import { mentionQuery, mentionPeople, mentionTokens, mentionedYou } from "/page/mentions.js";
 import * as L from "/page/comments-logic.js";
 import * as D from "/page/dictation-logic.js";
@@ -26,6 +27,7 @@ const PIN = 28;
 const svg = (body, w = 14) => `<svg width="${w}" height="${w}" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const ICON = {
   check: svg('<path d="M2.5 7.4l3 3 6-6.4"/>'),
+  circleCheck: svg('<circle cx="7" cy="7" r="5.4"/><path d="m4.6 7 1.6 1.6L9.4 5.4"/>'),
   trash: svg('<path d="M2.5 3.8h9M5.5 3.8V2.6h3v1.2M3.8 3.8l.5 7.6h5.4l.5-7.6M5.8 6v3.6M8.2 6v3.6"/>'),
   send: svg('<path d="M7 11.5v-9M3.2 6.2L7 2.4l3.8 3.8"/>'),
   bubble: svg('<path d="M7 1.8c3 0 5.2 2.1 5.2 4.7S10 11.2 7 11.2c-.7 0-1.3-.1-1.9-.3l-2.9 1.3.7-2.5C1.9 8.9 1.8 7.7 1.8 6.5 1.8 3.9 4 1.8 7 1.8z"/>'),
@@ -86,10 +88,9 @@ function start(host) {
 .cm-layer{position:absolute;left:0;top:0;width:100%;height:100%;z-index:14;pointer-events:none;overflow:hidden;font-family:var(--c-font-sans);-webkit-font-smoothing:antialiased;
   --cm-card:0 0 0 .5px #0000000f,0 1px 3px #00000014,0 12px 32px -6px #0000002e;--cm-pin:0 0 0 .5px #00000014,0 1px 2px #0000001f,0 4px 10px -2px #00000033;
   --cm-chip:var(--c-hover);--cm-line:var(--c-stroke);--cm-body:color-mix(in srgb,var(--c-fg) 80%,transparent);--cm-time:color-mix(in srgb,var(--c-muted-fg) 80%,transparent);
-  --cm-unread-fill:#2165d9;--cm-unread-text:#1859c6}
+  --cm-unread-fill:#2165d9}
 .cm-layer *{box-sizing:border-box}
 @media (prefers-color-scheme: dark){.cm-layer{--cm-card:0 0 0 .5px #00000099,0 1px 3px #00000066,0 12px 32px -6px #000000a6;--cm-pin:0 0 0 .5px #00000099,0 1px 2px #00000066,0 4px 10px -2px #00000080}}
-@media (prefers-color-scheme: dark){.cm-layer{--cm-unread-text:#8cbaff}}
 .cm-pin{position:absolute;left:0;top:0;width:${PIN}px;height:${PIN}px;border:0;padding:0;border-radius:14px 14px 14px 3px;background:var(--c-popover);color:var(--c-fg);font:600 12px/100% var(--c-font-sans);display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;box-shadow:var(--cm-pin);will-change:transform}
 .cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1.06}
 .cm-pin.open{color:var(--c-fg)}
@@ -104,21 +105,34 @@ function start(host) {
 .cm-pop,.cm-comp{position:absolute;left:0;top:0;border-radius:16px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:13px;line-height:18px;-webkit-user-select:text;user-select:text;cursor:default}
 .cm-pop{z-index:1;width:340px;display:flex;flex-direction:column}.cm-comp{width:320px}
 .cm-pop[hidden],.cm-comp[hidden]{display:none}
+.cm-sidebar{width:var(--c-sidebar-width);overflow:hidden}
+.cm-sidebar-body{flex:1;min-height:0;overflow:auto}
+.cm-sidebar-section:not([hidden]){display:flex;flex-direction:column;gap:2px}
 .cm-sidebar :is(h3,p){margin:0;padding-inline:calc(var(--c-sidebar-label-inset) - var(--c-sidebar-inset));color:var(--c-muted-fg)}
 .cm-sidebar h3{margin-block-start:4px;font:600 var(--c-size-2xs)/20px var(--c-font-sans)}
-.cm-thread-row span{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--c-muted-fg)}
-.cm-thread-row[aria-current=true] span{color:var(--c-sidebar-fg)}
-.cm-thread-row strong{font-weight:600}
-.cm-thread-row.unread span::first-line{font-weight:600;color:var(--c-fg)}
-.cm-new{color:var(--cm-unread-text);font-weight:600}
+.cm-sidebar-body:has(.cm-conversations:not([hidden])) .cm-empty{display:none}
+.cm-sidebar-footer{flex:none;border-top:1px solid var(--c-sidebar-hairline);padding-top:6px}
+.cm-sidebar-action{display:inline-flex;align-items:center;gap:6px;padding:0 6px;height:var(--c-sidebar-row);border:0;border-radius:var(--c-sidebar-radius);background:transparent;color:var(--c-muted-fg);font:inherit;white-space:nowrap;cursor:pointer}
+.cm-sidebar-action[hidden]{display:none}
+.cm-sidebar-action:hover{background:var(--c-hover);color:var(--c-fg)}
+.cm-read-all{font-size:var(--c-size-2xs)}
+.cm-thread-row.resolved{opacity:.65}
+.cm-thread-author{display:flex;align-items:center;gap:6px;min-width:0}
+.cm-thread-author strong,.cm-thread-meta{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cm-thread-author strong{font-weight:600}
+.cm-thread-author :is(.cm-av,.cm-agent){width:16px;height:16px}
+.cm-thread-author .cm-av{font-size:9px}
+.cm-thread-author .cm-agent{border-radius:50%;background:var(--c-hover);color:var(--c-muted-fg)}
+.cm-thread-author time,.cm-thread-meta{font-size:var(--c-size-2xs);color:var(--c-muted-fg)}
+.cm-thread-author time{margin-inline-start:auto;flex:none}
+.cm-unread-dot{width:6px;height:6px;flex:none;border-radius:50%;background:var(--c-sel)}
+.cm-thread-body{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;white-space:pre-wrap}
 .cm-chip{display:inline-flex;align-items:center;gap:5px;height:22px;min-width:0;padding:0 7px 0 6px;border-radius:7px;background:var(--cm-chip);color:color-mix(in srgb,var(--c-fg) 75%,transparent);font:500 12px/100% var(--c-font-sans)}
 .cm-chip svg{flex:none;color:var(--c-muted-fg)}
 .cm-chip span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:3px 0;margin:-3px 0}
 .cm-sp{flex:1;min-width:0;height:1px}
 .cm-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:26px;min-width:26px;padding:0;border:0;border-radius:8px;background:var(--cm-chip);color:var(--c-fg);font:500 12px/100% var(--c-font-sans);cursor:pointer;white-space:nowrap}
 .cm-btn.txt{padding:0 9px}
-.cm-read-all{height:var(--c-sidebar-row);border-radius:var(--c-sidebar-radius);background:transparent;color:var(--c-muted-fg)}
-.cm-read-all:hover{background:var(--c-hover);color:var(--c-fg)}
 .cm-btn.txt:has(svg){padding-left:7.5px}
 .cm-btn:hover{background:var(--c-active)}
 .cm-btn.on{background:var(--c-fg);color:var(--c-popover)}
@@ -178,15 +192,9 @@ function start(host) {
 .cm-gone .cm-acts .cm-btn.txt:first-child{padding-left:8.5px}
 .cm-gone .cm-btn:hover{background:#fed7aa}
 @media (prefers-color-scheme: dark){.cm-gone{background:#fb923c24;color:#fdba74}.cm-gone .cm-ghost{color:#fb923c}.cm-gone b{color:#fed7aa}.cm-gone .cm-btn{background:#fb923c2e;color:#fed7aa}.cm-gone .cm-btn:hover{background:#fb923c47}}
-.cm-bar,.cm-hint{position:absolute;left:50%;translate:-50% 0;display:none;align-items:center;gap:10px;white-space:nowrap;font-size:13px;line-height:100%;pointer-events:none}
-.cm-bar{flex-wrap:wrap;justify-content:center;min-height:36px;padding:8px 5px 8px 11px;border-radius:12px;background:var(--c-popover);color:var(--c-fg);box-shadow:var(--cm-card);font-size:12px;font-weight:500;pointer-events:auto}
-.cm-bar>*{flex:none;max-width:100%;overflow-wrap:anywhere}
-.cm-bar .cm-btn{height:auto;min-height:26px;white-space:normal}
-.cm-bar.on,.cm-hint.on{display:flex}
-#view:has(:is(.whiteboard-flyout,.vote-sheet):not([hidden])) .cm-bar{display:none}
-.cm-bar svg{color:var(--c-muted-fg)}
-.cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
-.cm-hint{flex-wrap:wrap;overflow-wrap:anywhere;min-height:36px;padding:8px 12px 8px 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
+.cm-hint{position:absolute;left:50%;translate:-50% 0;display:none;align-items:center;gap:10px;white-space:nowrap;font-size:13px;line-height:100%;pointer-events:none;flex-wrap:wrap;overflow-wrap:anywhere;min-height:36px;padding:8px 12px 8px 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}
+.cm-hint.on{display:flex}
+.cm-hint>span:first-child{display:flex}
 .native .cm-hint .cm-soft{min-width:0;padding:3px 0;margin:-3px 0}
 .native .cm-hint>b,.native .cm-hint>.cm-key,.native .cm-hint>span:first-child{flex-shrink:0}
 .cm-hint b{font-weight:600}
@@ -229,7 +237,7 @@ function start(host) {
 #view.cm-mode .cm-ui button,#view.cm-mode .cm-pin,#view.cm-mode .cm-pin *{cursor:pointer!important}
 #view.cm-mode .cm-pin.cm-add,#view.cm-mode .cm-pin.cm-add *{cursor:default!important}
 .cm-layer.dragging,.cm-layer.dragging *,#view.cm-mode .cm-pin.drag,#view.cm-mode .cm-pin.drag *{cursor:grabbing!important}
-.cm-t,.cm-bar>span,.cm-hint>b,.cm-hint>.cm-soft,.cm-chip span,.cm-who b,.cm-who time,.cm-gone b,.cm-gone .cm-gl{text-box:trim-both cap alphabetic}
+.cm-t,.cm-hint>b,.cm-hint>.cm-soft,.cm-chip span,.cm-who b,.cm-who time,.cm-gone b,.cm-gone .cm-gl{text-box:trim-both cap alphabetic}
 .cm-t.ex{text-box-edge:ex alphabetic}
 @media (prefers-reduced-motion: reduce){.cm-av,.cm-agent,.cm-send{transition:none}.cm-send.cm-mic.live{animation:none}.cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1}}`;
   document.head.appendChild(css);
@@ -242,68 +250,119 @@ function start(host) {
   const comp = h("div", "cm-comp cm-ui"); comp.hidden = true; comp.setAttribute("role", "dialog"); comp.setAttribute("aria-label", "New comment");
   const hint = h("div", "cm-hint");
   const shared = h("div", "cm-shared cm-ui");
-  const bar = h("div", "cm-bar cm-ui");
   const sidebar = h("aside", "cm-sidebar right-sidebar");
+  sidebar.id = "comments-sidebar";
   sidebar.hidden = true;
   sidebar.setAttribute("aria-label", "Comments");
-  layer.append(hov, pop, comp, hint, bar, shared);
+  const head = h("div", "cm-sidebar-head right-sidebar-header");
+  const close = btnEl("right-sidebar-close", "", "Close");
+  close.onclick = () => showList(false, { restoreFocus: true });
+  const read = txtBtn("cm-sidebar-action cm-read-all", "Mark all as read");
+  read.onclick = () => setRead();
+  head.append(h("strong", "", "Comments"), read, close);
+
+  const body = h("div", "cm-sidebar-body");
+  const threadList = h("div");
+  const runs = h("section", "cm-sidebar-section cm-conversations");
+  runs.hidden = true;
+  body.append(threadList, runs);
+  const footer = h("footer", "cm-sidebar-footer");
+  const resolved = btnEl("cm-sidebar-action cm-show-resolved", ICON.circleCheck);
+  const resolvedLabel = lbl("");
+  resolved.append(resolvedLabel);
+  resolved.onclick = () => {
+    showResolved = !showResolved;
+    try { localStorage.setItem(SHOW_KEY, showResolved ? "1" : "0"); } catch {}
+    render();
+  };
+  footer.append(resolved);
+  sidebar.append(head, body, footer);
+  layer.append(hov, pop, comp, hint, shared);
   document.body.append(sidebar);
-  bar.setAttribute("role", "button");
-  bar.tabIndex = 0;
-  bar.setAttribute("aria-label", "Open comments");
-  bar.addEventListener("click", (e) => { if (!e.target.closest("button")) showList(true); });
-  bar.addEventListener("keydown", (e) => {
-    if (e.target === bar && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); showList(true); }
-  });
-  function showList(open, { restoreFocus = false } = {}) {
+  const conversations = installConversations(host, runs, showList);
+  conversations.setOpen(false);
+  conversations.setUnread(0);
+
+  function showList(open = sidebar.hidden, { restoreFocus = false } = {}) {
+    if (open === !sidebar.hidden) return;
     sidebar.hidden = !open;
     document.body.classList.toggle("cm-sidebar-open", open);
+    conversations.setOpen(open);
     if (host.native) host.post({ commentsSidebar: open });
     if (open) {
       setMode(false);
       openThread(null);
-      sidebar.querySelector(".cm-thread-row.unread")?.scrollIntoView({ block: "nearest" });
+      body.scrollTop = 0;
     } else if (restoreFocus) {
-      bar.focus();
-    } else if (bar.contains(document.activeElement)) {
-      document.activeElement.blur();
+      conversations.button?.focus();
     }
+    window.dispatchEvent(new Event("resize"));
     schedule();
   }
+
+  let unreadCount = 0;
   function drawSidebar() {
+    const unread = L.newCount(st.threads, st.unread, true);
+    if (unread !== unreadCount) {
+      unreadCount = unread;
+      conversations.setUnread(unread);
+      if (host.native) host.post({ unreadComments: unread });
+    }
     if (sidebar.hidden) return;
-    sidebar.replaceChildren();
-    const head = h("div", "cm-sidebar-head right-sidebar-header");
-    const close = h("button", "right-sidebar-close");
-    close.type = "button";
-    close.title = "Close";
-    close.onclick = () => showList(false, { restoreFocus: true });
-    close.setAttribute("aria-label", "Close");
-    const read = txtBtn("cm-btn txt cm-read-all", "Mark all as read");
-    read.setAttribute("aria-label", "Mark all as read");
-    read.onclick = () => setRead();
-    head.append(h("strong", "", "Comments"));
-    if (st.unread.size) head.append(read);
-    head.append(close);
-    sidebar.append(head);
-    const threads = L.visibleThreads(st.threads, true);
-    const unread = threads.filter(t => st.unread.has(t.id));
-    const readThreads = threads.filter(t => !st.unread.has(t.id) && (showResolved || !t.resolvedAt));
-    if (unread.length) sidebar.append(h("h3", "", "Unread"));
-    for (const thread of unread) drawRow(thread, true);
-    if (unread.length && readThreads.length) sidebar.append(h("h3", "", "Read"));
-    for (const thread of readThreads) drawRow(thread, false);
-    if (!threads.length) sidebar.append(h("p", "", "No comments yet"));
-    function drawRow(thread, unread) {
-      const first = L.liveComments(thread)[0];
+    const { open, resolved: resolvedCount } = L.counts(st.threads);
+    const readingAll = document.activeElement === read;
+    read.hidden = !unread;
+    if (read.hidden && readingAll) close.focus();
+    footer.hidden = !resolvedCount;
+    resolved.setAttribute("aria-pressed", String(showResolved));
+    resolvedLabel.textContent = `${showResolved ? "Hide" : "Show"} ${resolvedCount} resolved`;
+    const threads = L.visibleThreads(st.threads, showResolved).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const openThreads = threads.filter(t => !t.resolvedAt);
+    const boardNames = new Map(host.doc?.boards?.map(({ id, name }) => [id, name]));
+    threadList.replaceChildren();
+    addSection("Unread", openThreads.filter(t => st.unread.has(t.id)));
+    addSection("Open", openThreads.filter(t => !st.unread.has(t.id)));
+    addSection("Resolved", threads.filter(t => t.resolvedAt));
+    if (!open && !resolvedCount) threadList.append(h("p", "cm-empty", "No comments yet"));
+
+    function addSection(title, items) {
+      if (!items.length) return;
+      const section = h("section", "cm-sidebar-section");
+      section.append(h("h3", "", title));
+      for (const thread of items) {
+        const row = threadRow(thread);
+        if (row) section.append(row);
+      }
+      threadList.append(section);
+    }
+    function threadRow(thread) {
+      const comments = L.liveComments(thread);
+      const first = comments[0];
       if (!first) return;
-      const row = h("button", "cm-thread-row right-sidebar-row" + (unread ? " unread" : ""));
+      const unread = st.unread.has(thread.id);
+      const row = h("button", "cm-thread-row right-sidebar-row");
+      row.classList.toggle("unread", unread);
+      row.classList.toggle("resolved", !!thread.resolvedAt);
       row.type = "button";
-      row.title = (unread ? "Unread comment from " : "Open comment from ") + (first.author?.name || "Someone");
       row.dataset.thread = thread.id;
       row.setAttribute("aria-current", String(st.open === thread.id));
-      if (unread) row.setAttribute("aria-label", row.title + ": " + first.body);
-      row.append(h("strong", "", first.author?.name || "Someone"), h("span", "", first.body));
+      const who = h("span", "cm-thread-author");
+      const av = avatar(first.author);
+      av.setAttribute("aria-hidden", "true");
+      const name = first.author?.name || "Someone";
+      who.append(av, h("strong", "", name), h("time", "", L.ago(first.createdAt)));
+      if (unread) {
+        const dot = h("span", "cm-unread-dot");
+        dot.setAttribute("aria-hidden", "true");
+        who.append(dot);
+      }
+      const replies = comments.length - 1;
+      const anchor = thread.anchor || {};
+      const target = anchor.nodeId ? host.layerInfo?.(anchor.nodeId)?.name || anchor.preview?.name
+        || boardNames.get(anchor.board || anchor.nodeId) || "Layer" : "Canvas";
+      const meta = replies ? `${replies} ${replies === 1 ? "reply" : "replies"}, ${target}` : target;
+      if (unread) row.setAttribute("aria-label", `Unread comment from ${name}: ${first.body}. ${meta}`);
+      row.append(who, h("span", "cm-thread-body", first.body), h("span", "cm-thread-meta", meta));
       row.onclick = async () => {
         const page = L.pageOf(thread, (board) => host.pageOfBoard(board), firstPage());
         if (page && page !== pageNow()) await host.setPage(page);
@@ -319,10 +378,9 @@ function start(host) {
         const z = Math.max(0.25, Math.min(1, host.cam.z));
         host.setCam({ z, x: ((ins.l || 0) + right) / 2 - spot.x * z,
           y: ((ins.t || 0) + v.height - (ins.b || 0)) / 2 - spot.y * z });
-        if (thread.resolvedAt) showResolved = true;
         openThread(thread.id);
       };
-      sidebar.append(row);
+      return row;
     }
   }
   if (!host.native) { const toolbar = document.querySelector("#bar .island:last-child"); if (toolbar) { toolbar.prepend(shared); shared.classList.add("toolbar"); } }
@@ -476,7 +534,8 @@ function start(host) {
     }
     if (st.open && !L.stillOpen(st.open, list, true)) st.open = null;
     drawThread();
-    drawBars();
+    drawShared();
+    drawHint();
     drawSidebar();
     schedule();
   }
@@ -597,7 +656,7 @@ function start(host) {
     }
     if (st.draft && at.has("draft") && !comp.hidden) placePopover(comp, at.get("draft"));
 
-    // In the app the shell's insets say what its islands cover; in the browser the bar sits under the page's own islands.
+    // In the browser the people strip sits under the page's own islands.
     let below = 0;
     if (!host.native) { const vt = view.getBoundingClientRect().top; for (const e of document.querySelectorAll(".island")) below = Math.max(below, e.getBoundingClientRect().bottom - vt - 4); }
     shared.style.top = (host.native ? 12 : below + 12) + "px";
@@ -616,9 +675,14 @@ function start(host) {
   host.on("cmd", (c) => {
     if (c && c.cmd === "insets") schedule();
     if (c && c.cmd === "comment") setMode(!st.mode);
-    if (c && c.cmd === "commentsSidebar" && typeof c.open === "boolean" && c.open === sidebar.hidden) showList(c.open);
+    if (c && (c.cmd === "commentsSidebar" || c.cmd === "conversations")) showList(c.open === undefined ? undefined : !!c.open);
   });
-  host.on("resync", () => { if (host.native) host.post({ commentsSidebar: !sidebar.hidden }); resyncPeople(); load(); });
+  host.on("resync", () => {
+    if (host.native) host.post({ commentsSidebar: !sidebar.hidden, unreadComments: unreadCount });
+    if (!sidebar.hidden) conversations.load();
+    resyncPeople();
+    load();
+  });
   if (host.es) host.es.addEventListener("comments", () => load());
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { resyncPeople(); load(); } });
 
@@ -1097,9 +1161,8 @@ function start(host) {
   for (const n of ["keydown", "keyup"]) addEventListener(n, (e) => { if (e.key === "Meta") cmdChanged(n === "keydown"); }, true);
   host.on("cmd", (c) => { if (c?.cmd === "mods") cmdChanged(!!c.meta); });
 
-  // ---------- the bars ----------
-  function drawBars() {
-    drawShared();
+  // ---------- comment mode hint ----------
+  function drawHint() {
     hint.classList.toggle("on", st.mode);
     hint.innerHTML = "";
     if (st.mode) {
@@ -1107,24 +1170,6 @@ function start(host) {
       const key = h("span", "cm-key");
       key.append(lbl("esc", "cm-t ex"));
       hint.append(m, h("b", "", st.repin ? "Pin to a layer" : "Comment mode"), h("span", "cm-soft", st.repin ? "Click the layer this comment is about" : "Click a layer to pin a comment"), key);
-    }
-    const n = L.counts(st.threads);
-    const show = !st.mode && n.open + n.resolved > 0;
-    bar.classList.toggle("on", show);
-    bar.innerHTML = "";
-    bar.style.paddingRight = "";
-    if (show) {
-      const m = h("span"); m.innerHTML = ICON.bubble; m.style.display = "flex";
-      bar.append(m, h("span", "", `${n.open} ${n.open === 1 ? "comment" : "comments"}`));
-      const unread = L.newCount(st.threads, st.unread, showResolved);
-      bar.setAttribute("aria-label", unread ? `Open comments, ${unread} new` : "Open comments");
-      if (unread) bar.append(h("span", "cm-new", `${unread} new`));
-      if (n.resolved) {
-        const b = txtBtn("cm-btn txt dim", showResolved ? `Hide ${n.resolved} resolved` : `Show ${n.resolved} resolved`);
-        b.setAttribute("aria-pressed", String(showResolved));
-        b.onclick = () => { showResolved = !showResolved; try { localStorage.setItem(SHOW_KEY, showResolved ? "1" : "0"); } catch {} render(); };
-        bar.append(b);
-      } else bar.style.paddingRight = "12px";
     }
   }
 
@@ -1217,6 +1262,7 @@ function start(host) {
       if (st.draft) { closeDraft(); render(); e.preventDefault(); e.stopPropagation(); return; }
       if (st.open) { openThread(null); e.preventDefault(); e.stopPropagation(); return; }
       if (st.mode) { setMode(false); e.preventDefault(); e.stopPropagation(); }
+      else if (!sidebar.hidden) { showList(false, { restoreFocus: true }); e.preventDefault(); }
       return;
     }
     if (e.key !== "c" && e.key !== "C") return;

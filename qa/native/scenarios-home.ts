@@ -123,7 +123,7 @@ sc("tabs", "Top bar chips align and show selected and hover fills", { covers: ["
     const leading = [await mark("sidebar-toggle"), home, studio, notes, plus];
     const trailing = await Promise.all([
       mark("resource-readout"), background("magnifyingglass"),
-      ...(homeShown ? [] : [background("sparkles.2"), mark("properties-toggle")]), mark("tab-list"),
+      ...(homeShown ? [] : [background("bubble.left"), mark("properties-toggle")]), mark("tab-list"),
     ]);
     const chips = [...leading, ...trailing];
     for (const chip of chips) {
@@ -225,12 +225,12 @@ sc("tabs", "Empty title bar space and chip gaps drag the window", { covers: ["ta
     const home = await t.mark({ id: "home-tab" });
     const plus = await t.mark({ id: "tab-new" });
     const search = await t.mark({ id: "top-bar-button-background", label: "magnifyingglass", exact: true });
-    const conversations = await t.mark({ id: "conversations-toggle" });
+    const comments = await t.mark({ id: "comments-toggle" });
     const gaps = [
       ["empty title bar", (plus.x + plus.w + search.x) / 2],
       ["before the strip", (home.x + home.w + tabs[0].x) / 2],
       ["between file tabs", (tabs[0].x + tabs[0].w + tabs[1].x) / 2],
-      ["between trailing actions", (search.x + search.w + conversations.x) / 2],
+      ["between trailing actions", (search.x + search.w + comments.x) / 2],
     ] as const;
     for (const [i, [name, x]] of gaps.entries()) {
       const before = (await t.state()).window;
@@ -877,19 +877,19 @@ sc('home-cloud-menu', 'Cloud sidebar context menu renames and confirms leaving',
   await t.waitState(s => s.file === t.file && !s.homeShown, 'restore the file after Home');
 });
 
-sc('comments-list-navigation', 'Native comment pill shows list instead of properties and centers pin', { covers: ['comments:list-navigation'] }, async (t: NT) => {
+sc('comments-list-navigation', 'Native Comments button shows the list and centers the chosen pin', { covers: ['comments:list-navigation'] }, async (t: NT) => {
   await t.waitJs('!!window.canvasHost.comments', 'comments ready');
   await t.js(`const h=window.canvasHost;
     const op={opId:crypto.randomUUID(),doc:h.comments.doc||'00000000-0000-4000-8000-000000000000',at:new Date().toISOString(),op:{kind:'thread.create',thread:crypto.randomUUID(),comment:crypto.randomUUID(),anchor:{x:120,y:80,page:h.page},body:'Review this spacing'}};
     const r=await fetch('/api/comments/ops?file='+encodeURIComponent(h.file),{method:'POST',headers:{'x-canvas':'1','content-type':'application/json'},body:JSON.stringify({ops:[op]})});
     const result=await r.json(); if(!r.ok || result.rejected?.length) throw new Error(JSON.stringify(result)); await h.comments.reload();`);
-  await t.waitJs("document.querySelector('.cm-bar.on')?.style.top", 'positioned comment pill');
   await t.settle();
   const click = async (selector: string) => {
     const p = await t.js<any>(`const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}`);
     await t.click(p);
   };
-  await click('.cm-bar');
+  const openComments = async () => t.click(center(await t.mark({ id: "comments-toggle" })));
+  await openComments();
   await t.waitJs("!!document.querySelector('.cm-sidebar:not([hidden]) .cm-thread-row')", 'native comments list');
   await t.settle();
   await click('.cm-thread-row');
@@ -910,8 +910,7 @@ sc('comments-list-navigation', 'Native comment pill shows list instead of proper
   t.ok(menuRight <= canvasRight, "the pin menu clears the docked sidebar");
   await click('.cm-sidebar-head [aria-label="Close"]');
   await t.waitJs("document.querySelector('.cm-sidebar').hidden", 'list closes');
-  t.eq(await t.js("return document.activeElement === document.querySelector('.cm-bar');"), true, "Close returns focus to the opener");
-  await click(".cm-bar");
+  await openComments();
   await t.waitJs("!document.querySelector('.cm-sidebar').hidden", "Comments reopens");
   await t.click(center(await t.mark({ id: "properties-toggle" })));
   await t.waitJs("document.querySelector('.cm-sidebar').hidden", "Properties replaces Comments");
