@@ -39,7 +39,7 @@
 <body>
 <div id="bg" class="page">
 </div>
-<div id="head" class="page"><h1 id="title">Canvas <span>0.2.1</span></h1></div>
+<div id="head" class="page"><h1 id="title">Canvas <span>0.2.2</span></h1></div>
 <script>
   const P = 'fill="none" stroke="#0A6CFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
   const ic = {
@@ -68,10 +68,10 @@
     trash:  `<svg viewBox="0 0 24 24" ${P}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>`,
   };
   const rows = {
-    r1: [["list","New left sidebar"],["eye","Peeks in at the left edge"],["tab","Rounded top bar"],["pen","Floating drawing tools"],["file","Same sidebar on Home"]],
-    r2: [["file","Sticky notes"],["spark","Stickers"],["pin","Dot votes"],["gauge","Timer"],["cloud","Votes and timer on Cloud"],["person","Viewers can comment and vote"]],
-    r3: [["pin","Dictate comments"],["text",'Hold <span class="key">fn</span> to talk'],["select","See where a comment will attach"],["spark","Agent conversations list"]],
-    r4: [["cloud","Sign in from a Cloud page"],["gauge","Screenshot-heavy files open faster"],["cursor","Right-click menu fixes"],["sync","Hosted Cloud fixes"]],
+    r1: [["move","Move files to a Cloud and back"],["drop","Drag or right-click"],["file","Media in subfolders"],["cloud","Large batches"]],
+    r2: [["spark","Hover animations on boards"],["gauge","Keyframe timeline"],["select","Keyframes button for any layer"],["list",'Timeline <span class="key">\u2318</span><span class="key">\u2325</span><span class="key">T</span>']],
+    r3: [["pin","Comments in the right sidebar"],["pen","New timer, vote and sticker popovers"],["select","Matching toolbar icons"],["align","Zoom matches the toolbar"]],
+    r4: [["eye","Page colors and text styles"],["copy","Export boards from the page"],["sync","Fewer stuck loads"],["undo","Quit stops the server too"]],
   };
   const q = new URLSearchParams(location.search);
   const layer = q.get("layer") || "bg";
