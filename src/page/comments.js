@@ -17,6 +17,7 @@
 import { installBottomOverlays } from "/page/bottom-overlays.js";
 import { mentionQuery, mentionPeople, mentionTokens, mentionedYou } from "/page/mentions.js";
 import * as L from "/page/comments-logic.js";
+import * as D from "/page/dictation-logic.js";
 
 const host = window.canvasHost;
 
@@ -30,6 +31,7 @@ const ICON = {
   bubble: svg('<path d="M7 1.8c3 0 5.2 2.1 5.2 4.7S10 11.2 7 11.2c-.7 0-1.3-.1-1.9-.3l-2.9 1.3.7-2.5C1.9 8.9 1.8 7.7 1.8 6.5 1.8 3.9 4 1.8 7 1.8z"/>'),
   layer: svg('<path d="M2 4.2V2.6A.6.6 0 012.6 2h1.6M9.8 2h1.6a.6.6 0 01.6.6v1.6M12 9.8v1.6a.6.6 0 01-.6.6H9.8M4.2 12H2.6a.6.6 0 01-.6-.6V9.8M5.4 5.4l3.9 1.6-1.6.7-.7 1.6z"/>', 12),
   ghost: svg('<path d="M2 4.2V2.6A.6.6 0 012.6 2h1.6M9.8 2h1.6a.6.6 0 01.6.6v1.6M12 9.8v1.6a.6.6 0 01-.6.6H9.8M4.2 12H2.6a.6.6 0 01-.6-.6V9.8"/>', 16),
+  mic: svg('<rect x="5" y="1.8" width="4" height="6.8" rx="2"/><path d="M2.8 6.8a4.2 4.2 0 008.4 0M7 11v1.4"/>'),
   clock: svg('<circle cx="7" cy="7" r="5.4"/><path d="M7 4v3.2l2 1.2"/>', 11),
   alert: svg('<circle cx="7" cy="7" r="5.4"/><path d="M7 4.2v3.4M7 9.7v.1"/>', 11),
   sparkles: svg('<path d="M5.5 2l1 2.9 2.9 1-2.9 1-1 2.9-1-2.9-2.9-1 2.9-1zM10.8 8.6l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/>', 12),
@@ -206,7 +208,16 @@ function start(host) {
 .cm-fail .cm-state svg{margin-top:2px}
 .cm-fail .cm-btn{height:20px;min-width:20px;margin-top:-2px;padding:0 7px;font-size:12px}
 .cm-failrow{padding:10px 14px 0}
-.cm-hov{position:absolute;left:0;top:0;display:none;border:1.5px solid var(--c-sel);pointer-events:none;border-radius:3px}
+.cm-hov{position:absolute;left:0;top:0;display:none;box-sizing:border-box;border:1px solid var(--c-sel);opacity:.55;pointer-events:none}
+.cm-hov.cmp{border-color:var(--c-component)}
+.cm-send.cm-mic{background:transparent;color:var(--c-muted-fg)}
+.cm-send.cm-mic:hover{background:var(--cm-chip)}
+.cm-send.cm-mic[aria-pressed=true]{background:var(--c-danger);color:#fff}
+.cm-send.cm-mic.live{animation:cm-live 1.4s ease-in-out infinite}
+@keyframes cm-live{50%{box-shadow:0 0 0 4px color-mix(in srgb,var(--c-danger) 28%,transparent)}}
+.cm-micnote{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:0 14px 10px;color:var(--c-muted-fg);font-size:12px;line-height:16px}
+.cm-micnote[hidden]{display:none}
+.cm-micnote button{border:0;padding:0;background:transparent;color:var(--c-fg);font:600 12px/16px var(--c-font-sans);text-decoration:underline;cursor:pointer}
 .cm-pin.cm-add{color:var(--c-muted-fg);cursor:default}
 .cm-pin.cm-add svg{position:absolute;left:0;top:0}
 .cm-pin.drag{z-index:1;cursor:grabbing}
@@ -219,7 +230,7 @@ function start(host) {
 .cm-layer.dragging,.cm-layer.dragging *,#view.cm-mode .cm-pin.drag,#view.cm-mode .cm-pin.drag *{cursor:grabbing!important}
 .cm-t,.cm-bar>span,.cm-hint>b,.cm-hint>.cm-soft,.cm-chip span,.cm-who b,.cm-who time,.cm-gone b,.cm-gone .cm-gl{text-box:trim-both cap alphabetic}
 .cm-t.ex{text-box-edge:ex alphabetic}
-@media (prefers-reduced-motion: reduce){.cm-av,.cm-agent,.cm-send{transition:none}.cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1}}`;
+@media (prefers-reduced-motion: reduce){.cm-av,.cm-agent,.cm-send{transition:none}.cm-send.cm-mic.live{animation:none}.cm-pin:hover .cm-av,.cm-pin:hover .cm-agent{scale:1}}`;
   document.head.appendChild(css);
 
   const layer = h("div", "cm-layer");
@@ -496,7 +507,7 @@ function start(host) {
     }
     drag.tip = L.tipAt(at, drag.grab);
     drag.meta = e.metaKey;
-    hovId = (host.pickSelectable ? host.pickSelectable(drag.tip.x, drag.tip.y, !!e.metaKey) : host.pick(drag.tip.x, drag.tip.y)) || null;
+    hovId = targetAt(drag.tip.x, drag.tip.y, !!e.metaKey);
     paintHover();
     schedule();
   }
@@ -508,7 +519,7 @@ function start(host) {
     try { d.el.releasePointerCapture(d.pid); } catch {}
     d.el.classList.remove("drag");
     layer.classList.remove("dragging");
-    if (!st.mode) { hovId = null; hov.style.display = "none"; }
+    if (!st.mode) { hovId = null; hov.style.display = "none"; } else queueHover();
     if (d.moving) { dragged = d.id; setTimeout(() => { if (dragged === d.id) dragged = null; }, 0); }
     return d;
   }
@@ -590,7 +601,7 @@ function start(host) {
     if (!host.native) { const vt = view.getBoundingClientRect().top; for (const e of document.querySelectorAll(".island")) below = Math.max(below, e.getBoundingClientRect().bottom - vt - 4); }
     shared.style.top = (host.native ? 12 : below + 12) + "px";
     shared.style.right = (ins.r || 0) + 12 + "px";
-    if (st.mode && hovId) paintHover();
+    if (hovId) paintHover();
   }
   host.beforeFrame(() => { if (pins.size || st.draft || hovId) place(); });
   host.on("render", schedule);
@@ -632,6 +643,7 @@ function start(host) {
     const menu = h("div", "cm-mentions cm-ui"); menu.hidden = true; menu.setAttribute("role", "listbox");
     let choices = [], active = 0, trigger = null;
     const close = () => { menu.hidden = true; ta.setAttribute("aria-expanded", "false"); };
+    ta.onDraft = onChange;
     ta.clearDraft = () => { ta.value = ""; picked.length = 0; close(); autoGrow(ta); onChange?.(false); };
     const choose = (p) => {
       if (!trigger) return;
@@ -652,7 +664,8 @@ function start(host) {
     };
     ta.setAttribute("aria-autocomplete", "list");
     ta.addEventListener("click", update);
-    ta.addEventListener("input", () => { update(); autoGrow(ta); if (onChange) onChange(ta.value.trim() !== ""); });
+    // Typing takes over from dictation; what it wrote stays.
+    ta.addEventListener("input", () => { if (dictation.active === ta) dictation.cancel(); update(); autoGrow(ta); if (onChange) onChange(ta.value.trim() !== ""); });
     ta.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (!menu.hidden && !e.isComposing) {
@@ -660,6 +673,7 @@ function start(host) {
         if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); choose(choices[active]); return; }
         if (e.key === "Escape") { e.preventDefault(); close(); return; }
       }
+      if ((e.key === "Enter" && !e.shiftKey && !e.isComposing) || e.key === "Escape") { if (dictation.active === ta) dictation.cancel(); }
       if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value.trim(); if (v) onPost(v, ta); }
       else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
     });
@@ -674,6 +688,92 @@ function start(host) {
     el.focus({ preventScroll: true });
     setTimeout(() => { if (document.activeElement !== el && el.isConnected && !el.closest("[hidden]")) el.focus({ preventScroll: true }); }, 0);
   }
+
+  // ---------- dictation (the app only: /page/dictation-logic.js and the shell's Dictation.swift) ----------
+  const dictationPost = (m) => host.post({ dictation: m });
+  const dictation = D.createDictation({
+    start: (id) => dictationPost({ op: "start", id }),
+    stop: (id) => dictationPost({ op: "stop", id }),
+    cancel: (id) => dictationPost({ op: "cancel", id }),
+  }, { onChange: () => drawMics() });
+  const mics = new Set(); // { ta, button, note }
+  function drawMics() {
+    for (const m of mics) {
+      if (!m.ta.isConnected) { mics.delete(m); continue; }
+      const phase = dictation.phase(m.ta), on = phase !== "idle";
+      m.button.setAttribute("aria-pressed", String(on));
+      m.button.classList.toggle("live", phase === "listening");
+      const label = on ? "Stop dictation" : "Dictate";
+      m.button.setAttribute("aria-label", label);
+      m.button.title = label + " (or hold Fn)";
+      m.ta.placeholder = phase === "listening" ? "Listening\u2026" : m.ta.getAttribute("aria-label");
+      const n = dictation.notice(m.ta), text = n ? n.text : "";
+      if (m.note.dataset.text === text) continue;
+      m.note.dataset.text = text;
+      m.note.hidden = !n;
+      m.note.replaceChildren();
+      if (n) m.note.append(h("span", "", n.text));
+      if (n?.which) {
+        const open = h("button", "", "Open System Settings");
+        open.type = "button";
+        open.onclick = () => dictationPost({ settings: n.which });
+        m.note.append(open);
+      }
+      schedule();
+    }
+  }
+  /** A field's mic button and the line under it, or null outside the app. */
+  function micFor(ta) {
+    if (!host.native) return null;
+    const button = btnEl("cm-send cm-mic", ICON.mic, "Dictate");
+    const note = h("div", "cm-micnote");
+    note.setAttribute("role", "status");
+    note.hidden = true;
+    note.dataset.text = "";
+    ta.dictationField = {
+      key: ta,
+      read: () => ({ value: ta.value, start: ta.selectionStart, end: ta.selectionEnd }),
+      write: (value, caret) => {
+        // The card this field was in is gone (posted, closed or redrawn): stop listening.
+        if (!ta.isConnected || ta.disabled) { dictation.cancel(); return; }
+        ta.value = value;
+        ta.setSelectionRange(caret, caret);
+        autoGrow(ta);
+        ta.onDraft?.(value.trim() !== "");
+      },
+    };
+    // The press must not take the focus from the field.
+    button.onpointerdown = (e) => e.preventDefault();
+    button.onclick = () => { ta.focus(); dictation.toggle(ta.dictationField); };
+    mics.add({ ta, button, note });
+    queueMicrotask(drawMics);
+    return { button, note };
+  }
+  /** Stop for good when the field that listens is no longer on screen. */
+  function dropLostDictation() {
+    const ta = dictation.active;
+    if (ta && (!ta.isConnected || ta.closest("[hidden]"))) dictation.cancel();
+  }
+  let fnTimer = 0, fnHeld = false;
+  function fnKey(down) {
+    clearTimeout(fnTimer);
+    if (!down) { if (fnHeld) { fnHeld = false; dictation.stop(); } return; }
+    const ta = document.activeElement;
+    if (!ta?.dictationField) return;
+    fnTimer = setTimeout(() => {
+      if (document.activeElement !== ta || dictation.active === ta) return;
+      fnHeld = true;
+      dictation.start(ta.dictationField);
+    }, D.FN_HOLD_MS);
+  }
+  // Fn with another key (arrows, delete) is that key, not a hold.
+  addEventListener("keydown", () => clearTimeout(fnTimer), true);
+  host.on("cmd", (c) => {
+    if (c?.cmd === "dictation") dictation.event(c);
+    if (c?.cmd === "dictationKey") fnKey(!!c.down);
+  });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) dictation.cancel(); });
+  addEventListener("pagehide", () => dictation.cancel());
 
   // ---------- a shared file: what waits, what the server refused ----------
   const opsFor = (list, id) => (list || []).filter((o) => o.comment === id);
@@ -720,7 +820,7 @@ function start(host) {
     if (!t || !L.stillOpen(st.open, st.threads, showResolved)) {
       // A hidden field keeps the focus until the next frame: keys would go to it, not the canvas.
       if (!pop.hidden && pop.contains(document.activeElement)) document.activeElement.blur();
-      pop.hidden = true; popFor = null; popKey = ""; return;
+      pop.hidden = true; popFor = null; popKey = ""; dropLostDictation(); return;
     }
     const where = layerLabel(t);
     const live = L.liveComments(t);
@@ -803,8 +903,11 @@ function start(host) {
     ta.restoreMentions(draftMentions);
     send.classList.toggle("ready", draftText.trim() !== "");
     wrap.append(ta);
-    row.append(wrap, send);
+    const mic = micFor(ta);
+    row.append(wrap, ...(mic ? [mic.button] : []), send);
     pop.append(row);
+    if (mic) pop.append(mic.note);
+    dropLostDictation();
     drawMenu();
     autoGrow(ta);
     lst.scrollTop = lst.scrollHeight;
@@ -906,6 +1009,10 @@ function start(host) {
     if (comp.contains(document.activeElement)) document.activeElement.blur();
     comp.hidden = true;
     comp.textContent = "";
+    dropLostDictation();
+    hovId = null;
+    hov.style.display = "none";
+    queueHover();
     const p = pins.get("draft");
     if (p) { p.el.remove(); pins.delete("draft"); }
   }
@@ -913,7 +1020,7 @@ function start(host) {
   function anchorAt(e) {
     const cx = e.clientX, cy = e.clientY, cam = host.cam, vb = host.viewBox;
     const world = { x: (cx - vb.l - cam.x) / cam.z, y: (cy - vb.t - cam.y) / cam.z };
-    const id = host.pickSelectable ? host.pickSelectable(cx, cy, !!e.metaKey) : host.pick(cx, cy);
+    const id = targetAt(cx, cy, !!e.metaKey);
     const rect = id ? host.worldRectOf(id) : null;
     const chain = id && host.chainOf ? host.chainOf(id) : [];
     const board = chain.length ? chain[0] : null;
@@ -945,8 +1052,12 @@ function start(host) {
     wrap.append(ta);
     fieldRow.append(avatar({ name: st.me }), wrap);
     const foot = h("div", "cm-foot");
-    foot.append(chip(anchor.preview ? anchor.preview.name || "Layer" : "Canvas", !anchor.nodeId), h("span", "cm-sp"), send);
+    const mic = micFor(ta);
+    foot.append(chip(anchor.preview ? anchor.preview.name || "Layer" : "Canvas", !anchor.nodeId), h("span", "cm-sp"), ...(mic ? [mic.button] : []), send);
     comp.append(fieldRow, foot);
+    if (mic) fieldRow.after(mic.note);
+    hovId = anchor.nodeId || null;
+    paintHover();
     comp.hidden = false;
     render();
     place();
@@ -955,25 +1066,35 @@ function start(host) {
 
   // ---------- the layer under the pointer lights up ----------
   let hovId = null, hovRaf = 0, ptr = null;
+  /** What a click or a hover at a window point is on: a board by its title, else the layer the select tool would take. */
+  function targetAt(x, y, deep) {
+    return host.titleAt?.(x, y) || (host.pickSelectable ? host.pickSelectable(x, y, deep) : host.pick(x, y)) || null;
+  }
   function paintHover() {
     const r = hovId && host.worldRectOf(hovId);
     const cam = host.cam;
     if (!r || !cam) { hov.style.display = "none"; return; }
     hov.style.display = "block";
+    hov.classList.toggle("cmp", !!host.isCmp?.(hovId));
     hov.style.transform = `translate(${cam.x + r.x * cam.z}px,${cam.y + r.y * cam.z}px)`;
     hov.style.width = r.w * cam.z + "px";
     hov.style.height = r.h * cam.z + "px";
   }
   function trackHover() {
     hovRaf = 0;
-    if (!st.mode || !ptr) { hovId = null; hov.style.display = "none"; return; }
-    const over = document.elementFromPoint(ptr.x, ptr.y);
-    const id = over && over.closest && over.closest(".cm-ui, .cm-pin") ? null : host.pickSelectable ? host.pickSelectable(ptr.x, ptr.y, !!ptr.meta) : host.pick(ptr.x, ptr.y);
-    hovId = id || null;
+    if (drag?.moving) return; // the dragged pin's tip decides
+    const over = ptr && !st.draft ? document.elementFromPoint(ptr.x, ptr.y) : null;
+    hovId = L.hoverTarget({ mode: st.mode, draft: st.draft?.anchor, pointer: ptr, overUi: !!over?.closest?.(".cm-ui, .cm-pin"), hand: !!host.hand, find: targetAt });
     paintHover();
   }
-  view.addEventListener("pointermove", (e) => { if (!st.mode) return; ptr = { x: e.clientX, y: e.clientY, meta: e.metaKey }; if (!hovRaf) hovRaf = requestAnimationFrame(trackHover); });
-  view.addEventListener("pointerleave", () => { ptr = null; hovId = null; hov.style.display = "none"; });
+  function queueHover() { if (!hovRaf) hovRaf = requestAnimationFrame(trackHover); }
+  view.addEventListener("pointermove", (e) => { ptr = { x: e.clientX, y: e.clientY, meta: e.metaKey || !!host.cmdHeld?.() }; if (st.mode) queueHover(); });
+  view.addEventListener("pointerleave", () => { ptr = null; if (st.mode) queueHover(); });
+  // A still pointer gets the new layer too: the canvas moved under it, or Cmd went down or up.
+  host.on("cam", () => { if (st.mode && ptr) queueHover(); });
+  const cmdChanged = (down) => { if (st.mode && ptr && ptr.meta !== down) { ptr.meta = down; queueHover(); } };
+  for (const n of ["keydown", "keyup"]) addEventListener(n, (e) => { if (e.key === "Meta") cmdChanged(n === "keydown"); }, true);
+  host.on("cmd", (c) => { if (c?.cmd === "mods") cmdChanged(!!c.meta); });
 
   // ---------- the bars ----------
   function drawBars() {
@@ -1066,9 +1187,8 @@ function start(host) {
     if (!on) {
       if (!keepDraft) closeDraft();
       st.repin = null;
-      hovId = null;
-      hov.style.display = "none";
-    }
+      if (!st.draft) { hovId = null; hov.style.display = "none"; }
+    } else queueHover();
     render();
     host.emit("commentmode", on);
   }

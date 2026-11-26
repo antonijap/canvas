@@ -149,3 +149,26 @@ test("who may drag a pin: anyone in a file that is not shared; in a shared one i
 test("a move refused by the server says who may move it", () => {
   assert.equal(L.refusalReason({ code: "forbidden", message: "x", kind: "thread.move" }, "commenter"), "Only the person who wrote it or the Cloud owner can move it");
 });
+
+test("in comment mode the layer under the pointer is the target, found by the select tool's rule", () => {
+  const asked: unknown[] = [];
+  const find = (x: number, y: number, deep: boolean) => { asked.push([x, y, deep]); return deep ? "leaf" : "frame"; };
+  const base = { mode: true, draft: null, pointer: { x: 5, y: 6, meta: false }, overUi: false, hand: false, find };
+  assert.equal(L.hoverTarget(base), "frame");
+  assert.equal(L.hoverTarget({ ...base, pointer: { x: 5, y: 6, meta: true } }), "leaf");
+  assert.deepEqual(asked, [[5, 6, false], [5, 6, true]]);
+  assert.equal(L.hoverTarget({ ...base, find: () => null }), null, "empty canvas");
+  assert.equal(L.hoverTarget({ ...base, pointer: null }), null, "the pointer left");
+  assert.equal(L.hoverTarget({ ...base, overUi: true }), null, "a card or a pin is on top");
+  assert.equal(L.hoverTarget({ ...base, hand: true }), null);
+  assert.equal(L.hoverTarget({ ...base, mode: false }), null);
+});
+
+test("while a comment is written the hover is off and its own layer stays outlined", () => {
+  const find = () => "other";
+  const base = { mode: true, pointer: { x: 1, y: 1 }, find };
+  assert.equal(L.hoverTarget({ ...base, draft: { nodeId: "A" } }), "A");
+  assert.equal(L.hoverTarget({ ...base, pointer: null, draft: { nodeId: "A" } }), "A");
+  assert.equal(L.hoverTarget({ ...base, mode: false, draft: { nodeId: "A" } }), "A");
+  assert.equal(L.hoverTarget({ ...base, draft: { x: 1, y: 2 } }), null, "a free comment outlines nothing");
+});

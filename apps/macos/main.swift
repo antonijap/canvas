@@ -804,9 +804,12 @@ func sendMods(_ flags: NSEvent.ModifierFlags) {
 
 NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { e in
   sendMods(e.modifierFlags)
+  // Hold Fn to dictate a comment: WebKit gives the page no Fn key, so the shell tells it (63 is Fn / Globe).
+  if e.keyCode == 63 { model.run("{cmd:'dictationKey',down:\(e.modifierFlags.contains(.function))}") }
   return e
 }
 NotificationCenter.default.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { _ in
+  model.run("{cmd:'dictationKey',down:false}")
   if commandDown || optionDown { commandDown = false; optionDown = false; model.run("{cmd:'mods',meta:false,alt:false}") }
 }
 /// A drag from another app (Finder) ended: this app never sees Command go up while that app is in front, so the page

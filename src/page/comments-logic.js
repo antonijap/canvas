@@ -16,6 +16,16 @@ export function anchorFor({ nodeId, rect, point, page, board, info }) {
 }
 const round = (n) => Math.round(n * 1e4) / 1e4;
 
+/**
+ * The layer comment mode outlines: while a comment is written, the layer it is pinned to (draft: its anchor), with no
+ * hover; else the layer under the pointer, found by the select tool's rule (find(x, y, deep); Cmd picks the deepest).
+ */
+export function hoverTarget({ mode, draft, pointer, overUi = false, hand = false, find }) {
+  if (draft) return draft.nodeId || null;
+  if (!mode || !pointer || overUi || hand) return null;
+  return find(pointer.x, pointer.y, !!pointer.meta) || null;
+}
+
 // ---------- moving a pin by dragging it ----------
 // A press on a pin opens its thread; once the pointer travels past DRAG_SLOP it drags the pin instead. The pin's tip
 // keeps the offset it was grabbed at, and on the drop the thread is anchored again at the tip by anchorFor, the rule a

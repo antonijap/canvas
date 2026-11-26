@@ -66,6 +66,34 @@ sc("comments", "Comment hint follows the zoom corner at every window size", { co
 });
 const openThread = async (t: T, id?: string) => { const p = await pinOf(t, id); await t.io.click(p.x + p.w / 2, p.y + p.h / 2); await t.waitFor(`!!document.querySelector(".cm-pop:not([hidden]) .cm-field")`, "the thread"); };
 
+sc("comments", "Dictation: the mic button writes into the composer as words arrive, and says when it is not allowed", { covers: ["comments:keyboard"], skip: { visual: "The app's shell is faked; no microphone is opened and no document pixels change." } }, async (t: T) => {
+  await t.open({ native: true });
+  await t.waitFor("!!window.canvasHost.comments", "comments loaded");
+  await t.focus("lay_nest");
+  await t.ev(`(() => { window.__dictation = []; window.webkit = { messageHandlers: { canvasState: { postMessage: (j) => { const m = JSON.parse(j); if (m.dictation) window.__dictation.push(m.dictation); } } } }; })()`);
+  await t.ev(`window.canvasCmd({cmd:'comment'})`);
+  const c = await t.center("r_free");
+  await t.io.click(c.x, c.y);
+  await t.waitFor(`document.activeElement === document.querySelector(".cm-comp textarea")`, "the composer focused");
+  const mic = await t.ev<{ x: number; y: number }>(`(() => { const r = document.querySelector(".cm-comp .cm-mic").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await t.io.click(mic.x, mic.y);
+  const sent = () => t.ev<{ op: string; id: string }[]>("window.__dictation");
+  t.eq((await sent()).map((m) => m.op), ["start"], "the button asks the shell to listen");
+  const id = (await sent())[0].id;
+  await t.ev(`window.canvasCmd({cmd:'dictation', id:'${id}', event:'listening'}); window.canvasCmd({cmd:'dictation', id:'${id}', event:'text', text:'Make it bigger'})`);
+  t.eq(await t.ev(`document.querySelector(".cm-comp textarea").value`), "Make it bigger", "the words show as they arrive");
+  t.ok(await t.ev(`document.querySelector(".cm-comp .cm-mic").classList.contains("live")`), "the button shows it is listening");
+  await shot(t, "comments-dictating");
+  await t.io.click(mic.x, mic.y);
+  t.eq((await sent()).map((m) => m.op), ["start", "stop"], "a second click stops");
+  await t.ev(`window.canvasCmd({cmd:'dictation', id:'${id}', event:'end'})`);
+  await t.io.click(mic.x, mic.y);
+  const next = (await sent())[2].id;
+  await t.ev(`window.canvasCmd({cmd:'dictation', id:'${next}', event:'denied', which:'microphone'})`);
+  t.ok(/Microphone access is off.*Open System Settings/s.test(await t.ev<string>(`document.querySelector(".cm-comp .cm-micnote").innerText`)), "a refusal says so and links to System Settings");
+  await shot(t, "comments-dictation-denied");
+});
+
 sc("comments", "C then a click pins a thread on the layer under the pointer; Return posts, Esc leaves", { covers: ["comments:pin", "comments:keyboard", "comments:page-point"] }, async (t: T) => {
   await t.focus("lay_nest");
   await t.clearSel();
@@ -86,6 +114,11 @@ sc("comments", "C then a click pins a thread on the layer under the pointer; Ret
   await t.io.click(c.x, c.y);
   await t.waitFor(`!!document.querySelector(".cm-comp:not([hidden]) textarea")`, "the composer");
   t.eq(await t.sel(), [], "a click in comment mode selects nothing");
+  const outlined = () => t.ev<number>(`(() => { const e = document.querySelector(".cm-hov"); return e.style.display === "block" ? e.getBoundingClientRect().width : 0; })()`);
+  const other = await t.rect("r_free");
+  await t.io.move(other.x + other.w * 3, other.y + other.h * 3, 4);
+  await sleep(100);
+  t.near(await outlined(), other.w, 2, "while composing, the attached layer stays outlined and nothing else lights up");
   await t.io.type("one");
   await t.io.key("Enter", { shift: true });
   await t.io.type("two");

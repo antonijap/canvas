@@ -377,6 +377,11 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         if native, let camera = m["openingCamera"] as? [String: Any], let source = message.webView, live[key] === source {
             UserDefaults.standard.set(camera, forKey: openingCameraKey(key))
         }
+        // Before the shown-tab rule: a tab that was just hidden must still be able to turn the microphone off.
+        if native, let dictation = m["dictation"] as? [String: Any], let source = message.webView {
+            Dictation.shared.handle(dictation, from: source)
+            return
+        }
         // Only the shown tab speaks for the window.
         guard message.webView === webView else { return }
         let token = loadToken

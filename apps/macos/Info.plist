@@ -12,6 +12,8 @@
   <key>CFBundleVersion</key><string>4</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Canvas uses the microphone while you dictate a comment.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Canvas turns your speech into text while you dictate a comment.</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>

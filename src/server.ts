@@ -2223,7 +2223,7 @@ function queueHover() {
   hovFrame = requestAnimationFrame(() => {
     hovFrame = 0;
     // An auto layout reorder drag (/page/autolayout.js) draws the layer at the pointer: no hover box chasing it a frame behind.
-    if (gesturing || drag || mv || space || !ptr || (host.autolayout && host.autolayout.dragging)) { clearHover(); return; }
+    if (gesturing || drag || mv || space || !ptr || (host.comments && host.comments.mode) || (host.autolayout && host.autolayout.dragging)) { clearHover(); return; }
     const id = titleAt(ptr.x, ptr.y) || pickSelectable(ptr.x, ptr.y, false);
     if (!id || isW(id) || (sel && id === sel.id)) { clearHover(); return; } // a card shows no hover box
     hovId = id;
@@ -2234,6 +2234,8 @@ function queueHover() {
 }
 view.addEventListener("pointermove", (e) => { ptr = { x: e.clientX, y: e.clientY }; if (!drag) queueHover(); });
 view.addEventListener("pointerleave", () => { ptr = null; clearHover(); });
+// Comment mode draws this outline itself (/page/comments.js), for the layer the comment would pin to.
+host.on("commentmode", (on) => { if (on) clearHover(); });
 // Working on the page shown makes it the one this viewer comes back to (see rememberPage).
 for (const n of ["pointerdown", "wheel"]) view.addEventListener(n, () => rememberPage(), { capture: true, passive: true });
 addEventListener("keydown", () => rememberPage(), true);
