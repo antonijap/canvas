@@ -56,16 +56,19 @@ struct StatusDot: View {
 
 // MARK: Surfaces
 
+/// The bottom bars (tool palette, zoom): a solid popover surface lifted by layered shadows, no glass and no rim.
 private struct GlassBar<S: Shape>: ViewModifier {
-    @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.colorScheme) private var scheme
     let shape: S
 
     func body(content: Content) -> some View {
+        let dark = scheme == .dark
         content.background {
             shape
-                .fill(appearsActive ? .clear : Palette.sidebar.opacity(0.8))
-                .glassEffect(.regular, in: shape)
-                .shadow(color: .black.opacity(0.10), radius: 14, y: 4)
+                .fill(Palette.popover)
+                .shadow(color: .black.opacity(dark ? 0.30 : 0.06), radius: 0.5)
+                .shadow(color: .black.opacity(dark ? 0.24 : 0.08), radius: 1.5, y: 1)
+                .shadow(color: .black.opacity(dark ? 0.36 : 0.18), radius: 16, y: 12)
                 .allowsHitTesting(false)
         }
     }
