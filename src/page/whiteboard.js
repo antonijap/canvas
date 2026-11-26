@@ -303,8 +303,9 @@ function start(host) {
   }
 
   function preview() {
+    const hit = point && document.elementFromPoint(point.x + host.viewBox.l, point.y + host.viewBox.t);
     ghost.hidden = hint.hidden = stickerGhost.hidden = true;
-    if (!tool || !point || !host.cam || host.hand) return;
+    if (!tool || !point || !host.cam || host.hand || hit?.closest("[data-whiteboard-ui]")) return;
     if (tool === "sticker") {
       stickerGhost.hidden = false;
       at(stickerGhost, point.x - STICKER_SIZE / 2, point.y - STICKER_SIZE / 2);
@@ -564,7 +565,7 @@ function start(host) {
   host.on("cmd", (c) => {
     if (c.cmd === "draw" && (c.type === "sticky" || c.type === "sticker")) activate(c.type);
     if (c.cmd === "cancelDraw") reset();
-    if (c.cmd === "insets") { updateInsets(); preview(); }
+    if (c.cmd === "insets") { updateInsets(); requestAnimationFrame(preview); }
   });
   addEventListener("pagehide", reset);
   host.on("draw-tool", reset);

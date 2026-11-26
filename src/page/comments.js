@@ -183,6 +183,7 @@ function start(host) {
 .cm-bar>*{flex:none;max-width:100%;overflow-wrap:anywhere}
 .cm-bar .cm-btn{height:auto;min-height:26px;white-space:normal}
 .cm-bar.on,.cm-hint.on{display:flex}
+#view:has(:is(.whiteboard-flyout,.vote-sheet):not([hidden])) .cm-bar{display:none}
 .cm-bar svg{color:var(--c-muted-fg)}
 .cm-bar>span:first-child,.cm-hint>span:first-child{display:flex}
 .cm-hint{flex-wrap:wrap;overflow-wrap:anywhere;min-height:36px;padding:8px 12px 8px 11px;border-radius:12px;background:#18181be6;color:#fff;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px);box-shadow:0 0 0 .5px #ffffff1f,0 8px 24px -6px #00000059}

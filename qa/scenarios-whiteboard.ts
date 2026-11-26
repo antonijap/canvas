@@ -4,6 +4,136 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+sc("sticker", "Sticker strip and toolbar popovers stay clear of comments and placement ghosts", {
+  covers: ["sticker:strip-layout", "sticker:ghost-clearance", "sticky:ghost-clearance", "comments:toolbar-popovers"],
+  skip: { visual: "Measures seal and popover bounds in the rendered page at two window widths." },
+}, async (t: T) => {
+  const doc = randomUUID(), thread = randomUUID(), at = new Date().toISOString();
+  const author = { name: "Anna", email: "anna@studio.test" };
+  fs.writeFileSync(path.join(t.file, "comments.json"), JSON.stringify({
+    format: 1, doc, seq: 2, outbox: [], threads: [{
+      id: thread, doc, anchor: { x: 120, y: 80, page: "layout" },
+      createdAt: at, createdBy: author, resolvedAt: at, resolvedBy: author,
+      comments: [{ id: randomUUID(), thread, author, createdAt: at, body: "Check the spacing" }],
+    }],
+  }));
+  await t.open({ native: true });
+  const problems: string[] = [];
+  const shots = process.env.CANVAS_UI_SHOTS;
+  const tray = "[data-sticker-tray]", bar = ".cm-bar.on";
+  const stickerGhost = ".sticker-ghost", stickyGhost = "[data-sticky-ghost]";
+  const rect = (selector: string) => t.ev<DOMRect>(`document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect().toJSON()`);
+  const visible = (selector: string) => `document.querySelector(${JSON.stringify(selector)})?.offsetWidth > 0`;
+  const intersects = (a: DOMRect, b: DOMRect) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+  const report = (ok: boolean, message: string) => { if (!ok) problems.push(message); };
+  const insets = (bottomClearance: number) => t.ev(`window.canvasCmd({ cmd: "insets", l: 80, t: 64, r: 280, b: ${bottomClearance}, bottomClearance: ${bottomClearance} })`);
+  await t.waitFor(`document.querySelector("${bar}")?.textContent.includes("Show 1 resolved")`, "resolved comment in the bar");
+  if (shots) {
+    fs.mkdirSync(shots, { recursive: true });
+    await t.page.send("Emulation.setEmulatedMedia", { features: [
+      { name: "prefers-color-scheme", value: "light" }, { name: "prefers-reduced-motion", value: "reduce" },
+    ] });
+  }
+  for (const width of [1560, 720]) {
+    await t.page.send("Emulation.setDeviceMetricsOverride", { width, height: 980, deviceScaleFactor: shots ? 2 : 1, mobile: false });
+    await insets(72);
+    const shot = async (name: string) => {
+      if (shots) fs.writeFileSync(path.join(shots, `${width}-${name}.png`), await t.shot());
+    };
+    // A native toast occupies the first bottom overlay slot and raises the comments bar into the popover area.
+    await t.ev('window.canvasCmd({ cmd: "bottomToast", shown: true })');
+    await t.waitFor(visible(bar), "comments bar before opening");
+    await t.io.move(250, 450);
+    await shot("comments-bar");
+    for (const [name, key, shift, selector] of [
+      ["sticker", "s", true, tray],
+      ["sticky", "s", false, '[aria-label="Sticky colours"]'],
+      ["timer", "t", true, "[data-timer-sheet]"],
+      ["vote", "d", true, "[data-vote-sheet]"],
+    ] as const) {
+      await t.io.key(key, { shift });
+      await t.waitFor(visible(selector), `${name} popover`);
+      if (name === "sticker") await t.io.key("1");
+      await t.frames();
+      const barRect = await rect(bar), popRect = await rect(selector);
+      report(!intersects(barRect, popRect) || !barRect.width, `${width}px: comments overlap the ${name} popover`);
+      report(!barRect.width, `${width}px: comments bar stays visible with ${name} open`);
+      await shot(name === "sticker" ? "sticker-default" : name);
+      if (name === "sticker") {
+        const inspect = async (state: string) => {
+          const seals = await t.ev<{ rect: DOMRect; pressed: boolean }[]>(`[...document.querySelectorAll("${tray} .sticker-choice")].map(b => ({
+            rect: b.querySelector(".sticker-seal").getBoundingClientRect().toJSON(), pressed: b.getAttribute("aria-pressed") === "true",
+          }))`);
+          t.eq(seals.length, 8, "eight sticker choices");
+          t.eq(seals.filter(s => s.pressed).length, 1, "one chosen sticker");
+          const label = `${width}px ${state}`, base = seals.find(s => !s.pressed)!.rect.width;
+          for (const [i, { rect: r, pressed }] of seals.entries()) {
+            report(r.left >= popRect.left + 8 && r.right <= popRect.right - 8 && r.top >= popRect.top && r.bottom <= popRect.bottom,
+              `${label}: seal ${i + 1} exceeds the strip padding or height`);
+            report(!seals.slice(i + 1).some(s => intersects(r, s.rect)), `${label}: seal ${i + 1} intersects another seal`);
+            if (pressed) report(r.width <= base * 1.1 + 0.02, `${label}: chosen seal is ${r.width}px against ${base}px`);
+          }
+          if (width === 1560) {
+            report(popRect.width === 404 && popRect.height === 72, `${label}: strip is ${popRect.width} × ${popRect.height}px`);
+            report(base === 40, `${label}: base seal is ${base}px`);
+            report(seals[4].rect.left - seals[3].rect.right === 8, `${label}: base seal gap differs from 8px`);
+          } else {
+            report(base < 40, `${label}: base seal did not shrink in the 360px canvas`);
+            report(seals[4].rect.left - seals[3].rect.right < 8, `${label}: base seal gap did not shrink`);
+          }
+          return seals;
+        };
+        await inspect("default");
+        await t.io.key("2");
+        t.ok(await t.ev(`document.querySelector('${tray} [data-kind="love"]').getAttribute("aria-pressed") === "true"`), "shortcut chooses Love");
+        const chosen = await inspect("chosen");
+        await shot("sticker-chosen");
+        const { x, y, width: w, height: h } = chosen[1].rect;
+        await t.io.move(x + w / 2, y + h / 2);
+        await t.waitFor(visible('[data-kind="love"] .sticker-choice-tip'), "hover tooltip");
+        t.eq(await inspect("hover"), chosen, "hover leaves seal geometry unchanged");
+        report(!(await t.ev<boolean>(visible(stickerGhost))), `${width}px: sticker ghost remains while hovering the strip`);
+        await shot("sticker-hover");
+
+        // Moving the tray under a stationary pointer still puts that pointer over UI.
+        const px = popRect.x + popRect.width / 2, py = popRect.y + popRect.height / 2 - 108;
+        await t.io.move(px, py);
+        await t.waitFor(visible(stickerGhost), "sticker ghost on the canvas");
+        await insets(180);
+        await t.frames();
+        t.ok(await t.ev(`document.elementFromPoint(${px}, ${py}).closest("${tray}") !== null`), "tray is now under the pointer");
+        report(!(await t.ev<boolean>(visible(stickerGhost))), `${width}px: sticker ghost remains after the strip moves beneath the pointer`);
+        await insets(72);
+        await t.io.move(250, 450);
+        await t.waitFor(visible(stickerGhost), "sticker ghost returns on the canvas");
+      }
+      if (name === "sticky") {
+        const x = popRect.x + popRect.width / 2, y = popRect.y + popRect.height / 2;
+        await t.io.move(x, y - 120);
+        await t.waitFor(visible(stickyGhost), "sticky ghost on the canvas");
+        await t.io.move(x, y);
+        report(!(await t.ev<boolean>(visible(stickyGhost))), `${width}px: sticky ghost remains while hovering its colours`);
+        await t.io.move(x, y - 120);
+        await t.waitFor(visible(stickyGhost), "sticky ghost returns on the canvas");
+        await t.ev(`window.__stickyCaptured = false;
+          window.canvasHost.view.addEventListener("gotpointercapture", () => {
+            window.__stickyCaptured = true;
+          }, { once: true });`);
+        await t.io.down();
+        await t.io.move(x, y, 2, 1);
+        t.ok(await t.ev("window.__stickyCaptured"), "sticky drag captures the pointer");
+        report(!(await t.ev<boolean>(visible(stickyGhost))), `${width}px: captured sticky drag shows a ghost over its colours`);
+      }
+      await t.io.key("Escape");
+      if (name === "sticky") await t.io.up();
+      await t.waitFor(`!(${visible(selector)}) && ${visible(bar)}`, `comments bar returns after ${name} closes`);
+    }
+    await t.ev('window.canvasCmd({ cmd: "bottomToast", shown: false })');
+  }
+  t.eq(problems, [], "popover regressions");
+  await t.open();
+});
+
 sc("sticky", "Sticky controls and vote panels fit a narrow canvas", {
   covers: ["sticky:compact-controls", "vote:compact-panels"],
   skip: { visual: "Checks the actual bounds of the controls and panels against the canvas insets." },
