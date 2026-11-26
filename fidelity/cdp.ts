@@ -70,6 +70,13 @@ export class Page {
 
 export type Chrome = { proc: ChildProcess; port: number; exe: string; version: string; newPage: () => Promise<Page>; stop: () => Promise<void> };
 
+// Every Chrome this process started. A run that throws past its finally, or is stopped by a signal, still ends
+// them: an orphaned test browser stays alive and shows an icon in the menu bar.
+const live = new Set<ChildProcess>();
+const killAll = () => { for (const p of live) { try { p.kill("SIGKILL"); } catch {} } live.clear(); };
+process.once("exit", killAll);
+for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.once(sig, () => { killAll(); if (process.listenerCount(sig) === 0) process.exit(128 + (sig === "SIGINT" ? 2 : sig === "SIGTERM" ? 15 : 1)); });
+
 /** Launch headless Chrome with WebGPU on (needed for the engine page, harmless for the DOM truth). `extra`: more flags. */
 export async function launchChrome(extra: string[] = []): Promise<Chrome> {
   const exe = chromePath();
@@ -80,6 +87,8 @@ export async function launchChrome(extra: string[] = []): Promise<Chrome> {
     "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows", "--disable-background-timer-throttling",
     "--enable-unsafe-webgpu", "--use-angle=metal", "--enable-features=Vulkan", ...extra, "about:blank",
   ], { stdio: "ignore" });
+  live.add(proc);
+  proc.once("exit", () => live.delete(proc));
   let port = 0;
   for (let i = 0; i < 150 && !port; i++) {
     try { port = Number(fs.readFileSync(path.join(dir, "DevToolsActivePort"), "utf8").split("\n")[0]); } catch { await sleep(100); }
@@ -99,6 +108,8 @@ export async function launchChrome(extra: string[] = []): Promise<Chrome> {
       for (const p of pages) p.close();
       proc.kill("SIGTERM");
       await sleep(300);
+      if (proc.exitCode === null && proc.signalCode === null) proc.kill("SIGKILL");
+      live.delete(proc);
       fs.rmSync(dir, { recursive: true, force: true });
     },
   };
