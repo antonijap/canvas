@@ -4,8 +4,8 @@
 // AppKit's tooltip manager never shows a tooltip for a point inside the titlebar container (NSTitlebarContainerView
 // sits above the content there), so `.help` on those controls stays silent however long the pointer rests, while
 // the same `.help` on the left rail (below the strip) works. Hover itself still reaches the controls, so these
-// views draw their own tip: after the system's delay, a small borderless panel at the pointer that never takes
-// the mouse or the keyboard. Everywhere else `.chromeHelp` is plain `.help`.
+// views draw their own tip: after the system's delay, a small borderless panel 6 pt under the control, centred on
+// it and kept inside the window, that never takes the mouse or the keyboard. Everywhere else `.chromeHelp` is plain `.help`.
 
 import AppKit
 import SwiftUI
@@ -30,19 +30,41 @@ private struct ChromeHelp: ViewModifier {
     private var hint: String { shortcut.map { "\(text)  \($0)" } ?? text }
     @Environment(\.titlebarTips) private var own
     @State private var token = UUID()
+    @State private var anchor = TipAnchorBox()
 
     func body(content: Content) -> some View {
         if own && !text.isEmpty {
             content
                 .accessibilityHint(hint)
+                .background(TipAnchor(box: anchor))
                 .onHover { inside in
-                    if inside { ChromeTip.shared.hover(text, shortcut: shortcut, owner: token) } else { ChromeTip.shared.leave(owner: token) }
+                    if inside { ChromeTip.shared.hover(text, shortcut: shortcut, owner: token, anchor: anchor) } else { ChromeTip.shared.leave(owner: token) }
                 }
                 .onDisappear { ChromeTip.shared.leave(owner: token) }
         } else {
             content.help(hint)
         }
     }
+}
+
+/// The control's own AppKit view, so the tip can hang under it rather than at the pointer.
+final class TipAnchorBox {
+    weak var view: NSView?
+    /// The control in screen coordinates, and its window's frame on its screen.
+    var placement: (control: CGRect, bounds: CGRect)? {
+        guard let view, let window = view.window else { return nil }
+        let control = window.convertToScreen(view.convert(view.bounds, to: nil))
+        let screen = window.screen?.visibleFrame ?? window.frame
+        let bounds = window.frame.intersection(screen)
+        return (control, bounds.isNull ? window.frame : bounds)
+    }
+}
+
+private struct TipAnchor: NSViewRepresentable {
+    let box: TipAnchorBox
+    final class Probe: NSView { override func hitTest(_ point: NSPoint) -> NSView? { nil } }
+    func makeNSView(context: Context) -> Probe { let v = Probe(); box.view = v; return v }
+    func updateNSView(_ v: Probe, context: Context) { box.view = v }
 }
 
 /// The one tip panel. Rest on a control for the system's tooltip delay and it shows; moving straight on to the
@@ -63,14 +85,14 @@ private struct ChromeHelp: ViewModifier {
         return ms > 0 ? Double(ms) / 1000 : 0.75
     }
 
-    func hover(_ text: String, shortcut: String?, owner id: UUID) {
+    func hover(_ text: String, shortcut: String?, owner id: UUID, anchor: TipAnchorBox? = nil) {
         installMonitor()
         owner = id
         pending?.cancel()
         let quick = panel?.isVisible == true || Date().timeIntervalSince(hiddenAt) < 0.5
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.owner == id, NSApp.isActive else { return }
-            self.show(text, shortcut: shortcut)
+            self.show(text, shortcut: shortcut, anchor: anchor)
         }
         pending = work
         DispatchQueue.main.asyncAfter(deadline: .now() + (quick ? 0.05 : delay), execute: work)
@@ -88,14 +110,19 @@ private struct ChromeHelp: ViewModifier {
         if panel?.isVisible == true { hiddenAt = Date(); panel?.orderOut(nil) }
     }
 
-    private func show(_ text: String, shortcut: String?) {
+    private func show(_ text: String, shortcut: String?, anchor: TipAnchorBox?) {
         let panel = self.panel ?? makePanel()
         host?.rootView = TipLabel(text: text, shortcut: shortcut)
         guard let host else { return }
         let size = host.fittingSize
-        let mouse = NSEvent.mouseLocation
-        let screen = NSScreen.screens.first { $0.frame.contains(mouse) }?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-        let origin = TipPlacement.origin(mouse: mouse, size: size, screen: screen)
+        let origin: CGPoint
+        if let at = anchor?.placement {
+            origin = TipPlacement.below(control: at.control, size: size, bounds: at.bounds)
+        } else {
+            let mouse = NSEvent.mouseLocation
+            let screen = NSScreen.screens.first { $0.frame.contains(mouse) }?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+            origin = TipPlacement.origin(mouse: mouse, size: size, screen: screen)
+        }
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         panel.orderFrontRegardless()
     }

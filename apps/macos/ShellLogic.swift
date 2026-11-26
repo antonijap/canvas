@@ -830,6 +830,17 @@ enum TipPlacement {
         y = min(max(y, screen.minY + 4), screen.maxY - size.height - 4)
         return CGPoint(x: x, y: y)
     }
+
+    /// Under its control: `gap` points below it, centred on it, kept inside `bounds` (the window on its screen), and
+    /// above the control when there is no room below. Screen coordinates, origin bottom-left.
+    static func below(control: CGRect, size: CGSize, bounds: CGRect, gap: CGFloat = 6) -> CGPoint {
+        var x = control.midX - size.width / 2
+        var y = control.minY - gap - size.height
+        if y < bounds.minY + 4 { y = control.maxY + gap }
+        x = min(max(x, bounds.minX + 4), bounds.maxX - size.width - 4)
+        y = min(max(y, bounds.minY + 4), bounds.maxY - size.height - 4)
+        return CGPoint(x: x, y: y)
+    }
 }
 
 /// A visible package name typed into a file tab.
@@ -1519,6 +1530,7 @@ enum MenuSpec {
         // Layout guides (layout grids): Control+G, owned by the menu; Shift+G works too, the page takes it.
         Item(title: "Layout Guides", command: "layoutGuides", key: "g", mods: [.control]),
         nil,
+        Item(title: "Show/Hide Left Panel", command: "togglePanel", mods: []),
         Item(title: "Show/Hide UI", command: "toggleUI", key: "\\"),
         Item(title: "Show/Hide Properties", command: "toggleProperties", mods: []),
         nil,

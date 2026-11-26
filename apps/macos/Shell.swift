@@ -640,6 +640,10 @@ private struct SidebarPeekTracker: NSViewRepresentable {
         }
         v.toggleFrame = { [weak model] in model?.sidebarToggleFrame ?? .zero }
         v.toggleHovered = { [weak model] in model?.sidebarToggleHovered ?? false }
+        // SwiftUI calls this on every model change: log only what moves the poll.
+        if v.pinned != pinned || v.canPeek != canPeek {
+            peekLog.notice("tracker update pinned=\(pinned, privacy: .public) canPeek=\(canPeek, privacy: .public) window=\(v.window != nil, privacy: .public)")
+        }
         v.canPeek = canPeek
         v.pinned = pinned
         v.panelWidth = width

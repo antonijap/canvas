@@ -244,6 +244,9 @@ MainActor.assumeIsolated {
   Updater.shared.start()
 }
 
+// `-CanvasPanelHidden YES` at launch starts with the left sidebar hidden (a QA instance checks the peek this way).
+if UserDefaults.standard.bool(forKey: "CanvasPanelHidden") { model.panelOpen = false }
+
 let window = NSWindow(
   contentRect: NSRect(x: 0, y: 0, width: 1560, height: 980),
   styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -844,6 +847,8 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   @objc func layoutGuides(_ s: Any?) { model.run("{cmd:'nav',op:'layoutGuides'}") }
   @objc func toggleUI(_ s: Any?) { model.uiHidden.toggle() }
   @objc func toggleProperties(_ s: Any?) { model.toggleProperties() }
+  /// View > Show/Hide Left Panel: the top bar's sidebar toggle, scriptable without the pointer.
+  @objc func togglePanel(_ s: Any?) { model.uiHidden = false; model.panelOpen.toggle() }
   /// Cmd+R: the selected layer's name opens for editing in the Layers panel.
   @objc func rename(_ s: Any?) { model.renameSelection() }
   /// Option+L (collapse layers): every open row in the Layers panel closes.
@@ -886,6 +891,9 @@ final class MenuActions: NSObject, NSMenuItemValidation {
     case #selector(toggleProperties(_:)):
       item.title = model.propertiesShown ? "Hide Properties" : "Show Properties"
       return model.editorChromeShown
+    case #selector(togglePanel(_:)):
+      item.title = model.panelOpen && !model.uiHidden ? "Hide Left Panel" : "Show Left Panel"
+      return true
     case #selector(toggleUI(_:)):
       item.title = model.uiHidden ? "Show UI" : "Hide UI"
       return true
@@ -979,6 +987,7 @@ func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op:
   case "pixelGrid": return (menuActions, #selector(MenuActions.pixelGrid(_:)), nil)
   case "rulers": return (menuActions, #selector(MenuActions.rulers(_:)), nil)
   case "layoutGuides": return (menuActions, #selector(MenuActions.layoutGuides(_:)), nil)
+  case "togglePanel": return (menuActions, #selector(MenuActions.togglePanel(_:)), nil)
   case "toggleUI": return (menuActions, #selector(MenuActions.toggleUI(_:)), nil)
   case "toggleProperties": return (menuActions, #selector(MenuActions.toggleProperties(_:)), nil)
   case "rename": return (menuActions, #selector(MenuActions.rename(_:)), nil)

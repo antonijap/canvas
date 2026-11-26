@@ -54,6 +54,7 @@ final class SidebarPeekTrackerView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        peekLog.notice("tracker window=\(self.window != nil, privacy: .public) pinned=\(self.pinned, privacy: .public) canPeek=\(self.canPeek, privacy: .public)")
         removeObservers()
         if let window {
             let nc = NotificationCenter.default

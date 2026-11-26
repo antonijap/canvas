@@ -538,6 +538,18 @@ struct ShellLogicTests {
         check(o.y + size.height < 700 && o.x >= 100, "below and right of the pointer")
         let edge = TipPlacement.origin(mouse: CGPoint(x: 990, y: 10), size: size, screen: screen)
         check(edge.x + size.width <= 996 && edge.y >= 4 && edge.y > 10, "kept on screen, above the pointer at the bottom edge")
+        // A titlebar tip hangs under its control, centred, not off at the pointer.
+        let window = CGRect(x: 100, y: 0, width: 800, height: 700)
+        let toggle = CGRect(x: 180, y: 660, width: 28, height: 28)
+        let u = TipPlacement.below(control: toggle, size: size, bounds: window)
+        check(u.y + size.height == 654, "6 pt under the control: \(u)")
+        check(u.x + size.width / 2 == toggle.midX, "centred on the control: \(u)")
+        let left = TipPlacement.below(control: CGRect(x: 102, y: 660, width: 28, height: 28), size: size, bounds: window)
+        check(left.x == 104, "clamped inside the window's left edge: \(left)")
+        let right = TipPlacement.below(control: CGRect(x: 880, y: 660, width: 28, height: 28), size: size, bounds: window)
+        check(right.x + size.width == 896, "clamped inside the window's right edge: \(right)")
+        let low = TipPlacement.below(control: CGRect(x: 400, y: 10, width: 28, height: 28), size: size, bounds: window)
+        check(low.y == 44, "above the control at the window's bottom: \(low)")
     }
 
     // Sweep S2: the core items on a layer, the short menu on empty canvas.

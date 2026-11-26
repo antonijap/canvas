@@ -476,6 +476,8 @@ final class PaletteController: NSObject, ObservableObject, WKScriptMessageHandle
             switch cmd {
             case "new", "open", "settings", "zoomIn", "zoomOut", "zoom100", "zoomFit", "zoomSelection", "toggleUI", "selectAll", "selectInverse", "collapseLayers": return true
             case "toggleProperties": return model.editorChromeShown
+            // The palette has its own "panel" command.
+            case "togglePanel": return false
             case "closeTab", "copyLink": return model.currentFile != nil
             case "duplicate", "delete", "front", "forward", "backward", "back": return anySel
             case "ungroup": return type == "group" || type == "frame" || (many && type == nil)
