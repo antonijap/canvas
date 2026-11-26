@@ -4,9 +4,9 @@ Use `set_motion` with the node ids in playback order. Each animation has an id, 
 
 | Source | Canvas |
 | --- | --- |
-| Framer Motion `whileHover` | Map x and y to translateX and translateY. Use the target values in tracks with `on: "boardHover"`. Use `transition` for timing. Convert seconds to milliseconds. Use `staggerChildren` as the tool's `stagger` argument. |
+| Motion for React (`motion.div`) `whileHover` | Map x and y to translateX and translateY. Use the target values in tracks with `on: "boardHover"`. Use `transition` for timing. Convert seconds to milliseconds. Use `staggerChildren` as the tool's `stagger` argument. |
 | CSS transitions or two-stop keyframes | Copy the start and end values, duration and delay. Convert `cubic-bezier(a,b,c,d)` to `[a,b,c,d]`. Write `ease-in-out` as `easeInOut`. |
-| React Spring or Framer Motion physical springs | Put `stiffness`, `damping` and `mass` inside `ease.spring`. For React Spring, use tension for stiffness and friction for damping. Match timing visually. |
+| React Spring or Motion for React physical springs | Put `stiffness`, `damping` and `mass` inside `ease.spring`. For React Spring, use tension for stiffness and friction for damping. Match timing visually. |
 | SwiftUI `.onHover` and `withAnimation` | Use the entered state for `to`. `.offset` maps to translateX/Y, `.scaleEffect` to scale/scaleX/scaleY, `.rotationEffect` to rotate, and `.opacity` to opacity. |
 | SwiftUI `.spring(duration:bounce:)` | Use `ease.spring: {duration, bounce}` with duration in milliseconds. |
 | SwiftUI `.spring(response:dampingFraction:)` | Use `ease.spring: {response, dampingFraction}` with response in seconds. |
