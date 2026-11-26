@@ -1,5 +1,5 @@
 import { segmentEase } from "./motion-logic.js";
-import { addKey, axisInset, editTrack, keyValue, moveKeys, removeKey, rulerStep, timelineLayers, trackValue, zoomAtTime } from "./timeline-logic.js";
+import { addKey, addTimelineProperty, availableTimelineProperties, axisInset, editTrack, keyValue, moveKeys, removeKey, rulerStep, timelineLayers, timelineProperties, trackValue, zoomAtTime } from "./timeline-logic.js";
 
 const paths = {
   play: "M3 2.3c0-.6.7-.9 1.2-.6l7.3 4.7c.4.3.4.9 0 1.2l-7.3 4.7c-.5.3-1.2 0-1.2-.6z",
@@ -151,7 +151,7 @@ function installTimeline(host) {
   sheet.append(rulerLine, rows, playhead);
   tracks.append(sheet); trackArea.append(tracks); body.append(trackArea, inspector); panel.append(header, body);
 
-  let open = false, shown = !document.hidden, selected = null, dismissed = false, model = null, request = null, unwatch = null;
+  let open = false, shown = !document.hidden, selected = null, dismissed = false, manual = false, model = null, request = null, unwatch = null;
   let layers = [], byId = new Map(), rowId, keyIndex = 0, collapsed = new Set(), readouts = [];
   let scale = 1, length = 0, time = 0, loopPreview = false, frame = 0, started = 0, drag = null, pinchScale = 1;
   let controls = null, resize = null, curl = null;
@@ -199,31 +199,50 @@ function installTimeline(host) {
     unwatch ??= host.on("document", () => refresh());
   }
   function selection(id) {
+    if (id?.startsWith("widget:")) id = host.selection().findLast(id => !id.startsWith("widget:")) ?? null;
     if (id === selected) return;
     selected = id;
-    dismissed = false;
+    dismissed = manual = false;
     request?.abort(); request = null;
     show(false);
     model = null; rowId = undefined; keyIndex = 0; collapsed = new Set(); time = 0; scale = 1;
     tracks.scrollLeft = tracks.scrollTop = 0;
-    watch(!!id && shown && !id.startsWith("widget:"));
+    watch(!!id && shown);
     refresh();
   }
-  function setDismissed(on) {
-    dismissed = on;
-    watch(!on && !!selected && !selected.startsWith("widget:") && shown);
-    if (on) {
-      request?.abort(); request = null;
-      show(false);
-    } else refresh(true, true);
+  function dismiss() {
+    dismissed = true;
+    manual = false;
+    watch(false);
+    request?.abort(); request = null;
+    show(false);
   }
   function toggle() {
-    if (open) setDismissed(true);
-    else if (selected) setDismissed(false);
+    if (open || manual) dismiss();
+    else openSelected(selected);
+  }
+  function openSelected(id) {
+    if (!id || id !== selected) return;
+    manual = true;
+    dismissed = false;
+    watch(shown);
+    if (open) {
+      const layer = layers.find(layer => layer.id === id);
+      const row = layer?.rows[0];
+      rowId = row?.id;
+      keyIndex = row ? row.keys.length - 1 : 0;
+      collapsed.delete(id);
+      rebuild();
+      focusLayer();
+    } else refresh(true, true);
+  }
+  function focusLayer() {
+    panel.focus({ preventScroll: true });
+    Array.from(rows.children).find(line => line.dataset.layerId === selected)?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
   async function refresh(force = false, focus = false) {
-    if (!selected || selected.startsWith("widget:") || dismissed || !shown || model?.pending || drag) return;
+    if (!selected || dismissed || !shown || model?.pending || drag) return;
     const key = model?.board ? host.boards.get(model.board)?.meta.key : undefined;
     if (!force && (request || (model && key === model.key))) return;
     request?.abort();
@@ -240,7 +259,7 @@ function installTimeline(host) {
       overtaken = next.key !== currentKey && host.doc?.revision !== requestedRevision;
       model = { ...next, pending: 0 };
       rebuild();
-      if (focus && open) panel.focus({ preventScroll: true });
+      if (focus && open) focusLayer();
     } catch (err) {
       if (!controller.signal.aborted && open) host.toast(err.message);
     } finally {
@@ -249,14 +268,14 @@ function installTimeline(host) {
     }
   }
   function rebuild() {
-    layers = timelineLayers(model?.root);
+    layers = timelineLayers(model?.root, selected);
     byId = new Map(layers.flatMap(layer => layer.rows.map(row => [row.id, row])));
-    const row = selectedRow() ?? layers.find(l => l.id === selected)?.rows[0] ?? byId.values().next().value;
+    const row = selectedRow() ?? layers.find(l => l.id === selected)?.rows[0] ?? (manual ? undefined : byId.values().next().value);
     if (row?.id !== rowId) { rowId = row?.id; keyIndex = row ? row.keys.length - 1 : 0; }
     if (row) keyIndex = Math.min(keyIndex, row.keys.length - 1);
     length = Math.max(0, ...layers.map(layer => layer.end));
     time = Math.min(time, length);
-    if (!layers.length) { show(false); return; }
+    if (!byId.size && !(manual && layers.length)) { show(false); return; }
     show(true);
     draw();
   }
@@ -287,19 +306,45 @@ function installTimeline(host) {
     el.style.left = axisX(first) + "px";
     el.style.width = (last - first) * scale + "px";
   }
+  function propertyPicker(layer) {
+    const available = availableTimelineProperties(layer.motion);
+    const { box, select } = picker("Add property", [
+      ["", "Add property", true],
+      ...timelineProperties.map(prop => [prop, props[prop], !available.includes(prop)]),
+    ]);
+    box.classList.add("mt-add-property");
+    select.value = "";
+    select.disabled = !writable() || !available.length;
+    select.onchange = () => {
+      const added = addTimelineProperty(layer, select.value, crypto.randomUUID());
+      select.value = "";
+      if (!added || !writable()) return;
+      rowId = added.rowId;
+      keyIndex = 1;
+      collapsed.delete(layer.id);
+      saveMotion(layer, added.motion, crypto.randomUUID());
+      rows.querySelector(".mt-key[data-selected]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    };
+    return box;
+  }
   function drawTracks() {
     readouts = [];
     const lines = [];
     for (const layer of layers) {
       const group = element("div", "mt-line"), cell = element("div", "mt-label"), axis = element("div", "mt-axis");
-      const disclosure = button("mt-group-label", "", layer.name);
-      disclosure.dataset.layer = layer.id;
-      disclosure.setAttribute("aria-expanded", String(!collapsed.has(layer.id)));
+      group.dataset.layerId = layer.id;
+      const disclosure = layer.rows.length ? button("mt-group-label", "", layer.name) : element("span", "mt-group-label");
       const name = element("span", "mt-row-name", layer.name);
-      disclosure.append(icon("chevron"), name);
-      const range = element("span", "mt-range");
-      bar(range, layer.start, layer.end);
-      axis.append(range); cell.append(disclosure); group.append(cell, axis); lines.push(group);
+      if (layer.rows.length) {
+        disclosure.dataset.layer = layer.id;
+        disclosure.setAttribute("aria-expanded", String(!collapsed.has(layer.id)));
+        disclosure.append(icon("chevron"));
+        const range = element("span", "mt-range");
+        bar(range, layer.start, layer.end);
+        axis.append(range);
+      }
+      disclosure.append(name);
+      cell.append(disclosure, propertyPicker(layer)); group.append(cell, axis); lines.push(group);
       if (collapsed.has(layer.id)) continue;
       for (const row of layer.rows) {
         const line = element("div", "mt-line"), cell = element("div", "mt-label"), axis = element("div", "mt-axis");
@@ -337,6 +382,9 @@ function installTimeline(host) {
     drawSelection();
   }
   function drawSelection() {
+    for (const group of rows.querySelectorAll("[data-layer-id]")) {
+      group.toggleAttribute("data-selected", !rowId && group.dataset.layerId === selected);
+    }
     for (const axis of rows.querySelectorAll(".mt-axis[data-row]")) {
       const selected = axis.dataset.row === rowId;
       axis.toggleAttribute("data-selected", selected);
@@ -361,7 +409,7 @@ function installTimeline(host) {
   function drawInspector() {
     const row = selectedRow(), index = keyIndex, key = row?.keys[index];
     curl = null;
-    if (!key) { inspector.replaceChildren(); return; }
+    if (!key) { inspector.replaceChildren(element("div", "mt-empty", "No keyframes")); return; }
     const title = element("div", "mt-inspector-heading");
     title.append(element("strong", "", props[row.track.prop]), element("span", "", `Keyframe ${index + 1} of ${row.keys.length}`));
     const disabled = !writable(), fields = element("div", "mt-fields");
@@ -402,11 +450,10 @@ function installTimeline(host) {
 
   function drawPickers() {
     const row = selectedRow();
-    if (row) {
-      pickValue(trigger.select, row.animation.on, triggers);
-      pickValue(leave.select, row.animation.leave ?? "reverse", leaves);
-    }
-    trigger.select.disabled = leave.select.disabled = !writable();
+    pickValue(trigger.select, row?.animation.on ?? "boardHover", triggers);
+    pickValue(leave.select, row?.animation.leave ?? "reverse", leaves);
+    trigger.select.disabled = leave.select.disabled = !row || !writable();
+    play.disabled = loop.disabled = handle.disabled = !length;
   }
   function draw() {
     drawPickers(); drawRuler(); drawTracks(); drawInspector(); updateTime();
@@ -417,10 +464,13 @@ function installTimeline(host) {
     drawSelection(); drawPickers(); drawInspector();
   }
   function editAnimation(row, animation, gesture) {
-    const target = model;
-    const node = target?.root?.children.find(node => node.id === row?.layer.id && node.motion === row.layer.motion);
-    if (!node || !writable()) return;
     const motion = row.layer.motion.map(a => a === row.animation ? animation : a);
+    saveMotion(row.layer, motion, gesture);
+  }
+  function saveMotion(layer, motion, gesture) {
+    const target = model;
+    const node = target?.root?.children.find(node => node.id === layer.id && node.motion === layer.motion);
+    if (!node || !writable()) return;
     node.motion = motion;
     target.pending++;
     // Each edit uses the prior write's revision. A concurrent external edit refuses the queue instead of being overwritten.
@@ -499,7 +549,7 @@ function installTimeline(host) {
   }
 
   play.onclick = playPause;
-  close.onclick = () => setDismissed(true);
+  close.onclick = dismiss;
   loop.onclick = () => { loopPreview = !loopPreview; loop.setAttribute("aria-pressed", String(loopPreview)); };
   trigger.select.onchange = () => {
     const row = selectedRow();
@@ -527,7 +577,7 @@ function installTimeline(host) {
   });
   panel.addEventListener("pointerdown", e => {
     if (e.button !== 0 || drag) return;
-    if (e.target.closest(".mt-ruler")) {
+    if (length && e.target.closest(".mt-ruler")) {
       begin(e, { kind: "playhead" });
       if (drag) seek(e.target === handle ? time : timeAt(e.clientX));
       return;
@@ -642,12 +692,12 @@ function installTimeline(host) {
       request?.abort(); request = null;
       show(false);
     } else {
-      watch(!!selected && !dismissed && !selected.startsWith("widget:"));
+      watch(!!selected && !dismissed);
       refresh(true);
     }
   });
   host.on("cmd", c => {
-    if (c.cmd === "motionTimeline") toggle();
+    if (c.cmd === "motionTimeline") c.id ? openSelected(c.id) : toggle();
     if (open && c.cmd === "insets") place();
   });
   host.on("readOnly", () => { if (open) draw(); });

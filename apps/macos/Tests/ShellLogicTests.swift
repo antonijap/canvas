@@ -19,7 +19,7 @@ struct ShellLogicTests {
         docURL(); nodeLocator(); numbers(); layout(); tabs(); retries(); autoTracking(); writeQueue(); fieldDraft(); fontWeights(); canvasInsets(); emptyPage(); serverCode(); tipPlacement(); contextMenu()
         numericExpr(); mixedKeys(); snapLimits(); secrets(); undoRouting(); throttle(); availableWeights(); overrideLabels(); pageDrag()
         fieldMath(); mixedEach(); menuSpec(); drawToolPalette(); panelMemory(); tabPool(); sidebarPeek(); repeatHint(); exportNaming(); pasteImage(); canvasLink(); toastActions(); firstRun(); exportSettings(); copyAsAndZoom()
-        bottomBars(); sidebarResize(); powerScrubAspect(); layoutGuides(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
+        bottomBars(); sidebarResize(); powerScrubAspect(); layoutGuides(); timelineMenu(); typeDetails(); fieldResets(); aboutInfo(); arrangeActions()
         updateManifest(); updateVerdict(); updateInstall(); updateHelper(); tabOrder(); fileTabs(); tabSizing(); tabPress(); tabRenameFocus(); recentlyClosedTabs()
         print(failures == 0 ? "ok: \(checks) checks" : "\(failures) of \(checks) checks failed")
         exit(failures == 0 ? 0 : 1)
@@ -295,6 +295,14 @@ struct ShellLogicTests {
         check(left["width"] != nil && left["offset"] != nil && left["margin"] == nil, "left columns take a width and an offset")
         check(LayoutGuides.withAlign(left, "center")["offset"] == nil && LayoutGuides.withAlign(left, "stretch")["width"] == nil, "centre has no offset, stretch no width")
         check(LayoutGuides.title(grid) == "Grid 10px" && LayoutGuides.aligns("rows").map(\.title) == ["Stretch", "Top", "Center", "Bottom"], "titles")
+    }
+
+    static func timelineMenu() {
+        check(MenuSpec.view.contains { $0?.title == "Show Timeline" && $0?.command == "motionTimeline" && $0?.key == "t" && $0?.mods == [.command, .option] }, "View > Show Timeline on Command+Option+T")
+        check(TimelineMenu.title(isOpen: false) == "Show Timeline" && TimelineMenu.title(isOpen: true) == "Hide Timeline", "the View menu follows the timeline's reported visibility")
+        check(TimelineMenu.layerID(primary: "card", selected: []) == "card", "a single selection has only a primary ID")
+        check(TimelineMenu.layerID(primary: "widget:note", selected: ["frame", "card", "widget:note"]) == "card", "mixed selection uses the last layer")
+        check(TimelineMenu.layerID(primary: "widget:note", selected: ["widget:note"]) == nil, "widgets do not have a layer timeline")
     }
 
     // Cmd+V of a screenshot pastes an image layer; Canvas's own copied layers still paste as layers.

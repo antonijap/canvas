@@ -1461,6 +1461,15 @@ enum DrawTool: String, CaseIterable {
     var usesShift: Bool { self == .sticker || self == .vote || self == .timer }
 }
 
+enum TimelineMenu {
+    static func title(isOpen: Bool) -> String { isOpen ? "Hide Timeline" : "Show Timeline" }
+
+    static func layerID(primary: String, selected: [String]) -> String? {
+        let ids = selected.isEmpty ? [primary] : selected
+        return ids.last { !$0.isEmpty && !$0.hasPrefix("widget:") }
+    }
+}
+
 /// The menu bar: what each menu holds, in order, with its key. main.swift wires each command to its action;
 /// Tests/ShellLogicTests.swift checks the table (every expected item there, no key used twice).
 enum MenuSpec {
@@ -1575,6 +1584,7 @@ enum MenuSpec {
         Item(title: "Show/Hide Left Panel", command: "togglePanel", mods: []),
         Item(title: "Show/Hide UI", command: "toggleUI", key: "\\"),
         Item(title: "Show/Hide Properties", command: "toggleProperties", mods: []),
+        Item(title: TimelineMenu.title(isOpen: false), command: "motionTimeline", key: "t", mods: [.command, .option]),
         nil,
     ]
     static let object: [Entry] = [

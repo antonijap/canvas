@@ -787,7 +787,7 @@ NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
   guard e.window === window, window.attachedSheet == nil, !model.homeShown,
         e.charactersIgnoringModifiers == "t",
         e.modifierFlags.intersection([.command, .option, .control, .shift]) == [.command, .option] else { return e }
-  if !e.isARepeat { model.run("{cmd:'motionTimeline'}") }
+  if !e.isARepeat { model.toggleMotionTimeline() }
   return nil
 }
 // Canvas keys (1/2/0/F/Esc/Delete/Space) belong to the canvas whenever no text field is being typed in: a click
@@ -899,6 +899,7 @@ final class MenuActions: NSObject, NSMenuItemValidation {
   @objc func layoutGuides(_ s: Any?) { model.run("{cmd:'nav',op:'layoutGuides'}") }
   @objc func toggleUI(_ s: Any?) { model.uiHidden.toggle() }
   @objc func toggleProperties(_ s: Any?) { model.toggleProperties() }
+  @objc func motionTimeline(_ s: Any?) { model.toggleMotionTimeline() }
   /// View > Show/Hide Left Panel: the top bar's sidebar toggle, scriptable without the pointer.
   @objc func togglePanel(_ s: Any?) { model.uiHidden = false; model.panelOpen.toggle() }
   /// Cmd+R: the selected layer's name opens for editing in the Layers panel.
@@ -943,6 +944,11 @@ final class MenuActions: NSObject, NSMenuItemValidation {
     case #selector(toggleProperties(_:)):
       item.title = model.propertiesShown ? "Hide Properties" : "Show Properties"
       return model.editorChromeShown
+    case #selector(motionTimeline(_:)):
+      let isOpen = model.timelineHeight > 0
+      item.title = TimelineMenu.title(isOpen: isOpen)
+      item.state = isOpen ? .on : .off
+      return model.canToggleTimeline
     case #selector(togglePanel(_:)):
       item.title = model.panelOpen && !model.uiHidden ? "Hide Left Panel" : "Show Left Panel"
       return true
@@ -1042,6 +1048,7 @@ func menuTarget(_ command: String) -> (target: AnyObject?, action: Selector, op:
   case "togglePanel": return (menuActions, #selector(MenuActions.togglePanel(_:)), nil)
   case "toggleUI": return (menuActions, #selector(MenuActions.toggleUI(_:)), nil)
   case "toggleProperties": return (menuActions, #selector(MenuActions.toggleProperties(_:)), nil)
+  case "motionTimeline": return (menuActions, #selector(MenuActions.motionTimeline(_:)), nil)
   case "rename": return (menuActions, #selector(MenuActions.rename(_:)), nil)
   case "collapseLayers": return (menuActions, #selector(MenuActions.collapseLayers(_:)), nil)
   case "palette": return (paletteMenuTarget, #selector(PaletteMenuTarget.toggle(_:)), nil)

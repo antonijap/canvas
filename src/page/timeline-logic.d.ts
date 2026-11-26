@@ -2,12 +2,15 @@ import type { CompiledMotion } from "./motion-logic.js";
 
 type Key = { t: number; v: number; ease?: unknown };
 type Track = { prop: string; keys?: Key[] };
-type Animation = { id: string; on: string; tracks: Track[] };
+type Animation = { id: string; on: string; leave?: string; tracks: Track[] };
 type Node = { id?: string; name?: string; type?: string; opacity?: number; motion?: Animation[]; children?: Node[] };
-type Layer = { id: string; name: string; start: number; end: number; rows: { id: string; animation: Animation; track: Track; keys: Key[] }[] };
+type Layer = { id: string; name: string; opacity?: number; motion: Animation[]; start: number; end: number; rows: { id: string; animation: Animation; track: Track; keys: Key[] }[] };
 export const axisInset: number;
+export const timelineProperties: string[];
+export function availableTimelineProperties(motion: Animation[]): string[];
+export function addTimelineProperty(layer: Pick<Layer, "id" | "opacity" | "motion">, prop: string, id: string): { motion: Animation[]; rowId: string } | null;
 export function keyValue(prop: string, value: number): number;
-export function timelineLayers(root?: Node): Layer[];
+export function timelineLayers(root?: Node, selected?: string): Layer[];
 export function trackValue(compiled: CompiledMotion, time: number): number;
 export function editTrack<T extends Track>(track: T, before: Key[], keys: Key[]): T | Track;
 export function moveKeys(keys: Key[], indices: number[], time: number, options?: { legacy?: boolean; snap?: boolean }): Key[];

@@ -599,6 +599,80 @@ function waitTimelineTrack(t: T, expr: string) {
   })()`, "the saved motion track");
 }
 
+sc("motion-timeline", "timeline entry points add the first property in one undo step", {
+  covers: ["motion-timeline:entry"], skip: { visual: "Checks the panel with native bridge commands and keyboard input." },
+}, async (t: T) => {
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [{
+    id: "tl_empty", name: "Motion sample", type: "frame", width: 220, height: 160, x: 10000, y: 10000, layout: "none", fill: "#203040",
+    children: [{ id: "tl_card", name: "Card", type: "rectangle", x: 24, y: 24, width: 172, height: 112, fill: "#DFDFFF", opacity: 0.8 }],
+  }] });
+  await t.page.send("Page.addScriptToEvaluateOnNewDocument", { source: `
+    window.timelineHeights = [];
+    window.webkit = { messageHandlers: { canvasState: { postMessage: raw => {
+      const { timelineHeight } = typeof raw === "string" ? JSON.parse(raw) : raw;
+      if (timelineHeight != null) window.timelineHeights.push(timelineHeight);
+    } } } };
+  ` });
+  await t.open({ native: true });
+  await t.focus("tl_empty");
+  await t.select(["tl_card"]);
+  const isOpen = `!!document.querySelector(${JSON.stringify(timelinePanel)})`;
+  t.eq(await t.ev(isOpen), false, "plain selection starts with the panel closed");
+  await t.ev("window.canvasCmd({cmd:'motionTimeline',id:'tl_card'})");
+  await t.waitFor(isOpen, "the inspector command to open the timeline for a plain layer");
+  await t.ev("window.canvasCmd({cmd:'motionTimeline',id:'tl_card'})");
+  await t.waitFor("window.timelineHeights.at(-1) === 280", "the bridge to report that the panel is open");
+  await t.io.key("t", { meta: true, alt: true });
+  t.eq(await t.ev("window.timelineHeights.at(-1)"), 0, "the shortcut closes the same panel");
+  await t.ev("window.canvasCmd({cmd:'motionTimeline'})");
+  await t.waitFor(isOpen, "the View menu command to reopen the panel");
+  await t.ev("window.canvasCmd({cmd:'insets',l:90,t:40,r:280,b:60})");
+
+  const menu = ".mt-add-property select";
+  t.eq(await t.ev("document.querySelector('.mt-group-label').textContent"), "Card", "the selected layer has a row");
+  t.eq(await t.ev(`Array.from(document.querySelector(${JSON.stringify(menu)}).options, o => o.text)`),
+    ["Add property", "Translate X", "Translate Y", "Scale", "Rotate", "Opacity"], "the row offers supported properties");
+  t.eq(await t.ev("document.querySelectorAll('.mt-key').length"), 0, "no keyframes before adding a property");
+  t.eq(await t.ev(`(() => {
+    const rect = selector => document.querySelector(selector).getBoundingClientRect();
+    const row = rect(".mt-line[data-layer-id]"), label = rect(".mt-group-label"), add = rect(${JSON.stringify(menu)});
+    return [(add.top - row.top), (row.bottom - add.bottom), (add.left - label.right), getComputedStyle(document.querySelector(${JSON.stringify(menu)})).lineHeight];
+  })()`), [2, 2, 0, "11px"], "the menu is centered vertically, fits beside the layer name, and uses a 100% line height");
+  const shot = process.env.QA_TIMELINE_EMPTY_SHOT;
+  if (shot) {
+    const clip = await t.ev<{ x: number; y: number; width: number; height: number }>(`(() => {
+      const { x, y, width, height } = document.querySelector(${JSON.stringify(timelinePanel)}).getBoundingClientRect();
+      return { x: x - 12, y: y - 12, width: width + 24, height: height + 12 };
+    })()`);
+    fs.writeFileSync(shot, await t.shot(clip));
+  }
+
+  const pick = (prop: string) => t.ev(`(() => {
+    const select = document.querySelector(${JSON.stringify(menu)});
+    if (select.disabled || select.querySelector('option[value=${prop}]').disabled) throw new Error("Property is unavailable");
+    select.value = ${JSON.stringify(prop)};
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  const savedMotion = async () => (await t.a.get("/api/node?id=tl_card&depth=0")).node.motion;
+  await pick("opacity");
+  await t.waitFor(`document.querySelector('${timelineKey}')?.getAttribute('aria-label') === 'Opacity keyframe 2, 300 ms'`, "the added property's second keyframe to be selected");
+  await t.flush();
+  const first = await savedMotion();
+  t.eq(first, [{ id: first?.[0]?.id, on: "boardHover", leave: "reverse", tracks: [
+    { prop: "opacity", keys: [{ t: 0, v: 0.8 }, { t: 300, v: 0.5 }] },
+  ] }], "the first property saves a hover animation with two keys");
+  await pick("translateX");
+  await t.waitFor(`document.querySelector('${timelineKey}')?.getAttribute('aria-label') === 'Translate X keyframe 2, 300 ms'`, "the second property's last keyframe to be selected");
+  await t.flush();
+  t.eq((await savedMotion())?.[0].tracks.length, 2, "a row with keyframes can add another property");
+  await t.a.post("/api/history/undo");
+  t.eq(await savedMotion(), first, "one Undo removes the added property");
+  await t.a.post("/api/history/undo");
+  t.eq(await savedMotion(), undefined, "one more Undo removes the first animation");
+  await t.waitFor(`${isOpen} && !document.querySelector('.mt-key')`, "Undo to restore the empty panel");
+  await t.clearSel();
+});
+
 sc("motion-timeline", "timeline follows board selection and respects side insets", {
   covers: ["motion-timeline:selection"], skip: { visual: "Asserts panel geometry and selection with real keyboard input." },
 }, async (t: T) => {

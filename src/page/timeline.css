@@ -70,7 +70,7 @@
   background: #ffffff14;
   color: var(--mt-fg);
 }
-.mt-header .mt-play:hover { background: #ffffff24; }
+.mt-header .mt-play:hover:not(:disabled) { background: #ffffff24; }
 .mt-icon { display: block; width: 14px; height: 14px; }
 .mt-time {
   flex: 0 0 116px;
@@ -118,6 +118,7 @@
 .mt-tracks {
   height: 100%;
   overflow: auto;
+  scroll-padding-top: 24px;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: #ffffff36 transparent;
@@ -157,11 +158,16 @@
   border-radius: 0;
   background: none;
 }
-.mt-label .mt-group-label { padding: 0 12px 0 10px; gap: 4px; font-weight: 600; }
+.mt-label .mt-group-label { flex: 1 1 auto; width: auto; padding: 0 12px 0 10px; gap: 4px; font-weight: 600; }
+.mt-label span.mt-group-label { padding-left: 26px; }
 .mt-group-label .mt-icon { width: 12px; height: 12px; flex: none; color: var(--mt-muted); }
 .mt-group-label[aria-expanded="false"] .mt-icon { transform: rotate(-90deg); }
+.mt-add-property { margin-inline-end: 6px; }
+.mt-add-property select { height: 22px; padding: 0 19px 0 6px; font-size: 11px; }
+.mt-add-property select:hover:not(:disabled) { background: #ffffff24; }
+.mt-add-property .mt-icon { right: 5px; width: 10px; height: 10px; }
 .mt-label .mt-row-label { padding: 0 12px 0 40px; color: var(--mt-secondary); }
-.mt-label :is(.mt-row-label, .mt-group-label):hover { background: #ffffff08; }
+.mt-label button:is(.mt-row-label, .mt-group-label):hover { background: #ffffff08; }
 .mt-row-name { overflow: hidden; text-overflow: clip; }
 .mt-row-value { margin-left: auto; font: 500 11px/1 var(--mt-mono); color: var(--mt-secondary); }
 .mt-line[data-selected] .mt-label {
@@ -284,6 +290,7 @@
 }
 .mt-inspector-heading strong { font-weight: 600; }
 .mt-inspector-heading span { color: var(--mt-muted); font-size: 11px; }
+.mt-empty { color: var(--mt-secondary); }
 .mt-fields { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 8px; }
 .mt-field {
   display: flex;
@@ -342,7 +349,6 @@
 }
 @container (width < 585px) {
   .mt-body { --mt-inspector-width: 190px; }
-  .mt-track-area { --mt-name-width: 120px; }
   .mt-inspector { padding-inline: 8px; }
   .mt-field { padding-inline: 5px; }
   .mt-field input { font-size: 10px; }

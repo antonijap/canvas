@@ -1158,10 +1158,10 @@ try {
         const visit = (n: DocNode, theme: Record<string, string>) => {
           selected ||= n.id === id;
           const active = n.theme ? { ...theme, ...n.theme as Record<string, string> } : theme;
-          if (n.id && Array.isArray(n.motion) && n.motion.length) {
+          if (n.id && (n.id === id || (Array.isArray(n.motion) && n.motion.length))) {
             const opacity = typeof n.opacity === "string" && n.opacity.startsWith("$")
               ? resolveVariable(snap.doc, n.opacity.slice(1), active) : n.opacity;
-            children.push({ id: n.id, name: n.name, type: n.type, motion: n.motion, ...(typeof opacity === "number" && { opacity }) });
+            children.push({ id: n.id, name: n.name, type: n.type, motion: Array.isArray(n.motion) ? n.motion : [], ...(typeof opacity === "number" && { opacity }) });
           }
           n.children?.forEach(c => visit(c, active));
         };

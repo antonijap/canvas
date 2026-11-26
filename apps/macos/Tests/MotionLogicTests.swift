@@ -12,7 +12,7 @@ struct MotionLogicTests {
         let motion = MotionAnimation(value)
         precondition(motion?.id == "hover" && motion?.trigger == "Board hover")
         precondition(motion?.tracks == [
-            "Move X · 180 ms · Ease out", "Opacity · 420 ms · Spring", "Rotate · Until settled · Spring", "Scale · 300 ms · Cubic bezier",
+            "Move X, 180 ms, Ease out", "Opacity, 420 ms, Spring", "Rotate, Until settled, Spring", "Scale, 300 ms, Cubic bezier",
         ])
         precondition(MotionAnimation([:]) == nil)
         print("ok: motion inspector")

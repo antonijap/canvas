@@ -300,11 +300,17 @@ struct InspectorBody: View {
         .modifier(LayoutProbeRefresh(probe: probe, model: model, s: s))
     }
 
-    @ViewBuilder private var motionSection: some View {
+    private var motionSection: some View {
         let stored = s.node["motion"] as? [[String: Any]] ?? []
         let animations = stored.compactMap(MotionAnimation.init)
-        if !multi && !animations.isEmpty {
-            InspectorSection(title: "Motion") {
+        return InspectorSection(title: "Motion") {
+            if !multi && animations.isEmpty {
+                Text("No motion").font(Typography.label).foregroundStyle(Palette.mutedFg)
+            }
+            FieldButton(title: "Edit keyframes", symbol: nil) {
+                model.showMotionTimeline()
+            }
+            if !multi && !animations.isEmpty {
                 FieldButton(title: "Preview", symbol: "play.fill") {
                     model.run("{cmd:'motionPreview',id:\(JSONText.string(s.id))}")
                 }

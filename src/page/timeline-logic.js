@@ -3,13 +3,35 @@ import { compileMotion, motionPose, motionProps, motionTrackKeys } from "./motio
 export const axisInset = 24;
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 export const keyValue = (prop, v) => prop === "opacity" ? clamp(v, 0, 1) : v;
+const rowId = (layer, animation, prop) => JSON.stringify([layer, animation, prop]);
+const endValues = new Map([["translateX", 8], ["translateY", 8], ["scale", 1.05], ["rotate", 5], ["opacity", 0.5]]);
+export const timelineProperties = [...endValues.keys()];
+
+const hoverAnimation = motion => motion.find(a => a?.on === "boardHover" && Array.isArray(a.tracks) && a.tracks.length < 8);
+
+export function availableTimelineProperties(motion) {
+  if (motion.length >= 4 && !hoverAnimation(motion)) return [];
+  const used = new Set(motion.filter(a => a?.on === "boardHover").flatMap(a => (a.tracks ?? []).map(t => t.prop)));
+  return timelineProperties.filter(prop => !used.has(prop));
+}
+
+export function addTimelineProperty(layer, prop, id) {
+  if (!availableTimelineProperties(layer.motion).includes(prop)) return null;
+  const from = keyValue(prop, motionTrackKeys({ prop }, layer.opacity)[0].v);
+  const track = { prop, keys: [{ t: 0, v: from }, { t: 300, v: endValues.get(prop) }] };
+  const hover = hoverAnimation(layer.motion);
+  const animation = hover ? { ...hover, tracks: [...hover.tracks, track] } : { id, on: "boardHover", leave: "reverse", tracks: [track] };
+  const motion = hover ? layer.motion.map(a => a === hover ? animation : a) : [...layer.motion, animation];
+  return { motion, rowId: rowId(layer.id, animation.id, prop) };
+}
 
 function compileTrack(track, opacity) {
   return compileMotion([{ on: "boardHover", tracks: [track] }], opacity);
 }
 
-export function timelineLayers(root) {
+export function timelineLayers(root, selected) {
   const layers = [];
+  let emptyLayer;
   function collect(node) {
     const rows = [];
     const motion = Array.isArray(node.motion) ? node.motion : [];
@@ -19,18 +41,20 @@ export function timelineLayers(root) {
       if (!compiled.tracks.length) continue;
       const keys = motionTrackKeys(track, node.opacity);
       compiled.tracks[0].cycles = 1;
-      rows.push({ id: JSON.stringify([node.id, animation.id, track.prop]), animation, track, keys, compiled });
+      rows.push({ id: rowId(node.id, animation.id, track.prop), animation, track, keys, compiled });
     }
-    if (rows.length) {
-      const start = Math.min(...rows.map(row => row.keys[0].t));
-      const end = Math.max(...rows.map(row => row.keys.at(-1).t));
+    if (rows.length || node.id && node.id === selected) {
+      const start = rows.length ? Math.min(...rows.map(row => row.keys[0].t)) : 0;
+      const end = Math.max(0, ...rows.map(row => row.keys.at(-1).t));
       const layer = { id: node.id, name: node.name || node.type || node.id, opacity: node.opacity, motion, rows, start, end };
       for (const row of rows) row.layer = layer;
-      layers.push(layer);
+      if (rows.length) layers.push(layer);
+      else emptyLayer = layer;
     }
     for (const child of node.children ?? []) collect(child);
   }
   if (root) collect(root);
+  if (emptyLayer) layers.push(emptyLayer);
   return layers;
 }
 

@@ -30,7 +30,7 @@ struct MotionAnimation: Identifiable {
             let duration = (track["duration"] as? NSNumber) ?? (spring?["duration"] as? NSNumber)
             let time = duration.map { "\($0) ms" } ?? (spring == nil ? "300 ms" : "Until settled")
             let ease = spring != nil ? "Spring" : (track["ease"] is [Any] ? "Cubic bezier" : Self.title(track["ease"] as? String ?? "linear"))
-            return [Self.title(prop), time, ease].joined(separator: " · ")
+            return [Self.title(prop), time, ease].joined(separator: ", ")
         }
     }
 }

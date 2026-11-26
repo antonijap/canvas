@@ -1464,6 +1464,23 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
     func showPage(_ id: String) { run("{cmd:'page',id:\(jsString(id))}"); focusCanvas() }
     var editorChromeShown: Bool { currentFile != nil && !homeShown && !uiHidden }
     var propertiesShown: Bool { editorChromeShown && inspectorOpen && !commentsSidebarOpen }
+    private var timelineLayerID: String? {
+        guard let selection else { return nil }
+        return TimelineMenu.layerID(primary: selection.id, selected: selection.ids)
+    }
+    var canToggleTimeline: Bool { currentFile != nil && !homeShown && (timelineHeight > 0 || timelineLayerID != nil) }
+
+    func showMotionTimeline() {
+        guard let id = timelineLayerID else { return }
+        run("{cmd:'motionTimeline',id:\(JSONText.string(id))}")
+        focusCanvas()
+    }
+
+    func toggleMotionTimeline() {
+        guard currentFile != nil && !homeShown else { return }
+        run("{cmd:'motionTimeline'}")
+        focusCanvas()
+    }
 
     func toggleProperties() {
         guard editorChromeShown else { return }
