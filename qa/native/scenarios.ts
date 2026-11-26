@@ -1664,15 +1664,23 @@ const EVIDENCE = `${process.cwd()}/qa/out/native`;
 /** The padlock's spot on a hovered row: left of the eye, at the row's trailing edge (Layers.swift LayerRowView). */
 const padlock = (r: { x: number; y: number; w: number; h: number }, board = false): Pt => ({ x: r.x + r.w - 6 - (board ? 0 : 22) - 11, y: r.y + r.h / 2 });
 
-sc("layers", "the padlock locks a row; a drag down the padlocks locks the rows it crosses; Shift+Cmd+L unlocks", { covers: ["lock:mouse", "lock:lock-drag", "lock:many", "lock:keyboard"] }, async (t: NT) => {
+sc("layers", "Layer lock works through the padlock, menus and shortcut, and blocks canvas input", { covers: ["lock:mouse", "lock:lock-drag", "lock:many", "lock:keyboard", "lock:canvas-keys"] }, async (t: NT) => {
   await openBoard(t, "lay_nest");
   // rows under the board, front-most first: r_free, g_outer, g_rot, g_pair, fr_outer, lay_nest_cap
   const free = await t.layerRow("r_free");
   await t.move(center(free.r));
   await sleep(250);
   await t.click(padlock(free.r));
-  await t.waitDisk(() => t.node("r_free")?.locked === true, "r_free locked");
+  await t.waitDisk(() => t.node("r_free")?.locked === true, "the row padlock to lock r_free");
   await t.waitState((s) => s.layers.find((l: any) => l.id === "r_free")?.locked, "the row to show its padlock closed");
+  const point = center(await t.rect("r_free"));
+  const { x, y } = t.node("r_free")!;
+  await t.click(point);
+  t.ok(!(await t.pageSel()).includes("r_free"), "a locked layer cannot be selected on the canvas");
+  await t.drag(point, { x: point.x + 35, y: point.y + 25 });
+  await t.settle();
+  t.ok(!(await t.pageSel()).includes("r_free"), "a canvas drag does not select the locked layer");
+  t.eq([t.node("r_free")?.x, t.node("r_free")?.y], [x, y], "a canvas drag does not move the locked layer");
   // A drag from g_outer's padlock down to g_pair's: three rows lock in one write.
   const rows = (await t.rows()).layers;
   const at = (id: string) => rows.find((l) => l.id === id)!;
@@ -1692,6 +1700,28 @@ sc("layers", "the padlock locks a row; a drag down the padlocks locks the rows i
   await t.key("l", ["cmd", "shift"]);
   await t.waitDisk(() => t.node("r_free")?.locked === undefined, "r_free unlocked");
   t.ok((await t.state()).toast !== "Link copied", "Shift+Cmd+L is not Cmd+L");
+  await t.key("l", ["cmd", "shift"]);
+  await t.waitDisk(() => t.node("r_free")?.locked === true, "Shift+Cmd+L to lock r_free");
+  const menuBar = () => t.cmd("qa.mainmenu", { title: "Lock/Unlock Selection", perform: true });
+  await t.click(center(free.r));
+  t.ok((await menuBar()).enabled, "Object menu lock is enabled for the selected locked layer");
+  await t.waitDisk(() => t.node("r_free")?.locked === undefined, "the Object menu to unlock r_free");
+  t.ok((await menuBar()).enabled, "Object menu lock is enabled for the selected unlocked layer");
+  await t.waitDisk(() => t.node("r_free")?.locked === true, "the Object menu to lock r_free");
+  await t.click(center(free.r), { right: true });
+  await t.pickMenu("Unlock");
+  await t.waitDisk(() => t.node("r_free")?.locked === undefined, "the layer context menu to unlock r_free");
+  await t.click(center(free.r), { right: true });
+  await t.pickMenu("Lock");
+  await t.waitDisk(() => t.node("r_free")?.locked === true, "the layer context menu to lock r_free");
+  await t.click(padlock(free.r));
+  await t.waitDisk(() => t.node("r_free")?.locked === undefined, "the row padlock to unlock r_free");
+  await t.look(0, 0);
+  const board = await t.rect("lay_nest");
+  await t.click({ x: board.x - 20, y: board.y + 20 });
+  await t.waitState(s => !s.selection, "the layer panel selection to clear");
+  await t.click(center(await t.rect("r_free")));
+  await t.waitState(s => s.selection?.id === "r_free", "the unlocked layer to be selectable on the canvas");
 });
 
 sc("layers", "Cmd+R with several layers opens Rename Layers; Current name and Number rename them in one undo step", { covers: ["batch-rename:many", "batch-rename:keyboard"] }, async (t: NT) => {

@@ -172,7 +172,7 @@ sc("sidebar", "section menu switches panels and remembers the selection", {
   const search = await t.mark({ id: "sidebar-search" });
   t.near(search.w, 28, 0.5, "the search button is 28 pt wide");
   t.near(search.h, 28, 0.5, "the search button is 28 pt high");
-  await t.click(center(search));
+  await t.click({ x: search.x + search.w - 2, y: center(search).y });
   await t.mark({ label: "Search text styles", exact: true });
   await t.waitState(s => /FieldEditor|TextView/.test(s.window.firstResponder ?? ""), "the token search field to focus");
   await t.section("Widgets");
@@ -266,21 +266,35 @@ sc("sidebar", "the editor sidebar resize handle clamps and saves its width", {
   covers: ["sidebar-resize:editor"],
 }, async (t: NT) => {
   await t.section("Layers");
-  const handle = await t.mark({ id: "sidebar-resize" });
-  const menu = await header(t);
-  t.ok(handle.y >= menu.y + menu.h, "the handle starts below the header");
-  const from = center(handle);
+  const edge = async (atHeader = false) => {
+    const panel = await t.mark({ id: "sidebar-panel" });
+    return {
+      x: panel.x + panel.w - 1,
+      y: atHeader ? panel.y + METRICS.control / 2 : center(panel).y,
+    };
+  };
+  for (const [i, section] of sections.entries()) {
+    await t.section(section);
+    const from = await edge(true);
+    const width = (await t.state()).sidebarWidth as number;
+    const dx = i % 2 === 0 ? 30 : -30;
+    await t.drag(from, { x: from.x + dx, y: from.y });
+    const expected = width + dx;
+    await t.waitState(s => s.sidebarWidth === expected, `${section} right edge beside the header to resize to ${expected} pt`);
+    t.near((await t.mark({ id: "sidebar-panel" })).w, expected, 0.5, `${section} shows the new width`);
+  }
+  const from = await edge();
   await t.drag(from, { x: from.x - 900, y: from.y });
   await t.waitState(s => s.sidebarWidth === METRICS.sidebarMin, "the sidebar to reach its minimum width");
   await t.section("Widgets");
-  const narrow = center(await t.mark({ id: "sidebar-resize" }));
+  const narrow = await edge();
   await t.drag(narrow, { x: narrow.x + 650, y: narrow.y });
   await t.waitState(s => s.sidebarWidth === METRICS.sidebarMax, "the sidebar to reach its maximum width");
   t.near((await t.mark({ id: "sidebar-panel" })).w, METRICS.sidebarMax, 0.5, "the maximum width is visible");
   await t.app.relaunch();
   await t.waitState(s => s.sidebarWidth === METRICS.sidebarMax, "the maximum width to survive relaunch");
   t.near((await t.mark({ id: "sidebar-panel" })).w, METRICS.sidebarMax, 0.5, "the saved width is visible after relaunch");
-  await t.doubleClick(center(await t.mark({ id: "sidebar-resize" })));
+  await t.doubleClick(await edge(true));
   await t.waitState(s => s.sidebarWidth === METRICS.sidebarWidth, "the default width to return");
 });
 

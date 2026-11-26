@@ -647,7 +647,7 @@ struct LeftColumn: View {
             }
             .frame(height: Self.headerHeight)
             .padding(.leading, Metric.sidebarLabelInset - Self.titlePadding)
-            .padding(.trailing, Metric.sidebarInset + (Metric.sidebarRow - Metric.toolbarControl) / 2)
+            .padding(.trailing, SidebarSize.hitWidth)
 
             VStack(spacing: 0) {
                 if section == .tokens && searchOpen {
@@ -674,14 +674,14 @@ struct LeftColumn: View {
                 .id(loaded)
                 .id(scrollKey)
             }
-            .overlay(alignment: .trailing) {
-                SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
-                                    defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
-            }
         }
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
         .sidebarSurface(canvasEdge: .trailing)
+        .overlay(alignment: .trailing) {
+            SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
+                                defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
+        }
         .task(id: section) { if section == .widgets { model.fetchKinds() } }
         .overlay(alignment: .topLeading) {
             if model.sidebarMenuOpen {

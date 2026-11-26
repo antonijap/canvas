@@ -277,7 +277,7 @@ final class LayersStore: ObservableObject {
     /// The padlock pressed (`dy` 0) or dragged `dy` points down the column: the rows it crosses take the pressed row's new state.
     func lockDragged(_ row: LayerRow, dy: CGFloat) {
         guard !row.lockedAbove, !LayersLogic.insideInstance(row.id), let i = rows.firstIndex(where: { $0.id == row.id }) else { return }
-        let j = max(0, min(rows.count - 1, i + Int((dy / (Metric.row + 2)).rounded())))
+        let j = max(0, min(rows.count - 1, i + Int((dy / SidebarStyle.row).rounded())))
         let lock = lockDrag?.lock ?? !row.locked
         lockDrag = (row.id, rows[j].id, lock)
         hover(nil)
