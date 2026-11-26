@@ -10,6 +10,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 enum StateFolder {
@@ -318,6 +319,9 @@ struct HomeSidebar: View {
 
             HomeRow(symbol: "clock", title: "Recents", selected: store.section == .recents) { store.section = .recents }
             HomeRow(symbol: "laptopcomputer", title: "On this Mac", selected: store.section == .mac) { store.section = .mac }
+                .modifier(HomeFileDrop(type: CanvasFileDrag.cloudType) { providers in
+                    CanvasFileDrag.loadCloud(providers) { account.moveFileToLocal(model, $0) }
+                })
             HomeRow(symbol: "graduationcap", title: "Learn Canvas", selected: false) { model.openCourse() }
 
             // The Clouds under one quiet label with a + for Add Cloud; sorted by name, filtered by the search, and
@@ -340,6 +344,11 @@ struct HomeSidebar: View {
                             // A second click, on the row that already shows, answers its word ("Sign in").
                             if store.section == .cloud(e.id) { account.answerPrompt(model, e) } else { store.section = .cloud(e.id) }
                         }
+                        .modifier(HomeFileDrop(type: e.kind == .server ? nil : UTType.fileURL.identifier, hover: {
+                            store.section = .cloud(e.id)
+                        }) { providers in
+                            CanvasFileDrag.loadLocal(providers) { account.moveOpenFile(model, file: $0.path, to: e) }
+                        })
                         .help(e.adapterTooltip)
                         .contextMenu {
                             Button("Rename") { RunLoop.main.perform { MainActor.assumeIsolated { account.renameCloud(model, e) } } }
@@ -363,6 +372,80 @@ struct HomeSidebar: View {
             .qaID("home-clouds")
         }
         .environment(\.titlebarTips, false)
+    }
+}
+
+enum CanvasFileDrag {
+    static let cloudType = "cc.getcanvas.canvas.cloud-file"
+
+    static func provider(_ file: CloudFileDrag) -> NSItemProvider {
+        let item = NSItemProvider()
+        item.suggestedName = file.name
+        item.registerDataRepresentation(forTypeIdentifier: cloudType, visibility: .ownProcess) { done in
+            do { done(try JSONEncoder().encode(file), nil) }
+            catch { done(nil, error) }
+            return nil
+        }
+        return item
+    }
+
+    static func loadCloud(_ providers: [NSItemProvider], then action: @escaping @MainActor (CloudFileDrag) -> Void) -> Bool {
+        guard providers.count == 1, let item = providers.first,
+              item.hasItemConformingToTypeIdentifier(cloudType) else { return false }
+        item.loadDataRepresentation(forTypeIdentifier: cloudType) { data, _ in
+            guard let data, let file = try? JSONDecoder().decode(CloudFileDrag.self, from: data) else { return }
+            Task { @MainActor in action(file) }
+        }
+        return true
+    }
+
+    static func loadLocal(_ providers: [NSItemProvider], then action: @escaping @MainActor (URL) -> Void) -> Bool {
+        let type = UTType.fileURL.identifier
+        guard providers.count == 1, let item = providers.first, item.hasItemConformingToTypeIdentifier(type) else { return false }
+        item.loadItem(forTypeIdentifier: type, options: nil) { value, _ in
+            let url: URL?
+            if let data = value as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
+            else if let value = value as? URL { url = value }
+            else if let value = value as? String { url = URL(string: value) }
+            else { url = nil }
+            guard let url, let package = CloudMove.localPackage(url) else { return }
+            Task { @MainActor in action(package) }
+        }
+        return true
+    }
+}
+
+struct FileCardDrag: ViewModifier {
+    let provider: (() -> NSItemProvider)?
+
+    func body(content: Content) -> some View {
+        if let provider { content.onDrag(provider) }
+        else { content }
+    }
+}
+
+private struct HomeFileDrop: ViewModifier {
+    let type: String?
+    var hover: (() -> Void)? = nil
+    let drop: ([NSItemProvider]) -> Bool
+    @State private var targeted = false
+
+    func body(content: Content) -> some View {
+        if let type {
+            content.overlay {
+                if targeted {
+                    RoundedRectangle(cornerRadius: SidebarStyle.radius).strokeBorder(Palette.fg.opacity(0.45))
+                        .allowsHitTesting(false)
+                }
+            }
+            .onDrop(of: [type], isTargeted: $targeted, perform: drop)
+            .task(id: targeted) {
+                guard targeted, let hover else { return }
+                // Let the same drag continue from a local card into the Cloud page.
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                if !Task.isCancelled { hover() }
+            }
+        } else { content }
     }
 }
 
@@ -599,6 +682,7 @@ private struct HomeCardView: View {
 
     var body: some View {
         let where_ = HomeLogic.whereLabel(server: card.server, clouds: model.prefs.clouds)
+        let package = card.exists ? CloudMove.localPackage(URL(fileURLWithPath: card.path)) : nil
         VStack(alignment: .leading, spacing: 10) {
             Button { if card.exists, NSApp.currentEvent?.type != .rightMouseUp { model.open(card.path) } } label: {
                 HomeThumbnail(store: store, card: card)
@@ -646,6 +730,8 @@ private struct HomeCardView: View {
                 }
             }
         }
+        .contentShape(Rectangle())
+        .modifier(FileCardDrag(provider: package.map { url in { NSItemProvider(object: url as NSURL) } }))
         .opacity(card.exists ? 1 : 0.55)
         .onHover { h in withAnimation(Motion.fast) { hovering = h } }
         .contextMenu {

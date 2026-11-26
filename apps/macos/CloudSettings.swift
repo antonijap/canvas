@@ -650,47 +650,136 @@ final class CloudAccount: ObservableObject {
         }
     }
 
-    /// A verified move waits for typing and inspector writes before uploading the package.
-    func moveOpenFile(_ model: CanvasModel, file selectedFile: String? = nil, to target: CloudEntry? = nil) {
-        guard let file = selectedFile ?? model.currentFile else { model.flash("Open a Canvas file first"); return }
+    /// Check each Mac Cloud on its own so an unrelated stalled connection cannot hide a destination.
+    private func moveDestinations(_ model: CanvasModel, targetID: String?) async -> [CloudEntry] {
+        let entries = CloudMove.destinations(model.prefs.clouds, targetID: targetID)
+        let available = await withTaskGroup(of: String?.self, returning: Set<String>.self) { group in
+            for entry in entries {
+                group.addTask {
+                    let query = [URLQueryItem(name: "url", value: entry.url), URLQueryItem(name: "fresh", value: "1")]
+                    let status = await CloudAccount.get(model, "api/cloud/status", query: query)
+                    guard status["status"] as? String == "connected",
+                          CloudFilesText.canEdit(status["role"] as? String ?? "") else { return nil }
+                    return entry.id
+                }
+            }
+            var ids = Set<String>()
+            for await id in group { if let id { ids.insert(id) } }
+            return ids
+        }
+        return CloudMove.destinations(model.prefs.clouds, targetID: targetID).filter { available.contains($0.id) }
+    }
+
+    private func confirmMove(title: String, message: String) async -> Bool {
+        await withCheckedContinuation { done in
+            RunLoop.main.perform { MainActor.assumeIsolated {
+                let alert = NSAlert()
+                alert.messageText = title
+                alert.informativeText = message
+                alert.addButton(withTitle: "Move")
+                alert.addButton(withTitle: "Cancel")
+                done.resume(returning: alert.runModal() == .alertFirstButtonReturn)
+            } }
+        }
+    }
+
+    private func afterFileWrites(_ model: CanvasModel, _ action: @escaping @MainActor () async -> Void) {
         model.flushTextEdit { ok in
             guard ok else { model.flash("Finish saving the text before moving this file"); return }
-            model.afterWrites { Task {
-            await self.refresh(model, fresh: true)
-            let can = CloudShare.candidates(model.prefs.clouds, status: self.states.mapValues { ($0.status, $0.role) }).filter { $0.kind != .server }
-            let chosen: CloudEntry?
-            if let target { chosen = can.first { $0.id == target.id } }
-            else { chosen = can.count == 1 ? can.first : await CloudAccount.pickOutsideTask(can, move: true) }
-            guard let chosen else { model.flash("Add a Mac Cloud with editor access first"); return }
-            guard !self.busy.contains(chosen.url) else { return }
-            self.busy.insert(chosen.url)
-            defer { self.busy.remove(chosen.url) }
-            if target != nil {
-                let confirmed = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
-                    RunLoop.main.perform { MainActor.assumeIsolated {
-                        let alert = NSAlert()
-                        alert.messageText = "Move \(HomeLogic.name(file)) to \(HomeLogic.cloudName(chosen))?"
-                        alert.informativeText = "Everyone in this Cloud can open its files. The verified local package goes to the Trash."
-                        alert.addButton(withTitle: "Move")
-                        alert.addButton(withTitle: "Cancel")
-                        done.resume(returning: alert.runModal() == .alertFirstButtonReturn)
-                    } }
-                }
-                guard confirmed else { return }
+            model.afterWrites { Task { await action() } }
+        }
+    }
+
+    private func forgetMovedFiles(_ model: CanvasModel, matching matches: (String) -> Bool) {
+        let home = HomeStore.shared
+        let paths = Set(model.openFiles + home.recents.map(\.path))
+        for file in paths where matches(file) {
+            model.close(file)
+            home.remove(file)
+        }
+    }
+
+    func moveOpenFile(_ model: CanvasModel, file selectedFile: String? = nil, to target: CloudEntry? = nil) {
+        guard let file = selectedFile ?? model.currentFile,
+              let package = CloudMove.localPackage(URL(fileURLWithPath: file)) else {
+            model.flash("Choose a local Canvas file first")
+            return
+        }
+        afterFileWrites(model) {
+            let choices = await self.moveDestinations(model, targetID: target?.id)
+            guard let first = choices.first else {
+                model.flash(target == nil ? "Add a Mac Cloud with editor access first" : "Connect to this Cloud with editor access to move a file here")
+                return
             }
-            let (movedStatus, moved) = await CloudAccount.post(model, "api/cloud/files/move", ["cloud": chosen.url], query: [URLQueryItem(name: "file", value: file)])
-            if movedStatus == 200, let destination = moved["file"] as? String {
+            let chosen: CloudEntry
+            if choices.count == 1 {
+                guard await self.confirmMove(
+                    title: "Move \(HomeLogic.name(package.path)) to \(HomeLogic.cloudName(first))?",
+                    message: "Everyone in this Cloud can open its files. The verified local package goes to the Trash."
+                ) else { return }
+                chosen = first
+            } else {
+                guard let picked = await CloudAccount.pickOutsideTask(choices, move: true) else { return }
+                chosen = picked
+            }
+            guard self.busy.insert(chosen.url).inserted else { return }
+            defer { self.busy.remove(chosen.url) }
+            let (status, moved) = await CloudAccount.post(model, "api/cloud/files/move", ["cloud": chosen.url], query: [URLQueryItem(name: "file", value: package.path)])
+            if status == 200, let destination = moved["file"] as? String {
                 model.setCloudFileName(moved["name"] as? String, for: destination)
-                model.close(file)
-                HomeStore.shared.remove(file)
+                self.forgetMovedFiles(model) { CloudMove.localPackage(URL(fileURLWithPath: $0))?.path == package.path }
                 model.open(destination)
                 if let notice = moved["notice"] as? String { model.flash(notice) }
                 else { model.flash("Moved to \(HomeLogic.cloudName(chosen))", level: "success") }
             } else if moved["code"] as? String == "vote_history", let message = moved["error"] as? String {
                 model.flash(message)
-            } else { model.flash(CloudFilesText.problem(code: moved["code"] as? String, fallback: "Could not move the file. Your local copy is kept.")) }
+            } else {
+                model.flash(CloudFilesText.problem(code: moved["code"] as? String, fallback: "Could not move the file. Your local copy is kept."))
+            }
+        }
+    }
 
-            } }
+    func moveFileToLocal(_ model: CanvasModel, _ file: CloudFileDrag) {
+        guard let cloud = entry(model, url: file.cloud), cloud.kind != .server,
+              UUID(uuidString: file.id) != nil else { return }
+        afterFileWrites(model) {
+            guard self.busy.insert(cloud.url).inserted else { return }
+            defer { self.busy.remove(cloud.url) }
+            guard await self.confirmMove(title: "Move \(file.name) to Local Files?",
+                                         message: "Everyone in this Cloud loses access to it. Votes and timers stay in the Cloud.") else { return }
+            let fm = FileManager.default
+            guard let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+                model.flash("Could not find the Documents folder")
+                return
+            }
+            let folder = documents.appendingPathComponent("Canvas", isDirectory: true)
+            do { try fm.createDirectory(at: folder, withIntermediateDirectories: true) }
+            catch { model.flash("Could not create the Canvas folder in Documents"); return }
+            let target = CloudMove.localTarget(name: file.name, folder: folder, exists: fm.fileExists(atPath:))
+            let (status, result) = await CloudAccount.post(model, "api/cloud/files/download", [
+                "cloud": cloud.url, "id": file.id, "target": target.path, "move": true,
+            ])
+            if status == 200, result["moved"] as? Bool == true, let destination = result["file"] as? String {
+                let key = CloudFilePath.key(for: cloud.url)
+                self.forgetMovedFiles(model) {
+                    guard let path = CloudFilePath($0) else { return false }
+                    return path.key == key && path.id == file.id
+                }
+                model.open(destination)
+                model.flash("Moved to Local Files", level: "success")
+            } else if result["code"] as? String == "file_changed" {
+                model.flash("The Cloud file changed during the move. A local copy is in Documents/Canvas.")
+            } else if result["file"] is String {
+                model.flash("A local copy is in Documents/Canvas. Could not confirm removal from the Cloud.")
+            } else if result["code"] as? String == "unsynced" {
+                model.flash("Sync this file's edits before moving it.")
+            } else if result["code"] as? String == "update_move_host" {
+                model.flash("Update Canvas on the host to move files to Local Files.")
+            } else if result["code"] as? String == "forbidden" {
+                model.flash("Only the file's creator or the Cloud owner can move it to Local Files.")
+            } else {
+                model.flash("Could not move the file to Local Files. Check the Cloud and try again.")
+            }
         }
     }
 
@@ -769,7 +858,7 @@ final class CloudAccount: ObservableObject {
 
     nonisolated static func post(_ model: CanvasModel, _ path: String, _ body: [String: Any], query: [URLQueryItem] = []) async -> (Int, [String: Any]) {
         var c = URLComponents(url: model.base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        if !query.isEmpty { c?.queryItems = query }
+        if !query.isEmpty { c?.setQuery(query) }
         guard let url = c?.url else { return (0, [:]) }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"

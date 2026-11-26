@@ -101,6 +101,15 @@ struct HomeLogicTests {
         check(CloudFilesText.edited("2026-11-20T10:00:00.000Z", now: Date(timeIntervalSince1970: 1795169100)) == "Edited 5 min ago", "timestamp subtitle")
         check(CloudFilesText.edited(nil) == "", "no invented author or edit time")
         check(CloudFilesText.canEdit("owner") && CloudFilesText.canEdit("editor") && !CloudFilesText.canEdit("viewer"), "only editors can create or move")
+        let folder = URL(fileURLWithPath: "/Users/you/Documents/Canvas", isDirectory: true)
+        let package = folder.appendingPathComponent("Design.canvas")
+        check(CloudMove.localPackage(package.appendingPathComponent("document.json"))?.path == package.path, "a document path resolves to its package")
+        check(CloudMove.localPackage(folder.appendingPathComponent("image.png")) == nil, "an image is not a local move source")
+        let cached = URL(fileURLWithPath: "/cache/Canvas/cloud-files/1234567890abcdef/12345678-abcd-4000-8000-0123456789ab.canvas")
+        check(CloudMove.localPackage(cached) == nil, "a Cloud cache is not a local move source")
+        let target = CloudMove.localTarget(name: "Design.canvas", folder: folder, exists: { $0 == package.path })
+        check(target.lastPathComponent == "Design 2.canvas", "a move picks a free local filename")
+        check(CloudMove.localTarget(name: "Invalid/Name", folder: folder, exists: { _ in false }).lastPathComponent == "Cloud File.canvas", "an invalid filename stays inside the local folder")
     }
 
     static func recents() {

@@ -21,7 +21,7 @@ import { createPackage, targetPath } from './docpath.ts';
 import { type BlobRow } from '../cloud/core/files/seam.ts';
 import { readBodyText } from './body.ts';
 import { applyOp, VOTE_CLIENT_CAPABILITIES, isRateRefusal, isVoteOp, LIMITS, needsCloudTimers, supportsCloudTimers, supportsCloudVotes, supportsPrivateVoteViews, UPDATE_TIMER_HOST, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type Rejected, type StandaloneTimer, type Thread, type Vote, type VoteView } from '../cloud/protocol.ts';
-import { COMMENTS_FILE, forkComments, readCommentsFile, writeCommentsFile } from './comments-file.ts';
+import { COMMENTS_FILE, emptyComments, forkComments, readCommentsFile, writeCommentsFile } from './comments-file.ts';
 import { anchorVoteClock, ownLocalVotes, receiveVoteViews, sendableCommentOps, voteOpsForTransfer, voteServerTime, type VoteClock } from './vote-state.ts';
 import { prepareMove } from './cloud-files-move.ts';
 import { checkPresence, stripIdentity, keep, type Presence, type PeerPresence } from '../cloud/core/presence.ts';
@@ -66,6 +66,10 @@ export const cloudKey = (url: string) => createHash('sha256').update(url).digest
 const root = () => path.join(fs.realpathSync(os.homedir()), 'Library', 'Application Support', 'Canvas', 'cloud-files');
 const resolveCloud = (cloud: string) => cloudConfigs().find(c => c.url === cloud || cloudKey(c.url) === cloud)?.url ?? fail(404, 'not_found', 'Cloud is not added');
 const fail = (status: number, code: string, message: string): never => { throw Object.assign(new Error(message), { status, code }); };
+const committingMoves = new Set<string>();
+function requireStationaryFile(file: string) {
+    if (committingMoves.size && committingMoves.has(docFile(file))) fail(409, 'moving', 'This file is moving to Local Files');
+}
 interface Session {
     store: FileStateStore;
     ws?: WebSocket;
@@ -191,6 +195,7 @@ cloudFileHooks.undoConflict = (file, writers) => {
     return changed ? [...names].slice(0,3).join(', ') || 'Someone' : undefined;
 };
 cloudFileHooks.assertEdit = f => {
+    requireStationaryFile(f);
     const s = fileSession(f);
     if (s?.updateMessage) fail(426, 'update', s.updateMessage);
     if (s && !CAN_EDIT[s.store.meta.role]) fail(403, 'read_only', 'This Cloud file is read only');
@@ -624,6 +629,7 @@ async function connect(s: Session): Promise<'missing' | void> {
 onAction((file, action) => { const s = fileSession(file); if (!s)
     return;
     let a; try {
+    requireStationaryFile(file);
     if (s.updateMessage) fail(426, 'update', s.updateMessage);
     if (s.whiteboard !== true && insertsWhiteboard(action.ops)) fail(426, 'update_host', UPDATE_WHITEBOARD_HOST);
     a = s.store.propose(action.ops, action);
@@ -688,30 +694,82 @@ export async function openCloudFile(cloud: string, id: string, importingName?: s
     evictClosedPackages(root(),new Set([...sessions.values()].map(s=>s.store.pkg)));
     return { id, file: pkg, name: item.name, cloud, role: s.store.meta.role };
 }
-async function downloadCloudFile(cloud: string, id: string, target: unknown) {
+function requireSyncedMoveSource(pkg: string) {
+    const s = fileSession(pkg);
+    if (s && (s.store.replica.pending.length || s.store.replica.refused.length || s.commentsPending.length || s.commentsRejected?.length)) {
+        fail(409, 'unsynced', 'This Cloud file has edits that have not synced');
+    }
+}
+
+async function downloadCloudFile(cloud: string, id: string, target: unknown, move: boolean) {
     cloud = resolveCloud(cloud);
     const targetFile = targetPath(target);
     const g = generation(cloud);
     const cancelled = () => generation(cloud) !== g;
-    const manifest = await cloudJson(await request(cloud, `/v1/files/${id}/manifest`)) as Manifest;
+    const route = `/v1/files/${id}`;
+    const pkg = path.join(root(), cloudKey(cloud), id + '.canvas');
+    const source = docFile(pkg);
+    let comments: { seq: number; threads: Thread[] } | undefined;
+    if (move) {
+        let response: Response;
+        try { response = await request(cloud, route + '/move'); }
+        catch (error) {
+            if (!(error instanceof CloudHttpError) || error.status !== 404) throw error;
+            await request(cloud, route);
+            return fail(426, 'update_move_host', 'Update Canvas on the host to move files to Local Files');
+        }
+        comments = await cloudJson(response);
+        if (!comments || !Number.isSafeInteger(comments.seq) || !Array.isArray(comments.threads)) {
+            fail(400, 'invalid', 'The Cloud did not return comments for this file');
+        }
+        requireSyncedMoveSource(pkg);
+    }
+    const manifest = await cloudJson(await request(cloud, route + '/manifest')) as Manifest;
     if (manifest.file !== id) throw new Error('Manifest names another file');
     const { state } = await loadManifest(objects(cloud, id), JSON.stringify(manifest));
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'canvas-cloud-download-'));
     try {
         await downloadBlobs(cloud, id, dir, state.blobs, cancelled);
-        await request(cloud, `/v1/files/${id}`);
+        await request(cloud, route);
         if (cancelled()) fail(403, 'removed', 'Cloud membership was removed during download');
+        if (move) {
+            requireStationaryFile(source);
+            requireSyncedMoveSource(pkg);
+        }
         const tree = DocTree.fromState(state);
+        const localComments = comments?.threads.length ? emptyComments() : undefined;
+        if (localComments && comments) localComments.threads = comments.threads.map(thread => ({ ...thread, doc: localComments.doc }));
         const file = createPackage(targetFile, tmp => {
-            fs.writeFileSync(path.join(tmp, 'document.json'), JSON.stringify(documentOf(tree)));
-            fs.writeFileSync(path.join(tmp, 'widgets.json'), JSON.stringify(envelopeOf(tree)));
-            for (const rel of Object.keys(state.blobs)) {
+            const files = [['document.json', documentOf(tree)], ['widgets.json', envelopeOf(tree)]] as [string, unknown][];
+            if (localComments) files.push([COMMENTS_FILE, localComments]);
+            for (const [name, json] of files) {
+                const dest = path.join(tmp, name), bytes = JSON.stringify(json);
+                fs.writeFileSync(dest, bytes);
+                if (move && fs.readFileSync(dest, 'utf8') !== bytes) throw new Error(`Move verification failed: ${name} differs`);
+            }
+            for (const [rel, blob] of Object.entries(state.blobs)) {
                 const dest = path.join(tmp, rel);
                 fs.mkdirSync(path.dirname(dest), { recursive: true });
                 fs.copyFileSync(path.join(dir, rel), dest, fs.constants.COPYFILE_FICLONE);
+                if (move && createHash('sha256').update(fs.readFileSync(dest)).digest('hex') !== blob.sha256)
+                    throw new Error('Move verification failed: blob hash differs');
             }
         });
-        return { file };
+        if (!move) return { file };
+        committingMoves.add(source);
+        try {
+            await request(cloud, `${route}/move`, 'DELETE', { seq: manifest.seq, epoch: manifest.epoch, commentsSeq: comments?.seq });
+        } catch (error) {
+            return { file, verified: true, moved: false, code: (error as CloudHttpError).code };
+        } finally {
+            committingMoves.delete(source);
+        }
+        const session = sessions.get(source);
+        if (session) {
+            try { closeSession(source, session, true); }
+            catch (error) { fileEvents.problem?.((error as Error).message); }
+        }
+        return { file, verified: true, moved: true };
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -821,7 +879,10 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             if (typeof b.id !== 'string' || !UUID.test(b.id)) fail(400, 'invalid', 'Invalid file id');
             const cloud = resolveCloud(b.cloud), id = b.id;
             const route = `/v1/files/${id}`;
-            if (p.endsWith('/download')) return out(200, await downloadCloudFile(cloud, id, b.target));
+            if (p.endsWith('/download')) {
+                const result = await downloadCloudFile(cloud, id, b.target, b.move === true);
+                return out(result.moved === false ? 409 : 200, result);
+            }
             if (p.endsWith('/duplicate')) return out(201, await cloudJson(await request(cloud, route + '/duplicate', 'POST', {})));
             if (p.endsWith('/delete')) return out(200, await cloudJson(await request(cloud, route, 'DELETE', {})));
             const name = await renameCloudFileById(cloud, id, b.name);
@@ -931,6 +992,7 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             return out(200, { ok: true });
         }
         if (p === '/api/comments/ops') {
+            requireStationaryFile(s.store.pkg);
             if (s.store.meta.role === 'viewer' && !s.voting)
                 return out(426, { code: 'version', error: s.voting === false ? UPDATE_COMMENT_HOST : 'Connect to the Cloud to check for viewer comments.' });
             const ops = (b.ops ?? []).map((e: OpEnvelope) => ({ ...e, doc: s.store.meta.file }));

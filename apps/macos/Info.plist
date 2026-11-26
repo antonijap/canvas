@@ -47,6 +47,11 @@
       <key>UTTypeDescription</key><string>Canvas widget</string>
       <key>UTTypeConformsTo</key><array><string>public.data</string></array>
     </dict>
+    <dict>
+      <key>UTTypeIdentifier</key><string>cc.getcanvas.canvas.cloud-file</string>
+      <key>UTTypeDescription</key><string>Canvas Cloud File</string>
+      <key>UTTypeConformsTo</key><array><string>public.data</string></array>
+    </dict>
   </array>
   <key>NSAppTransportSecurity</key>
   <dict><key>NSAllowsLocalNetworking</key><true/></dict>

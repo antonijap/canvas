@@ -5,6 +5,33 @@
 import CryptoKit
 import Foundation
 
+struct CloudFileDrag: Codable {
+    let cloud: String
+    let id: String
+    let name: String
+}
+
+extension CloudMove {
+    static func localPackage(_ url: URL) -> URL? {
+        guard url.isFileURL, CloudFilePath(url.path) == nil else { return nil }
+        let file = url.standardizedFileURL
+        let package = file.lastPathComponent == "document.json" ? file.deletingLastPathComponent() : file
+        return package.pathExtension == "canvas" ? package : nil
+    }
+
+    static func localTarget(name: String, folder: URL, exists: (String) -> Bool) -> URL {
+        let filename = TabRename.name(name) ?? "Cloud File.canvas"
+        var target = folder.appendingPathComponent(filename)
+        let base = target.deletingPathExtension().lastPathComponent
+        var number = 2
+        while exists(target.path) {
+            target = folder.appendingPathComponent("\(base) \(number).canvas")
+            number += 1
+        }
+        return target
+    }
+}
+
 /// Copy shared by the Cloud file page, its actions and the host's settings.
 enum CloudFilesText {
     static func canEdit(_ role: String) -> Bool { role == "owner" || role == "editor" }

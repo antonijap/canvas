@@ -871,6 +871,7 @@ struct ShellLogicTests {
         check(has("View", "Pixel Grid", "'", [.command]) && has("View", "Rulers", "r", [.shift]), "Cmd+' and Shift+R")
         check(has("Edit", "Paste to Replace", "r", [.command, .shift]), "Paste to replace, Shift+Cmd+R")
         check(has("File", "Place Image\u{2026}", "k", [.command, .shift]), "Place image, Shift+Cmd+K")
+        check(has("File", "Move to Cloud", "", []), "Move to Cloud has no ellipsis")
         check(ContextMenuLayout.node.flatMap { $0 }.contains { $0.selector == "pasteReplace:" && $0.key == "r" && $0.shift }, "right-click > Paste to replace")
         check(has("Edit", "Find and Replace\u{2026}", "f", [.command]), "Edit > Find and Replace on Cmd+F")
         // Styled ranges in a text (TextRangeState): the selected letters' style over the layer's, Mixed, what goes to them.

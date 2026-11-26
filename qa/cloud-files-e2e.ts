@@ -28,8 +28,14 @@ try {
     const a = servers[0];
     let b = servers[1];
     const host = await call(a, '/api/cloud/host/start', { name: 'Studio', label: 'Anna' });
+    const statusPath = '/api/cloud/status?fresh=1&url=' + encodeURIComponent(host.url);
+    const hosted = await call(a, statusPath);
+    assert.deepEqual([hosted.status, hosted.role, hosted.hostedHere], ['connected', 'owner', true]);
     const inv = await call(a, '/api/cloud/host/invite', { hostId: host.hostId, label: 'Ben', role: 'editor' });
     const joined = await call(b, '/api/cloud/join', { link: inv.link, device: 'A Mac' });
+    assert.equal(joined.url, host.url);
+    const joinedStatus = await call(b, statusPath);
+    assert.deepEqual([joinedStatus.status, joinedStatus.role, joinedStatus.hostedHere], ['connected', 'editor', false]);
     const cloud = host.url;
     const created = await call(a, '/api/cloud/files/create', { cloud, name: 'Design' });
     const fileId = created.id;
@@ -64,7 +70,7 @@ try {
     console.log('PASS failed move keeps local source and cleans its Cloud import');
     await measurePresence(a,b,fa,fb);
     // A package carrying all three media types is moved only after its published hashes check out.
-    const pkg = path.join(tmp, 'anna', 'Move.canvas');
+    const pkg = path.join(tmp, 'ben', 'Move.canvas');
     fs.mkdirSync(pkg);
     fs.mkdirSync(path.join(pkg, 'media'));
     fs.mkdirSync(path.join(pkg, 'shaders'));
@@ -74,15 +80,22 @@ try {
     const mediaDocument = JSON.stringify({ version: '2.21', themes: { mode: ['light', 'dark'] }, variables: { accent: { type: 'color', value: '#123456' } }, fonts: [], children: [{ type: 'frame', id: 'Media', width: 100, height: 100, fill: { type: 'image', url: 'media/image.png' }, children: Array.from({ length: 130 }, (_, i) => ({ id: 'Item' + i, type: 'rectangle', width: 1, height: 1 })) }] });
     fs.writeFileSync(path.join(pkg, 'document.json'), mediaDocument);
     fs.writeFileSync(path.join(pkg, 'widgets.json'), JSON.stringify({ version: 1, widgets: [{ id: 'Video', kind: 'video', name: 'Clip', x: 0, y: 0, w: 100, h: 100, locked: false, config: { src: 'media/clip.mp4' } }, { id: 'Shader', kind: 'shader', name: 'Shader', x: 120, y: 0, w: 100, h: 100, locked: false, config: { rev: '123456789abc' } }, { id: 'Note', kind: 'note', name: 'Note', x: 0, y: 120, w: 100, h: 100, locked: false, config: { text: 'Example' } }], pages: [{ id: 'first', name: 'First', boards: ['Media'] }, { id: 'second', name: 'Second', boards: [] }, { id: 'third', name: 'Third', boards: [] }] }));
-    const moved = await call(a, '/api/cloud/files/move?file=' + encodeURIComponent(pkg), { cloud, name: 'Media' });
+    const moved = await call(b, '/api/cloud/files/move?file=' + encodeURIComponent(pkg), { cloud: joined.url, name: 'Media' });
     assert.equal(fs.existsSync(pkg), false);
     assert.ok(moved.verified);
     assert.equal(bytes(moved.file), mediaDocument);
-    const movedB = await call(b, '/api/cloud/files/open', { cloud: joined.url, id: moved.id });
-    await until('moved document identical', async () => bytes(moved.file) === bytes(movedB.file));
+    const movedA = await call(a, '/api/cloud/files/open', { cloud, id: moved.id });
+    await until('moved document identical', async () => bytes(moved.file) === bytes(movedA.file));
     for (const rel of ['media/image.png', 'media/clip.mp4', 'shaders/Shader.src-123456789abc.wgsl'])
-        assert.deepEqual(fs.readFileSync(path.join(moved.file, rel)), fs.readFileSync(path.join(movedB.file, rel)));
-    console.log('PASS byte identical move with image, video, shader, widgets, variables and pages');
+        assert.deepEqual(fs.readFileSync(path.join(moved.file, rel)), fs.readFileSync(path.join(movedA.file, rel)));
+    const movedParts = ['document.json', 'widgets.json', 'media/image.png', 'media/clip.mp4', 'shaders/Shader.src-123456789abc.wgsl'];
+    const expectedParts = movedParts.map(rel => fs.readFileSync(path.join(movedA.file, rel)));
+    const localCopy = await call(b, '/api/cloud/files/download', { cloud: joined.url, id: moved.id, target: pkg, move: true });
+    assert.equal(localCopy.moved, true);
+    assert.deepEqual(movedParts.map(rel => fs.readFileSync(path.join(localCopy.file, rel))), expectedParts);
+    const listedAfterMove = await call(a, '/api/cloud/files?cloud=' + encodeURIComponent(cloud));
+    assert.ok(!listedAfterMove.files.some((row: { id: string }) => row.id === moved.id));
+    console.log('PASS joined editor moves a package both ways with identical document, widgets and assets');
     const playground = path.join(tmp, 'anna', 'Playground.canvas');
     fs.cpSync(PLAYGROUND, playground, { recursive: true });
     const { document: playgroundDocument } = expectedMove(playground);

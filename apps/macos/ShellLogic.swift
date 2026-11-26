@@ -1463,7 +1463,7 @@ enum MenuSpec {
         // Shift+Cmd+E: the selection (else every layer on the page with export settings) with its settings.
         Item(title: "Export\u{2026}", command: "exportSettings", key: "e", mods: [.command, .shift]),
         // Sends the open file's comments to one of the Clouds in Settings > Cloud (src/cloud.ts).
-        Item(title: "Move to Cloud\u{2026}", command: "moveCloud", mods: []),
+        Item(title: "Move to Cloud", command: "moveCloud", mods: []),
         Item(title: "Share Comments to Cloud\u{2026}", command: "shareComments", mods: []),
         nil,
         Item(title: "Reload Page", command: "reload", mods: []),

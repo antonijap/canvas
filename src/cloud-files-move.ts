@@ -18,6 +18,12 @@ export interface MoveBlob {
     bytes: Buffer;
     source?: string;
 }
+function movePackagePath(source: string): string {
+    const file = path.resolve(source);
+    const parent = path.dirname(file);
+    return path.basename(file) === 'document.json' && parent.endsWith('.canvas') ? parent : file;
+}
+
 export async function prepareMove(source: string, publish: (name: string, doc: Record<string, Json>, envelope: Record<string, Json>, blobs: MoveBlob[], comments: ReturnType<typeof opsForShare>) => Promise<{
     id: string;
     file: string;
@@ -25,7 +31,7 @@ export async function prepareMove(source: string, publish: (name: string, doc: R
     cloud: string;
     role: string;
 }>, finalize?: (destination: { id:string; file:string; name:string; cloud:string; role:string }) => Promise<void>) {
-    const pkg = path.resolve(source);
+    const pkg = movePackagePath(source);
     if (!pkg.endsWith('.canvas') || fs.lstatSync(pkg).isSymbolicLink() || !fs.statSync(pkg).isDirectory())
         throw new Error('Move a local Canvas package');
     const fingerprint = (dir: string): string => {

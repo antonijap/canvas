@@ -542,6 +542,12 @@ enum CloudShare {
     }
 }
 
+enum CloudMove {
+    static func destinations(_ list: [CloudEntry], targetID: String?) -> [CloudEntry] {
+        list.filter { $0.kind != .server && (targetID == nil || $0.id == targetID) }
+    }
+}
+
 /// Settings > Cloud before an address is saved: one field and Sign in (CloudSettings.swift).
 enum CloudSetup {
     enum Next: Equatable { case signIn, askEmail }

@@ -28,9 +28,9 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
         CANVAS_FAKE_TUNNEL_ANY_PORT: '1',
         CANVAS_COMMENT_NAME: 'Editor',
     });
-    const call = async (route: string, body: unknown, expectedStatus?: number) => {
+    const call = async (route: string, body?: unknown, expectedStatus?: number) => {
         const response = await fetch(server.base + route, {
-            method: 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(body),
+            method: body === undefined ? 'GET' : 'POST', headers: { 'x-canvas': '1', 'content-type': 'application/json' }, body: JSON.stringify(body),
         });
         const result = await response.json() as any;
         if (expectedStatus !== undefined) assert.equal(response.status, expectedStatus, JSON.stringify(result));
@@ -42,7 +42,14 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
         for (const fixture of ['playground', 'media', 'empty variables', 'children first', 'package image folder']) {
             await t.test(fixture, async () => {
                 const host = await call('/api/cloud/host/start', { name: 'Studio', label: 'Editor' });
-                const source = path.join(dir, fixture + '.canvas');
+                const status = await call('/api/cloud/status?fresh=1&url=' + encodeURIComponent(host.url));
+                assert.equal(status.status, 'connected');
+                assert.equal(status.role, 'owner');
+                assert.equal(status.hostedHere, true);
+                const empty = await call('/api/cloud/files?cloud=' + encodeURIComponent(host.url));
+                assert.deepEqual(empty.files, []);
+                assert.equal(empty.role, 'owner');
+                const source = path.join(dir, (fixture === 'empty variables' ? 'Board+Notes' : fixture) + '.canvas');
                 if (fixture === 'playground') fs.cpSync(PLAYGROUND, source, { recursive: true });
                 else {
                     fs.mkdirSync(source);
@@ -105,7 +112,8 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     await call(route, { name: 'Anna', envelope: envelopeFor({ kind: 'vote.start', vote, scope: { page: 'layout' }, on: 'anything', perPerson: 3, hidden: true, anonymous: false }) });
                     await call(route, { name: 'Anna', envelope: envelopeFor({ kind: 'vote.cast', vote, ballot: randomUUID(), layer: 'r_free' }) });
                 }
-                const moved = await call('/api/cloud/files/move?file=' + encodeURIComponent(source), { cloud: host.url });
+                const selected = fixture === 'empty variables' ? path.join(source, 'document.json') : source;
+                const moved = await call('/api/cloud/files/move?file=' + encodeURIComponent(selected), { cloud: host.url });
                 assert.equal(moved.verified, true);
                 assert.equal(fs.existsSync(source), false);
                 const check = (file: string) => {
@@ -172,6 +180,11 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     const refusal = await call('/api/cloud/files/download', { cloud: host.url, id: invalid.id, target }, 400);
                     assert.match(refusal.error, /invalid blob path/);
                     assert.equal(fs.existsSync(target), false);
+                    const failedMove = await call('/api/cloud/files/download', { cloud: host.url, id: invalid.id, target, move: true }, 400);
+                    assert.match(failedMove.error, /invalid blob path/);
+                    assert.equal(fs.existsSync(target), false);
+                    const list = await call('/api/cloud/files?cloud=' + encodeURIComponent(host.url));
+                    assert.ok(list.files.some((row: { id: string }) => row.id === invalid.id), 'failed verification keeps the Cloud file');
                 }
                 if (fixture === 'media') {
                     const renamed = await call('/api/cloud/files/rename', { cloud: host.url, id: moved.id, name: ' \u202eBo\u0000ard ' });
@@ -187,9 +200,34 @@ test('Cloud moves preserve complete packages byte for byte after JSON serializat
                     check(target);
                     await call('/api/cloud/files/download', { cloud: host.url, id: moved.id, target }, 409);
                     check(target);
+                    await call('/api/cloud/files/download', { cloud: host.url, id: moved.id, target, move: true }, 409);
+                    const before = await call('/api/cloud/files?cloud=' + encodeURIComponent(host.url));
+                    assert.ok(before.files.some((row: { id: string }) => row.id === moved.id), 'a target collision keeps the Cloud file');
+                    await call('/api/comments/ops?file=' + encodeURIComponent(reopened.file), {
+                        ops: [envelopeFor({ kind: 'thread.create', thread: randomUUID(), comment: randomUUID(),
+                            body: 'Review this board', anchor: { nodeId: 'Board', x: 0.5, y: 0.5 } })],
+                    });
+                    const commentsRoute = '/api/comments?file=' + encodeURIComponent(reopened.file);
+                    for (let attempt = 0; attempt < 50; attempt++) {
+                        if ((await call(commentsRoute)).threads.length) break;
+                        await new Promise(resolve => setTimeout(resolve, 20));
+                    }
+                    const cloudComments = (await call(commentsRoute)).threads;
+                    assert.equal(cloudComments.length, 1);
+                    const moveTarget = path.join(dir, 'Moved.canvas');
+                    const local = await call('/api/cloud/files/download', { cloud: host.url, id: moved.id, target: moveTarget, move: true });
+                    assert.equal(local.file, moveTarget);
+                    assert.equal(local.verified, true);
+                    assert.equal(fs.existsSync(path.join(moveTarget, '.cloud')), false);
+                    check(moveTarget);
+                    const localComments = readCommentsFile(moveTarget)!;
+                    assert.equal(localComments.server, undefined);
+                    assert.deepEqual(localComments.threads, cloudComments.map((thread: object) => ({ ...thread, doc: localComments.doc })));
+                    const after = await call('/api/cloud/files?cloud=' + encodeURIComponent(host.url));
+                    assert.deepEqual(after.files.map((row: { id: string }) => row.id), [duplicate.id]);
                     await call('/api/cloud/files/delete', { cloud: host.url, id: duplicate.id });
                     const list = await (await fetch(server.base + '/api/cloud/files?cloud=' + encodeURIComponent(host.url))).json() as { files: { id: string }[] };
-                    assert.deepEqual(list.files.map(file => file.id), [moved.id]);
+                    assert.deepEqual(list.files, []);
                 }
             });
         }

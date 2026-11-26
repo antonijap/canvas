@@ -647,6 +647,40 @@ test("rename removes controls and bidi overrides before checking the name", asyn
   assert.equal(file.name, "Board 2");
 });
 
+test("a Cloud move keeps a file whose design or comments changed during download", async () => {
+  const { h, base } = await host();
+  const owner = bearer(h.ownerDevice("Owner device"));
+  const editor = bearer((await join(base, h.invite("Editor", "editor").code, "Editor device")).token);
+  const { id } = await (await post(base, "/v1/files", { name: "Board" }, owner)).json() as { id: string };
+  const route = `/v1/files/${id}`;
+  const read = (suffix: string, headers = owner) => fetch(base + route + suffix, { headers });
+  const remove = (seq: number, epoch: number, commentsSeq: number, headers = owner) => fetch(base + route + "/move", {
+    method: "DELETE", headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ seq, epoch, commentsSeq }),
+  });
+  const { seq, epoch } = await (await read("/manifest")).json() as { seq: number; epoch: number };
+  assert.equal((await read("/move", editor)).status, 403);
+  assert.equal((await remove(seq, epoch, 0, editor)).status, 403);
+  const add = await post(base, route + "/sync", { type: "actions", epoch, actions: [{
+    id: crypto.randomUUID(), epoch, baseSeq: seq, ops: [{ k: "insert", parent: null, after: null, node: { id: "Board", type: "frame", children: [] } }],
+  }] }, owner);
+  assert.equal(add.status, 200);
+  const afterEdit = await (await read("/manifest")).json() as { seq: number; epoch: number };
+  assert.ok(afterEdit.seq > seq);
+  assert.equal((await remove(seq, epoch, 0)).status, 409);
+  assert.equal((await read("")).status, 200);
+  const comment = await post(base, route + "/comments", { ops: [{ opId: crypto.randomUUID(), doc: id, at: new Date().toISOString(), op: {
+    kind: "thread.create", thread: crypto.randomUUID(), comment: crypto.randomUUID(), body: "Review", anchor: { nodeId: "Board", x: 0.5, y: 0.5 },
+  } }] }, editor);
+  assert.equal(comment.status, 200);
+  const comments = await (await read("/move")).json() as { seq: number; threads: object[] };
+  assert.equal(comments.threads.length, 1);
+  assert.equal((await remove(afterEdit.seq, epoch, 0)).status, 409);
+  assert.equal((await read("")).status, 200);
+  assert.equal((await remove(afterEdit.seq, epoch, comments.seq)).status, 200);
+  assert.equal((await read("")).status, 404);
+});
+
 test("duplicate refuses the combined size of its blobs before copying", async t => {
   const { h, dir, base } = await host();
   const owner = bearer(h.ownerDevice("Owner device"));

@@ -142,8 +142,14 @@ struct CloudFilesView: View {
                 perform("download", item: item, with: ["target": url.path])
             }
         }.disabled(busy || offline)
+        Button("Move to Local Files") { account.moveFileToLocal(model, dragFile(item)) }
+            .disabled(busy || !canDelete(item))
         Divider()
         Button("Delete", role: .destructive) { deleteItem = item }.disabled(busy || !canDelete(item))
+    }
+
+    private func dragFile(_ item: CloudFileItem) -> CloudFileDrag {
+        CloudFileDrag(cloud: entry.url, id: item.id, name: item.name)
     }
 
     private var revealedID: String? {
@@ -153,7 +159,7 @@ struct CloudFilesView: View {
     }
 
     private func move(_ url: URL) {
-        guard canEdit, !busy, url.isFileURL, url.pathExtension.lowercased() == "canvas" else { return }
+        guard !busy else { return }
         account.moveOpenFile(model, file: url.path, to: entry)
     }
 
@@ -169,17 +175,8 @@ struct CloudFilesView: View {
     }
 
     private func drop(_ providers: [NSItemProvider]) -> Bool {
-        guard canEdit, !busy, providers.count == 1, let provider = providers.first else { return false }
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-            let url: URL?
-            if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) }
-            else if let value = item as? URL { url = value }
-            else if let value = item as? String { url = URL(string: value) }
-            else { url = nil }
-            guard let url else { return }
-            Task { @MainActor in move(url) }
-        }
-        return true
+        guard !busy, !loaded || canEdit else { return false }
+        return CanvasFileDrag.loadLocal(providers, then: move)
     }
 
     private var header: some View {
@@ -239,6 +236,8 @@ struct CloudFilesView: View {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: HomeMetric.cardMin, maximum: HomeMetric.cardMax), spacing: HomeMetric.gap, alignment: .top)], alignment: .leading, spacing: 24) {
                             ForEach(visible) { item in
                                 CloudFileCard(name: item.name, subtitle: CloudFilesText.edited(item.updated)) { open(item) }
+                                    .contentShape(Rectangle())
+                                    .modifier(FileCardDrag(provider: canDelete(item) && !busy ? { CanvasFileDrag.provider(dragFile(item)) } : nil))
                                     .disabled(busy).qaID("cloud-file", label: item.name)
                                     .contextMenu { fileMenu(item) }
                                     .id(item.id)
@@ -256,7 +255,7 @@ struct CloudFilesView: View {
             if offline { Spacer(minLength: 0) }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(targeted && canEdit ? Palette.hover : Color.clear)
+        .background(targeted && !busy && (!loaded || canEdit) ? Palette.hover : Color.clear)
         .contentShape(Rectangle())
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $targeted, perform: drop)
         .alert("Delete Cloud File", isPresented: Binding(get: { deleteItem != nil }, set: { if !$0 { deleteItem = nil } }), presenting: deleteItem) { item in

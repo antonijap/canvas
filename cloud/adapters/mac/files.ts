@@ -507,15 +507,27 @@ export class MacFiles {
                 this.db.sql.exec('UPDATE files SET name=?, updated_at=? WHERE id=?', name, new Date(this.now()).toISOString(), file);
                 return json(200, { ok: true, name });
             }
-            if (!sub && method === 'DELETE') {
+            if (sub === 'move' && method === 'GET') {
                 if (row.state !== 'live') return json(404, { code: 'not_found' });
                 if (!canDelete(row, me)) return json(403, { code: 'forbidden' });
+                return json(200, this.room(file).comments.snapshot());
+            }
+            if ((!sub || sub === 'move') && method === 'DELETE') {
+                if (row.state !== 'live') return json(404, { code: 'not_found' });
+                if (!canDelete(row, me)) return json(403, { code: 'forbidden' });
+                const expected = sub === 'move' ? await body() : undefined;
                 const r = this.room(file);
                 await r.core.exclusive(async () => {
                     const editor = this.edit(me);
                     const current = this.row(file, editor);
                     if (current.state !== 'live') error(404, 'not_found', 'No such Cloud file');
                     if (!canDelete(current, editor)) error(403, 'forbidden', 'Only the creator or Cloud owner can delete this file');
+                    if (sub === 'move') {
+                        const { seq, epoch } = r.core.meta();
+                        if (expected?.seq !== seq || expected?.epoch !== epoch || expected?.commentsSeq !== r.comments.sequence()) {
+                            error(409, 'file_changed', 'The Cloud file changed during the move');
+                        }
+                    }
                     this.db.sql.exec("UPDATE files SET state='trash' WHERE id=?", file);
                     for (const ws of r.sockets.keys())
                         ws.close(1008, 'File is in Trash');
@@ -564,6 +576,7 @@ export class MacFiles {
                 const b = await body(), fresh = this.current(me);
                 if (!fresh)
                     return json(401, { code: 'removed' });
+                if (this.row(file, fresh).state === 'trash') return json(404, { code: 'not_found' });
                 r.roles.push(me.id, fresh.role);
                 if (b.type === 'hello') {
                     if (!this.bank.grant(fresh.id, 'messages', 1, this.now())) error(429, 'quota', 'Message quota');
@@ -756,9 +769,11 @@ export class MacFiles {
             if (sub === 'comments' && method === 'POST') {
                 const b = await body(), fresh = this.current(me);
                 if (!fresh) return json(403, { code: 'forbidden' });
+                const state = this.row(file, fresh).state;
+                if (state === 'trash') return json(404, { code: 'not_found' });
                 if (!Array.isArray(b.ops) || b.ops.length > LIMITS.opsPerMessage)
                     return json(400, { code: 'invalid' });
-                const importing = this.row(file, fresh).state === 'importing';
+                const importing = state === 'importing';
                 const now = this.now();
                 const allowance = importing ? this.importBank.grant('import:' + fresh.id, 'ops', b.ops.length, now)
                     : this.bank.grant(fresh.id, 'ops', b.ops.length, now);
@@ -827,11 +842,13 @@ export class MacFiles {
                     queued++;
                     chain = chain.then(async () => {
                         const fresh = this.current(me);
-                        if (fresh)
-                            this.row(m[1], fresh);
                         if (!fresh) {
                             ws.send(JSON.stringify({ type: 'removed' }));
                             ws.close(1008, 'removed');
+                            return;
+                        }
+                        if (this.row(m[1], fresh).state === 'trash') {
+                            ws.close(1008, 'File is in Trash');
                             return;
                         }
                         r.roles.push(me.id, fresh.role);

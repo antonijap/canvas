@@ -320,6 +320,13 @@ extension SettingsTests {
         // Sharing: only Clouds that are connected with an owner or editor role can take a file.
         let st: [String: (status: String, role: String?)] = ["https://b.example.com": ("connected", "editor"), "https://a.example.com": ("connected", "commenter"), "https://c.example.com": ("signedOut", nil)]
         check(CloudShare.candidates(named, status: st).map(\.name) == ["birch"], "who can take a file")
+        let joined = CloudEntry(url: "canvas-cloud://\(ids[2])", name: "Joined", kind: .joined)
+        let destinations = (hosted2?.list ?? []) + [joined]
+        if let fresh = CloudList.hosted(destinations).last {
+            check(CloudMove.destinations(destinations, targetID: fresh.id) == [fresh], "a drop checks the fresh host independently of the last entry")
+            check(CloudMove.destinations(destinations, targetID: nil).map(\.kind) == [.hosted, .hosted, .joined], "the menu consults all Mac Clouds")
+            check(CloudMove.destinations(destinations, targetID: e.id).isEmpty, "server rows do not take file moves")
+        }
     }
 
     /// The single Cloud of an older version moves into the list once, written before the old keys go.
