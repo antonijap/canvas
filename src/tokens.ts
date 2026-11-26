@@ -116,6 +116,9 @@ export const METRICS = {
   sidebarMax: 420,
   resizeHit: 12,
   propsWidth: 284,
+  // The editor sidebars float: this far from the window edges and the top bar, with this corner radius.
+  sidebarGap: 8,
+  sidebarPanelRadius: 16,
   scrollbar: 10,
   pill: 40,
   pillPad: 4,

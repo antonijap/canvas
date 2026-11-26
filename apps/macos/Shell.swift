@@ -166,6 +166,8 @@ final class ControlHostingController<Content: View>: NSHostingController<Content
 struct RootView: View {
     @ObservedObject var model: CanvasModel
     @State private var windowWidth: CGFloat = 0
+    /// The floating right panel and its gap to the window edge.
+    private static let propsReserve = Metric.propsWidth + Metric.sidebarGap
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden && !model.homeShown }
     private var inspectorShown: Bool { model.propertiesShown }
     private var toolPaletteShown: Bool { model.currentFile != nil && !model.homeShown && !model.cloudReadOnly && !model.uiHidden }
@@ -179,16 +181,16 @@ struct RootView: View {
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
     private var panelWidth: CGFloat? {
         guard windowWidth > 0 else { return model.sidebarWidth }
-        return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, rightSidebar: rightSidebarShown,
-                                        inset: Metric.inset, gap: Metric.islandGap, props: Metric.propsWidth, minWidth: Metric.sidebarMin,
+        return ShellLayout.sidebarWidth(window: windowWidth - Metric.sidebarGap, stored: model.sidebarWidth, rightSidebar: rightSidebarShown,
+                                        inset: Metric.inset, gap: Metric.islandGap, props: Self.propsReserve, minWidth: Metric.sidebarMin,
                                         minimumCanvas: minimumCanvasWidth)
     }
 
     /// The widest the panel may be dragged in this window: the maximum, or the room the window leaves.
     private var panelMax: CGFloat {
         guard windowWidth > 0 else { return Metric.sidebarMax }
-        let room = ShellLayout.room(window: windowWidth, rightSidebar: rightSidebarShown, inset: Metric.inset,
-                                    gap: Metric.islandGap, props: Metric.propsWidth, minimumCanvas: minimumCanvasWidth)
+        let room = ShellLayout.room(window: windowWidth - Metric.sidebarGap, rightSidebar: rightSidebarShown, inset: Metric.inset,
+                                    gap: Metric.islandGap, props: Self.propsReserve, minimumCanvas: minimumCanvasWidth)
         return min(Metric.sidebarMax, room)
     }
 
@@ -247,7 +249,7 @@ struct RootView: View {
                     // Nothing to zoom on an empty page: the pill comes back with the first board.
                     if zoomShown {
                         ZoomCorner(model: model)
-                            .padding(.trailing, rightSidebarShown ? Metric.propsWidth : 0)
+                            .padding(.trailing, rightSidebarShown ? Self.propsReserve : 0)
                             .padding(.bottom, zoomAboveTools ? toolClearance - Metric.inset : 0)
                     }
                     if let t = model.toast {
@@ -292,8 +294,9 @@ struct RootView: View {
     }
 
     private func canvasInsets(bottomClearance: CGFloat = 0) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
-        CanvasInsets.compute(panel: panelOpen ? panelWidth : nil, rightSidebar: rightSidebarShown, inset: Metric.inset,
-                             gap: Metric.islandGap, pill: Metric.pill, props: Metric.propsWidth, bottomClearance: bottomClearance)
+        CanvasInsets.compute(panel: panelOpen ? panelWidth.map { $0 + Metric.sidebarGap } : nil, rightSidebar: rightSidebarShown,
+                             inset: Metric.inset, gap: Metric.islandGap, pill: Metric.pill, props: Self.propsReserve,
+                             bottomClearance: bottomClearance)
     }
 
     private struct Insets: Equatable {
@@ -627,10 +630,11 @@ struct LeftColumn: View {
             }
             if let width = panelWidth {
                 column(width: width)
-                    .transition(reduceMotion ? .identity : .offset(x: -width - 32))
+                    .padding([.leading, .bottom], Metric.sidebarGap)
+                    .transition(reduceMotion ? .identity : .offset(x: -width - Metric.sidebarGap - 32))
             }
         }
-        .padding(.top, Metric.topBar)
+        .padding(.top, Metric.topBar + Metric.sidebarGap)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: panelWidth != nil)
         .onChange(of: panelWidth != nil) { _, shown in
@@ -735,10 +739,11 @@ struct LeftColumn: View {
         }
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
-        .sidebarSurface(canvasEdge: .trailing)
+        .sidebarSurface()
         .overlay(alignment: .trailing) {
             SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
                                 defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
+                .padding(.vertical, Metric.sidebarPanelRadius / 2)
         }
         .task(id: section) { if section == .widgets { model.fetchKinds() } }
         .overlay(alignment: .topLeading) {

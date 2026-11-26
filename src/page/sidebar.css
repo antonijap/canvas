@@ -176,7 +176,14 @@
   -webkit-font-smoothing: antialiased;
 }
 .right-sidebar[hidden] { display: none; }
-.native .right-sidebar { top: var(--c-top-bar); }
+/* In the app the right sidebar floats like the native panels. It lives in the canvas's own page, where the system
+   material cannot reach, so it stays solid. */
+.native .right-sidebar {
+  inset: calc(var(--c-top-bar) + var(--c-sidebar-gap)) var(--c-sidebar-gap) var(--c-sidebar-gap) auto;
+  border-inline-start: 0;
+  border-radius: var(--c-sidebar-panel-radius);
+  box-shadow: 0 4px 28px #0000001a;
+}
 body:is(.cm-sidebar-open, .cv-open) #props { visibility: hidden; }
 .right-sidebar * { box-sizing: border-box; }
 .right-sidebar-header {

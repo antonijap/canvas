@@ -42,7 +42,7 @@ async function captureStudio(t: NT, dir: string) {
   }
 }
 
-sc("sidebar", "right panels dock and align with the Layers header", { covers: ["sidebar:menu"] }, async (t: NT) => {
+sc("sidebar", "right panels float and align with the Layers header", { covers: ["sidebar:menu"] }, async (t: NT) => {
   await t.section("Layers");
   await t.showPage("layout");
   await t.selectIds(["lay_nest"]);
@@ -51,9 +51,9 @@ sc("sidebar", "right panels dock and align with the Layers header", { covers: ["
   const { window } = await t.state();
   const leftHeader = await header(t);
   const docked = (panel: { x: number; y: number; w: number; h: number }, title: { y: number; h: number }, name: string) => {
-    t.near(panel.x + panel.w, window.width, 1, name + " reaches the right edge");
-    t.near(panel.y, METRICS.topBar, 1, name + " starts below the top bar");
-    t.near(panel.y + panel.h, window.height, 1, name + " reaches the bottom");
+    t.near(panel.x + panel.w, window.width - METRICS.sidebarGap, 1, name + " floats in from the right edge");
+    t.near(panel.y, METRICS.topBar + METRICS.sidebarGap, 1, name + " floats below the top bar");
+    t.near(panel.y + panel.h, window.height - METRICS.sidebarGap, 1, name + " floats above the bottom");
     t.near(panel.w, METRICS.propsWidth, 1, name + " has the shared width");
     t.near(title.h, METRICS.control, 1, name + " header height");
     t.near(title.y + title.h / 2, center(leftHeader).y, 1, name + " header centre");
@@ -66,8 +66,8 @@ sc("sidebar", "right panels dock and align with the Layers header", { covers: ["
   const trailingX = center(action).x;
   const checkZoom = async (name: string) => {
     const zoom = await t.mark({ id: "zoom-island" });
-    t.near(zoom.x + zoom.w, window.width - METRICS.propsWidth - METRICS.inset, 1, name + " leaves the normal gap before zoom");
-    await t.waitFor(async () => await t.js("return canvasHost.insets.r;") === METRICS.propsWidth + METRICS.gap,
+    t.near(zoom.x + zoom.w, window.width - METRICS.sidebarGap - METRICS.propsWidth - METRICS.inset, 1, name + " leaves the normal gap before zoom");
+    await t.waitFor(async () => await t.js("return canvasHost.insets.r;") === METRICS.sidebarGap + METRICS.propsWidth + METRICS.gap,
       name + " reserves its width and gap on the canvas");
   };
   await checkZoom("Inspector");

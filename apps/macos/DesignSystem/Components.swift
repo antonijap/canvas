@@ -70,6 +70,25 @@ private struct GlassBar<S: Shape>: ViewModifier {
     }
 }
 
+private struct SidebarGlass: ViewModifier {
+    @Environment(\.appearsActive) private var appearsActive
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Metric.sidebarPanelRadius, style: .continuous)
+        content
+            .clipShape(shape)
+            .background {
+                // The tint keeps small text readable over a loud board. An inactive window's glass turns flat grey,
+                // so it gets the sidebar's own colour (as GlassIsland does).
+                shape
+                    .fill(appearsActive ? .clear : Palette.sidebarSurface.opacity(0.92))
+                    .glassEffect(.regular.tint(Palette.sidebarSurface.opacity(0.25)), in: shape)
+                    .shadow(color: .black.opacity(0.10), radius: 14, y: 4)
+                    .allowsHitTesting(false)
+            }
+    }
+}
+
 extension View {
     func glassBar<S: Shape>(in shape: S) -> some View { modifier(GlassBar(shape: shape)) }
 
@@ -80,14 +99,8 @@ extension View {
         }
     }
 
-    func sidebarSurface(canvasEdge: HorizontalAlignment) -> some View {
-        background {
-            Rectangle().fill(Palette.sidebarSurface).allowsHitTesting(false)
-        }
-        .overlay(alignment: Alignment(horizontal: canvasEdge, vertical: .center)) {
-            Rectangle().fill(Palette.sidebarHairline).frame(width: 1).allowsHitTesting(false)
-        }
-    }
+    /// An editor sidebar: a floating panel of system Liquid Glass with the canvas behind it.
+    func sidebarSurface() -> some View { modifier(SidebarGlass()) }
 
     /// Extends a section's content row so its last control shares the header action's center.
     func inspectorActionColumn(controlWidth: CGFloat? = Metric.sidebarRow) -> some View {

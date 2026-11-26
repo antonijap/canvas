@@ -30,9 +30,10 @@ struct Inspector: View {
             .environment(\.fieldFill, Palette.sidebarField)
             .frame(width: Metric.propsWidth)
             .frame(maxHeight: .infinity, alignment: .top)
-            .sidebarSurface(canvasEdge: .leading)
+            .sidebarSurface()
             .qaID("right-sidebar-panel")
-            .padding(.top, Metric.topBar)
+            .padding(.top, Metric.topBar + Metric.sidebarGap)
+            .padding([.trailing, .bottom], Metric.sidebarGap)
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
