@@ -4,6 +4,7 @@
 // Palette, Metric, Typography or Motion (generated from src/tokens.ts), so one token edit
 // restyles the studio.
 
+import AppKit
 import SwiftUI
 
 // MARK: Glyphs
@@ -70,37 +71,49 @@ private struct GlassBar<S: Shape>: ViewModifier {
     }
 }
 
-private struct SidebarGlass: ViewModifier {
-    @Environment(\.appearsActive) private var appearsActive
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Metric.sidebarPanelRadius, style: .continuous)
-        content
-            .clipShape(shape)
-            .background {
-                // The tint keeps small text readable over a loud board. An inactive window's glass turns flat grey,
-                // so it gets the sidebar's own colour (as GlassIsland does).
-                shape
-                    .fill(appearsActive ? .clear : Palette.sidebarSurface.opacity(0.92))
-                    .glassEffect(.regular.tint(Palette.sidebarSurface.opacity(0.25)), in: shape)
-                    .shadow(color: .black.opacity(0.10), radius: 14, y: 4)
-                    .allowsHitTesting(false)
-            }
+/// The native sidebar material: the desktop shows through softly, the same from top to bottom.
+private struct SidebarMaterial: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = .sidebar
+        v.blendingMode = .behindWindow
+        v.state = .followsWindowActiveState
+        return v
     }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 extension View {
     func glassBar<S: Shape>(in shape: S) -> some View { modifier(GlassBar(shape: shape)) }
 
-    func topBarSurface() -> some View {
-        background { Rectangle().fill(Palette.sidebarSurface).allowsHitTesting(false) }
+    /// The content side of the top bar: opaque, with a hairline under it. `leading` leaves the sidebar's part clear.
+    func topBarSurface(leading: CGFloat = 0) -> some View {
+        background { Rectangle().fill(Palette.sidebarSurface).padding(.leading, leading).allowsHitTesting(false) }
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Palette.sidebarHairline).frame(height: 1).allowsHitTesting(false)
+            Rectangle().fill(Palette.sidebarHairline).frame(height: 1).padding(.leading, leading).allowsHitTesting(false)
         }
     }
 
-    /// An editor sidebar: a floating panel of system Liquid Glass with the canvas behind it.
-    func sidebarSurface() -> some View { modifier(SidebarGlass()) }
+    /// The right sidebar: a solid column flush with the window, a hairline on the canvas side.
+    func sidebarSurface(canvasEdge: HorizontalAlignment) -> some View {
+        background {
+            Rectangle().fill(Palette.sidebarSurface).allowsHitTesting(false)
+        }
+        .overlay(alignment: Alignment(horizontal: canvasEdge, vertical: .center)) {
+            Rectangle().fill(Palette.sidebarHairline).frame(width: 1).allowsHitTesting(false)
+        }
+    }
+
+    /// The left sidebar: native sidebar vibrancy, full height, a hairline on the canvas side.
+    func sidebarMaterial(canvasEdge: HorizontalAlignment) -> some View {
+        background {
+            SidebarMaterial().allowsHitTesting(false).ignoresSafeArea()
+        }
+        .overlay(alignment: Alignment(horizontal: canvasEdge, vertical: .center)) {
+            Rectangle().fill(Palette.sidebarHairline).frame(width: 1).allowsHitTesting(false).ignoresSafeArea()
+        }
+    }
 
     /// Extends a section's content row so its last control shares the header action's center.
     func inspectorActionColumn(controlWidth: CGFloat? = Metric.sidebarRow) -> some View {

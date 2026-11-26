@@ -82,6 +82,7 @@ struct PagesSection: View {
     @State private var editingFile: String?
     @State private var draft = ""
     @State private var confirmDelete: PageInfo?
+    @AppStorage("canvas.sidebar.pagesCollapsed") private var collapsed = false
     @State private var dragging: String?
     @State private var dropTarget: PageDropTarget?
     @State private var dropWatch: Task<Void, Never>?
@@ -91,7 +92,7 @@ struct PagesSection: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                SidebarGroupLabel(title: "Pages")
+                SidebarGroupLabel(title: "Pages", collapsed: $collapsed)
                 Button {
                     model.addPage { id, name in startRename(PageInfo(id: id, name: name, count: 0)) }
                 } label: {
@@ -101,7 +102,9 @@ struct PagesSection: View {
                 .buttonStyle(.plain).chromeHelp("Add page").accessibilityLabel("Add page")
                 .qaID("page-add", label: "Add page").disabled(model.cloudReadOnly || model.revision.isEmpty)
             }
-            if model.revision.isEmpty {
+            if collapsed {
+                EmptyView()
+            } else if model.revision.isEmpty {
                 if let sidebar = model.openingSidebar {
                     VStack(spacing: 0) {
                         ForEach(sidebar.pages) { page in

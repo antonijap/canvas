@@ -393,8 +393,8 @@ private struct HomeRow: View {
                         .qaID("home-cloud-word", label: word.text)
                 }
             }
-            .padding(.horizontal, 12).frame(height: Metric.row)
-            .background(RoundedRectangle(cornerRadius: Metric.radiusRow, style: .continuous).fill(selected ? Palette.active : hovering ? Palette.hover : .clear))
+            .padding(.horizontal, 8).frame(height: SidebarStyle.row)
+            .background(RoundedRectangle(cornerRadius: SidebarStyle.radius, style: .continuous).fill(selected ? Palette.active : hovering ? Palette.hover : .clear))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -439,9 +439,9 @@ private struct HomeMain: View {
     }
 
     /// The header sits level with the sidebar's first control: the search field, or Recents' row before the first file.
-    private var headerHeight: CGFloat { HomeLogic.showsSearch(files: store.recents.count, query: store.query) ? Metric.field : Metric.row }
+    private var headerHeight: CGFloat { HomeLogic.showsSearch(files: store.recents.count, query: store.query) ? Metric.field : SidebarStyle.row }
     /// The sidebar panel's top plus its padding: the header's top is its first control's top.
-    private var topInset: CGFloat { Metric.topBar + 2 * Metric.sidebarGap }
+    private var topInset: CGFloat { Metric.topBar + Metric.sidebarInset }
 
     @ViewBuilder private var top: some View {
         if let cloud {

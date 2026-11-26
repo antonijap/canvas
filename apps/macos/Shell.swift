@@ -166,8 +166,7 @@ final class ControlHostingController<Content: View>: NSHostingController<Content
 struct RootView: View {
     @ObservedObject var model: CanvasModel
     @State private var windowWidth: CGFloat = 0
-    /// The floating right panel and its gap to the window edge.
-    private static let propsReserve = Metric.propsWidth + Metric.sidebarGap
+    private static let propsReserve = Metric.propsWidth
     /// The left sidebar is the same panel on Home and in a file (only its rows change).
     private var panelOpen: Bool { model.panelOpen && !model.uiHidden }
     private var inspectorShown: Bool { model.propertiesShown }
@@ -188,7 +187,7 @@ struct RootView: View {
     /// The panel's width in this window, or nil when the window is too narrow for it beside the inspector.
     private var panelWidth: CGFloat? {
         guard windowWidth > 0 else { return model.sidebarWidth }
-        return ShellLayout.sidebarWidth(window: windowWidth - Metric.sidebarGap, stored: model.sidebarWidth, rightSidebar: fileRightSidebar,
+        return ShellLayout.sidebarWidth(window: windowWidth, stored: model.sidebarWidth, rightSidebar: fileRightSidebar,
                                         inset: Metric.inset, gap: Metric.islandGap, props: Self.propsReserve, minWidth: Metric.sidebarMin,
                                         minimumCanvas: minimumCanvasWidth)
     }
@@ -196,7 +195,7 @@ struct RootView: View {
     /// The widest the panel may be dragged in this window: the maximum, or the room the window leaves.
     private var panelMax: CGFloat {
         guard windowWidth > 0 else { return Metric.sidebarMax }
-        let room = ShellLayout.room(window: windowWidth - Metric.sidebarGap, rightSidebar: fileRightSidebar, inset: Metric.inset,
+        let room = ShellLayout.room(window: windowWidth, rightSidebar: fileRightSidebar, inset: Metric.inset,
                                     gap: Metric.islandGap, props: Self.propsReserve, minimumCanvas: minimumCanvasWidth)
         return min(Metric.sidebarMax, room)
     }
@@ -230,7 +229,7 @@ struct RootView: View {
 
             // The Home tab: a native screen over the (hidden, still alive) canvas page (Home.swift).
             if model.homeShown {
-                HomeView(model: model, sidebarReserve: panelOpen ? panelWidth.map { $0 + Metric.sidebarGap } ?? 0 : 0).ignoresSafeArea()
+                HomeView(model: model, sidebarReserve: panelOpen ? panelWidth ?? 0 : 0).ignoresSafeArea()
             }
 
             // Talk to the selection: the spark and progress rings, glass over the canvas, under the islands (Spark.swift).
@@ -286,7 +285,7 @@ struct RootView: View {
                     .ignoresSafeArea()
             }
 
-            TopBar(model: model).ignoresSafeArea(edges: .top)
+            TopBar(model: model, sidebarWidth: panelOpen ? panelWidth : nil).ignoresSafeArea(edges: .top)
 
             // Rename Layers (Cmd+R with several layers): Layers.swift.
             BatchRenameLayer(model: model)
@@ -303,7 +302,7 @@ struct RootView: View {
     }
 
     private func canvasInsets(bottomClearance: CGFloat = 0) -> (l: CGFloat, t: CGFloat, r: CGFloat, b: CGFloat) {
-        CanvasInsets.compute(panel: panelOpen ? panelWidth.map { $0 + Metric.sidebarGap } : nil, rightSidebar: rightSidebarShown,
+        CanvasInsets.compute(panel: panelOpen ? panelWidth : nil, rightSidebar: rightSidebarShown,
                              inset: Metric.inset, gap: Metric.islandGap, pill: Metric.pill, props: Self.propsReserve,
                              bottomClearance: bottomClearance)
     }
@@ -333,6 +332,10 @@ struct TopBar: View {
     private static let leadingWidth = Metric.trafficLights + 16
     private let gap = ToolbarButtonStyle.chipGap
     @ObservedObject var model: CanvasModel
+    /// The left sidebar's width while it is shown: the window buttons, the toggle and Home sit on it, and the file
+    /// tabs start right of it. nil when it is hidden.
+    var sidebarWidth: CGFloat? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var tabWidths: [String: CGFloat] = [:]
     @State private var barWidth: CGFloat = 0
     @State private var actionsWidth: CGFloat = 0
@@ -341,10 +344,19 @@ struct TopBar: View {
 
     private var showsSidebarToggle: Bool { !model.uiHidden }
 
+    /// The window buttons, the sidebar toggle and Home: as wide as the sidebar while it is shown.
+    private var leadingGroupWidth: CGFloat {
+        let controls: CGFloat = showsSidebarToggle ? 2 : 1
+        let natural = Self.leadingWidth + controls * (Metric.toolbarControl + gap) - gap
+        guard let sidebarWidth else { return natural }
+        return max(natural, sidebarWidth)
+    }
+    /// The space between the leading group and the first file tab.
+    private var tabsLead: CGFloat { sidebarWidth == nil ? gap : Metric.sidebarInset }
+
     private var tabRoom: CGFloat {
-        let controls: CGFloat = showsSidebarToggle ? 3 : 2
-        let fixedWidth = controls * (Metric.toolbarControl + gap)
-        return max(0, barWidth - actionsWidth - Self.leadingWidth - fixedWidth - Self.minimumDragWidth)
+        let fixedWidth = Metric.toolbarControl + gap
+        return max(0, barWidth - actionsWidth - leadingGroupWidth - tabsLead - fixedWidth - Self.minimumDragWidth)
     }
     private func fittedWidths(for files: [String]) -> [CGFloat] {
         let font = NSFont.systemFont(ofSize: 12, weight: .medium)
@@ -470,13 +482,6 @@ struct TopBar: View {
         let fitted = fittedWidths(for: files)
         let stripWidth = min(tabRoom, fitted.reduce(0, +) + CGFloat(max(0, files.count - 1)) * gap)
         return HStack(spacing: gap) {
-            if showsSidebarToggle {
-                SidebarToggleButton(model: model)
-            }
-            TopBarIconButton(symbol: "house", active: model.homeShown, help: "Home", shortcut: "\u{21E7}\u{2318}0") {
-                model.showHome()
-            }
-            .qaID("home-tab", label: "Home")
             if !files.isEmpty {
                 FadingScroller(scrollTo: model.currentFile, spacing: gap) {
                     ForEach(Array(files.enumerated()), id: \.element) { i, file in
@@ -492,6 +497,20 @@ struct TopBar: View {
             TopBarIconButton(symbol: "plus", help: "New file", shortcut: "\u{2318}N") { model.newCanvas() }
                 .qaID("tab-new", label: "New file")
         }
+    }
+
+    private var leadingGroup: some View {
+        HStack(spacing: gap) {
+            Color.clear.frame(width: Self.leadingWidth - gap)
+            if showsSidebarToggle {
+                SidebarToggleButton(model: model)
+            }
+            TopBarIconButton(symbol: "house", active: model.homeShown, help: "Home", shortcut: "\u{21E7}\u{2318}0") {
+                model.showHome()
+            }
+            .qaID("home-tab", label: "Home")
+        }
+        .frame(width: leadingGroupWidth, alignment: .leading)
     }
 
     private var tabMenu: some View {
@@ -551,13 +570,15 @@ struct TopBar: View {
     var body: some View {
         GeometryReader { _ in
             HStack(spacing: 0) {
-                Color.clear.frame(width: Self.leadingWidth)
-                tabs
+                leadingGroup
+                tabs.padding(.leading, tabsLead)
                 Spacer(minLength: Self.minimumDragWidth)
                 actions
             }
             .frame(height: Metric.topBar)
-            .topBarSurface()
+            // Over the sidebar the bar is clear, so the sidebar material runs up behind the window buttons.
+            .topBarSurface(leading: sidebarWidth ?? 0)
+            .animation(reduceMotion || model.resizingSidebar ? nil : .easeOut(duration: 0.2), value: sidebarWidth != nil)
             .overlayPreferenceValue(TopBarChipBounds.self) { regions in
                 GeometryReader { geometry in
                     WindowDragArea(chips: regions.map { region in
@@ -592,23 +613,42 @@ private struct SidebarToggleButton: View {
 }
 
 enum SidebarStyle {
-    static let row = Metric.sidebarRow
-    static let radius = Metric.sidebarRadius
+    static let row: CGFloat = 28
+    static let radius: CGFloat = 6
     static let selection = Palette.sidebarSelected
     static let title = Font.system(size: 13, weight: .semibold)
-    static let text = Font.system(size: 12)
+    static let text = Font.system(size: 13)
 }
 
+/// A section's small grey label. With `collapsed` it is a button with a chevron that folds the section away.
 struct SidebarGroupLabel: View {
     let title: String
     var inset: CGFloat = 6
+    var collapsed: Binding<Bool>? = nil
 
     var body: some View {
-        Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, inset)
-            .frame(height: 20)
-            .qaText(title)
+        if let collapsed {
+            Button { withAnimation(Motion.fast) { collapsed.wrappedValue.toggle() } } label: {
+                HStack(spacing: 4) {
+                    Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg).qaText(title)
+                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(Palette.mutedFg)
+                        .rotationEffect(.degrees(collapsed.wrappedValue ? -90 : 0))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, inset)
+                .frame(height: 24)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(collapsed.wrappedValue ? "Show \(title)" : "Hide \(title)")
+            .qaID("sidebar-group-toggle", label: title)
+        } else {
+            Text(title).font(Typography.section).foregroundStyle(Palette.mutedFg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, inset)
+                .frame(height: 20)
+                .qaText(title)
+        }
     }
 }
 
@@ -639,11 +679,9 @@ struct LeftColumn: View {
             }
             if let width = panelWidth {
                 column(width: width)
-                    .padding([.leading, .bottom], Metric.sidebarGap)
-                    .transition(reduceMotion ? .identity : .offset(x: -width - Metric.sidebarGap - 32))
+                    .transition(reduceMotion ? .identity : .offset(x: -width - 1))
             }
         }
-        .padding(.top, Metric.topBar + Metric.sidebarGap)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: panelWidth != nil)
         .onChange(of: panelWidth != nil) { _, shown in
@@ -678,24 +716,26 @@ struct LeftColumn: View {
         !model.revision.isEmpty && (section != .widgets || (model.sidebarWidgetsLoaded && !model.widgetKinds.isEmpty))
     }
 
-    /// One glass panel for Home and for a file: the panel stays put and only its rows change.
+    /// One sidebar for Home and for a file: a full-height column in the native sidebar material that reaches up into
+    /// the title bar (the window buttons, the toggle and Home sit on it). Only its rows change.
     private func column(width: CGFloat) -> some View {
         let section = model.section
         return ZStack(alignment: .top) {
             if model.homeShown {
                 HomeSidebar(model: model)
-                    .padding(Metric.sidebarGap)
+                    .padding(.horizontal, Metric.sidebarInset).padding(.vertical, Metric.sidebarInset)
             } else {
                 fileRows
             }
         }
+        .padding(.top, Metric.topBar)
         .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .top)
-        .sidebarSurface()
+        .sidebarMaterial(canvasEdge: .trailing)
         .overlay(alignment: .trailing) {
             SidebarResizeHandle(model: model, shown: width, minWidth: Metric.sidebarMin, maxWidth: panelMax,
                                 defaultWidth: Metric.sidebarWidth) { model.sidebarWidth = $0 }
-                .padding(.vertical, Metric.sidebarPanelRadius / 2)
+                .padding(.top, Metric.topBar)
         }
         .task(id: section) { if section == .widgets { model.fetchKinds() } }
         .overlay(alignment: .topLeading) {
@@ -703,14 +743,14 @@ struct LeftColumn: View {
                 ZStack(alignment: .topLeading) {
                     Color.clear.contentShape(Rectangle())
                         .onTapGesture { dismissMenu() }
-                        .padding(.top, Self.headerHeight)
+                        .padding(.top, Metric.topBar + Self.headerHeight)
                     SidebarSectionMenu(selection: section) {
                         model.section = $0
                         dismissMenu()
                     }
                     .qaID("sidebar-section-popup")
                     .padding(.leading, Metric.sidebarLabelInset)
-                    .padding(.top, Self.headerHeight)
+                    .padding(.top, Metric.topBar + Self.headerHeight)
                 }
             }
         }
@@ -735,8 +775,10 @@ struct LeftColumn: View {
                             .foregroundStyle(Palette.mutedFg)
                     }
                     .padding(.horizontal, Self.titlePadding)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(ToolbarButtonStyle(active: model.sidebarMenuOpen, width: nil))
+                .buttonStyle(.plain)
                 .help("Choose a sidebar section")
                 .accessibilityLabel(section.rawValue)
                 .accessibilityHint("Choose a sidebar section")
@@ -918,6 +960,7 @@ private struct SidePanel: View {
     let query: String
     @Binding var offset: CGFloat?
     @State private var scroll: ScrollPosition
+    @AppStorage("canvas.sidebar.layersCollapsed") private var layersCollapsed = false
 
     init(model: CanvasModel, section: SidebarSection, tokenTab: Binding<TokenTab>, query: String, offset: Binding<CGFloat?>) {
         self.model = model
@@ -935,8 +978,8 @@ private struct SidePanel: View {
                     switch section {
                     case .layers:
                         PagesSection(model: model).padding(.bottom, 10)
-                        SidebarGroupLabel(title: "Layers")
-                        LayersRows(model: model, store: LayersStore.of(model))
+                        SidebarGroupLabel(title: "Layers", collapsed: $layersCollapsed)
+                        if !layersCollapsed { LayersRows(model: model, store: LayersStore.of(model)) }
                     case .assets:
                         ForEach(model.components) { c in
                             ListRow(title: (c.isText ? "T " : "") + c.name, detail: c.instances > 0 ? "\(c.instances) \u{00D7}" : c.type,

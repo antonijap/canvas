@@ -61,8 +61,6 @@ enum Metric {
     static let sidebarMax: CGFloat = 420
     static let resizeHit: CGFloat = 12
     static let propsWidth: CGFloat = 284
-    static let sidebarGap: CGFloat = 8
-    static let sidebarPanelRadius: CGFloat = 16
     static let scrollbar: CGFloat = 10
     static let pill: CGFloat = 40
     static let pillPad: CGFloat = 4
