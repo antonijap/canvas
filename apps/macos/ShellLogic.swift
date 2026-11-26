@@ -1402,9 +1402,9 @@ enum DrawTool: String, CaseIterable {
         case .rectangle: return "square"
         case .ellipse: return "circle"
         case .text: return "textformat"
-        case .sticky: return "note"
-        case .sticker: return "seal"
-        case .vote: return "checkmark.square"
+        case .sticky: return "note.text"
+        case .sticker: return "face.smiling"
+        case .vote: return "hand.thumbsup"
         case .timer: return "timer"
         }
     }

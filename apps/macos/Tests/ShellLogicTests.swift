@@ -682,6 +682,10 @@ struct ShellLogicTests {
         check(groups.flatMap { $0 }.map(\.keycap) == ["F", "R", "O", "T", "S", "\u{21E7}S"], "palette keycaps match tool shortcuts")
         check(DrawTool.timer.keycap == "\u{21E7}T", "the Timer control shows its Shift shortcut")
         check(DrawTool.vote.keycap == "\u{21E7}D", "the Vote control shows its Shift shortcut")
+        let symbolTools = DrawTool.allCases.filter { $0 != .text }
+        check(symbolTools.map(\.symbol) == ["number", "square", "circle", "note.text", "face.smiling", "hand.thumbsup", "timer"],
+              "palette tools use the expected SF Symbols")
+        check(DrawTool.allCases.allSatisfy { !$0.symbol.hasSuffix(".fill") }, "palette symbols use outline variants")
     }
 
     // Sidebar resize: the editor panel and the Home sidebar share one set of rules.

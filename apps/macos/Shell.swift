@@ -1187,15 +1187,6 @@ private struct ToolPalette: View {
             default: return model.activeDrawTool == tool
             }
         }
-        var icon: WhiteboardToolIcon? {
-            switch tool {
-            case .sticky: return .sticky
-            case .sticker: return .sticker
-            case .vote: return .vote
-            case .timer: return .timer
-            default: return nil
-            }
-        }
     }
 
     private static let groups: [[Item]] = {
@@ -1256,18 +1247,16 @@ private struct ToolPalette: View {
         private var showsTooltip: Bool { hovering || qaHovered }
 
         var body: some View {
-            let glyph: CGFloat = 16
             Button(action: action) {
                 Group {
-                    if let icon = item.icon {
-                        icon.stroke(style: StrokeStyle(lineWidth: glyph / 12, lineCap: .round, lineJoin: .round))
-                            .frame(width: glyph, height: glyph)
-                    } else if item.tool == .text {
-                        Text("T").font(.system(size: glyph, weight: .light))
+                    if item.tool == .text {
+                        Text("T")
                     } else {
-                        Image(systemName: item.tool.symbol).font(.system(size: glyph, weight: .medium))
+                        Image(systemName: item.tool.symbol)
+                            .symbolRenderingMode(.monochrome)
                     }
                 }
+                .font(.system(size: 16, weight: .medium))
             }
             .buttonStyle(ToolbarButtonStyle(active: selected, selectedMark: (item.mark + "-selected", item.tool.title),
                                             forceHover: qaHovered))
@@ -1298,46 +1287,6 @@ private struct ToolPalette: View {
             .accessibilityAddTraits(selected ? .isSelected : [])
             .qaID(item.mark, label: item.tool.title)
         }
-    }
-}
-
-private enum WhiteboardToolIcon: Shape {
-    case sticky, sticker, vote, timer
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        switch self {
-        case .sticky, .sticker:
-            path.move(to: CGPoint(x: 21, y: 9))
-            path.addLines([CGPoint(x: 21, y: 9), CGPoint(x: 15, y: 3), CGPoint(x: 5, y: 3)])
-            path.addQuadCurve(to: CGPoint(x: 3, y: 5), control: CGPoint(x: 3, y: 3))
-            path.addLine(to: CGPoint(x: 3, y: 19))
-            path.addQuadCurve(to: CGPoint(x: 5, y: 21), control: CGPoint(x: 3, y: 21))
-            path.addLine(to: CGPoint(x: 19, y: 21))
-            path.addQuadCurve(to: CGPoint(x: 21, y: 19), control: CGPoint(x: 21, y: 21))
-            path.closeSubpath()
-            path.move(to: CGPoint(x: 15, y: 3))
-            path.addLine(to: CGPoint(x: 15, y: 8))
-            path.addQuadCurve(to: CGPoint(x: 16, y: 9), control: CGPoint(x: 15, y: 9))
-            path.addLine(to: CGPoint(x: 21, y: 9))
-            if self == .sticker {
-                for x in [8.0, 16.0] {
-                    path.addLines([CGPoint(x: x, y: 13), CGPoint(x: x + 0.01, y: 13)])
-                }
-                path.move(to: CGPoint(x: 10, y: 16))
-                path.addQuadCurve(to: CGPoint(x: 14, y: 16), control: CGPoint(x: 12, y: 18))
-            }
-        case .vote:
-            path.addRoundedRect(in: CGRect(x: 5, y: 5, width: 14, height: 14), cornerSize: CGSize(width: 2, height: 2), style: .circular)
-            path.addLines([CGPoint(x: 2, y: 19), CGPoint(x: 22, y: 19)])
-            path.addLines([CGPoint(x: 9, y: 12), CGPoint(x: 11, y: 14), CGPoint(x: 15, y: 10)])
-        case .timer:
-            path.addEllipse(in: CGRect(x: 4, y: 6, width: 16, height: 16))
-            path.addLines([CGPoint(x: 10, y: 2), CGPoint(x: 14, y: 2)])
-            path.addLines([CGPoint(x: 12, y: 14), CGPoint(x: 15, y: 11)])
-        }
-        let transform = CGAffineTransform(translationX: rect.minX, y: rect.minY).scaledBy(x: rect.width / 24, y: rect.height / 24)
-        return path.applying(transform)
     }
 }
 
