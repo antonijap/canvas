@@ -546,13 +546,14 @@ struct ShellLogicTests {
                     let compact = width - i.l - i.r < 265 + 8
                     let bars = BottomBarLayout(windowWidth: width, leftInset: i.l, rightInset: i.r,
                         zoomRightInset: inset + (inspector ? props : 0),
-                        paletteWidth: compact ? 132 : 265, zoomWidth: 124, height: compact ? 68 : 36, gap: gap)
+                        paletteWidth: compact ? 132 : 265, zoomWidth: 124, height: compact ? 68 : 36, zoomHeight: 36, gap: gap)
                     let label = "\(width) pt, inspector \(inspector), sidebar \(sidebar)"
                     guard let palette = bars.palette, let zoom = bars.zoom else {
                         check(false, "both bars exist at \(label)")
                         continue
                     }
-                    check(zoom.height == palette.height, "same outer height at \(label)")
+                    check(zoom.height == 36, "zoom keeps the one-row toolbar height at \(label)")
+                    if !compact { check(zoom.height == palette.height, "same outer height at \(label)") }
                     check(palette.midX == (width + i.l - i.r) / 2, "palette centered between panels at \(label)")
                     check(width - (inspector ? props : 0) - zoom.maxX == inset, "zoom's right gap equals the panel inset at \(label)")
                     check(palette.minX >= i.l && zoom.minX >= i.l, "bars stay clear of the left panel at \(label)")
@@ -560,7 +561,7 @@ struct ShellLogicTests {
                     if bars.zoomAboveTools {
                         check(zoom.maxY == palette.minY - gap, "raised zoom maintains a vertical gap at \(label)")
                     } else {
-                        check(zoom.midY == palette.midY && zoom.maxY == -14, "bars share the palette centerline at \(label)")
+                        check(zoom.midY == palette.midY, "bars share the palette centerline at \(label)")
                         check(palette.maxX + gap <= zoom.minX, "aligned bars maintain a horizontal gap at \(label)")
                     }
                     check(bars.clearance == -min(palette.minY, zoom.minY) + gap, "notices clear both bars at \(label)")
@@ -571,11 +572,11 @@ struct ShellLogicTests {
         }
 
         let viewer = BottomBarLayout(windowWidth: 720, leftInset: 0, rightInset: inset, zoomRightInset: inset,
-            paletteWidth: nil, zoomWidth: 124, height: 36, gap: gap)
+            paletteWidth: nil, zoomWidth: 124, height: 36, zoomHeight: 36, gap: gap)
         check(viewer.palette == nil && viewer.zoom == CGRect(x: 586, y: -50, width: 124, height: 36)
             && viewer.clearance == 0, "zoom alone anchors to the bottom right without toolbar clearance")
         let empty = BottomBarLayout(windowWidth: 720, leftInset: 0, rightInset: inset, zoomRightInset: inset,
-            paletteWidth: 265, zoomWidth: nil, height: 36, gap: gap)
+            paletteWidth: 265, zoomWidth: nil, height: 36, zoomHeight: 36, gap: gap)
         check(empty.zoom == nil && empty.clearance == 60, "palette alone leaves room for notices")
     }
 

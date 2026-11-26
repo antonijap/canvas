@@ -211,7 +211,8 @@ struct RootView: View {
         let bottomBars = BottomBarLayout(windowWidth: windowWidth, leftInset: i.l, rightInset: i.r,
             zoomRightInset: zoomRightInset,
             paletteWidth: toolPaletteShown ? ToolPalette.width(compact: compactTools) : nil,
-            zoomWidth: zoomShown ? ZoomPill.width : nil, height: ToolPalette.height(compact: compactTools), gap: Metric.islandGap)
+            zoomWidth: zoomShown ? ZoomPill.width : nil, height: ToolPalette.height(compact: compactTools),
+            zoomHeight: ToolPalette.height(compact: false), gap: Metric.islandGap)
         let insets = insets(bottomClearance: bottomBars.clearance)
 
         ZStack(alignment: .topLeading) {

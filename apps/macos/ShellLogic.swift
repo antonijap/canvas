@@ -702,8 +702,10 @@ struct BottomBarLayout {
     let zoomAboveTools: Bool
     let clearance: CGFloat
 
+    /// `height` is the palette's (two rows when compact); the zoom control keeps the one-row `zoomHeight` and sits on the
+    /// palette's centre line, or above the palette when they would collide.
     init(windowWidth: CGFloat, leftInset: CGFloat, rightInset: CGFloat, zoomRightInset: CGFloat,
-         paletteWidth: CGFloat?, zoomWidth: CGFloat?, height: CGFloat, gap: CGFloat) {
+         paletteWidth: CGFloat?, zoomWidth: CGFloat?, height: CGFloat, zoomHeight: CGFloat, gap: CGFloat) {
         let bottom = -Self.bottomMargin
         let centerX = (windowWidth + leftInset - rightInset) / 2
         let zoomRight = windowWidth - zoomRightInset
@@ -714,11 +716,17 @@ struct BottomBarLayout {
         } else {
             raised = false
         }
-        let zoomBottom = raised ? bottom - height - gap : bottom
+        let zoomY: CGFloat
+        if let paletteFrame {
+            zoomY = raised ? paletteFrame.minY - gap - zoomHeight : paletteFrame.midY - zoomHeight / 2
+        } else {
+            zoomY = bottom - zoomHeight
+        }
         palette = paletteFrame
-        zoom = zoomWidth.map { CGRect(x: zoomRight - $0, y: zoomBottom - height, width: $0, height: height) }
+        zoom = zoomWidth.map { CGRect(x: zoomRight - $0, y: zoomY, width: $0, height: zoomHeight) }
         zoomAboveTools = raised
-        clearance = paletteFrame == nil ? 0 : -zoomBottom + height + gap
+        let top = min(paletteFrame?.minY ?? 0, raised ? zoomY : 0)
+        clearance = paletteFrame == nil ? 0 : -top + gap
     }
 }
 
