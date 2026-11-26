@@ -225,9 +225,9 @@ export class MacFiles {
     }
     async expireImports() {
         const cutoff = new Date(this.now() - 24 * 60 * 60 * 1000).toISOString();
-        // Older transfer clients could have parked their only local copy before sending the publish request.
-        for (const row of this.db.sql.exec<{id:string}>(`SELECT id FROM files WHERE state='importing' AND created_at<=?
-            AND NOT EXISTS (SELECT 1 FROM file_transfer_imports WHERE file=id AND source_visible=0)`, cutoff).toArray()) {
+        // Every stale import expires: the client keeps its source visible until publish, and an exemption the client
+        // could claim would let an editor fill the Cloud with hidden imports nobody else can see or discard.
+        for (const row of this.db.sql.exec<{id:string}>(`SELECT id FROM files WHERE state='importing' AND created_at<=?`, cutoff).toArray()) {
             if (this.activeImports.has(row.id) || [...this.activeParts].some(p => p.startsWith(path.join(this.root, 'uploads', row.id) + path.sep))) continue;
             const r = this.room(row.id);
             await r.core.exclusive(async () => {

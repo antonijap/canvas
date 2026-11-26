@@ -141,7 +141,7 @@ test('publication keeps an external replacement of the original path', async t =
     assert.equal(fs.readFileSync(path.join(source, 'document.json'), 'utf8'), document);
 });
 
-test('stale imports only expire when their source was kept visible', () => hostTest(async (h, call) => {
+test('stale imports expire whatever the client claims about its source', () => hostTest(async (h, call) => {
     const now = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
     const older = crypto.randomUUID(), sourceVisible = crypto.randomUUID();
     for (const id of [older, sourceVisible]) {
@@ -150,7 +150,7 @@ test('stale imports only expire when their source was kept visible', () => hostT
     }
     (h.files as any).db.sql.exec('UPDATE files SET created_at=?', now);
     await h.files.expireImports();
-    assert.equal((await call(`/v1/files/${older}`)).status, 200);
+    assert.equal((await call(`/v1/files/${older}`)).status, 404);
     assert.equal((await call(`/v1/files/${sourceVisible}`)).status, 404);
 }));
 
