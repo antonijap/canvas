@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { RECORDER_JS } from "./frames.ts";
 import { sc, type T } from "./harness.ts";
 import { sleep } from "./lib.ts";
 
@@ -28,7 +31,7 @@ async function moveToHoverTitle(t: T, id: string) {
   await t.frames();
 }
 
-sc("hover-motion", "the hover box follows board sprites through the leave animation", {
+sc("hover-motion", "the hover box stays hidden through the leave animation", {
   covers: ["hover-motion:suppression"],
   skip: { visual: "Checks the transient hover box directly." },
 }, async (t: T) => {
@@ -85,7 +88,7 @@ sc("hover-motion", "hovering a board title from rest leaves its outline visible"
   await t.io.move(6, 90);
 });
 
-sc("hover-motion", "boards without playable sprites keep their hover boxes", {
+sc("hover-motion", "compiled motion hides the hover box even when promotion is skipped", {
   covers: ["hover-motion:suppression"],
   skip: { visual: "Checks the transient hover box directly." },
 }, async (t: T) => {
@@ -102,8 +105,8 @@ sc("hover-motion", "boards without playable sprites keep their hover boxes", {
   await moveToHoverTarget(t, "qa_skipped_layer");
   await t.waitFor(`window.__motion.skipped.some(s => s.id === "qa_skipped_layer" && s.reason === "overlaps later paint")`, "the motion track to be skipped");
   t.eq({ named, skipped: await hoverState(t) }, {
-    named: { sprites: 0, outline: true }, skipped: { sprites: 0, outline: true },
-  }, "a layer name and skipped motion both leave the hover box visible");
+    named: { sprites: 0, outline: true }, skipped: { sprites: 0, outline: false },
+  }, "only the board with compiled motion hides the hover box");
   await t.io.move(6, 90);
 });
 
@@ -311,4 +314,180 @@ sc("hover-motion", "first frame paints sprites that fall outside the batch atlas
   const first = await t.waitFor("window.__batchFirstFrame", "the first sprite frame") as { batched: number; missing: number };
   t.ok(first.batched > 0 && first.batched < 40, "some urgent sprite tiles overflowed the atlas");
   t.eq(first.missing, 0, "every sprite tile was ready when the rest layers were hidden");
+});
+
+// Compare every composite to a pose made by transforming crops of the static board in Canvas 2D.
+// The crops contain the original AA and shadow, plus enough plain background to cover the moving edges.
+const recordHover = String.raw`(({ region, patches, point, scale, camera }) => {
+  const h = window.canvasHost, e = h.engineView.engine, recorder = window.__frames;
+  const box = document.getElementById("hov");
+  recorder.ref("A", region);
+  const canvas = () => Object.assign(document.createElement("canvas"), { width: region.w, height: region.h });
+  const rest = canvas(), expected = canvas(), g = expected.getContext("2d", { willReadFrequently: true });
+  rest.getContext("2d").putImageData(new ImageData(recorder.A, region.w, region.h), 0, 0);
+  const bg = (region.w * 12 + 12) * 4;
+  g.fillStyle = "rgb(" + recorder.A.subarray(bg, bg + 3).join(",") + ")";
+  const poses = new Map();
+  const transform = e.setBoardTransform, remove = e.removeBoard;
+  e.setBoardTransform = function (id, ...v) { poses.set(id, v); return transform.call(this, id, ...v); };
+  e.removeBoard = function (id) { poses.delete(id); return remove.call(this, id); };
+  const flashes = [];
+  let phase = "rest", last = e.stats().frames;
+  const pointer = event => { phase = Math.abs(event.clientX - point.x) <= 1 ? "enter" : "leave"; };
+  addEventListener("pointermove", pointer, true);
+  function outline() {
+    const style = getComputedStyle(box), rect = box.getBoundingClientRect();
+    return style.display !== "none" && style.visibility === "visible" && rect.width > 0 && rect.height > 0;
+  }
+  // A pointer frame can update the DOM without a composite. Observe it separately.
+  const observer = new MutationObserver(() => {
+    if (phase !== "rest" && outline()) flashes.push(phase);
+  });
+  observer.observe(box, { attributes: true, attributeFilter: ["style"] });
+  recorder.start(region, 240, 1, () => {
+    const n = e.stats().frames;
+    if (n === last) return false;
+    last = n;
+    return { phase, outline: outline(), poses: Array.from(poses.values()), sprites: window.__motion.sprites };
+  });
+  window.__finishHover = (evidence) => {
+    observer.disconnect();
+    removeEventListener("pointermove", pointer, true);
+    e.setBoardTransform = transform;
+    e.removeBoard = remove;
+    const { frames } = recorder.stop();
+    const bad = [], restFailures = [], outlines = [], identity = [1, 0, 0, 1, 0, 0, 1];
+    const { x, y } = camera;
+    let moving = 0, maxMean = 0, maxPixels = 0, maxRestMean = 0, maxMoves = 0;
+    frames.forEach(({ data, sample }, i) => {
+      const { poses, phase, sprites, outline } = sample;
+      if (outline) outlines.push(i);
+      if (poses.length && poses.some(v => v.some((n, j) => n !== identity[j]))) moving++;
+      maxMoves = Math.max(maxMoves, poses.length);
+      const still = poses.every(v => v.every((n, j) => n === identity[j]));
+      let ref = recorder.A;
+      if (!still) {
+        g.drawImage(rest, 0, 0);
+        for (const p of patches) g.fillRect(p.x, p.y, p.w, p.h);
+        patches.forEach((p, j) => {
+          const [a, b, c, d, tx, ty] = poses[j] ?? identity;
+          g.setTransform(a, b, c, d, tx * scale + (1 - a) * x - c * y, ty * scale - b * x + (1 - d) * y);
+          g.drawImage(rest, p.x, p.y, p.w, p.h, p.x, p.y, p.w, p.h);
+        });
+        g.resetTransform();
+        ref = g.getImageData(0, 0, region.w, region.h).data;
+      }
+      let error = 0, pixels = 0, peak = 0;
+      for (let k = 0; k < ref.length; k += 4) {
+        const delta = Math.abs(data[k] - ref[k]) + Math.abs(data[k + 1] - ref[k + 1]) + Math.abs(data[k + 2] - ref[k + 2]);
+        error += delta;
+        peak = Math.max(peak, delta);
+        if (delta > 32) pixels++;
+      }
+      const mean = error / (region.w * region.h);
+      maxMean = Math.max(maxMean, mean);
+      maxPixels = Math.max(maxPixels, pixels);
+      if (still && sprites) maxRestMean = Math.max(maxRestMean, mean);
+      // Splitting a transparent layer into a separate texture can round channels by one.
+      if (still && (mean > 0.35 || peak > 12)) restFailures.push({ i, phase, sprites, mean: +mean.toFixed(3), peak });
+      // The 2D reference and the GPU interpolate moving edges differently.
+      if (!still && (mean > 0.7 || pixels > region.w * region.h * 0.003)) bad.push({ i, phase, mean: +mean.toFixed(3), pixels });
+    });
+    const enter = frames.filter(f => f.sample.phase === "enter"), leave = frames.filter(f => f.sample.phase === "leave");
+    const entersAtRest = enter[0]?.sample.poses.every(v => v.every((n, j) => n === identity[j]));
+    const leavesAtRest = leave.at(-1)?.sample.sprites === 0;
+    let strip;
+    if (evidence && enter.length >= 6 && leave.length >= 6) {
+      const out = Object.assign(document.createElement("canvas"), { width: region.w * 6, height: region.h * 2 });
+      const ctx = out.getContext("2d");
+      [enter, leave].forEach((sequence, row) => sequence.slice(0, 6).forEach((f, col) => {
+        ctx.putImageData(new ImageData(f.data, region.w, region.h), col * region.w, row * region.h);
+      }));
+      strip = out.toDataURL().split(",")[1];
+    }
+    return { total: frames.length, enter: enter.length, leave: leave.length, entersAtRest, leavesAtRest, moving, maxMoves,
+      firstSprites: enter[0]?.sample.sprites, flashes, outlines, maxMean, maxPixels, maxRestMean,
+      poseFailures: bad.length, restFailures: restFailures.length, examples: [...restFailures.slice(0, 2), ...bad.slice(0, 2)], strip };
+  };
+})`;
+
+const spring = (tracks: { prop: string; to: number }[]) => [{
+  id: "spring", on: "boardHover",
+  tracks: tracks.map(track => ({ ...track, delay: 100, ease: { spring: { duration: 420, bounce: 0.2 } } })),
+}];
+const flashBoard = (id: string, children: object[]) => ({
+  ...hoverBoard(id, 10000.25, children), y: 10000.25, height: 162.55, width: 220.45, fill: "#202A3A",
+  stroke: "#64748B", strokeWidth: 2, strokeAlignment: "inner",
+});
+const demos = [
+  { name: "shadowed spring card", id: "qa_flash_card", layers: ["qa_flash_card_layer"], pad: 24,
+    board: flashBoard("qa_flash_card", [{
+      type: "frame", layout: "none", id: "qa_flash_card_layer", x: 55.65, y: 61.65, width: 105.55, height: 53.55, fill: "#E0E7F2",
+      cornerRadius: 9, stroke: "#BFA685", strokeWidth: 3, strokeAlignment: "inner",
+      effect: [{ type: "shadow", offset: { x: 1, y: 5 }, blur: 12, spread: 1, color: "#00000099" }],
+      motion: spring([{ prop: "translateY", to: -12 }, { prop: "scale", to: 1.04 }]),
+      children: [{ type: "rectangle", id: "qa_flash_card_detail", x: 8, y: 10, width: 58, height: 4, fill: "#587A9D", cornerRadius: 2 }],
+    }]) },
+  { name: "rotating spring icon", id: "qa_flash_icon", layers: ["qa_flash_icon_layer"], pad: 9,
+    board: flashBoard("qa_flash_icon", [{
+      type: "frame", layout: "none", id: "qa_flash_icon_layer", x: 76.35, y: 48.65, width: 66.55, height: 66.55, fill: "#818CF8",
+      cornerRadius: 16, motion: spring([{ prop: "scale", to: 1.12 }, { prop: "rotate", to: -6 }]),
+      children: [{ type: "ellipse", id: "qa_flash_icon_detail", x: 15, y: 13, width: 33, height: 29, fill: "#EFF6FF" }],
+    }]) },
+  { name: "staggered auto layout rows", id: "qa_flash_rows", layers: Array.from({ length: 4 }, (_, i) => "qa_flash_row_" + i), pad: 4,
+    board: { ...flashBoard("qa_flash_rows", Array.from({ length: 4 }, (_, i) => ({
+      type: "rectangle", id: "qa_flash_row_" + i, width: 146.55, height: 20.55, fill: ["#BFD8F1", "#A7F3D0", "#FDE68A", "#FBCFE8"][i],
+      cornerRadius: 4, opacity: 0.75,
+      motion: [{ id: "slide", on: "boardHover", tracks: [{ prop: "translateX", to: 16, delay: 100 + i * 55, duration: 300 }] }],
+    }))), layout: "vertical", gap: 12.55, padding: [18.65, 24.65, 18.65, 24.65] } },
+];
+
+for (const demo of demos) sc("hover-motion", `every hover frame preserves the ${demo.name}`, {
+  covers: ["hover-motion:composite", "hover-motion:rest", "hover-motion:suppression"],
+  skip: { visual: "Compares every animation frame against the static and transformed pixels." },
+}, async (t: T) => {
+  await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [demo.board] });
+  await t.page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  await t.waitFor(`window.canvasHost.boards.has(${JSON.stringify(demo.id)})`, "the motion board");
+  await t.focus(demo.id, 1.125);
+  await t.io.move(6, 90);
+  await t.settle();
+  await t.waitFor("!window.canvasHost.motionBlocked()", "the settled camera");
+  const point = await t.center(demo.layers[0]);
+  t.ok(await t.ev(RECORDER_JS), "engine frame recorder installed");
+  const { left, top, dpr, scale, x, y } = await t.ev(`(() => {
+    const h = window.canvasHost, { left, top } = h.view.getBoundingClientRect(), dpr = window.__frames.dpr();
+    return { left, top, dpr, scale: dpr * h.cam.z, x: Math.round(h.cam.x * dpr), y: Math.round(h.cam.y * dpr) };
+  })()`);
+  const board = await t.rect(demo.id);
+  const region = { x: Math.round((board.x - left) * dpr) - 5, y: Math.round((board.y - top) * dpr) - 5,
+    w: Math.round(board.w * dpr) + 10, h: Math.round(board.h * dpr) + 10 };
+  const patches = [];
+  for (const id of demo.layers) {
+    const r = await t.rect(id), pad = demo.pad * scale;
+    patches.push({ x: Math.floor((r.x - left) * dpr - region.x - pad), y: Math.floor((r.y - top) * dpr - region.y - pad),
+      w: Math.ceil(r.w * dpr + pad * 2) + 1, h: Math.ceil(r.h * dpr + pad * 2) + 1 });
+  }
+  await t.ev(`${recordHover}(${JSON.stringify({ region, patches, point, scale, camera: { x: x - region.x, y: y - region.y } })})`);
+  const evidence = process.env.QA_MOTION_EVIDENCE;
+  let result;
+  try {
+    await t.io.move(point.x, point.y);
+    await t.waitFor(`window.__motion.sprites === ${demo.layers.length}`, "all motion sprites");
+    await sleep(720);
+    await t.io.move(6, 90);
+    await t.waitFor("window.__motion.sprites === 0", "the leave animation to finish");
+    await t.frames();
+  } finally {
+    result = await t.ev(`window.__finishHover(${!!evidence})`);
+  }
+  const { strip, ...summary } = result;
+  if (evidence && strip) {
+    fs.mkdirSync(evidence, { recursive: true });
+    fs.writeFileSync(path.join(evidence, demo.id + ".png"), Buffer.from(strip, "base64"));
+  }
+  console.log(`hover frames ${demo.name} ${JSON.stringify(summary)}`);
+  t.ok(result.enter >= 6 && result.leave >= 6 && result.moving >= 10 && result.total < 240, "recorded the full play and leave");
+  t.eq([result.entersAtRest, result.firstSprites, result.maxMoves, result.leavesAtRest], [true, demo.layers.length, demo.layers.length, true], "covered the sprite handover at each end");
+  t.eq([result.flashes.length, result.outlines.length, result.restFailures, result.poseFailures], [0, 0, 0, 0], "no hover outline or missing, doubled or offset paint");
 });

@@ -2198,7 +2198,7 @@ function badgeText(r) {
 // handles and badge stay one size at any zoom. Each box remembers its node's rectangle in world
 // coordinates (read from the live drawing once, when the node or its drawing changes) and is placed
 // from the camera by arithmetic, so a camera change reads no layout and cannot go stale.
-let selWorld = null, hovWorld = null, hovId = null, ptr = null, space = false;
+let selWorld = null, hovWorld = null, hovId = null, hovBody = null, ptr = null, space = false;
 /** The selected layer's own box when it is rotated ({r, w, h}, /page/live.js), or null. */
 const selShape = () => (!multi && sel && !isW(sel.id) && host.live && host.live.shape ? host.live.shape(sel.id) : null);
 function putBox(box, w) {
@@ -2233,8 +2233,8 @@ function putBox(box, w) {
   if (box === selBox) box.classList.toggle("tiny", w.w * cam.z < 10 && w.h * cam.z < 10);
 }
 function placeHoverBox() {
-  const board = host.motion?.spriteBoard;
-  const suppressed = board && hovId && (hovId === board || ev?.boardOf(hovId) === board);
+  const board = hovId && (boards.has(hovId) ? hovId : ev?.boardOf(hovId));
+  const suppressed = host.motion?.canHover(board) && (board === hovBody || board === host.motion.spriteBoard);
   putBox(hovBox, suppressed ? null : hovWorld);
 }
 function placeOverlays() {
@@ -2334,7 +2334,7 @@ async function showMulti(ids) {
   const stuck = new Set(layers.filter((id, i) => id.includes("/") || (nodes[i] && nodes[i].placed)));
   if (native) post({ selection: { id: sel.id, ids, count: ids.length, free: ids.length - stuck.size, node: Object.assign({}, shared, { name: ids.length + " selected" }), parentId: null, path: ids.some((x) => x.includes("/")), w: selWorld ? selWorld.w : null, h: selWorld ? selWorld.h : null, cmp: false, ctx: null } });
 }
-function clearHover() { hovId = null; hovWorld = null; hovBox.style.display = "none"; }
+function clearHover() { hovBody = null; hovId = null; hovWorld = null; hovBox.style.display = "none"; }
 let hovFrame = 0;
 function queueHover() {
   if (hovFrame || gesturing) return; // no hit testing while the camera moves; settle() resumes it
@@ -2342,12 +2342,15 @@ function queueHover() {
     hovFrame = 0;
     // An auto layout reorder drag (/page/autolayout.js) draws the layer at the pointer: no hover box chasing it a frame behind.
     if (gesturing || drag || mv || space || !ptr || (host.comments && host.comments.mode) || (host.autolayout && host.autolayout.dragging)) { clearHover(); return; }
-    if (host.motion && prefs.playHoverMotion && ev?.engine.boardAt && document.elementFromPoint(ptr.x, ptr.y) === ev.canvas) {
+    const title = titleAt(ptr.x, ptr.y);
+    hovBody = null;
+    if (!title && host.motion && ev?.engine.boardAt && document.elementFromPoint(ptr.x, ptr.y) === ev.canvas) {
       const board = ev.engine.boardAt(ptr.x - VL, ptr.y - VT);
       const r = board && boards.has(board) && ev.rect(board);
-      host.motion.hover(r && Math.min(r.w, r.h) * cam.z >= 48 ? board : null, ptr.time);
-    } else host.motion?.hover(null);
-    const id = titleAt(ptr.x, ptr.y) || pickSelectable(ptr.x, ptr.y, false);
+      if (r && Math.min(r.w, r.h) * cam.z >= 48) hovBody = board;
+    }
+    host.motion?.hover(hovBody, ptr.time);
+    const id = title || pickSelectable(ptr.x, ptr.y, false);
     if (!id || isW(id) || (sel && id === sel.id)) { clearHover(); return; } // a card shows no hover box
     hovId = id;
     hovBox.classList.toggle("cmp", host.isCmp(id));

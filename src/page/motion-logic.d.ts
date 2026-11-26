@@ -7,6 +7,7 @@ export const motionProps: MotionProp[];
 export function easeCurve(ease: unknown): (x: number) => number;
 export function springCurve(spring: Spring): { duration: number; sample(t: number): number };
 export function compileMotion(animations: unknown, opacity?: number): CompiledMotion;
+export function hasHoverMotion(node: unknown): boolean;
 export function motionPose(motion: CompiledMotion, elapsed: number, options?: { leave?: Pose; enter?: Pose; end?: boolean }): Pose;
 export type MotionAffine = [number, number, number, number, number, number, number];
 export function poseAffine(values: Pose["values"], rect: { x: number; y: number; w: number; h: number }, origins?: MotionOrigins | [number, number]): MotionAffine;

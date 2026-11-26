@@ -9,6 +9,7 @@
 
 import { stickyOwner, stickyTextId, whiteboardScene } from "./whiteboard-model.js";
 import { createImageOverview, imageOverviewBoard, localJpegPath } from "./image-overview.js";
+import { hasHoverMotion } from "./motion-logic.js";
 
 /** What an image is decoded at while boards show it large, but not larger than this on screen. */
 export const MAX_IMAGE_SIDE = 2048;
@@ -719,7 +720,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
       for (const id of rec.ids) if (nodeIndex.get(id) && nodeIndex.get(id).board === meta.id) nodeIndex.delete(id);
       const uses = [];
       rec.ids = indexScene(scene.root, meta.id, nodeIndex, uses);
-      rec.motionText = text.includes('"boardHover"') ? text : null;
+      rec.motionText = hasHoverMotion(scene.root) ? text : null;
       rec.content = content;
       rec.overview = bulkOverview && !overviewDone ? imageOverviewBoard(scene.root) : null;
       if (!rec.overview && bulkOverview && !overviewDone) endOverview();
@@ -853,7 +854,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     rec.rect = root;
     for (const n of rec.ids) if (nodeIndex.get(n) && nodeIndex.get(n).board === id) nodeIndex.delete(n);
     rec.ids = indexScene(scene.root, id, nodeIndex);
-    rec.motionText = text.includes('"boardHover"') ? text : null;
+    rec.motionText = hasHoverMotion(scene.root) ? text : null;
     rec.content = content;
     rec.x = at.x; rec.y = at.y;
     onChange();

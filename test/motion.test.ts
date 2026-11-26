@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
 import { planMotion } from "../src/page/motion-lift.js";
-import { composeAffine, compileMotion, motionPose, poseAffine, springCurve, easeCurve } from "../src/page/motion-logic.js";
+import { composeAffine, compileMotion, hasHoverMotion, motionPose, poseAffine, springCurve, easeCurve } from "../src/page/motion-logic.js";
 import { NODE_TYPES, NODE_KEYS, unknownKeys, validateNode, type Json } from "../cloud/core/schema.ts";
 
 const near = (actual: number, expected: number) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} != ${expected}`);
@@ -95,6 +95,15 @@ test("each transform uses the origin declared by its animation", () => {
   const pose = motionPose(motion, 300);
   poseAffine(pose.values, { x: 0, y: 0, w: 10, h: 20 }, motion.origins)
     .forEach((v, i) => near(v, [0, 2, -2, 0, 20, -10, 1][i]));
+});
+
+test("hover eligibility requires a usable compiled track on the board or a descendant", () => {
+  assert.equal(hasHoverMotion({ motion: [animation] }), true);
+  assert.equal(hasHoverMotion({ children: [{ children: [node] }] }), true);
+  assert.equal(hasHoverMotion({ name: "boardHover", children: [
+    { motion: [{ ...animation, on: "future" }] },
+    { motion: [{ ...animation, tracks: [{ ...track, prop: "future" }, { ...track, to: NaN }] }] },
+  ] }), false);
 });
 
 test("nested sprites can move together within the outer painted bounds", () => {

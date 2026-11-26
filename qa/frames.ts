@@ -34,13 +34,14 @@ export const RECORDER_JS = String.raw`(() => {
       if (!rec.region) { rec.frames.push({ t: performance.now() }); return more; }
       // Where the drag drew its layer (autolayout.js state.drawn) and where the pointer was, in world units.
       const st = h.autolayout && h.autolayout.state, c = h.cam, vr = h.view.getBoundingClientRect();
-      rec.frames.push({ t: performance.now(), px, py, wx: (px - vr.left - c.x) / c.z, wy: (py - vr.top - c.y) / c.z, drawn: st && st.drawn ? { x: st.drawn.x, y: st.drawn.y } : null, data: grab(rec.region) });
+      const sample = rec.sample?.();
+      if (sample !== false) rec.frames.push({ t: performance.now(), px, py, wx: (px - vr.left - c.x) / c.z, wy: (py - vr.top - c.y) / c.z, drawn: st && st.drawn ? { x: st.drawn.x, y: st.drawn.y } : null, data: grab(rec.region), sample });
     }
     return more;
   };
   window.__frames = {
     dpr: () => canvas.width / Math.max(1, canvas.clientWidth),
-    start(region = null, max = 900, every = 1) { rec = { region, frames: [], max, every, seen: 0 }; return true; },
+    start(region = null, max = 900, every = 1, sample = null) { rec = { region, frames: [], max, every, seen: 0, sample }; return true; },
     stop() { const r = rec; rec = null; return r; },
     // The pictures the frames are checked against: before the gesture (A) and after it settled (B). Composited once
     // more and copied in the same task (engine-view's capture): outside a frame the drawing buffer may be cleared.

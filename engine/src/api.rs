@@ -9,7 +9,7 @@ use peniko::ImageData;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-use crate::board::{Board, BuildOptions};
+use crate::board::{Board, BuildOptions, Sprite};
 use crate::cache::{BATCH_TILE_PX, Batch, Cover, Fit, Redraw, TileRect, redraw_area, FrameClock, fit_board, fit_tiles, gesture_stretch, gpu_limit, keep_pending, PREFETCH_HEADROOM, ScaleKey, TileBudget, TileKey, base_px_for, base_scale_at, frame_budgets, interior_uv, jobs_needed, prefetch_ring, scissor_px, tile_budget_for, tile_bytes, tiles_in_view, wants_more};
 use crate::gpu::{GPU_BASE_MS, GPU_DONE_MS, GPU_MS_PER_MPX, Gpu, Quad, Source, to_device};
 use crate::images::{ATLAS_PX, Cells, DEFAULT_IMAGE_BUDGET, MipCache, Plan, Want, ahead_short, cell_src, fit_plans, gives_back_levels, grid, keep_cells, level_dims, level_for, plan_px, slot};
@@ -1055,13 +1055,14 @@ impl Engine {
     #[wasm_bindgen(js_name = setBoardSprite)]
     pub fn set_board_sprite(&mut self, id: &str, parent: &str, clip: Vec<f64>) -> bool {
         let Some(p) = self.pos_of(id) else { return false };
-        if id == parent || self.pos_of(parent).is_none() { return false; }
+        let Some(owner) = self.pos_of(parent) else { return false };
+        if p == owner { return false; }
         let clip = match clip.as_slice() {
             [] => None,
             [x, y, w, h] if clip.iter().all(|v| v.is_finite()) && *w >= 0. && *h >= 0. => Some(Rect::new(*x, *y, x + w, y + h)),
             _ => return false,
         };
-        self.boards[p].sprite = Some((parent.to_string(), clip));
+        self.boards[p].sprite = Some(Sprite { owner: parent.to_string(), clip, rest_ink: self.boards[owner].ink });
         self.dirty = true;
         true
     }
@@ -1193,7 +1194,26 @@ impl Engine {
         let gpu_budget = gpu_limit(period, gpu_share, GPU_BASE_MS.with(std::cell::Cell::get));
         // At rest every board is fitted to whole device pixels (shared edges stay shared: `cache::fit_board`);
         // a zoom draws them where the world puts them.
-        let fits: Vec<Fit> = self.boards.iter().map(|b| if zooming { Fit::none((b.x, b.y), s_exact) } else { let f = b.layout.aabb.first().copied().unwrap_or(Rect::ZERO); fit_board((b.x, b.y), (f.x1, f.y1), b.ink, s) }).collect();
+        let fit = |b: &Board, ink| {
+            if zooming { return Fit::none((b.x, b.y), s_exact); }
+            let f = b.layout.aabb.first().copied().unwrap_or(Rect::ZERO);
+            fit_board((b.x, b.y), (f.x1, f.y1), ink, s)
+        };
+        let mut fits: Vec<Fit> = self.boards.iter().map(|b| fit(b, b.ink)).collect();
+        let uses_sprites = self.boards.iter().any(|b| b.sprite.is_some());
+        if uses_sprites && !zooming {
+            for (i, b) in self.boards.iter().enumerate() {
+                let Some(sprite) = &b.sprite else { continue };
+                let Some(p) = self.pos_of(&sprite.owner) else { continue };
+                let owner = &self.boards[p];
+                // Hiding ink can change the owner's fit. Keep its static fit and rasterize aligned
+                // sprites in that same grid, including the fractional positions inside the board.
+                fits[p] = fit(owner, sprite.rest_ink);
+                if (b.x, b.y) == (owner.x, owner.y) {
+                    fits[i] = fits[p];
+                }
+            }
+        }
         // Per board: the view and every tile of it in view, in the world: what its image tiles are planned for
         // (`ensure_images`), once for the frame.
         let mut reach: Vec<Rect> = vec![view; self.boards.len()];
@@ -1237,7 +1257,7 @@ impl Engine {
         for (bi, b) in self.boards.iter().enumerate() {
             let wink = b.world_ink();
             // An empty board cannot produce a base tile. Keeping it in work would keep the frame loop alive.
-            let sprite = b.sprite.as_ref().is_some_and(|(parent, _)| self.pos_of(parent).is_some_and(|p| !self.boards[p].hidden));
+            let sprite = b.sprite.as_ref().is_some_and(|s| self.pos_of(&s.owner).is_some_and(|p| !self.boards[p].hidden));
             if b.hidden || b.ink.is_zero_area() || (b.sprite.is_some() && !sprite) || (!sprite && b.transform.is_none() && !wink.overlaps(near)) {
                 continue;
             }
@@ -1618,12 +1638,11 @@ impl Engine {
         let mut still_urgent: Vec<bool> = vec![false; self.boards.len()];
         // Insert each sprite after its owner and before any board that paints above it.
         let mut stacked: Vec<&SlotDraw> = Vec::new();
-        let uses_sprites = self.boards.iter().any(|b| b.sprite.is_some());
         let mut sprite_drawn = false;
         if uses_sprites {
             stacked.extend(&slots);
             stacked.sort_by_key(|sd| self.boards[sd.bi].sprite.as_ref()
-                .and_then(|(parent, _)| self.pos_of(parent)).map_or((sd.bi, 0), |p| (p, sd.bi + 1)));
+                .and_then(|s| self.pos_of(&s.owner)).map_or((sd.bi, 0), |p| (p, sd.bi + 1)));
         }
         for i in 0..slots.len() {
             let sd = if uses_sprites { stacked[i] } else { &slots[i] };
@@ -1637,10 +1656,10 @@ impl Engine {
                 let (x, y) = cam_dev;
                 (Some([a, b, c, d, e * s_exact + (1. - a) * x - c * y, f * s_exact - b * x + (1. - d) * y].map(|v| v as f32)), [alpha; 4])
             });
-            let clip = b.sprite.as_ref().and_then(|(parent, clip)| {
-                let pi = self.pos_of(parent)?;
+            let clip = b.sprite.as_ref().and_then(|s| {
+                let pi = self.pos_of(&s.owner)?;
                 let owner = &self.boards[pi];
-                let local = (*clip)? - kurbo::Vec2::new(owner.x, owner.y);
+                let local = s.clip? - kurbo::Vec2::new(owner.x, owner.y);
                 Some(scissor_px(fits[pi].device(local, s_exact, cam_dev), dw, dh).unwrap_or([0; 4]))
             });
             let sprite_visible = b.sprite.is_some() && clip != Some([0; 4]);

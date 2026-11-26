@@ -97,6 +97,11 @@ export function compileMotion(animations, opacity = 1) {
   return { tracks: [...tracks.values()], origins };
 }
 
+export function hasHoverMotion(node) {
+  return (Array.isArray(node?.motion) && compileMotion(node.motion, node.opacity).tracks.length > 0)
+    || (Array.isArray(node?.children) && node.children.some(hasHoverMotion));
+}
+
 export function motionPose(motion, elapsed, { leave, enter, end } = {}) {
   const values = {}, progress = {};
   let done = true, held = false;

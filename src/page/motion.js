@@ -30,7 +30,7 @@ if (host) {
     return true;
   }
 
-  function start(board, now) {
+  function start(board) {
     const ev = host.engineView, e = ev?.engine;
     const source = ev?.motionSource(board);
     if (!source || !e?.setBoardSprite || ev.compactOverview() || host.live?.touched(board)) return;
@@ -48,14 +48,15 @@ if (host) {
       for (const sprite of sprites) {
         const { node, placement: r, clip, animateOpacity } = sprite;
         const id = "\u0000motion:" + made.length;
-        const child = { ...node, x: 0, y: 0, layoutPosition: "absolute" };
+        // Keep the layer in board coordinates so its raster uses the same pixel grid as the static board.
+        const child = { ...node, x: r.x - source.x, y: r.y - source.y, layoutPosition: "absolute" };
         if (child.children?.length) child.children = child.children.map(k => hideMotionRoots(k, promoted));
         if (node.width !== undefined || node.type !== "group") child.width = r.w;
         if (node.height !== undefined || node.type !== "group") child.height = r.h;
         if (animateOpacity) child.opacity = 1;
         const root = { id, type: "frame", width: r.w, height: r.h, layout: "none", children: [child] };
         // Keep the board's registered resources. Only the subtree's paint refers to them.
-        ev.motionBoard(id, r.x, r.y, { ...scene, id, root });
+        ev.motionBoard(id, source.x, source.y, { ...scene, id, root });
         const restAlpha = animateOpacity ? (sprite.compiled.tracks.find(t => t.prop === "opacity")?.rest ?? 1) : 1;
         const entry = { ...sprite, id, rest: poseAffine({ opacity: restAlpha }, sprite.pivot), last: null, pose: null, presentedPose: null, basis: null, parent: parents.get(sprite.parent) };
         made.push(entry);
@@ -64,9 +65,10 @@ if (host) {
         e.drawNow(id);
       }
       if (!made.length) return;
-      active = { board, source, scene, ev, sprites: made, phase: "enter", at: now, preview };
+      active = { board, source, scene, ev, sprites: made, phase: "enter", at: 0, preview };
       ev.motionBoard(board, source.x, source.y, { ...scene, root: hideMotionRoots(scene.root, promoted) });
       e.drawNow(board);
+      active.at = performance.now();
       stats.sprites = made.length;
       host.emit("motionSprites");
     } catch (err) {
@@ -99,7 +101,7 @@ if (host) {
       if (host.engineView !== ev || !host.boards.has(board) || !next || next.content !== source.content || next.x !== source.x || next.y !== source.y || host.live?.touched(board)) stop();
     }
     if (active && desired && (active.board !== desired || (preview && !active.preview))) stop();
-    if (!active && desired) start(desired, now);
+    if (!active && desired) start(desired);
     if (!active) return;
     if (becameReduced) {
       if (!desired) { stop(); return; }
@@ -116,7 +118,7 @@ if (host) {
       phase("leave", now);
     }
     if (active.phase === "still" || active.phase === "settled") return;
-    const elapsed = performance.now() - active.at;
+    const elapsed = Math.max(0, now - active.at);
     let done = true, held = false;
     for (const s of active.sprites) {
       // An explicit preview runs one cycle, including tracks that normally loop indefinitely.
@@ -156,10 +158,11 @@ if (host) {
     else playing = true;
   }
 
+  const canHover = id => !!id && host.prefs().playHoverMotion && !host.motionBlocked() && !!host.engineView?.motionSource(id);
   const setHover = (id, time = performance.now()) => {
     if (preview || active?.preview) return;
     if (!id && !desired && !active) return;
-    if (!host.prefs().playHoverMotion || host.motionBlocked() || !host.engineView?.motionSource(id)) id = null;
+    if (!canHover(id)) id = null;
     if (desired === id) return;
     desired = id;
     entered = time;
@@ -168,6 +171,7 @@ if (host) {
   host.beforeFrame(tick);
   host.motion = {
     hover: setHover,
+    canHover,
     get active() { return !!active; },
     get spriteBoard() { return active?.board ?? null; },
     invalidate(id) { if (active?.board === id || desired === id) this.cancel(); },

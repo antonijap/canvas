@@ -15,6 +15,13 @@ use crate::paint::{EffectJob, ImageStore, PaintOptions, paint_board};
 use crate::scene::{Doc, FlexLayout, FontRef, Kind, SceneBoard, Sizing};
 use crate::text::TextSystem;
 
+pub struct Sprite {
+    pub owner: String,
+    pub clip: Option<Rect>,
+    /// The owner's ink before the promoted layers were hidden.
+    pub rest_ink: Rect,
+}
+
 pub struct Board {
     pub id: String,
     /// stable number for texture keys
@@ -65,7 +72,7 @@ pub struct Board {
     /// hit-tested or listed in view, so going back to its page needs no layout, decode or render.
     pub hidden: bool,
     /// Transient sprite boards paint above their owner and are ignored by hit testing.
-    pub sprite: Option<(String, Option<Rect>)>,
+    pub sprite: Option<Sprite>,
     pub transform: Option<([f64; 6], f32)>,
     /// Per node (board space): what it and its subtree draw (`Painted::node_ink`).
     pub node_ink: Vec<Rect>,
