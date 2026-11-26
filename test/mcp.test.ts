@@ -1153,3 +1153,28 @@ test("motion edits repair a hand-edited fallback when saving another animation",
   assert.equal(redone.status, 200, redone.body.error);
   assert.deepEqual(await list(), [normalized, normalized]);
 });
+
+test("the timeline route finds a rendered instance replacement", async () => {
+  const file = path.join(dir, "motion-replacement.canvas.json");
+  const motion = [{ id: "fade", on: "boardHover", tracks: [{ prop: "opacity", to: 0.5 }] }];
+  fs.writeFileSync(file, JSON.stringify({ version: "2.23", children: [
+    { id: "main", type: "frame", reusable: true, width: 200, height: 120, children: [
+      { id: "layer", type: "rectangle", width: 24, height: 24 },
+    ] },
+    { id: "board", type: "frame", width: 200, height: 120, children: [
+      { id: "instance", type: "ref", ref: "main", descendants: {
+        layer: { id: "replacement", type: "rectangle", width: 24, height: 24, motion },
+      } },
+    ] },
+  ] }));
+  const query = `?file=${encodeURIComponent(file)}&id=replacement`;
+  const node = await (await fetch(base + "/api/node" + query)).json();
+  assert.deepEqual(node.node.motion, motion);
+  const timeline = await (await fetch(base + "/api/motion-timeline" + query)).json();
+  assert.equal(timeline.board, "board");
+  assert.deepEqual(timeline.root.children.find((n: { id: string }) => n.id === "replacement").motion, motion);
+  const next = [{ ...motion[0], tracks: [{ prop: "opacity", to: 0.25 }] }];
+  const edit = await postJson(base, "/api/update", { file, id: "replacement", props: { motion: next }, expectedRevision: timeline.revision });
+  assert.equal(edit.status, 200, edit.body.error);
+  assert.deepEqual((await (await fetch(base + "/api/node" + query)).json()).node.motion, next);
+});

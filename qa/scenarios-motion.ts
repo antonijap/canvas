@@ -571,7 +571,7 @@ const timelinePanel = ".motion-timeline[data-open]";
 const timelineKey = ".mt-key[data-selected]";
 const timelineAnimation = { id: "move", on: "boardHover", tracks: [{ prop: "translateX", from: 0, to: 100, duration: 500 }] };
 
-async function openTimeline(t: T) {
+async function openTimeline(t: T, prepare?: () => void) {
   await t.a.post("/api/structure", { file: t.file, op: "add", page: "layout", place: { parent: null }, nodes: [{
     id: "tl_board", name: "Timeline sample", type: "frame", width: 220, height: 160, x: 10000, y: 10000, layout: "none", fill: "#203040",
     children: [
@@ -579,6 +579,7 @@ async function openTimeline(t: T) {
       { id: "tl_plain", name: "Plain", type: "rectangle", x: 24, y: 100, width: 24, height: 24, fill: "#DFDFFF" },
     ],
   }] });
+  if (prepare) { await t.flush(); prepare(); }
   await t.open({ native: true });
   await t.focus("tl_board");
   await t.ev("window.canvasCmd({cmd:'prefs',prefs:{playHoverMotion:false}})");
@@ -774,6 +775,71 @@ sc("motion-timeline", "timeline adds sampled keys and deletes down to two", {
   await t.page.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: ruler.x, y: ruler.y, deltaX: 0, deltaY: -400, modifiers: 4 });
   await t.waitFor("document.querySelector('.mt-tracks').scrollLeft > 0", "Cmd scroll to zoom and scroll the time axis");
   t.eq(await t.ev("document.querySelector('.mt-label').getBoundingClientRect().x"), left, "layer names stay fixed while time scrolls");
+});
+
+sc("motion-timeline", "timeline saves after another board changes", {
+  covers: ["motion-timeline:keys"], skip: { visual: "Checks the update against the live document revision." },
+}, async (t: T) => {
+  await openTimeline(t);
+  const before = await t.ev("window.canvasHost.doc.revision");
+  const edited = await t.a.post("/api/update", { file: t.file, id: "lay_nest", props: { name: "Renamed board" } });
+  t.ok(edited.revision && edited.revision !== before, "editing the other board changes the revision");
+  await t.waitFor(`window.canvasHost.doc.revision === ${JSON.stringify(edited.revision)}`, "the other board's revision");
+  const editValue = async (value: string) => {
+    await t.ev(`(() => {
+      const field = document.querySelector(".mt-field input");
+      field.focus(); field.select();
+    })()`);
+    await t.io.type(value);
+    await t.io.key("Enter");
+  };
+  await editValue("75");
+  await waitTimelineTrack(t, "track.to === 75");
+  await t.flush();
+
+  // Put another revision between the timeline selecting its precondition and sending the write.
+  const raceWith = (id: string, props: object) => t.ev(`(() => {
+    const fetchOriginal = window.fetch;
+    window.fetch = async (url, opts) => {
+      if (url === "/api/update") {
+        window.fetch = fetchOriginal;
+        const { file } = JSON.parse(opts.body);
+        const r = await fetchOriginal(url, { ...opts, body: JSON.stringify({ file, id: ${JSON.stringify(id)}, props: ${JSON.stringify(props)} }) });
+        if (!r.ok) throw new Error("Could not apply the concurrent edit");
+      }
+      return fetchOriginal(url, opts);
+    };
+  })()`);
+  await raceWith("lay_nest", { name: "Renamed during save" });
+  await editValue("50");
+  await waitTimelineTrack(t, "track.to === 50");
+  await t.flush();
+
+  await raceWith("tl_marker", { motion: [{ ...timelineAnimation, tracks: [{ ...timelineAnimation.tracks[0], to: 30 }] }] });
+  await editValue("15");
+  await t.waitFor("document.querySelector('.mt-field input')?.value === '30'", "the timeline to show the concurrent motion edit");
+  await waitTimelineTrack(t, "track.to === 30");
+});
+
+sc("motion-timeline", "timeline names opaque easing Linear", {
+  covers: ["motion-timeline:keys"], skip: { visual: "Opens a document with easing stored by an older host." },
+}, async (t: T) => {
+  const file = path.join(t.file, "document.json");
+  let original: Buffer | undefined;
+  try {
+    await openTimeline(t, () => {
+      original = fs.readFileSync(file);
+      const doc = t.disk();
+      t.node("tl_marker", doc)!.motion = [{ ...timelineAnimation, tracks: [{ prop: "translateX", keys: [
+        { t: 0, v: 0 }, { t: 250, v: 50, ease: { toString: null } }, { t: 500, v: 100, ease: { spring: { stiffness: 320 } } },
+      ] }] }];
+      fs.writeFileSync(file, JSON.stringify(doc));
+    });
+    t.eq(await t.ev("Array.from(document.querySelectorAll('.mt-segment'), s => s.getAttribute('aria-label'))"),
+      ["Linear segment", "Linear segment"], "opaque eases render as Linear");
+  } finally {
+    if (original) fs.writeFileSync(file, original);
+  }
 });
 
 sc("motion-timeline", "timeline close releases the pose and adds no frames", {

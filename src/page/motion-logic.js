@@ -5,8 +5,10 @@ const clamp = (x, lo = 0, hi = 1) => Math.min(hi, Math.max(lo, x));
 const mix = (a, b, t) => a + (b - a) * t;
 const finite = (n, fallback) => Number.isFinite(n) ? n : fallback;
 
+export const isCubicEase = ease => Array.isArray(ease) && ease.length === 4 && ease.every(Number.isFinite);
+
 export function easeCurve(ease) {
-  const points = Array.isArray(ease) ? ease : typeof ease === "string" && Object.hasOwn(beziers, ease) ? beziers[ease] : null;
+  const points = isCubicEase(ease) ? ease : typeof ease === "string" && Object.hasOwn(beziers, ease) ? beziers[ease] : null;
   if (!points) return x => x;
   const [x1, y1, x2, y2] = points;
   const ax = 1 - 3 * x2 + 3 * x1, bx = 3 * x2 - 6 * x1, cx = 3 * x1;
@@ -69,7 +71,21 @@ export function springCurve(spring) {
   return { duration: ms, sample: t => t >= ms ? 1 : 1 - displacement(duration === undefined ? t / 1000 : t / ms * hi) };
 }
 
-const springEase = ease => ease?.spring && typeof ease.spring === "object" ? springCurve(ease.spring) : null;
+export function springParams(ease) {
+  const spring = ease?.spring;
+  if (!spring || typeof spring !== "object") return null;
+  const { stiffness, damping, mass, duration, bounce, response, dampingFraction } = spring;
+  const fields = Object.keys(spring).length;
+  if (fields === 3 && [stiffness, damping, mass].every(Number.isFinite) && stiffness > 0 && damping >= 0 && mass > 0) return spring;
+  if (fields === 2 && Number.isFinite(duration) && duration > 0 && Number.isFinite(bounce)) return spring;
+  if (fields === 2 && Number.isFinite(response) && response > 0 && Number.isFinite(dampingFraction) && dampingFraction >= 0) return spring;
+  return null;
+}
+
+const springEase = ease => {
+  const spring = springParams(ease);
+  return spring ? springCurve(spring) : null;
+};
 export function segmentEase(ease, curve = springEase(ease)) {
   return curve ? p => curve.sample(p * curve.duration) : easeCurve(ease);
 }
@@ -88,16 +104,20 @@ export function withKeyframeFallback(track, keys) {
 }
 
 export function motionTrackKeys(track, opacity = 1) {
-  if (Array.isArray(track.keys)) return track.keys;
+  if (validKeys(track.keys)) return track.keys;
   const rest = restValue(track.prop, opacity), delay = trackDelay(track);
   return [{ t: delay, v: finite(track.from, rest) }, {
     t: delay + trackDuration(track, springEase(track.ease)), v: finite(track.to, rest), ease: track.ease,
   }];
 }
 
+function validKeys(keys) {
+  return Array.isArray(keys) && keys.length >= 2 && keys.length <= 16 &&
+    keys.every((k, i) => Number.isFinite(k?.t) && Number.isFinite(k?.v) && k.t >= 0 && k.t <= 60000 && (!i || k.t > keys[i - 1].t));
+}
+
 function compileKeys(keys) {
-  if (!Array.isArray(keys) || keys.length < 2 || keys.length > 16 ||
-      keys.some((k, i) => !Number.isFinite(k?.t) || !Number.isFinite(k?.v) || k.t < 0 || k.t > 60000 || (i && k.t <= keys[i - 1].t))) return null;
+  if (!validKeys(keys)) return null;
   const delay = keys[0].t, duration = keys.at(-1).t - delay;
   const segments = keys.slice(1).map((key, i) => ({
     from: keys[i].v, to: key.v, start: (keys[i].t - delay) / duration,
@@ -121,7 +141,7 @@ export function compileMotion(animations, opacity = 1) {
       if (!motionProps.includes(track?.prop)) continue;
       const { prop } = track;
       const keyed = compileKeys(track.keys);
-      if (!keyed && (track.keys !== undefined || (track.to !== undefined && !Number.isFinite(track.to)))) continue;
+      if (!keyed && ((track.keys !== undefined || track.to !== undefined) && !Number.isFinite(track.to))) continue;
       const ease = keyed ? undefined : track.ease;
       const rest = restValue(prop, opacity), spring = springEase(ease);
       tracks.set(prop, {

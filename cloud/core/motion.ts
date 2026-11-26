@@ -1,5 +1,5 @@
 import { motionProps, withKeyframeFallback, type MotionKey } from "../../src/page/motion-logic.js";
-import type { Json } from "./schema.ts";
+import type { DocNode, Json } from "./schema.ts";
 
 export const UPDATE_MOTION_HOST = "The Cloud host runs an older Canvas and must be updated to save motion.";
 
@@ -68,34 +68,42 @@ function matchingFallback(track: Record<string, unknown>, fallback: ReturnType<t
 
 export function normalizeMotionFallbacks(value: Json, repairOnly = false): Json {
   if (!Array.isArray(value)) return value;
-  return value.map(a => {
+  const animations = value.map(a => {
     if (!object(a) || !Array.isArray(a.tracks)) return a;
     const tracks = a.tracks.map(t => {
       if (!object(t) || t.keys === undefined || (repairOnly && !hasFallback(t)) || !checkKeys(t.keys, t.prop, "", [])) return t;
       const fallback = withKeyframeFallback(t, t.keys);
       return matchingFallback(t, fallback) ? t : fallback as Json;
     });
-    return { ...a, tracks };
+    return tracks.some((track, i) => track !== (a.tracks as Json[])[i]) ? { ...a, tracks } : a;
   });
+  return animations.some((animation, i) => animation !== value[i]) ? animations : value;
 }
 
 // History can restore motion directly or inside an instance's stored override.
 export function repairMotionFallbacks(key: string, value: Json): Json {
   if (key === "motion") return normalizeMotionFallbacks(value, true);
   if (key === "descendants" && object(value)) {
-    return Object.fromEntries(Object.entries(value).map(([id, props]) => [id, repairOverrideFallbacks(props)]));
+    const entries = Object.entries(value).map(([id, props]) => [id, repairOverrideFallbacks(props)] as const);
+    return entries.some(([id, props]) => props !== value[id]) ? Object.fromEntries(entries) : value;
   }
   if (key.startsWith("descendants/")) return repairOverrideFallbacks(value);
   return value;
 }
 
+export function repairMotionSubtree(node: DocNode): DocNode {
+  return repairOverrideFallbacks(node) as DocNode;
+}
+
 function repairOverrideFallbacks(props: Json): Json {
   if (!object(props)) return props;
-  const next = { ...props };
-  if (props.motion !== undefined) next.motion = repairMotionFallbacks("motion", props.motion);
-  if (props.descendants !== undefined) next.descendants = repairMotionFallbacks("descendants", props.descendants);
-  if (Array.isArray(props.children)) next.children = props.children.map(repairOverrideFallbacks);
-  return next;
+  const { motion, descendants, children } = props;
+  const repaired = motion === undefined ? motion : repairMotionFallbacks("motion", motion);
+  const overrides = descendants === undefined ? descendants : repairMotionFallbacks("descendants", descendants);
+  const kids = Array.isArray(children) ? children.map(repairOverrideFallbacks) : children;
+  const changedKids = Array.isArray(children) && Array.isArray(kids) && kids.some((child, i) => child !== children[i]);
+  if (repaired === motion && overrides === descendants && !changedKids) return props;
+  return { ...props, ...(repaired !== motion && { motion: repaired }), ...(overrides !== descendants && { descendants: overrides }), ...(changedKids && { children: kids }) };
 }
 
 export function checkMotion(value: unknown, where: string, errors: string[], warnings?: string[]) {

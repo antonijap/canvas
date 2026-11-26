@@ -13,7 +13,7 @@
 // first, so a refused step writes nothing. Ids stay the same through undo and redo.
 
 import type http from "node:http";
-import { repairMotionFallbacks } from "../cloud/core/motion.ts";
+import { repairMotionFallbacks, repairMotionSubtree } from "../cloud/core/motion.ts";
 import { cloudFileHooks } from './cloud-files-runtime.ts';
 import { allIds, buildIndex, findNode, loadDoc, revisionOf, stateHashOf, StaleFileError, updateNode, type Json, type DocNode } from "./engine.ts";
 import { currentDoc, editDoc, pendingEdits, writerHooks } from "./docwriter.ts";
@@ -844,14 +844,14 @@ function runSequence(doc: Doc, ops: Op[], dir: Dir, e: Entry): void {
         const taken = allIds(doc as any);
         const clash = idsIn(op.node).find((i) => taken.has(i));
         if (clash) fail(`"${clash}" exists again`);
-        const added = clone(op.node);
+        const added = clone(repairMotionSubtree(op.node));
         (kids as DocNode[]).splice(Math.min(op.index, (kids as DocNode[]).length), 0, added);
         inserted.push(added);
       } else {
         const at = placeOf(doc, id);
         if (!at) fail(`${nodeName(op.node)} was deleted`);
         else if (at.parent !== op.parent) fail(`${nodeName(at.node)} moved`);
-        else if (!same(at.node, op.node)) fail(`${nodeName(at.node)} or a layer inside it`);
+        else if (!same(at.node, op.node) && !same(at.node, repairMotionSubtree(op.node))) fail(`${nodeName(at.node)} or a layer inside it`);
         else {
           at.list.splice(at.index, 1);
           removed.push(at.node);
@@ -1046,7 +1046,11 @@ async function apply(docFile: string, e: Entry, dir: Dir, hooks: ApplyHooks): Pr
       if (c.length) throw refuse(d, e, c);
       try {
         // What the step does, as ops that run forward (the crash journal keeps them): redo as recorded, undo inverted.
-        const recorded = seqOps ? () => { const now = e.ops.filter(layerOp); return d === "redo" ? clone(now) : invertOps(now); } : undefined;
+        const recorded = seqOps ? () => {
+          const now = e.ops.filter(layerOp);
+          const forward = d === "redo" ? clone(now) : invertOps(now);
+          return forward.map(op => op.t === "tree" && op.kind === "insert" ? { ...op, node: repairMotionSubtree(op.node) } : op);
+        } : undefined;
         const { write } = await editDoc(docFile, { expectedRevision: loaded.revision, touches, deep: !!seqOps, urgent: !!seqOps, recorded }, (doc) => {
           // The step's ops as they are when this runs: a replay after an outside save may have rebased them.
           if (d === dir) unsplit();

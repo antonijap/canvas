@@ -87,3 +87,24 @@ test("Cloud applies keyframes with or without matching fallback fields", () => {
   assert.deepEqual(tree.node("board")?.props.motion, mixed);
   assert.ok(!isReject(update({ v: compatible })));
 });
+
+test("Cloud restores and replaces subtrees with stale keyframe fallbacks", () => {
+  const tree = seed(), peer = seed();
+  const keys = [{ t: 0, v: 1 }, { t: 300, v: 0.5 }];
+  const track = { prop: "opacity", keys, from: 1, to: 0, delay: 0, duration: 300 };
+  const motion = [{ id: "fade", on: "boardHover", tracks: [track] }];
+  const node = { id: "group", type: "frame", children: [{ id: "layer", type: "rectangle", motion }] };
+  const insert = { k: "insert", parent: "board", after: null, node } as const;
+  const remove = { k: "remove", id: node.id } as const;
+  const old = applyAction(tree, makeAction([insert]), { replay: true });
+  assert.ok(!isReject(old));
+  assert.deepEqual(tree.node("layer")?.props.motion, motion);
+  assert.ok(!isReject(send(tree, [remove])));
+  for (const ops of [[insert], [remove, insert]]) {
+    const result = send(tree, ops);
+    assert.ok(!isReject(result), JSON.stringify(result));
+    assert.deepEqual(tree.node("layer")?.props.motion, [{ ...motion[0], tracks: [{ ...track, to: 0.5 }] }]);
+    assert.ok(!isReject(applyAction(peer, result, { replay: true })));
+    assert.deepEqual(peer.doc, tree.doc);
+  }
+});

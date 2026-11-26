@@ -4,6 +4,7 @@ import { randomInt } from "node:crypto";
 import { factsOf, IdSet } from "./boardindex.ts";
 import type { CanvasDoc } from "./docfile.ts";
 import { type Json, type DocNode, validateNode, ValidationError } from "./schema.ts";
+import { repairMotionSubtree } from "../../cloud/core/motion.ts";
 import { follow, normalize, SPAN_KEYS, without, type Span } from "../page/text-spans.js";
 import { followLists, normalizeLists, paragraphCount } from "../page/text-paras.js";
 
@@ -129,7 +130,7 @@ function assertValid(errs: string[]) {
 
 export function insertNode(doc: CanvasDoc, parentId: string | null | undefined, node: DocNode, index?: number): string[] {
   if (!node || typeof node !== "object" || Array.isArray(node)) throw new ValidationError("node must be one object");
-  const copy = structuredClone(node);
+  const copy = structuredClone(repairMotionSubtree(node));
   assertValid(validateNode(copy));
   const ids: string[] = [];
   assignIds(copy, allIds(doc), { fresh: false }, ids);

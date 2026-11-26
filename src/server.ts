@@ -64,7 +64,7 @@ import { handleVariationsRoute, type VarCtx } from "./variations.ts";
 import { handleExportRoute } from "./export.ts";
 import { handleCopyAsRoute } from "./copy-as.ts";
 import { handleLayoutRoute, runLayout, withoutPlacedXY } from "./autolayout.ts";
-import { handleTextRoute } from "./textedit.ts";
+import { handleTextRoute, textTarget } from "./textedit.ts";
 import { fromNudge, fromUpdate, lastEdit, noteEdit, onRepeat, planRepeat, repeatInfo, repeatToast } from "./repeat.ts";
 import { followRename, handleOverrideRoute, OverrideError, overrideInfo, renameFollowers, updateWithOverrides } from "./overrides.ts";
 import { normColor, replaceEach, selectionColors } from "./selection-colors.ts";
@@ -334,23 +334,33 @@ function nodeAt(s: Snapshot, id: string, depth = 4): { node: DocNode; parentId: 
       // A rendered id that is not in the stored tree (an expanded instance child) falls through.
     }
   }
-  // The drawn parent of an instance layer: the frame or instance it sits in ("Inst" for "Inst/Child"), so Esc and
-  // Shift+Enter walk up through instances, not straight to the board.
-  const seek = (n: DocNode, id: string, parent: DocNode | null, index: number): { hit: DocNode; parent: DocNode | null; index: number } | undefined => {
+  const rendered = expandedNodeAt(s, id);
+  if (rendered) {
+    const { hit, parent, index, top } = rendered;
+    // Esc and Shift+Enter walk up through the drawn parents of an instance layer.
+    return { node: trim(hit, depth), parentId: String(parent?.id ?? top.id), index, path: id.includes("/") };
+  }
+  return undefined;
+}
+
+/** Find a rendered id, including a replacement stored on an instance rather than in its children. */
+function expandedNodeAt(s: Snapshot, id: string) {
+  const seek = (n: DocNode, parent: DocNode | null, index: number): { hit: DocNode; parent: DocNode | null; index: number } | undefined => {
     if (String(n.id) === id) return { hit: n, parent, index };
     const kids = (n.children as DocNode[] | undefined) ?? [];
     for (let i = 0; i < kids.length; i++) {
-      const r = seek(kids[i], id, n, i);
+      const r = seek(kids[i], n, i);
       if (r) return r;
     }
     return undefined;
   };
   const rootId = id.split("/")[0];
+  let index: ReturnType<typeof buildIndex> | undefined;
   for (const top of s.doc.children) {
     if (String(top.id) !== rootId && !JSON.stringify(top).includes(`"${rootId}"`)) continue;
-    const ex = expand(buildIndex(s.doc), top, []);
-    const r = seek(ex, id, null, -1);
-    if (r) return { node: trim(r.hit, depth), parentId: r.parent ? String(r.parent.id) : String(top.id), index: r.parent ? r.index : -1, path: id.includes("/") };
+    const root = expand(index ??= buildIndex(s.doc), top, []);
+    const r = seek(root, null, -1);
+    if (r) return { ...r, root, top };
   }
   return undefined;
 }
@@ -915,18 +925,20 @@ try {
         for (const props of [b.props, ...Object.values(b.each ?? {})]) {
           if (props?.motion !== undefined) props.motion = normalizeMotionFallbacks(props.motion);
         }
+        const updateInstance = async (file: string) => {
+          const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
+          const r = await updateWithOverrides(file, b, { source: by === "mcp" ? "mcp" : "user", session: String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined });
+          noteEdit(file, fromUpdate(b));
+          if (r.revision) docChanged(file, r.revision, by, { id: r.ids[0] });
+          if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: r.ids[0], ids: r.ids, props: Object.keys(b.props ?? {}), remove: b.remove ?? [] });
+          const cloud = by === "mcp" && writesMotion(b) ? await checkCloudMotionWrite(file, r.actionId) : undefined;
+          return json(res, { ok: true, revision: r.revision, ids: r.ids, cloud });
+        };
         // A layer inside a component instance: the edit is an override on the instance (src/overrides.ts).
         if (b.file && [b.id, ...(Array.isArray(b.ids) ? b.ids : [])].some((i) => typeof i === "string" && i.includes("/"))) {
           try {
             await prime(b.file);
-            const file = resolveDocPath(b.file);
-            const by = req.headers["x-canvas-source"] === "mcp" ? "mcp" : "inspector";
-            const r = await updateWithOverrides(file, b, { source: by === "mcp" ? "mcp" : "user", session: String(req.headers["x-canvas-session"] ?? "").slice(0, 80) || undefined });
-            noteEdit(file, fromUpdate(b));
-            if (r.revision) docChanged(file, r.revision, by, { id: r.ids[0] });
-            if (by === "inspector") bridgeEmit("user_edit", { file: displayPath(file), id: r.ids[0], ids: r.ids, props: Object.keys(b.props ?? {}), remove: b.remove ?? [] });
-            const cloud = by === "mcp" && writesMotion(b) ? await checkCloudMotionWrite(file, r.actionId) : undefined;
-            return json(res, { ok: true, revision: r.revision, ids: r.ids, cloud });
+            return await updateInstance(resolveDocPath(b.file));
           } catch (e) {
             if ((e as { code?: string }).code === "update_host") return json(res, { error: (e as Error).message, code: "update_host" }, 426);
             if (e instanceof OverrideError) return json(res, { error: e.message, code: e.code }, e.status);
@@ -959,8 +971,10 @@ try {
         try {
           await prime(b.file);
           const file = resolveDocPath(b.file);
+          const doc = watched(file).doc;
+          if (writesMotion(b) && !buildIndex(doc).has(b.id) && textTarget(doc, b.id)?.kind === "replacement") return await updateInstance(file);
           // Auto letter spacing (src/tracking.ts): an auto text node recomputes in the same write as its font change.
-          const metrics = await prepareAutoTracking(watched(file).doc, b.id, b.props ?? {}, b.remove ?? []);
+          const metrics = await prepareAutoTracking(doc, b.id, b.props ?? {}, b.remove ?? []);
           let op: NodeOp | undefined;
           // A main component renamed: instances still named after it follow, in the same step.
           const followers = renameFollowers(watched(file).doc, b.id, b.props ?? {});
@@ -991,6 +1005,7 @@ try {
           return json(res, { ok: true, revision: write.revision, node: result, cloud });
         } catch (e) {
           if ((e as { code?: string }).code === "update_host") return json(res, { error: (e as Error).message, code: "update_host" }, 426);
+          if (e instanceof OverrideError) return json(res, { error: e.message, code: e.code }, e.status);
           if (e instanceof StaleFileError) return json(res, { error: (e as Error).message, code: "stale_revision" }, 409);
           return json(res, { error: (e as Error).message }, 422);
         }
@@ -1151,10 +1166,16 @@ try {
       }
       if (url.pathname === "/api/motion-timeline" && req.method === "GET") {
         const id = url.searchParams.get("id") ?? "";
-        let found;
-        try { found = findNode(snap.doc, id.split("/")[0]); }
-        catch { return json(res, { board: null }); }
-        const top = found.ancestors[0] ?? found.node;
+        let top: DocNode | undefined, root: DocNode | undefined;
+        try {
+          const found = findNode(snap.doc, id.split("/")[0]);
+          top = found.ancestors[0] ?? found.node;
+        } catch {
+          const rendered = expandedNodeAt(snap, id);
+          top = rendered?.top;
+          root = rendered?.root;
+        }
+        if (!top) return json(res, { board: null });
         const board = snap.boards.find(b => b.id === top.id);
         if (!board) return json(res, { board: null });
         const children: { id: string; name: Json; type?: string; motion: Json[]; opacity?: number }[] = [];
@@ -1169,7 +1190,7 @@ try {
           }
           n.children?.forEach(c => visit(c, active));
         };
-        visit(expand(buildIndex(snap.doc), top, []), defaultTheme(snap.doc));
+        visit(root ?? expand(buildIndex(snap.doc), top, []), defaultTheme(snap.doc));
         return json(res, selected ? { board: board.id, key: board.key, revision: snap.revision, root: { children } } : { board: null });
       }
       if (url.pathname === "/api/node") {

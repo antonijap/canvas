@@ -60,6 +60,23 @@ function external(id: string, props: Record<string, unknown>) {
 }
 
 describe("node edits", () => {
+  test("undo restores a subtree with a repaired keyframe fallback and redo removes it", async () => {
+    const keys = [{ t: 0, v: 1 }, { t: 300, v: 0.5 }];
+    const track = { prop: "opacity", keys, from: 1, to: 0, delay: 0, duration: 300 };
+    external("Scr01", { children: [{ id: "fade-layer", type: "rectangle", width: 20, height: 20,
+      motion: [{ id: "fade", on: "boardHover", tracks: [track] }],
+    }] });
+    await edit("Scr02", {});
+    const deleted = await call("POST", "/api/structure", { file: docFile, op: "delete", ids: ["Scr01"] });
+    assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+    assert.equal(node("Scr01"), undefined);
+    const restored = await undo();
+    assert.equal(restored.status, 200, JSON.stringify(restored.body));
+    assert.deepEqual(node("Scr01").children[0].motion[0].tracks[0], { ...track, to: 0.5 });
+    assert.equal((await redo()).status, 200);
+    assert.equal(node("Scr01"), undefined);
+  });
+
   test("undo restores, redo reapplies, labels name the property", async () => {
     assert.equal((await edit("Scr01", { fill: "#FF0000" })).status, 200);
     assert.equal((await state()).undo, "Fill Change");

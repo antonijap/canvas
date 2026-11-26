@@ -6,6 +6,8 @@ export type MotionKey = { t: number; v: number; ease?: unknown };
 type Segment = { from: number; to: number; start: number; end: number; ease: (t: number) => number };
 export type CompiledMotion = { tracks: { prop: MotionProp; rest: number; from: number; to: number; duration: number; delay: number; ease: (t: number) => number; cycles: number; alternate: boolean; leave: string; segments?: Segment[] }[]; origins: MotionOrigins };
 export const motionProps: MotionProp[];
+export function isCubicEase(ease: unknown): ease is [number, number, number, number];
+export function springParams(ease: unknown): Spring | null;
 export function easeCurve(ease: unknown): (x: number) => number;
 export function segmentEase(ease: unknown): (x: number) => number;
 export function motionTrackKeys(track: { prop: string }, opacity?: number): MotionKey[];

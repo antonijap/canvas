@@ -11,7 +11,7 @@
 // an instance of itself. `if` preconditions name the action that must have written a key last (0: none since load).
 
 import { whiteboardPerson } from "../../../src/page/whiteboard-model.js";
-import { checkMotionOverride } from "../motion.ts";
+import { checkMotionOverride, repairMotionSubtree } from "../motion.ts";
 import { docKeyError, setKeyError, validateNode, validateVariable, DESCENDANTS_PREFIX, PROTO_KEYS, type DocNode, type Json } from "../schema.ts";
 import { shift as shiftSpans } from "../../../src/page/text-spans.js";
 import { shiftLists, type ListItem } from "../../../src/page/text-paras.js";
@@ -372,8 +372,8 @@ class Run {
   private insert(op: Extract<FileOp, { k: "insert" }>): AppliedOp {
     const list = this.holder(op.parent);
     const index = this.indexAfter(list, op.after, "insert");
-    const node = op.node;
-    if (!isObj(node)) this.fail("invalid", "insert: node must be an object");
+    if (!isObj(op.node)) this.fail("invalid", "insert: node must be an object");
+    const node = this.ctx.replay ? op.node : repairMotionSubtree(op.node);
     const errs = validateNode(node as DocNode, { replay: this.ctx.replay });
     if (errs.length) this.fail("invalid", errs.slice(0, 3).join("; "));
     const ids = new Set<string>();
@@ -402,7 +402,7 @@ class Run {
       if (this.tree.ver(`s:${id}`) !== 0) this.tree.setVer(`s:${id}`, this.id);
     }
     this.touchUp(op.parent);
-    return { ...op, index };
+    return { ...op, node, index };
   }
 
   /**

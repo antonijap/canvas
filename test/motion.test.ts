@@ -191,6 +191,12 @@ test("keyframes win over hand-edited fallback values in playback", () => {
   assert.equal(motionPose(motion, 60).values.translateX, 100);
 });
 
+test("malformed keys leave valid legacy motion playable", () => {
+  const track = { prop: "translateX", from: 0, to: 40, duration: 300, keys: [{ t: 0, v: 5 }] };
+  const motion = compileMotion([{ ...animation, tracks: [track] }]);
+  assert.equal(motionPose(motion, 150).values.translateX, 20);
+});
+
 test("keyframe playback tolerates opaque easing saved by an older host", () => {
   const keys = [{ t: 0, v: 0 }, { t: 100, v: 40, ease: { toString: null } }];
   const motion = compileMotion([{ ...animation, tracks: [{ prop: "translateX", keys }] }]);

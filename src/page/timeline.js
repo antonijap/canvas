@@ -1,4 +1,4 @@
-import { segmentEase } from "./motion-logic.js";
+import { isCubicEase, segmentEase, springParams } from "./motion-logic.js";
 import { addKey, addTimelineProperty, availableTimelineProperties, axisInset, editTrack, keyValue, moveKeys, removeKey, rulerStep, timelineLayers, timelineProperties, trackValue, zoomAtTime } from "./timeline-logic.js";
 
 const paths = {
@@ -65,16 +65,17 @@ function pickValue(select, value, options) {
   select.value = value;
 }
 function easeMode(ease) {
-  if (ease?.spring) return "spring";
-  if (Array.isArray(ease)) return "curve";
-  return ease;
+  if (springParams(ease)) return "spring";
+  if (isCubicEase(ease)) return "curve";
+  return typeof ease === "string" ? ease : "linear";
 }
 function easeName(ease) {
-  const spring = ease?.spring;
+  const spring = springParams(ease);
   if (spring?.stiffness !== undefined) return "Spring " + digits(spring.stiffness) + ", " + digits(spring.damping);
   if (spring) return "Spring";
-  if (Array.isArray(ease)) return "Curve";
-  return Object.hasOwn(easings, ease) ? easings[ease] : (ease || "Linear");
+  if (isCubicEase(ease)) return "Curve";
+  if (typeof ease !== "string" || !ease) return "Linear";
+  return Object.hasOwn(easings, ease) ? easings[ease] : ease;
 }
 function springSettings(spring) {
   if (spring.stiffness !== undefined) return spring;
@@ -85,7 +86,7 @@ function springSettings(spring) {
 function curveGraph(ease) {
   const graph = svg("svg", { class: "mt-curve", viewBox: "0 0 256 92", preserveAspectRatio: "none", role: "img", "aria-label": "Easing curve" });
   const samples = Array.from({ length: 97 }, (_, i) => i / 96).map(segmentEase(ease));
-  const points = Array.isArray(ease) ? ease : [];
+  const points = isCubicEase(ease) ? ease : [];
   const low = Math.min(0, ...samples, points[1] ?? 0, points[3] ?? 0);
   const high = Math.max(1, ...samples, points[1] ?? 1, points[3] ?? 1);
   const x = p => 8 + 240 * p, y = p => 82 - 72 * ((p - low) / (high - low));
@@ -196,7 +197,11 @@ function installTimeline(host) {
 
   function watch(on) {
     if (!on) { unwatch?.(); unwatch = null; return; }
-    unwatch ??= host.on("document", () => refresh());
+    unwatch ??= host.on("document", doc => {
+      // A revision from another board leaves this timeline's data current, even during a drag.
+      if (model?.board && !model.pending && host.boards.get(model.board)?.meta.key === model.key) model.revision = doc.revision;
+      refresh();
+    });
   }
   function selection(id) {
     if (id?.startsWith("widget:")) id = host.selection().findLast(id => !id.startsWith("widget:")) ?? null;
@@ -241,6 +246,12 @@ function installTimeline(host) {
     Array.from(rows.children).find(line => line.dataset.layerId === selected)?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
+  async function readTimeline(id, signal) {
+    const response = await fetch(host.api("/api/motion-timeline") + "&id=" + encodeURIComponent(id), { signal });
+    if (!response.ok) throw new Error("Could not read motion");
+    return response.json();
+  }
+
   async function refresh(force = false, focus = false) {
     if (!selected || dismissed || !shown || model?.pending || drag) return;
     const key = model?.board ? host.boards.get(model.board)?.meta.key : undefined;
@@ -251,12 +262,14 @@ function installTimeline(host) {
     let overtaken = false;
     request = controller;
     try {
-      const response = await fetch(host.api("/api/motion-timeline") + "&id=" + encodeURIComponent(selected), { signal: controller.signal });
-      if (!response.ok) throw new Error("Could not read motion");
-      const next = await response.json();
-      if (controller.signal.aborted) return;
+      const next = await readTimeline(selected, controller.signal);
+      if (controller.signal.aborted || model?.pending) return;
       const currentKey = next.board ? host.boards.get(next.board)?.meta.key : undefined;
-      overtaken = next.key !== currentKey && host.doc?.revision !== requestedRevision;
+      const revision = host.doc?.revision;
+      if (revision && revision !== requestedRevision) {
+        overtaken = next.key !== currentKey;
+        if (next.board && !overtaken && next.revision === requestedRevision) next.revision = revision;
+      }
       model = { ...next, pending: 0 };
       rebuild();
       if (focus && open) focusLayer();
@@ -471,16 +484,26 @@ function installTimeline(host) {
     const target = model;
     const node = target?.root?.children.find(node => node.id === layer.id && node.motion === layer.motion);
     if (!node || !writable()) return;
+    const previous = node.motion;
     node.motion = motion;
     target.pending++;
-    // Each edit uses the prior write's revision. A concurrent external edit refuses the queue instead of being overwritten.
+    // Each edit uses the prior write's revision. Rebase only while this layer's motion agrees with what was edited.
     target.queue = (target.queue ?? Promise.resolve()).then(async () => {
       if (target.failed) return;
-      const response = await fetch("/api/update", {
+      const write = expectedRevision => fetch("/api/update", {
         method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" },
-        body: JSON.stringify({ file: host.file, id: node.id, props: { motion }, expectedRevision: target.revision, gesture }),
+        body: JSON.stringify({ file: host.file, id: node.id, props: { motion }, expectedRevision, gesture }),
       });
-      const result = await response.json();
+      let response = await write(target.revision);
+      let result = await response.json();
+      if (response.status === 409 && result.code === "stale_revision") {
+        const current = await readTimeline(node.id);
+        const saved = current.root?.children.find(layer => layer.id === node.id);
+        if (current.board === target.board && saved && JSON.stringify(saved.motion) === JSON.stringify(previous)) {
+          response = await write(current.revision);
+          result = await response.json();
+        }
+      }
       if (!response.ok) throw new Error(result.error || "Could not save motion");
       target.revision = result.revision;
     }).catch(err => {

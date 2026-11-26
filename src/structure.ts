@@ -25,6 +25,7 @@
 // paste even when the system clipboard only holds the marker (see src/page/structure.js).
 
 import { stickerAnchor } from "./page/whiteboard-model.js";
+import { repairMotionSubtree } from "../cloud/core/motion.ts";
 import { asOneAction } from "./cloud-files-ops.ts";
 import { cloudFileHooks } from "./cloud-files-runtime.ts";
 import { fitAround, groupsAround, turnedBox } from "./groupfit.ts";
@@ -118,8 +119,9 @@ export class Recorder {
   insert(parent: string | null, index: number, node: DocNode) {
     const list = this.kids(parent);
     const at = Math.max(0, Math.min(index, list.length));
-    list.splice(at, 0, node);
-    this.ops.push({ t: "tree", kind: "insert", parent, index: at, node: clone(node) });
+    const inserted = repairMotionSubtree(node);
+    list.splice(at, 0, inserted);
+    this.ops.push({ t: "tree", kind: "insert", parent, index: at, node: clone(inserted) });
   }
   remove(id: string) {
     const p = placeOf(this.doc, id)!;
