@@ -46,7 +46,7 @@ sc("vote", "Vote and timer palette controls and panels fit at 720 pt", { covers:
       (await t.marks({ id: "vote-tool-selected" })).length === (on ? 1 : 0), on ? "Vote highlighted" : "Vote highlight cleared");
     await t.click(center(timer));
     await panel("[data-timer-sheet]");
-    await click("[data-timer-start]");
+    await click('[data-standalone-duration="300000"]');
     await panel("[data-timer-bar]");
     await t.shot(path.resolve("qa/out/native/timer-bar-720.png"));
     await click("[data-timer-stop]");
@@ -258,7 +258,7 @@ sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it, a
     await ben.waitJs(target, "viewer sees the board");
     await t.js('window.canvasHost.votes.activate()');
     await t.waitJs('document.querySelector("[data-vote-sheet]:not([hidden])")', "start sheet");
-    await t.js(`document.querySelector('[data-vote-mode="anything"]').click(); document.querySelector("[data-vote-start]").click()`);
+    await t.js('document.querySelector("[data-vote-start]").click()');
     await ben.waitJs('document.querySelector(".vote-bar:not([hidden])")', "viewer sees the vote");
     await ben.look(0, 0);
     await ben.js('window.canvasHost.presence.update({cursor:{x:310,y:220},sel:["BallotTarget"]})');
@@ -280,7 +280,7 @@ sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it, a
     await t.key("Escape");
     await t.key("t", ["shift"]);
     await t.waitJs('document.querySelector("[data-timer-sheet]:not([hidden])")', "Shift+T opens the timer sheet");
-    await t.js('document.querySelector("[data-timer-start]").click()');
+    await t.js('document.querySelector(\'[data-standalone-duration="300000"]\').click()');
     await ben.waitJs('document.querySelector("[data-timer-bar] [data-timer-countdown]")?.textContent', "viewer sees the standalone countdown");
     t.eq(await ben.js(`return document.querySelectorAll(${JSON.stringify(viewerTimerControls)}).length`), 0, "viewer cannot control the timer");
     const beforeJump = await ben.js<string>('return document.querySelector("[data-timer-countdown]").textContent');

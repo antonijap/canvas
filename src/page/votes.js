@@ -1,14 +1,17 @@
 import { colorOf } from "./comments-logic.js";
-import { button, el, icon } from "./whiteboard.js";
+import { button, el, icon, rememberWhiteboardSetting, whiteboardSetting } from "./whiteboard.js";
+import { timerDial } from "./timer-dial.js";
 import { STICKY_COLORS, WHITEBOARD_PAINT } from "./whiteboard-model.js";
 
 const NIL_DOC = "00000000-0000-4000-8000-000000000000";
 const VOTE_ICON = icon("M4 21h16M6 21V7h12v14m-9-8 2 2 4-4");
-const TIMER_ICON = icon("M10 2h4m-2 6a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm0 7 3-3");
+const HIDE_ICON = icon("m3 3 18 18M10 10a3 3 0 0 0 4 4m-2-5a3 3 0 0 1 3 3M10.6 5.1c.5-.1.9-.1 1.4-.1 5 0 8.3 4.7 10 7a16 16 0 0 1-3.2 3.5M6.2 6.2A21 21 0 0 0 2 12c1.7 2.3 5 7 10 7a9 9 0 0 0 4.2-1.2");
+const ANONYMOUS_ICON = icon("M3 21v-1a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v1zM12 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm4-1a2.5 2.5 0 1 1 4 2c-1 .6-1.5 1-1.5 2m0 3h.01");
 const PAUSE_ICON = icon("M9 5v14m6-14v14");
 const RESUME_ICON = icon("M8 5l11 7-11 7Z");
 const COMPLETE_ICON = icon("M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM8 12l3 3 5-6");
-const DURATIONS = [["180000", "3 min"], ["300000", "5 min"], ["600000", "10 min"]];
+const DURATIONS = [["0", "Off"], ["180000", "3m"], ["300000", "5m"], ["600000", "10m"]];
+const TIMER_SETTING = "timer-duration";
 const MUTE_KEY = "canvas.timer.muted";
 const field = "input,textarea,select,[contenteditable]";
 const canvasChrome = "button,a,#labels,#rulerTop,#rulerLeft,#rulerCorner,[data-whiteboard-ui]," + field;
@@ -41,12 +44,6 @@ function doneHeading() {
   return h;
 }
 
-function optionRow(label, ...controls) {
-  const row = el("div", "vote-form-row");
-  row.append(el("span", "", label), ...controls);
-  return row;
-}
-
 function segments(label, options, changed, key) {
   const group = el("div", "vote-segments");
   group.setAttribute("role", "group");
@@ -64,14 +61,13 @@ function segments(label, options, changed, key) {
   return { group, select };
 }
 
-function toggle(label, key, checked = false) {
-  const row = el("label", "vote-toggle");
-  const input = el("input");
-  input.type = "checkbox";
-  input.checked = checked;
-  input.dataset[key] = "";
-  row.append(input, el("span", "", label));
-  return { row, input };
+function toggle(label, key, glyph, changed) {
+  const set = value => b.setAttribute("aria-pressed", String(value));
+  const checked = () => b.getAttribute("aria-pressed") === "true";
+  const b = button(label, "vote-toggle", () => { set(!checked()); changed?.(); });
+  b.dataset[key] = "";
+  b.innerHTML = glyph;
+  return { b, set, checked };
 }
 
 function start(host) {
@@ -89,41 +85,42 @@ function start(host) {
   const sheet = panel("vote-sheet", "Start a vote");
   sheet.dataset.voteSheet = "";
   sheet.setAttribute("role", "dialog");
-  sheet.append(heading("Start a vote"));
-  let draft = null, timerDuration = null;
-  const things = segments("Vote on", [["stickies", "Stickies"], ["anything", "Anything"]], value => { draft.on = value; }, "voteMode");
-  const scopes = segments("Scope", [["frame", "Selected frame"], ["page", "This page"]], value => { draft.scopeKind = value; });
-  const scopeRow = optionRow("Scope", scopes.group);
-  const each = el("output", "", "3");
-  each.setAttribute("aria-label", "Votes each");
-  const less = control("−", () => step(-1));
-  const more = control("+", () => step(1));
-  less.setAttribute("aria-label", "Fewer votes");
-  more.setAttribute("aria-label", "More votes");
+  let draft = null;
+  const each = el("output", "vote-each");
+  const less = button("Fewer votes", "vote-step", () => step(-1));
+  less.innerHTML = icon("M5 12h14");
+  const more = button("More votes", "vote-step", () => step(1));
+  more.innerHTML = icon("M5 12h14m-7-7v14");
+  const dots = el("div", "vote-stepper-dots");
+  dots.setAttribute("aria-hidden", "true");
   const stepper = el("div", "vote-stepper");
-  stepper.append(less, each, more);
-  const voteDurations = segments("Timer", [["0", "Off"], ...DURATIONS], value => { draft.timerMs = Number(value); }, "timerDuration");
+  stepper.append(less, dots, more);
+  const voteDurations = segments("Timer", DURATIONS, value => { draft.timerMs = Number(value); }, "timerDuration");
   const timerNotice = el("p", "vote-muted");
   timerNotice.hidden = true;
-  const hidden = toggle("Hide votes until the end", "voteHidden", true);
-  const anonymous = toggle("Anonymous results", "voteAnonymous");
-  const startVote = control("Start", submitStart, "voteStart", true);
-  const sheetActions = el("div", "vote-actions");
+  const hidden = toggle("Hide votes until the end", "voteHidden", HIDE_ICON);
+  const anonymous = toggle("Anonymous results", "voteAnonymous", ANONYMOUS_ICON, paintSheetPeople);
+  const settings = el("div", "vote-settings");
+  const privacy = el("div", "vote-privacy-options");
+  privacy.append(hidden.b, anonymous.b);
+  settings.append(voteDurations.group, privacy);
+  const startVote = control("Start vote", submitStart, "voteStart", true);
   const sheetPeople = el("div", "vote-sheet-people");
-  sheetActions.append(sheetPeople, control("Cancel", closeSheet), startVote);
-  sheet.append(optionRow("Vote on", things.group), scopeRow, optionRow("Votes each", stepper), optionRow("Timer", voteDurations.group), timerNotice, hidden.row, anonymous.row, sheetActions);
+  sheet.append(stepper, each, settings, timerNotice, startVote, sheetPeople);
   layer.append(sheet);
 
-  const timerSheet = panel("vote-sheet", "Start a timer");
+  const timerSheet = panel("vote-sheet timer-sheet", "Start a timer");
   timerSheet.dataset.timerSheet = "";
   timerSheet.setAttribute("role", "dialog");
-  const soloDurations = segments("Duration", DURATIONS, value => { timerDuration = Number(value); }, "standaloneDuration");
-  const startTimer = control("Start", async () => {
-    if (await send({ kind: "timer.set", standalone: true, action: "start", vote: crypto.randomUUID(), ms: timerDuration })) closeTimerSheet();
-  }, "timerStart", true);
-  const timerActions = el("div", "vote-actions");
-  timerActions.append(control("Cancel", closeTimerSheet), startTimer);
-  timerSheet.append(heading("Start a timer", TIMER_ICON), optionRow("Duration", soloDurations.group), timerActions);
+  const dial = timerDial(async (ms) => {
+    if (await send({ kind: "timer.set", standalone: true, action: "start", vote: crypto.randomUUID(), ms })) {
+      rememberWhiteboardSetting(TIMER_SETTING, ms);
+      closeTimerSheet();
+    }
+  });
+  const timerLayout = el("div", "timer-dial-layout");
+  timerLayout.append(dial.face, ...dial.presets);
+  timerSheet.append(timerLayout);
   layer.append(timerSheet);
 
   const bar = panel("vote-bar", "Voting");
@@ -163,7 +160,9 @@ function start(host) {
   function step(delta) {
     if (!draft) return;
     draft.perPerson = Math.max(1, Math.min(10, draft.perPerson + delta));
-    each.value = String(draft.perPerson);
+    each.value = `${draft.perPerson} ${draft.perPerson === 1 ? "vote" : "votes"} each`;
+    dots.style.setProperty("--vote-allowance", draft.perPerson);
+    dots.replaceChildren(...Array.from({ length: draft.perPerson + 1 }, () => el("span")));
     less.disabled = draft.perPerson === 1;
     more.disabled = draft.perPerson === 10;
   }
@@ -179,6 +178,7 @@ function start(host) {
 
   function closeTimerSheet() {
     if (timerSheet.hidden) return;
+    dial.cancel();
     if (timerSheet.contains(document.activeElement)) document.activeElement.blur();
     timerSheet.hidden = true;
     reportTool();
@@ -191,10 +191,9 @@ function start(host) {
     if (standalone && !standalone.endedAt) { timerBar.querySelector("button")?.focus(); return; }
     if (!timerSheet.hidden) { closeTimerSheet(); return; }
     host.emit("draw-tool", "timer");
-    soloDurations.select("300000");
     timerSheet.hidden = false;
     reportTool();
-    soloDurations.group.querySelector('[aria-pressed="true"]').focus({ preventScroll: true });
+    dial.reset(whiteboardSetting(TIMER_SETTING));
   }
 
   function updateTimerOptions() {
@@ -213,31 +212,29 @@ function start(host) {
     if (!canStart || host.readOnly) { host.toast("Owners and editors can start a vote."); return; }
     if (draft) { closeSheet(); return; }
     host.emit("draw-tool", "vote");
-    const selected = host.selection();
-    const frame = selected.length === 1 && host.layerInfo(selected[0])?.type === "frame" ? selected[0] : undefined;
-    draft = { page: host.page, frame, scopeKind: frame ? "frame" : "page", on: "stickies", perPerson: 3 };
-    things.select(draft.on);
-    scopes.select(draft.scopeKind);
+    const frames = host.selection().filter(id => (host.boards.get(id)?.meta.type ?? host.layerInfo(id)?.type) === "frame");
+    draft = { page: host.page, frame: frames.length === 1 ? frames[0] : undefined, perPerson: 3 };
     voteDurations.select("0");
     updateTimerOptions();
-    scopeRow.hidden = !frame;
-    hidden.input.checked = true;
-    anonymous.input.checked = false;
+    hidden.set(true);
+    anonymous.set(false);
     step(0);
     sheet.hidden = false;
     paintSheetPeople();
     reportTool();
-    things.group.firstElementChild.focus({ preventScroll: true });
+    less.focus({ preventScroll: true });
     host.requestFrame();
   }
 
   async function submitStart() {
     if (!draft) return;
-    const { page, frame, scopeKind, on, perPerson, timerMs } = draft;
+    const { page, frame, perPerson, timerMs } = draft;
+    const hasStickies = [...host.boards.values()].some(({ meta, gone }) =>
+      !gone && (frame ? meta.stickyScopes?.includes(frame) : meta.stickyScopes?.length));
     const ok = await send({
       kind: "vote.start", vote: crypto.randomUUID(),
-      scope: { page, ...(scopeKind === "frame" && { frame }) },
-      on, perPerson, ...(timerMs && { timerMs }), hidden: hidden.input.checked, anonymous: anonymous.input.checked,
+      scope: { page, ...(frame && { frame }) },
+      on: hasStickies ? "stickies" : "anything", perPerson, ...(timerMs && { timerMs }), hidden: hidden.checked(), anonymous: anonymous.checked(),
     });
     if (ok) { closeSheet(); if (host.page === page) host.clearSel(); }
   }
@@ -299,7 +296,8 @@ function start(host) {
     if (busy) return false;
     busy = true;
     loading++;
-    startVote.disabled = startTimer.disabled = true;
+    startVote.disabled = true;
+    dial.setDisabled(true);
     try {
       const r = await fetch(path, {
         method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" },
@@ -319,7 +317,8 @@ function start(host) {
       return false;
     } finally {
       busy = false;
-      startVote.disabled = startTimer.disabled = false;
+      startVote.disabled = false;
+      dial.setDisabled(false);
       void load();
     }
   }
@@ -344,11 +343,10 @@ function start(host) {
   }
 
   function paintSheetPeople() {
-    const here = anonymous.input.checked ? [] : people;
+    const here = anonymous.checked() ? [] : people;
     sheetPeople.replaceChildren();
     if (here.length) sheetPeople.append(avatars(here), el("span", "vote-muted", `${here.length} here`));
   }
-  anonymous.input.addEventListener("change", paintSheetPeople);
 
   function playEnd(id) {
     const last = "canvas.timer.lastEnd";
@@ -645,6 +643,8 @@ function start(host) {
   }, true);
 
   addEventListener("pointerdown", e => {
+    if (!timerSheet.hidden && !timerSheet.contains(e.target)) closeTimerSheet();
+    if (draft && !sheet.contains(e.target)) closeSheet();
     const v = current();
     if (v?.state !== "active" || !canVote || host.hand || e.button !== 0 || !view.contains(e.target)) return;
     const id = targetAt(e, v);

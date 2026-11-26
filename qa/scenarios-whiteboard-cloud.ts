@@ -127,7 +127,6 @@ sc("vote", "Cloud vote and timer let a viewer vote and comment without revealing
     await anna.page.send("Page.bringToFront");
     await anna.io.key("d", { shift: true });
     await anna.waitFor('document.querySelector("[data-vote-sheet]:not([hidden])")', "start sheet");
-    await anna.ev('document.querySelector(\'[data-vote-mode="anything"]\').click()');
     await anna.ev('document.querySelector(\'[aria-label="Fewer votes"]\').click(); document.querySelector(\'[aria-label="Fewer votes"]\').click(); document.querySelector("[data-vote-start]").click()');
     await ben.waitFor('document.querySelector(".vote-bar:not([hidden])")', "the viewer sees the live vote");
     await ben.page.send("Page.bringToFront");

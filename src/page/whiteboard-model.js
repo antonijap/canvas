@@ -5,13 +5,13 @@ export const STICKY_COLORS = Object.freeze({
 });
 
 export const STICKERS = Object.freeze({
-  agree: { label: "Agree", key: "a", color: "#20864E", path: "m5 12 4 4L19 6" },
-  love: { label: "Love it", key: "l", color: "#C83A62", path: "M20.8 8.6c0 4.2-8.8 9.6-8.8 9.6s-8.8-5.4-8.8-9.6a4.5 4.5 0 0 1 8.8-1 4.5 4.5 0 0 1 8.8 1Z" },
-  star: { label: "Star", key: "s", color: "#9A6200", path: "m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2-5.5-3-5.5 3 1-6.2L3 9.6l6.2-.9Z" },
-  question: { label: "Question", key: "q", color: "#4C75C6", path: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-2.3 6.3a2.4 2.4 0 1 1 3.6 2c-1 .5-1.3 1.2-1.3 2.2m0 2.9h.01" },
-  idea: { label: "Idea", key: "i", color: "#7954CB", path: "M9 18h6m-5 3h4M9 15c0-3-3-3.3-3-7a6 6 0 1 1 12 0c0 3.7-3 4-3 7Z" },
-  flag: { label: "Flag", key: "f", color: "#BA5422", path: "M5 21V4m0 1c5-5 9 4 14 0v10c-5 4-9-5-14 0" },
-  "plus-one": { label: "Plus one", key: "1", color: "#197D91", path: "M3 12h8m-4-4v8m8-6 4-2v8" },
+  agree: { label: "Agree", key: "a", color: "#20864E", path: "M5 13 9 17 19 7" },
+  love: { label: "Love it", key: "l", color: "#C83A62", path: "M20.8 9.3c0 4.2-8.8 9.6-8.8 9.6s-8.8-5.4-8.8-9.6a4.5 4.5 0 0 1 8.8-1 4.5 4.5 0 0 1 8.8 1Z" },
+  star: { label: "Star", key: "s", color: "#9A6200", path: "m12 3.4 2.8 5.7 6.2.9-4.5 4.4 1 6.2-5.5-3-5.5 3 1-6.2L3 10l6.2-.9Z" },
+  question: { label: "Question", key: "q", color: "#4C75C6", path: "M7.27 7.15a4.86 4.86 0 0 1 9.45 1.62c0 3.24-4.86 4.32-4.86 5.94M11.86 20.11h.02" },
+  idea: { label: "Idea", key: "i", color: "#7954CB", path: "M9 18.5h6m-5 3h4M9 15.5c0-3-3-3.3-3-7a6 6 0 1 1 12 0c0 3.7-3 4-3 7Z" },
+  flag: { label: "Flag", key: "f", color: "#BA5422", path: "M5 20.78v-17m0 1c5-5 9 4 14 0v10c-5 4-9-5-14 0" },
+  "plus-one": { label: "Plus one", key: "7", color: "#197D91", path: "M4 12h8m-4-4v8m8-6 4-2v8" },
   rocket: { label: "Rocket", key: "r", color: "#626D84", path: "M14 6c1.8-1.8 4-2.7 7-3-.3 3-1.2 5.2-3 7l-6 6-4-4 6-6Zm2.5 1.5h.01M9 10l-4 1-2 4 5-1m6 1-1 4-4 2 1-5m-6 3-1 2 2-1" },
 });
 
@@ -22,7 +22,7 @@ export const STICKY_SIZE = 184;
 export const STICKY_PADDING = 16;
 export const STICKER_SIZE = 42;
 export const STICKY_GAP = 16;
-export const STICKER_MIN_ICON = 16;
+export const STICKER_MIN_ICON = 20;
 export const isStickyColor = (key) => typeof key === "string" && Object.hasOwn(STICKY_COLORS, key);
 export const isStickerKind = (key) => typeof key === "string" && Object.hasOwn(STICKERS, key);
 export const isTextLayer = (type) => type === "text" || type === "sticky";
@@ -62,8 +62,9 @@ export function stackStickers(stickers) {
   return stacks;
 }
 
-export function stickerGlyph(kind, size = STICKER_MIN_ICON) {
+export function stickerGlyph(kind, sealSize = STICKER_SIZE) {
   const art = isStickerKind(kind) ? STICKERS[kind] : STICKERS.agree;
+  const size = sealSize * STICKER_MIN_ICON / STICKER_SIZE;
   return `<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="${art.path}"/></svg>`;
 }
 

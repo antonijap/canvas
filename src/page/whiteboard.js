@@ -1,6 +1,6 @@
 import { drawRect } from "./draw-logic.js";
 import { BADGE, SPARK, sparkAt, visibleArea } from "./spark-logic.js";
-import { STICKY_COLORS, STICKY_SIZE, STICKY_GAP, STICKERS, STICKER_SIZE, stackStickers, stickerGlyph,
+import { STICKY_COLORS, STICKY_SIZE, STICKY_GAP, STICKERS, STICKER_SIZE, STICKER_MIN_ICON, stackStickers, stickerGlyph,
   isStickyColor, isStickerKind, stickyOwner, whiteboardPerson, WHITEBOARD_PAINT } from "./whiteboard-model.js";
 
 const field = "input,textarea,select,[contenteditable]";
@@ -9,6 +9,7 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const round = (n) => Math.round(n * 1000) / 1000;
 const get = (key) => { try { return localStorage.getItem("canvas:whiteboard:" + key); } catch { return null; } };
 function remember(key, value) { try { localStorage.setItem("canvas:whiteboard:" + key, value); } catch { /* private browsing */ } }
+export { get as whiteboardSetting, remember as rememberWhiteboardSetting };
 export const icon = (path) => `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
 
 export function el(tag, cls, text) {
@@ -56,10 +57,10 @@ function start(host) {
   const tray = el("div", "whiteboard-panel whiteboard-flyout sticker-tray");
   tray.dataset.stickerTray = "";
   tray.dataset.whiteboardUi = "";
+  tray.setAttribute("role", "group");
+  tray.setAttribute("aria-label", "Stickers");
+  tray.style.setProperty("--wb-glyph-ratio", STICKER_MIN_ICON / STICKER_SIZE);
   tray.hidden = true;
-  tray.append(el("div", "sticker-tray-title", "Stickers"));
-  const grid = el("div", "sticker-tray-grid");
-  tray.append(grid);
   const controls = el("div", "whiteboard-panel sticky-controls");
   controls.dataset.stickyControls = "";
   controls.dataset.whiteboardUi = "";
@@ -118,16 +119,23 @@ function start(host) {
     stickerGhost.innerHTML = stickerGlyph(kind);
     preview();
   }
-  const choices = Object.entries(STICKERS).map(([key, art]) => {
-    const b = button(art.label + " (" + art.key.toUpperCase() + ")", "sticker-choice", () => choose(key));
+  const choices = Object.entries(STICKERS).map(([key, art], index) => {
+    const number = String(index + 1), shortcut = art.key.toUpperCase();
+    const b = button(art.label, "sticker-choice", () => choose(key));
+    b.removeAttribute("title");
     b.dataset.kind = key;
+    b.dataset.stickerKey = number;
+    b.setAttribute("aria-keyshortcuts", shortcut === number ? number : number + " " + shortcut);
     const seal = el("span", "sticker-seal");
     seal.style.setProperty("--wb-sticker", art.color);
-    seal.innerHTML = stickerGlyph(key);
-    b.append(seal);
+    seal.innerHTML = stickerGlyph(key, 40);
+    const tip = el("span", "sticker-choice-tip", art.label);
+    tip.setAttribute("aria-hidden", "true");
+    tip.append(el("kbd", "whiteboard-key", shortcut));
+    b.append(seal, tip);
     return b;
   });
-  grid.append(...choices);
+  tray.append(...choices);
 
   function request(path, body) {
     return fetch(host.api(path), { method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" },
@@ -499,9 +507,9 @@ function start(host) {
     if (key === "escape" && (tool || open)) { reset(); closePopover(); }
     else if (key === "s" && e.shiftKey) activate("sticker");
     else if (tool === "sticker" && !e.shiftKey) {
-      const choice = Object.keys(STICKERS).find((k) => STICKERS[k].key === key);
+      const choice = choices.find((b) => b.dataset.stickerKey === key || STICKERS[b.dataset.kind].key === key);
       if (!choice) return;
-      choose(choice);
+      choose(choice.dataset.kind);
     } else if (key === "s" && !e.shiftKey) activate("sticky");
     else if (key === "tab" && !e.shiftKey && parentId && !tool && !e.target.closest?.("[data-whiteboard-ui]")) next(parentId, "right");
     else return;

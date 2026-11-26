@@ -7,10 +7,29 @@ import { makeAction } from "../src/cloud-files-ops.ts";
 import { copyNodes, pasteNodes } from "../src/structure.ts";
 import { exportTargets, shutdownRenderer, type CanvasDoc } from "../src/engine.ts";
 import { applyPeerPreviews } from "../src/page/presence-client.js";
+import { boardsOf } from "../src/boards.ts";
+import { stickerGlyph } from "../src/page/whiteboard-model.js";
 
 const sticky: DocNode = { id: "note", type: "sticky", color: "yellow", width: 184, height: 184, content: "Draft",
   spans: [{ start: 0, end: 5, fontWeight: "700" }], author: { name: "Anna", id: "person" }, showAuthor: true, autoHeight: true };
 const sticker: DocNode = { id: "seal", type: "sticker", kind: "love", on: { layer: "note", x: 0.9, y: 0.1 }, by: { name: "Anna", id: "person" } };
+
+test("board metadata includes frames with enabled sticky descendants", () => {
+  const doc: CanvasDoc = { children: [
+    { id: "board", type: "frame", children: [
+      { id: "nested", type: "frame", children: [{ ...sticky }] },
+      { id: "disabled", type: "frame", enabled: false, children: [{ ...sticky, id: "hidden-note" }] },
+      { id: "empty", type: "frame", children: [{ ...sticky, id: "disabled-note", enabled: false }] },
+    ] },
+    { ...sticky, id: "loose" },
+  ] };
+  assert.deepEqual(boardsOf(doc).map(board => board.stickyScopes), [["board", "nested"], ["loose"]]);
+});
+
+test("sticker glyphs use the centered paths and scale with the seal", () => {
+  assert.match(stickerGlyph("question"), /width="20" height="20".*stroke-width="2\.25".*d="M7\.27 7\.15a4\.86 4\.86 0 0 1 9\.45 1\.62c0 3\.24-4\.86 4\.32-4\.86 5\.94M11\.86 20\.11h\.02"/);
+  assert.match(stickerGlyph("agree", 84), /width="40" height="40".*d="M5 13 9 17 19 7"/);
+});
 
 test("whiteboard nodes validate through the shared document schema", () => {
   assert.deepEqual(validateNode(sticky), []);
@@ -70,6 +89,7 @@ test("SVG exports the authored note and the stacked seal, including either stick
   assert.match(all.svg!, /Draft/);
   assert.match(all.svg!, /Anna/);
   assert.match(all.svg!, /Love it/);
+  assert.match(first.svg!, /M20\.8 9\.3c0 4\.2/);
   assert.match(all.svg!, />2<\/text>/);
   assert.equal(first.rect.width, 42);
   assert.equal(second.rect.pageX, first.rect.pageX);

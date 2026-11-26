@@ -17,9 +17,10 @@ const numOr = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v :
 
 /** type: the node's type. Only frames are boards in the person's eyes: other top-level layers show no name label. */
 /** `guides`: ruler guides saved on the board (metadata.canvasGuides, src/page/navigate.js), offsets from its top-left. */
-/** `layoutGuides`: the frames in the board (itself included) that have layout guides (metadata.canvasLayoutGuides,
+/** `stickyScopes`: the board and frames containing enabled stickies, including on boards that are offscreen.
+ * `layoutGuides`: the frames in the board (itself included) that have layout guides (metadata.canvasLayoutGuides,
  * src/page/layout-guides-logic.js), with their guides; the page draws them over the canvas. */
-export type BoardMeta = { id: string; name: string; type: string; x: number; y: number; width?: number; height?: number; key: string; stickers?: Sticker[]; guides?: { axis: "x" | "y"; at: number }[]; layoutGuides?: { id: string; guides: LayoutGuide[] }[] };
+export type BoardMeta = { id: string; name: string; type: string; x: number; y: number; width?: number; height?: number; key: string; stickers?: Sticker[]; stickyScopes?: string[]; guides?: { axis: "x" | "y"; at: number }[]; layoutGuides?: { id: string; guides: LayoutGuide[] }[] };
 
 /** A board's ruler guides, when it has any: well-formed ones only. */
 function guidesOf(n: Record<string, any>): { guides?: { axis: "x" | "y"; at: number }[] } {
@@ -35,18 +36,23 @@ function hasRef(n: DocNode): boolean {
 }
 
 /** Per board object: a digest of its content, whether it uses components, and a digest of the components it holds. */
-type BoardFacts = { stickers: Sticker[]; digest: string; hasRef: boolean; comps: string; layoutGuides: { id: string; guides: LayoutGuide[] }[] };
+type BoardFacts = { stickers: Sticker[]; stickyScopes: string[]; digest: string; hasRef: boolean; comps: string; layoutGuides: { id: string; guides: LayoutGuide[] }[] };
 const facts = boardCache<BoardFacts>();
 function factsOf(n: DocNode): BoardFacts {
   let f = facts.get(n);
   if (f) return f;
   const components: DocNode[] = [];
   const stickers: Sticker[] = [];
+  const stickyScopes = new Set<string>();
   const layoutGuides: { id: string; guides: LayoutGuide[] }[] = [];
   walk({ children: [n] } as CanvasDoc, (c, parent, ancestors) => {
     const sticker = stickerData(c);
     if (sticker && ancestors.every((a) => a.enabled !== false)) {
       stickers.push(parent?.id ? { ...sticker, parent: parent.id } : sticker);
+    }
+    if (c.type === "sticky" && c.enabled !== false && ancestors.every((a) => a.enabled !== false)) {
+      stickyScopes.add(String(n.id));
+      for (const a of ancestors) if (a.type === "frame") stickyScopes.add(String(a.id));
     }
     if (c.reusable === true) components.push(c);
     if (c.type === "frame" && c.metadata && typeof c.metadata === "object") {
@@ -54,7 +60,7 @@ function factsOf(n: DocNode): BoardFacts {
       if (g.length) layoutGuides.push({ id: String(c.id), guides: g });
     }
   });
-  f = { stickers, digest: sha1(JSON.stringify(n)), hasRef: hasRef(n), comps: components.length ? sha1(JSON.stringify(components)) : "", layoutGuides };
+  f = { stickers, stickyScopes: [...stickyScopes], digest: sha1(JSON.stringify(n)), hasRef: hasRef(n), comps: components.length ? sha1(JSON.stringify(components)) : "", layoutGuides };
   facts.set(n, f);
   return f;
 }
@@ -89,6 +95,7 @@ export function boardsOf(doc: CanvasDoc): BoardMeta[] {
       height: numOr(n.height),
       key: sha1(`${shared}:${f!.hasRef ? comps : ""}:${f!.digest}`),
       ...(f!.stickers.length ? { stickers: f!.stickers.map((s) => layers?.has(s.on.layer.split("/")[0]) ? s : { ...s, missingTarget: true }) } : {}),
+      ...(f!.stickyScopes.length ? { stickyScopes: f!.stickyScopes } : {}),
       ...guidesOf(n),
       ...(f!.layoutGuides.length ? { layoutGuides: f!.layoutGuides } : {}),
     }));

@@ -21,7 +21,7 @@ export function whiteboardPerson(value: unknown): WhiteboardPerson | null;
 export function stickerAnchor(value: unknown): StickerAnchor | null;
 export function stickerData(node: DocNode): Sticker | null;
 export function stackStickers(stickers: Iterable<Sticker>): Map<string, Sticker[]>;
-export function stickerGlyph(kind: string, size?: number): string;
+export function stickerGlyph(kind: string, sealSize?: number): string;
 export function stickyText(node: DocNode): DocNode;
 export function stickyFrame(node: DocNode): DocNode;
 export function whiteboardScene(node: DocNode): DocNode;

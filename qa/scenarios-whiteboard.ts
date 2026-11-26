@@ -34,10 +34,13 @@ sc("sticky", "Sticky controls and vote panels fit a narrow canvas", {
   await t.waitFor('window.canvasHost.textEdit.active', "sticky editor");
   await t.io.key("Escape");
   await inspect(".sticky-controls");
+  await t.clearSel();
   await t.io.key("d", { shift: true });
   await inspect("[data-vote-sheet]");
   await t.ev(`document.querySelector("[data-vote-start]").click()`);
   await t.waitFor('document.querySelector("[data-vote-end]")?.offsetWidth', "vote started");
+  const { votes: [vote] } = await t.a.get("/api/votes");
+  t.eq([vote.scope, vote.on], [{ page: await t.ev("window.canvasHost.page") }, "stickies"], "the page vote targets its stickies");
   await inspect(".vote-bar");
   await t.ev(`document.querySelector("[data-vote-end]").click()`);
   await inspect("[data-vote-results]");
@@ -59,7 +62,7 @@ sc("vote", "Vote on objects, reveal results and undo the conclusion", { covers: 
     })()`, selector);
     await t.io.click(at.x, at.y);
   };
-  await click('[data-vote-mode="anything"]');
+  t.eq(await t.ev('document.querySelector(".vote-sheet output").textContent'), "3 votes each", "default vote allowance");
   fs.writeFileSync("qa/out/vote-start.png", await t.shot());
   await click("[data-vote-start]");
   await t.waitFor('document.querySelector("[data-vote-end]")?.offsetWidth', "vote started");
@@ -86,7 +89,8 @@ sc("vote", "Vote on objects, reveal results and undo the conclusion", { covers: 
   fs.writeFileSync("qa/out/vote-reveal.png", await t.shot());
   await t.flush();
   const read = () => JSON.parse(fs.readFileSync(path.join(t.file, "comments.json"), "utf8"));
-  t.eq([read().seq, read().votes[0].state, read().votes[0].ballots[0].layer], [0, "ended", "r_free"], "the verdict is stored alongside comments");
+  t.eq([read().seq, read().votes[0].scope.frame, read().votes[0].on, read().votes[0].state, read().votes[0].ballots[0].layer],
+    [0, "lay_nest", "anything", "ended", "r_free"], "the selected frame with no stickies is open to any object");
   const cards = () => t.disk().children.filter((n) => n.name === "Vote conclusion");
   t.eq(cards().length, 1, "one conclusion on the canvas");
   t.ok(cards()[0].children?.some((node: any) => node.type === "text" && node.content === "1. Free rect"), "the conclusion has the ranked object");
@@ -148,7 +152,7 @@ sc("sticker", "Sticker placement stacks and follows the target", { covers: ["sti
   for (let i = 0; i < 2; i++) {
     await t.ev('window.canvasHost.emit("cmd", { cmd: "draw", type: "sticker" })');
     await t.waitFor('document.querySelector("[data-sticker-tray]")?.offsetWidth', "sticker tray");
-    await t.io.key("l");
+    await t.io.key(i ? "l" : "2");
     await t.io.click(p.x, p.y);
     await t.flush();
   }
@@ -285,8 +289,33 @@ sc("timer", "Standalone timer pauses, extends, resumes and ends", {
   skip: { visual: "Countdown text changes against the clock. The scenario checks rendered states and captures the running bar." },
 }, async (t: T) => {
   await t.io.key("t", { shift: true });
-  await t.waitFor('document.querySelector("[data-timer-sheet]:not([hidden])")', "timer duration sheet");
-  await t.ev('document.querySelector("[data-timer-start]").click()');
+  const dial = '[data-timer-dial]';
+  const value = `document.querySelector(${JSON.stringify(dial)})?.getAttribute("aria-valuetext")`;
+  const open = '!!document.querySelector("[data-timer-sheet]:not([hidden])")';
+  const stopped = 'document.querySelector("[data-timer-bar]").hidden';
+  await t.waitFor(open, "timer dial");
+  t.eq(await t.ev(value), "5:00", "initial duration");
+  await t.io.key("ArrowRight");
+  t.eq(await t.ev(value), "5:30", "arrow advances half a minute");
+  await t.io.key("Escape");
+  t.ok(await t.ev(`!${open} && ${stopped}`), "Escape dismisses the dial without starting");
+  await t.io.key("t", { shift: true });
+  await t.io.click(30, 200);
+  t.ok(await t.ev(`!${open} && ${stopped}`), "click outside dismisses without starting");
+  await t.io.key("t", { shift: true });
+  const r = await t.ev<{ x: number; y: number; width: number; height: number }>(
+    `document.querySelector(${JSON.stringify(dial)}).getBoundingClientRect().toJSON()`);
+  await t.io.move(r.x + r.width * .9, r.y + r.height / 2);
+  await t.io.down();
+  await t.io.move(r.x + r.width / 2, r.y + r.height * .9, 4, 1);
+  t.eq(await t.ev(value), "5:00", "drag previews the snapped duration");
+  t.ok(await t.ev(stopped), "drag waits for release");
+  await t.io.up();
+  await t.waitFor('document.querySelector("[data-timer-pause]")', "drag starts a timer on release");
+  await t.ev('document.querySelector("[data-timer-stop]").click()');
+  await t.waitFor(stopped, "drag timer stops");
+  await t.io.key("t", { shift: true });
+  await t.ev('document.querySelector(\'[data-standalone-duration="180000"]\').click()');
   await t.waitFor('document.querySelector("[data-timer-pause]")', "running timer");
   await t.ev('window.qaRealNow = Date.now; Date.now = () => window.qaRealNow() + 3600000');
   try {
@@ -315,10 +344,14 @@ sc("timer", "Standalone timer pauses, extends, resumes and ends", {
   await t.waitFor('document.querySelector("[data-timer-bar]").hidden', "the end notice dismisses");
   await t.open();
   t.ok(await t.ev('document.querySelector("[data-timer-bar]").hidden'), "the local dismissal stays after reload");
-  // The harness also reopens a copy in a fresh app profile, which has its own dismissal preference.
-  t.eq((await whiteboardOp(t.srv.base, t.file, { kind: "timer.set", action: "stop", standalone: true, vote })).status,
-    200, "clear the completed timer before comparing the saved design");
-
+  await t.io.key("t", { shift: true });
+  t.eq(await t.ev(value), "3:00", "last started duration survives reload");
+  await t.io.key("ArrowLeft");
+  await t.io.key("Enter");
+  await t.waitFor('document.querySelector("[data-timer-pause]")', "Return starts the keyboard duration");
+  await t.waitFor('document.querySelector("[data-timer-countdown]").textContent === "02:30"', "keyboard timer uses the adjusted duration");
+  await t.ev('document.querySelector("[data-timer-stop]").click()');
+  await t.waitFor(stopped, "keyboard timer stops");
   const timedVote = randomUUID(), page = await t.ev<string>("window.canvasHost.page");
   t.eq((await whiteboardOp(t.srv.base, t.file, { kind: "vote.start", vote: timedVote, scope: { page }, on: "anything",
     perPerson: 1, hidden: true, anonymous: false, timerMs: 2000 })).status, 200, "start a local timed vote");
