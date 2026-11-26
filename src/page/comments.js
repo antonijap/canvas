@@ -34,7 +34,7 @@ const ICON = {
   mic: svg('<rect x="5" y="1.8" width="4" height="6.8" rx="2"/><path d="M2.8 6.8a4.2 4.2 0 008.4 0M7 11v1.4"/>'),
   clock: svg('<circle cx="7" cy="7" r="5.4"/><path d="M7 4v3.2l2 1.2"/>', 11),
   alert: svg('<circle cx="7" cy="7" r="5.4"/><path d="M7 4.2v3.4M7 9.7v.1"/>', 11),
-  sparkles: svg('<path d="M5.5 2l1 2.9 2.9 1-2.9 1-1 2.9-1-2.9-2.9-1 2.9-1zM10.8 8.6l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/>', 12),
+  sparkles: svg('<path fill="currentColor" stroke="none" d="M5.5 2l1 2.9 2.9 1-2.9 1-1 2.9-1-2.9-2.9-1 2.9-1zM10.8 8.6l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z"/>', 12),
 };
 // The add pin: what the pointer is in comment mode, and the pin a click leaves while its comment is written. The same
 // 28 pt teardrop as every pin (.cm-pin: radii 14 14 14 3, the popover's colour, --cm-pin's three shadows), with a

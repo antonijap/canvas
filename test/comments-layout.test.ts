@@ -18,3 +18,9 @@ test('comment composer keeps the send button without a Return chip', () => {
   assert.ok(!source.includes('ICON.ret'));
   assert.ok(source.includes('e.key === "Enter" && !e.shiftKey && !e.isComposing'));
 });
+
+test('agent comments show a filled sparkles mark, not an outline', () => {
+  const source = fs.readFileSync(new URL('../src/page/comments.js', import.meta.url), 'utf8');
+  const line = source.split('\n').find(l => l.trim().startsWith('sparkles:')) || '';
+  assert.ok(line.includes('fill="currentColor"') && line.includes('stroke="none"'));
+});
