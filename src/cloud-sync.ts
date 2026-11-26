@@ -155,7 +155,9 @@ export function reject(f: SyncFile, list: Rejected[]): boolean {
 /** Retry: a refused op goes back to the end of the outbox. */
 export function retry(f: SyncFile, opId: string): boolean {
   const i = (f.rejected ?? []).findIndex((r) => r.envelope.opId === opId);
-  if (i < 0 || isVoteOp(f.rejected![i].envelope.op)) return false;
+  if (i < 0) return false;
+  const item = f.rejected![i];
+  if (isVoteOp(item.envelope.op) && !item.retryableVote) return false;
   const [r] = f.rejected!.splice(i, 1);
   f.outbox.push(r.envelope);
   return true;

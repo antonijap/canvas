@@ -232,3 +232,90 @@ test("the standalone timer uses server time, keeps its paused time and broadcast
   assert.equal(apply({ ...timer, action: "stop" }).acks.length, 1);
   assert.equal(ops.socialView(ben).timer, null);
 });
+
+test("a legacy whole-document vote design stays live after vote start", t => {
+  const { ops, store } = room(t);
+  const submit = (op: Op) => ops.submit(doc, [envelope(op)], anna, "owner", 100, [], true);
+  assert.ok(ops.setVoteDesign({ pages: ["page"], nodes: [] }));
+  assert.equal(submit({ ...start, scope: { page: "page" } }).acks.length, 1);
+  assert.ok(ops.setVoteDesign({ pages: ["page"], nodes: [["sticky", { page: "page", chain: ["sticky"], type: "sticky" }]] }));
+  assert.equal(submit(cast).acks.length, 1);
+  // Upgraded rooms may already contain a frozen copy from a previous start.
+  store.sql.exec("INSERT INTO vote_designs (id, json) VALUES (?, ?)", vote, JSON.stringify({ pages: ["page"], nodes: [] }));
+  assert.equal(submit({ ...cast, ballot: randomUUID() }).rejected[0].message, "You have no votes left");
+});
+
+test("an unconfirmed conclusion can be reclaimed after its lease, then confirmed", t => {
+  const { store } = room(t);
+  let now = Date.parse(at);
+  const ops = new Operations(store, () => now);
+  const target = "vote-conclusion-" + vote;
+  const submit = (op: Op, by = anna, cardExists = false) => ops.submit(doc, [envelope(op)], by, "editor", 100, [], {
+    ...design, node: id => id === target && cardExists ? { type: "frame", page: "page", chain: [id] } : design.node(id),
+  });
+  submit(start);
+  submit({ kind: "vote.end", vote }, ben);
+  assert.equal(ops.voteView(anna)[0].needsConclusion, false);
+  now += 10 * 60_000;
+  ops.expireDueVotes();
+  assert.equal(ops.voteView(anna)[0].needsConclusion, true);
+  const claim = submit({ kind: "vote.end", vote, expired: true });
+  assert.equal(ops.voteView(anna)[0].conclusionOp, claim.acks[0].opId);
+  const confirm = { kind: "vote.conclusion", vote, claim: claim.acks[0].opId } as const;
+  assert.equal(submit(confirm).rejected[0].code, "conflict");
+  assert.equal(submit(confirm, anna, true).acks.length, 1);
+  now += 10 * 60_000;
+  assert.equal(ops.voteView(ben)[0].needsConclusion, false);
+});
+
+test("a migrated anonymous conclusion becomes claimable again", t => {
+  const { store, submit } = room(t);
+  submit(start);
+  submit(cast, ben, "viewer");
+  submit({ kind: "vote.end", vote });
+  const row = store.sql.exec<{ json: string }>("SELECT json FROM room_votes WHERE id = ?", vote).one();
+  const legacy = { ...JSON.parse(row.json), conclusion: { by: "", opId: randomUUID() } };
+  store.sql.exec("UPDATE room_votes SET json = ? WHERE id = ?", JSON.stringify(legacy), vote);
+  const migrated = new Operations(store);
+  assert.equal(migrated.voteView(anna)[0].needsConclusion, true);
+  assert.deepEqual(migrated.voteView(anna)[0].totals, [{ layer: "sticky", count: 1, names: [] }]);
+});
+
+test("a full room returns a permanent timer refusal distinct from rate limiting", t => {
+  const { store, submit, ops } = room(t);
+  store.sql.exec("UPDATE room_usage SET bytes = ? WHERE id = 1", 20 * 1024 * 1024);
+  const op = { kind: "timer.set", standalone: true, vote, ms: 1000, action: "start" } as const;
+  assert.equal(submit(op).rejected[0].code, "storage_quota");
+  assert.equal(ops.submit(doc, [envelope(op)], anna, "owner", 0, [], design).rejected[0].code, "quota");
+});
+
+test("transfers omit unsupported timers without dropping ballots", async () => {
+  const { voteOpsForTransfer } = await import("../src/vote-state.ts");
+  const timer = { kind: "timer.set", standalone: true, vote, action: "pause" } as const;
+  const ops = [envelope({ ...start, timerMs: 3000 }), envelope(cast), envelope(timer)];
+  assert.deepEqual(voteOpsForTransfer(ops, false).map(e => e.op), [start, cast]);
+  assert.deepEqual(voteOpsForTransfer([envelope(timer)], false), []);
+});
+
+test("legacy vote migration matches the verified account and holds ambiguous entries", async t => {
+  const { emptyComments } = await import("../src/comments-file.ts");
+  const { stageLegacyVoteQueue, migrateLegacyVoteQueue } = await import("../src/vote-state.ts");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-legacy-queue-"));
+  const oldDir = process.env.CANVAS_STATE_DIR;
+  process.env.CANVAS_STATE_DIR = dir;
+  t.after(() => {
+    if (oldDir === undefined) delete process.env.CANVAS_STATE_DIR;
+    else process.env.CANVAS_STATE_DIR = oldDir;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const file = { ...emptyComments(), server: { url: "https://studio.test" }, me: anna };
+  const queued = { ...envelope(cast), doc: file.doc };
+  stageLegacyVoteQueue("known", { ...file, outbox: [queued] }, true);
+  assert.deepEqual(migrateLegacyVoteQueue("known", file, ben.id).outbox, []);
+  assert.deepEqual(migrateLegacyVoteQueue("known", file, anna.id).outbox, [queued]);
+  const ambiguous = { ...queued, opId: randomUUID() };
+  stageLegacyVoteQueue("unknown", { ...file, outbox: [ambiguous] }, false);
+  const unverified = migrateLegacyVoteQueue("unknown", file, anna.id);
+  assert.deepEqual(unverified.outbox, [queued]);
+  assert.deepEqual(unverified.rejected?.map(r => r.envelope), [ambiguous]);
+});

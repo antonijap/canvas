@@ -47,6 +47,32 @@ test('comment quota retries and other rejected drafts survive restart',async()=>
  }finally{clearTimeout(s.timer);store.close();fs.rmSync(dir,{recursive:true,force:true});}
 });
 
+test("a permanent timer refusal does not enter the comment or design cooldown", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "canvas-timer-quota-"));
+  const store = new FileStateStore(dir, { cloud: "mac://studio", file: crypto.randomUUID(), name: "Design",
+    role: "editor", author: { id: "anna", name: "Anna" }, state: state() });
+  store.db.exec("CREATE TABLE comments_state(id INTEGER PRIMARY KEY,json TEXT NOT NULL)");
+  const timer = { opId: crypto.randomUUID(), doc: store.meta.file, at: new Date().toISOString(),
+    op: { kind: "timer.set", vote: crypto.randomUUID(), standalone: true, action: "start", ms: 1000 } };
+  const comment = { ...timer, opId: crypto.randomUUID(), op: { kind: "thread.create", thread: crypto.randomUUID(),
+    comment: crypto.randomUUID(), anchor: { x: 0, y: 0 }, body: "A note" } };
+  const s: any = { store, status: "connected", comments: [], commentsSeq: 0, commentsPending: [timer, comment] };
+  try {
+    // Also accept the permanent error from hosts that used the old quota code.
+    await receive(s, { type: "comments.ack", acks: [], rejected: [{
+      opId: timer.opId, code: "quota", message: "Document storage quota exceeded",
+    }] });
+    assert.equal(s.status, "connected");
+    assert.deepEqual(s.commentsPending, [comment]);
+    assert.equal(s.commentsRejected[0].envelope.opId, timer.opId);
+    assert.doesNotMatch(fs.readFileSync(path.join(dir, "comments.json"), "utf8"), /timer\.set/);
+  } finally {
+    clearTimeout(s.timer);
+    store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 import {prepareMove} from '../src/cloud-files-move.ts';
 test('move keeps source edits made while publication is awaited',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'canvas-move-publish-')),source=path.join(dir,'Design.canvas'),dest=path.join(dir,'Cloud.canvas');fs.mkdirSync(source);fs.writeFileSync(path.join(source,'document.json'),JSON.stringify({version:'2.21',children:[]}));

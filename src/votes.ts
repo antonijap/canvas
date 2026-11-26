@@ -15,8 +15,8 @@ import { BOARD_GAP, cardBoxes, clearCardSpot, topBox } from "./placement.ts";
 import { cleanName } from "./settings.ts";
 import type { StructureBody } from "./structure.ts";
 import { TOKENS } from "./tokens.ts";
-import { legacyVoteClockOffset, legacyVoteState, queueLegacyVote, writeLegacyVoteState } from "./cloud.ts";
-import { validateVoteTarget, voteTotals } from "../cloud/core/votes.ts";
+import { legacyVoteLeases, legacyVoteServerTime, legacyVoteState, queueLegacyVote, writeLegacyVoteState } from "./cloud.ts";
+import { conclusionId, validateVoteTarget, voteTotals } from "../cloud/core/votes.ts";
 import { voterId } from "./vote-state.ts";
 
 const docNode = (doc: CanvasDoc, id: string) => {
@@ -120,8 +120,6 @@ export function visibleVotes(file: CommentsFile, id: string, doc: CanvasDoc, loc
 }
 
 const resultColor = TOKENS.light;
-const conclusionId = (voteId: string) => "vote-conclusion-" + voteId;
-
 function conclusion(docFile: string, doc: CanvasDoc, vote: Vote | VoteView): StructureBody {
   const rows = voteResults(vote, doc);
   const width = 424, rowHeight = 38, height = 80 + Math.max(1, rows.length) * rowHeight;
@@ -164,17 +162,35 @@ type VoteDeps = {
 };
 const placing = new Map<string, Promise<void>>();
 
+function submittedConclusion(state: CommentsFile, claim: string) {
+  const matches = ({ op }: OpEnvelope) => op.kind === "vote.conclusion" && op.claim === claim;
+  return state.outbox.some(matches) || state.rejected?.some(r => matches(r.envelope));
+}
+
 async function placeConclusion(file: string, pkg: string, docFile: string, vote: Vote | VoteView, deps: VoteDeps) {
   const key = pkg + "/" + vote.id;
   const running = placing.get(key);
   if (running) return running;
-  const inCloudFile = !!fileInfo(file, false);
+  const shared = fileInfo(file, false);
   const work = (async () => {
     const doc = currentDoc(docFile).doc;
     // A retry after an interrupted save can find the card already on the canvas.
     if (!docNode(doc, conclusionId(vote.id))) await deps.place(file, conclusion(docFile, doc, vote));
-    if (inCloudFile) {
-      if (hasConfirmedFileLayer(file, conclusionId(vote.id))) completeFileVoteConclusion(file, vote.id);
+    if (shared && !hasConfirmedFileLayer(file, conclusionId(vote.id))) return;
+    const leased = shared?.leasedConclusions ?? legacyVoteLeases(pkg);
+    if (leased && "conclusionOp" in vote && vote.conclusionOp) {
+      const disk = readCommentsFile(pkg);
+      const state = fileVoteState(file) ?? (disk && legacyVoteState(disk));
+      if (!state?.cloudVotes?.some(v => v.id === vote.id && v.conclusionOp === vote.conclusionOp)) return;
+      if (submittedConclusion(state, vote.conclusionOp)) return;
+      const envelope = { doc: state.doc, opId: randomUUID(), at: new Date().toISOString(),
+        op: { kind: "vote.conclusion", vote: vote.id, claim: vote.conclusionOp } } as const;
+      if (shared) queueFileVote(file, envelope);
+      else queueLegacyVote(pkg, file, state, envelope);
+      return;
+    }
+    if (shared) {
+      completeFileVoteConclusion(file, vote.id);
       return;
     }
     const disk = readCommentsFile(pkg);
@@ -202,6 +218,7 @@ export async function syncVoteConclusions(file: string, deps: VoteDeps) {
   for (const vote of sidecar.cloudVotes) {
     if (shared && !fileInfo(file, false)) return;
     if (sidecar.voteConclusions?.includes(vote.id)) {
+      if (vote.conclusionOp && submittedConclusion(sidecar, vote.conclusionOp)) continue;
       const before = docNode(currentDoc(docFile).doc, conclusionId(vote.id));
       const confirmed = !shared || hasConfirmedFileLayer(file, conclusionId(vote.id));
       await placeConclusion(file, pkg, docFile, vote, deps);
@@ -296,16 +313,16 @@ export async function handleVotesRoute(req: http.IncomingMessage, res: http.Serv
         waitingForTimerSupport: timerCapable === false && f.outbox.some(({ op }) => needsCloudTimers(op)),
         timerMessage: timerCapable === false ? UPDATE_TIMER_HOST : "Connect to the Cloud to check for timer support.",
         people: people.slice(0, 8).map(p => ({ id: p.id || p.email, name: p.name, done: false })),
-        canStart: role === "owner" || role === "editor", canVote: capable === true, serverTime: shared?.serverTime,
-        clockOffset: shared?.voteClockOffset ?? legacyVoteClockOffset(pkg),
+        canStart: role === "owner" || role === "editor", canVote: capable === true, serverTime: shared?.serverTime ?? legacyVoteServerTime(pkg),
         message: capable === false ? UPDATE_VOTE_HOST : capable === undefined ? "Connect to the Cloud to check for voting support." : undefined,
         pending: f.outbox.filter(e => isVoteOp(e.op)).length,
-        rejected: (f.rejected ?? []).filter(r => isVoteOp(r.envelope.op)).map(r => ({ id: r.envelope.opId, message: r.message })),
+        rejected: (f.rejected ?? []).filter(r => isVoteOp(r.envelope.op)).map(r => ({ id: r.envelope.opId, message: r.message, retryable: r.retryableVote })),
       };
     };
     const localView = (f: CommentsFile) => ({
       votes: f.votes?.length ? visibleVotes(f, voterId(), currentDoc(docFile).doc, true) : [],
       timer: f.timer ?? null,
+      serverTime: new Date().toISOString(),
     });
     if (req.method === "GET") {
       if (!cloud) {

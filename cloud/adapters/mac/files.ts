@@ -4,7 +4,7 @@ import path from "node:path";
 import type http from "node:http";
 import type { Duplex } from "node:stream";
 import { randomUUID } from "node:crypto";
-import { SqliteStore } from "./sqlite.ts";
+import { roomHasSocialDeadline, SqliteStore } from "./sqlite.ts";
 import { MacUsage, macUsageTone } from './usage.ts';
 import { PresenceLimiter, receivePresence, snapshotFor, goneOf, fanOut, type PresenceSocket, type KeptPresence, type PeerPresence } from '../../core/presence.ts';
 import { upgrade, type ServerSocket } from "./websocket.ts";
@@ -16,7 +16,7 @@ import { buildSnapshot, recoverSnapshots, compact, type Manifest } from "../../c
 import { collectGarbage } from "../../core/files/gc.ts";
 import { stateFromFiles, stateOf } from "../../core/files/state.ts";
 import { type ObjectStore, boardKey, versKey, blobKey } from "../../core/files/objects.ts";
-import { CLOUD_VOTES, LIMITS, supportsCloudVotes } from "../../protocol.ts";
+import { LIMITS, supportsPrivateVoteViews } from "../../protocol.ts";
 import { voteDesignForTree } from "../../core/votes.ts";
 import { Operations, type OpResult } from "../../core/operations.ts";
 import type { Me } from "./host.ts";
@@ -173,6 +173,8 @@ export class MacFiles {
         this.ledger = new StorageLedger(db, cap);
         this.sweepParts();
         this.recount();
+        for (const { id } of db.sql.exec<{ id: string }>("SELECT id FROM files WHERE state != 'trash'").toArray())
+            if (UUID.test(id) && roomHasSocialDeadline(path.join(root, 'files', id + '.sqlite'))) this.room(id);
         this.sweepTimer = setInterval(() => { this.sweepParts(); void this.expireImports().catch(() => {}).finally(() => this.recount()); }, 60_000); this.sweepTimer.unref();
     }
     private accountDatabase(file: string) {
@@ -307,6 +309,18 @@ export class MacFiles {
             this.scheduleVoteExpiry(r);
         }, Math.max(1, next - this.now()));
         r.voteTimer?.unref();
+    }
+    private submitComments(r: Room, ops: unknown[], me: Me, allowance: number, voting: boolean): OpResult {
+        try {
+            return this.bounded(r, () => r.comments.submit(r.core.file, ops, me, me.role, allowance, [],
+                voting ? voteDesignForTree(r.core.tree) : undefined));
+        } catch (error) {
+            if (!(error instanceof Error) || !('code' in error) || error.code !== 'quota') throw error;
+            const rejected = ops.flatMap(op => op && typeof op === 'object' && 'opId' in op && typeof op.opId === 'string'
+                ? [{ opId: op.opId, code: 'storage_quota' as const, message: error.message }]
+                : []);
+            return { acks: [], entries: [], rejected };
+        }
     }
     private broadcastComments(r: Room, entries: OpResult['entries']) {
         const changed = entries.some(entry => entry.op.kind === 'vote.changed');
@@ -738,7 +752,7 @@ export class MacFiles {
                 headers['content-length']=String(end-start+1);res.writeHead(range?206:200,headers);
                 const stream=fs.createReadStream(object.file,{start,end});this.downloads.set(res,me);res.on('finish',()=>this.downloads.delete(res));res.on('close',()=>{this.downloads.delete(res);stream.destroy();});stream.on('error',()=>res.destroy());stream.pipe(res);return true;
             }
-            const voting = String(req.headers[FILE_CAPABILITIES_HEADER] ?? '').split(/\s*,\s*/).includes(CLOUD_VOTES);
+            const voting = supportsPrivateVoteViews(String(req.headers[FILE_CAPABILITIES_HEADER] ?? '').split(/\s*,\s*/));
             if (sub === 'comments' && method === 'POST') {
                 const b = await body(), fresh = this.current(me);
                 if (!fresh) return json(403, { code: 'forbidden' });
@@ -748,7 +762,7 @@ export class MacFiles {
                 const now = this.now();
                 const allowance = importing ? this.importBank.grant('import:' + fresh.id, 'ops', b.ops.length, now)
                     : this.bank.grant(fresh.id, 'ops', b.ops.length, now);
-                const out = this.bounded(r, () => r.comments.submit(file, b.ops, fresh, fresh.role, allowance, [], voting ? voteDesignForTree(r.core.tree) : undefined));
+                const out = this.submitComments(r, b.ops, fresh, allowance, voting);
                 this.scheduleVoteExpiry(r);
                 if (out.entries.length)
                     this.broadcastComments(r, out.entries);
@@ -843,7 +857,7 @@ export class MacFiles {
                             const social = r.comments.snapshot();
                             r.ready.set(ws, supportsWhiteboard(msg.capabilities));
                             this.votingSockets.delete(ws);
-                            const voting = supportsCloudVotes(msg.capabilities);
+                            const voting = supportsPrivateVoteViews(msg.capabilities);
                             if (voting) this.votingSockets.add(ws);
                             const peers = r.privateVoting ? [] : snapshotFor(presence.socket, r.presence.values());
                             if (peers.length) ws.send(JSON.stringify({ type: 'presence', peers }));
@@ -862,7 +876,7 @@ export class MacFiles {
                             if (!this.bank.grant(fresh.id, 'messages', 1, this.now()))
                                 error(429, 'quota', 'Message quota');
                             const allowance = this.bank.grant(fresh.id, 'ops', msg.ops.length, this.now());
-                            const out = this.bounded(r, () => r.comments.submit(m[1], msg.ops, fresh, fresh.role, allowance, [], this.votingSockets.has(ws) ? voteDesignForTree(r.core.tree) : undefined));
+                            const out = this.submitComments(r, msg.ops, fresh, allowance, this.votingSockets.has(ws));
                             this.scheduleVoteExpiry(r);
                             if (out.entries.length)
                                 this.broadcastComments(r, out.entries);

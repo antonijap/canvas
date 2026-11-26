@@ -234,7 +234,7 @@ sc("whiteboard-review", "Sticky author removal clears disk and undo restores it"
 });
 
 sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it, and both see the timer", {
-  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence", "timer:cloud", "timer:expiry"],
+  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence", "timer:cloud", "timer:expiry", "timer:clock-change"],
 }, async (t: NT) => {
   const peer = new QaApp(path.dirname(t.app.dir), 100 + t.app.shard);
   fs.mkdirSync(peer.dir, { recursive: true });
@@ -278,6 +278,14 @@ sc("vote", "Cloud vote reveals a viewer's ballot only after the owner ends it, a
     await t.js('document.querySelector("[data-timer-start]").click()');
     await ben.waitJs('document.querySelector("[data-timer-bar] [data-timer-countdown]")?.textContent', "viewer sees the standalone countdown");
     t.eq(await ben.js(`return document.querySelectorAll(${JSON.stringify(viewerTimerControls)}).length`), 0, "viewer cannot control the timer");
+    const beforeJump = await ben.js<string>('return document.querySelector("[data-timer-countdown]").textContent');
+    await ben.js('window.qaRealNow = Date.now; Date.now = () => window.qaRealNow() + 3600000');
+    try {
+      await ben.waitJs(`document.querySelector("[data-timer-countdown]").textContent !== ${JSON.stringify(beforeJump)}`, "countdown ticks after the clock jump");
+      t.ok(await ben.js('return /[1-9]/.test(document.querySelector("[data-timer-countdown]").textContent)'), "the viewer still has time left");
+    } finally {
+      await ben.js('Date.now = window.qaRealNow; delete window.qaRealNow');
+    }
     await t.waitJs('document.querySelector("[data-timer-pause]")', "owner can pause");
     await t.js('document.querySelector("[data-timer-pause]").click()');
     const paused = 'document.querySelector("[data-timer-bar]").textContent.includes("Paused")';

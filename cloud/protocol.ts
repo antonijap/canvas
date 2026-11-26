@@ -3,13 +3,21 @@
 // docs/cloud/protocol.md; change both together, and bump PROTOCOL_VERSION for any change an older side cannot read.
 
 export const CLOUD_VOTES = "cloud-votes";
+export const PRIVATE_VOTE_VIEWS = "private-vote-views";
+export const PER_VOTE_DESIGN = "per-vote-design";
+export const VOTE_CLIENT_CAPABILITIES = [CLOUD_VOTES, PRIVATE_VOTE_VIEWS];
 export const CLOUD_TIMERS = "cloud-timers";
 export const UPDATE_TIMER_HOST = "Update Canvas on the host to use Cloud timers.";
 export const supportsCloudTimers = (capabilities: unknown) => Array.isArray(capabilities) && capabilities.includes(CLOUD_TIMERS);
 export const COMMENTS_CAPABILITIES_HEADER = "x-canvas-comments-capabilities";
 export const UPDATE_VOTE_HOST = "Update Canvas on the host to use Cloud voting.";
 export const UPDATE_COMMENT_HOST = "Update Canvas on the host to let viewers comment.";
-export const supportsCloudVotes = (capabilities: unknown) => Array.isArray(capabilities) && capabilities.includes(CLOUD_VOTES);
+export const supportsPrivateVoteViews = (capabilities: unknown) => Array.isArray(capabilities) && capabilities.includes(PRIVATE_VOTE_VIEWS);
+export const supportsCloudVotes = (capabilities: unknown) =>
+  supportsPrivateVoteViews(capabilities) || (Array.isArray(capabilities) && capabilities.includes(CLOUD_VOTES));
+export const supportsPerVoteDesign = (capabilities: unknown) => Array.isArray(capabilities) && capabilities.includes(PER_VOTE_DESIGN);
+export const UPDATE_VOTE_CLIENT = "Update Canvas on this Mac to use Cloud voting.";
+export const voteRoomCapabilities = (privateViews: boolean) => privateViews ? [PRIVATE_VOTE_VIEWS, CLOUD_TIMERS] : [];
 
 export const PROTOCOL_VERSION = 1;
 
@@ -112,7 +120,9 @@ export interface Vote {
   state: "active" | "ended" | "dismissed";
   ballots: VoteBallot[];
   retracted?: Uuid[];
-  conclusion?: { by: string; opId: Uuid };
+  conclusion?: { by: string; opId: Uuid; expiresAt?: Iso };
+  conclusionConfirmed?: true;
+  conclusionPending?: true;
   clearedTotals?: VoteTotal[];
   timedOut?: boolean;
 }
@@ -141,6 +151,7 @@ export type VoteOp =
   | { kind: "vote.retract"; vote: Uuid; ballot: Uuid }
   | { kind: "vote.end"; vote: Uuid; expired?: boolean }
   | { kind: "vote.clear"; vote: Uuid }
+  | { kind: "vote.conclusion"; vote: Uuid; claim: Uuid }
   | TimerOp;
 
 export type TimerOp = { kind: "timer.set"; vote: Uuid; standalone?: true } & (
@@ -184,13 +195,17 @@ export interface Applied {
   op: Op | { kind: "vote.changed" };
 }
 
-export type ErrorCode = "unauthenticated" | "forbidden" | "not_found" | "invalid" | "conflict" | "quota" | "version" | "server";
+export type ErrorCode = "unauthenticated" | "forbidden" | "not_found" | "invalid" | "conflict" | "quota" | "storage_quota" | "version" | "server";
 
 export interface Rejected {
   opId: Uuid;
   code: ErrorCode;
   message: string;
 }
+
+/** Older hosts also used quota for permanent comment storage limits. */
+export const isRateRefusal = (r: Rejected) => r.code === "quota" &&
+  !/^(Document storage quota exceeded|Document has too many threads|This Cloud is full)/i.test(r.message);
 
 // ---------- the room socket: /v1/docs/:doc/socket ----------
 
@@ -200,7 +215,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "welcome"; protocol: number; server: string; role: Role; me: Author; seq: number; threads?: Thread[]; capabilities?: string[]; serverTime?: Iso; votes?: VoteView[]; timer?: StandaloneTimer | null }
-  | { type: "applied"; entries: Applied[]; votes?: VoteView[]; timer?: StandaloneTimer | null }
+  | { type: "applied"; entries: Applied[]; serverTime?: Iso; votes?: VoteView[]; timer?: StandaloneTimer | null }
   | { type: "ack"; opId: Uuid; seq: number }
   | { type: "reject"; rejected: Rejected[] }
   | { type: "error"; code: ErrorCode; message: string };
@@ -249,7 +264,7 @@ export interface CommentsFile {
   /** Comments an agent wrote here through MCP and this app sent as its person: comment id to the agent, shown as the agent on this Mac only. */
   relayed?: Record<Uuid, Author>;
   /** Ops the server refused, kept so nothing typed is lost; shown to the person. */
-  rejected?: { envelope: OpEnvelope; code: ErrorCode; message: string }[];
+  rejected?: { envelope: OpEnvelope; code: ErrorCode; message: string; retryableVote?: true }[];
 }
 
 // ---------- limits both sides enforce ----------
@@ -341,6 +356,7 @@ export function checkEnvelope(e: unknown): string | null {
       if (op.action === "start" || op.action === undefined) return validTimerMs(op.ms) ? null : "invalid timer duration";
       return (op.action === "pause" || op.action === "resume" || op.action === "extend" || (op.action === "stop" && op.standalone)) &&
         op.ms === undefined ? null : "invalid timer action";
+    case "vote.conclusion": return !isUuid(op.vote) || !isUuid(op.claim) ? "invalid vote conclusion" : null;
     case "vote.end": return !isUuid(op.vote) || (op.expired !== undefined && typeof op.expired !== "boolean") ? "invalid end vote" : null;
     case "vote.clear": return !isUuid(op.vote) ? "vote needs a uuid" : null;
     default: return "unknown op kind";
@@ -468,6 +484,7 @@ export function applyVote(votes: Vote[], op: VoteOp, by: Author, at: Iso, manage
     return null;
   }
   if (!vote) return "No such vote";
+  if (op.kind === "vote.conclusion") return "Cloud conclusion required";
   if (op.kind === "vote.end" || op.kind === "vote.clear") {
     if (!manage && vote.host.id !== id) return "Only the host can end or clear the vote";
     if (op.kind === "vote.end" && vote.state === "active") vote.state = "ended";
@@ -519,6 +536,7 @@ export function mayApply(op: Op, role: Role, me: Author, threads: Thread[]): boo
   switch (op.kind) {
     case "vote.start":
     case "vote.end":
+    case "vote.conclusion":
     case "vote.clear":
     case "timer.set": return admin;
     case "comment.edit": return own(op.comment);

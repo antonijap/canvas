@@ -22,12 +22,12 @@ import { WHITEBOARD } from "../../protocol-files.ts";
 import type { AddressInfo, Socket } from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
-import { CLOUD_TIMERS, CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../protocol.ts";
+import { CLOUD_TIMERS, PER_VOTE_DESIGN, PRIVATE_VOTE_VIEWS, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsPrivateVoteViews, voteRoomCapabilities } from "../../protocol.ts";
 import type { Applied, Role, ServerInfo, ServerMessage } from "../../protocol.ts";
 import { Operations, type Identity } from "../../core/operations.ts";
 import { ranks } from "../../core/people.ts";
 import { TeamStore } from "../../core/team-store.ts";
-import { SqliteStore } from "./sqlite.ts";
+import { roomHasSocialDeadline, SqliteStore } from "./sqlite.ts";
 import { ServerSocket, upgrade } from "./websocket.ts";
 
 export const SERVER_VERSION = "0.1.0-mac";
@@ -147,6 +147,12 @@ export class CloudHost {
     this.db.sql.exec("INSERT OR IGNORE INTO host (id, host_id, created_at) VALUES (1, ?, ?)",
       opts.hostId ?? crypto.randomUUID(), new Date().toISOString());
     this.files = new MacFiles(opts.dir, this.db, me => this.current(me), id => this.person(id)?.role as Role | null ?? null, () => this.now(), opts.storageCap ?? Number(process.env.CANVAS_CLOUD_STORAGE_CAP || 20 * 1024 ** 3));
+    const rooms = path.join(opts.dir, "rooms");
+    for (const file of fs.readdirSync(rooms, { withFileTypes: true })) {
+      const doc = file.name.slice(0, -7);
+      if (file.isFile() && file.name.endsWith(".sqlite") && this.team.hasDoc(doc) &&
+          roomHasSocialDeadline(path.join(rooms, file.name))) this.room(doc);
+    }
     this.protect();
   }
 
@@ -515,7 +521,7 @@ export class CloudHost {
     }
     if (!this.team.allowMessage(me.device)) return json(429, { code: "quota", message: "Too many requests in one minute" });
     if (await this.files.route(req, res, url, me, () => this.body(req, 1024 * 1024, me.device))) return;
-    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", WHITEBOARD, CLOUD_VOTES, CLOUD_TIMERS], hostId: this.hostId() } as ServerInfo);
+    if (p === "/v1/info" && method === "GET") return json(200, { protocol: PROTOCOL_VERSION, server: SERVER_VERSION, capabilities: ["comments", "hosted", "files", WHITEBOARD, PRIVATE_VOTE_VIEWS, CLOUD_TIMERS, PER_VOTE_DESIGN], hostId: this.hostId() } as ServerInfo);
     if (p === "/v1/members" && method === "GET") return json(200, this.people().filter(p => p.devices.length).map(p => ({ id: p.id, name: p.label, role: p.role })));
     if (p === "/v1/me" && method === "GET") return json(200, { id: me.id, email: me.email, name: me.name, role: me.role, hostId: this.hostId() });
     if (p === "/v1/docs" && method === "POST") {
@@ -538,7 +544,7 @@ export class CloudHost {
       if (!this.room(design[1]).ops.setVoteDesign(body)) return json(400, { code: "invalid", message: "Invalid vote design" });
       return json(200, { ok: true });
     }
-    const voting = supportsCloudVotes(String(req.headers[COMMENTS_CAPABILITIES_HEADER] ?? "").split(/\s*,\s*/));
+    const voting = supportsPrivateVoteViews(String(req.headers[COMMENTS_CAPABILITIES_HEADER] ?? "").split(/\s*,\s*/));
     const result = await route({
       kind: "mac",
       team: () => this.team,
@@ -546,7 +552,8 @@ export class CloudHost {
         read: request => {
           const since = Number(request.query.get("since") ?? "0");
           if (!Number.isSafeInteger(since) || since < 0) return { status: 400, body: { code: "invalid", message: "since must be a nonnegative integer" } };
-          return { status: 200, body: { ...this.room(doc).ops.read(since), ...(voting && { votes: this.room(doc).ops.voteView(me, false) }) } };
+          const { ops } = this.room(doc);
+          return { status: 200, body: { ...ops.read(since), ...(voting && ops.socialView(me)) } };
         },
         submit: async request => {
           const body = await request.body();
@@ -636,10 +643,10 @@ export class CloudHost {
         if (message.doc !== s.doc) throw new HostError(400, "invalid", "Document does not match the room");
         const since = Number(message.since);
         if (!Number.isSafeInteger(since) || since < 0) throw new HostError(400, "invalid", "since must be a nonnegative integer");
-        s.voting = supportsCloudVotes(message.capabilities);
+        s.voting = supportsPrivateVoteViews(message.capabilities);
         const data = room.ops.read(since);
         const me = { id: s.me.id, email: s.me.email, name: s.me.name };
-        send({ type: "welcome", protocol: PROTOCOL_VERSION, server: SERVER_VERSION, role: s.me.role, me, seq: data.seq, serverTime: new Date(this.now()).toISOString(), capabilities: [CLOUD_VOTES, CLOUD_TIMERS], ...(s.voting && room.ops.socialView(me)), ...("threads" in data ? { threads: data.threads } : {}) });
+        send({ type: "welcome", protocol: PROTOCOL_VERSION, server: SERVER_VERSION, role: s.me.role, me, seq: data.seq, serverTime: new Date(this.now()).toISOString(), capabilities: [...voteRoomCapabilities(!!s.voting), ...(s.voting ? [PER_VOTE_DESIGN] : [])], ...(s.voting && room.ops.socialView(me)), ...("threads" in data ? { threads: data.threads } : {}) });
         if ("entries" in data && data.entries.length) send({ type: "applied", entries: data.entries });
         s.ready = true;
         return;

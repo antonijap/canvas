@@ -94,18 +94,32 @@ function personKey(key: string | undefined, vote: Pick<Vote, "anonymous" | "id">
   return vote.anonymous && id && key ? anonymousId(key, vote.id, id) : id;
 }
 
+export const CONCLUSION_LEASE_MS = 2 * 60_000;
+export const conclusionId = (vote: string) => "vote-conclusion-" + vote;
+const needsConclusion = (vote: Vote) => !vote.conclusion && !vote.conclusionConfirmed && !!(vote.timedOut || vote.conclusionPending);
+
 export function updateRoomVote(votes: StoredVote[], key: string | undefined, op: VoteOp, opId: string, me: Author, at: string, design: VoteDesign) {
   const vote = votes.find(v => v.id === op.vote);
   const targetError = validateVoteTarget(design, vote, op);
   if (targetError) return targetError;
   const id = personKey(key, vote ?? { id: op.vote, anonymous: op.kind === "vote.start" && op.anonymous }, me);
   if ((op.kind === "vote.cast" || op.kind === "vote.retract") && vote?.timer?.endsAt && vote.timer.endsAt <= at) return "The vote has ended";
-  if (op.kind === "vote.end" && op.expired && !vote?.timedOut) return "The vote timer has not ended";
+  if (op.kind === "vote.conclusion") {
+    if (!vote || vote.conclusion?.opId !== op.claim || vote.conclusion.by !== (me.id || me.email))
+      return "The conclusion claim has expired";
+    if (design.node(conclusionId(vote.id))?.type !== "frame") return "Save the conclusion card first";
+    delete vote.conclusion;
+    delete vote.conclusionPending;
+    vote.conclusionConfirmed = true;
+    return null;
+  }
+  if (op.kind === "vote.end" && op.expired && !(vote?.timedOut || vote?.conclusionPending)) return "The vote has not expired";
   const active = vote?.state === "active";
-  if (op.kind === "vote.clear" && vote?.state === "ended" && (vote.conclusion || vote.timedOut)) vote.clearedTotals = voteTotals(vote);
+  if (op.kind === "vote.clear" && vote?.state === "ended" && (vote.conclusion || vote.timedOut || vote.conclusionPending || vote.conclusionConfirmed))
+    vote.clearedTotals = voteTotals(vote);
   const error = applyVote(votes, op, { id, name: me.name, agent: me.agent }, at, true);
-  if (!error && op.kind === "vote.end" && vote && (active || (vote.timedOut && !vote.conclusion))) {
-    vote.conclusion = { by: me.id || me.email || "", opId };
+  if (!error && op.kind === "vote.end" && vote && (active || needsConclusion(vote))) {
+    vote.conclusion = { by: me.id || me.email || "", opId, expiresAt: new Date(Date.parse(at) + CONCLUSION_LEASE_MS).toISOString() };
     if (active) forgetAnonymousBallots(vote);
   }
   return error;
@@ -127,8 +141,8 @@ export function projectVotes(votes: StoredVote[], legacyKey: string | undefined,
     const { id, scope, on, perPerson, hidden, anonymous, state, timer, conclusion } = vote;
     const mine = personKey(vote.anonymousKey ?? legacyKey, vote, person);
     const conclusionOp = conclusion?.by === (person.id || person.email) ? conclusion?.opId : undefined;
-    const needsConclusion = vote.timedOut && !conclusion;
-    if (state === "dismissed" && !conclusionOp && !needsConclusion) return [];
+    const unclaimed = needsConclusion(vote);
+    if (state === "dismissed" && !conclusionOp && !unclaimed) return [];
     const live = state === "active";
     const ballots = live ? vote.ballots.filter(b => b.voter.id === mine).map(({ id, layer }) => ({ id, layer })) : [];
     const people = new Map<string, { name?: string; count: number }>();
@@ -139,7 +153,7 @@ export function projectVotes(votes: StoredVote[], legacyKey: string | undefined,
       people.set(voter.id, p);
     }
     return [{
-      id, scope, on, perPerson, hidden, anonymous, state, timer, timedOut: vote.timedOut, ballots, conclusionOp, needsConclusion,
+      id, scope, on, perPerson, hidden, anonymous, state, timer, timedOut: vote.timedOut, ballots, conclusionOp, needsConclusion: unclaimed,
       ...(live && !anonymous && { progress: [...people].flatMap(([id, p], index) => p.name ? [{ id: id.includes("@") ? `${vote.id}:${index}` : id, name: p.name, done: p.count >= perPerson }] : []) }),
       ...(live && { done: [...people.values()].filter(p => p.count >= perPerson).length }),
       ...(!live && !anonymous && { voters: people.size }),

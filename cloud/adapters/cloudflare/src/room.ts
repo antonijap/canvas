@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { CLOUD_TIMERS, CLOUD_VOTES, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../../protocol";
+import { PER_VOTE_DESIGN, LIMITS, PROTOCOL_VERSION, supportsPrivateVoteViews, voteRoomCapabilities } from "../../../protocol";
 import type { Applied, PeopleRule, Role, ServerMessage } from "../../../protocol";
 import type { Identity } from "./auth";
 import type { SqlStore } from "../../../core/sql.ts";
@@ -9,7 +9,7 @@ import { Operations } from "./operations";
 import { effectiveRole, ranks } from "./people";
 
 interface Session {
-  doc: string; me: Identity; role: Role; ready: boolean; voting?: boolean; opened: number;
+  doc: string; me: Identity; role: Role; ready: boolean; privateVotes?: boolean; opened: number;
   window?: number; messages?: number;
 }
 function session(socket: WebSocket): Session { return socket.deserializeAttachment() as Session; }
@@ -21,10 +21,11 @@ export class Room extends DurableObject<Env> {
   private generation = -1;
   private checked = 0;
   private refreshing?: Promise<void>;
+  private expiryDelivery?: Promise<void>;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.operations = new Operations(ctx.storage as unknown as SqlStore);
-    this.operations.onVotesExpired = entries => this.broadcast(entries);
+    this.operations.onVotesExpired = entries => this.ctx.waitUntil(this.queueExpiryDelivery(entries, this.scheduleVoteExpiry()));
   }
   private matches(doc: string): boolean {
     return uuid(doc) && this.env.ROOM.idFromName(doc).equals(this.ctx.id);
@@ -53,6 +54,7 @@ export class Room extends DurableObject<Env> {
     const members = await this.env.TEAM.getByName("team").members("recipients");
     await this.refreshRules();
     const auth = role && await this.env.TEAM.getByName("team").authorization(-1, [me.email]);
+    while (this.expiryDelivery) await this.expiryDelivery;
     const current = auth && auth.generation >= this.generation ? auth.roles?.[0]?.role ?? null : null;
     const result = this.operations.submit(doc, ops, me, current, allowance, members, voting || undefined);
     if (result.entries.length) this.broadcast(result.entries);
@@ -63,7 +65,7 @@ export class Room extends DurableObject<Env> {
     const changed = entries.some(entry => entry.op.kind === "vote.changed");
     for (const socket of this.ctx.getWebSockets()) {
       const state = session(socket);
-      if (state.ready) send(socket, { type: "applied", entries, ...(changed && state.voting && this.operations.socialView(state.me)) });
+      if (state.ready) send(socket, { type: "applied", entries, ...(changed && state.privateVotes && this.operations.socialView(state.me)) });
     }
   }
   private async scheduleVoteExpiry() {
@@ -73,18 +75,34 @@ export class Room extends DurableObject<Env> {
     else if (next === undefined && current !== null) await this.ctx.storage.deleteAlarm();
   }
   async alarm() {
-    await this.refreshRules();
-    this.operations.expireDueVotes();
-    await this.scheduleVoteExpiry();
+    const entries = this.operations.expireDueVotes(false);
+    await this.queueExpiryDelivery(entries, this.scheduleVoteExpiry());
+  }
+  private queueExpiryDelivery(entries: Applied[], scheduled: Promise<void>): Promise<void> {
+    if (!entries.length) return scheduled;
+    const previous = this.expiryDelivery;
+    const task = scheduled.then(async () => {
+      await previous;
+      if (!this.ctx.getWebSockets().length) return;
+      try { await this.refreshRules(true); }
+      catch {
+        // Reconnect replays the committed expiry after authorization is available again.
+        for (const socket of this.ctx.getWebSockets()) socket.close(1011, "Could not check access");
+        return;
+      }
+      this.broadcast(entries);
+    }).finally(() => { if (this.expiryDelivery === task) this.expiryDelivery = undefined; });
+    this.expiryDelivery = task;
+    return task;
   }
   private updateRole(socket: WebSocket, role: Role | null) {
     const previous = session(socket);
     if (!role || ranks[role] < ranks[previous.role]) socket.close(1008, "Permission changed");
     else socket.serializeAttachment({ ...previous, role });
   }
-  private async refreshRules(): Promise<void> {
+  private async refreshRules(force = false): Promise<void> {
     if (this.refreshing) return this.refreshing;
-    if (Date.now() - this.checked < 5000) return;
+    if (!force && Date.now() - this.checked < 5000) return;
     const task = (async () => {
       const emails = [...new Set(this.ctx.getWebSockets().map(socket => session(socket).me.email))];
       const result = await this.env.TEAM.getByName("team").authorization(this.generation, emails);
@@ -149,11 +167,11 @@ export class Room extends DurableObject<Env> {
           socket.close(1008, "Unsupported protocol"); return;
         }
         if (message.doc !== state.doc) throw new HttpError(400, "invalid", "Document does not match the room");
-        state.voting = supportsCloudVotes(message.capabilities);
+        state.privateVotes = supportsPrivateVoteViews(message.capabilities);
         const data = this.operations.read(sinceValue(message.since));
         send(socket, {
           type: "welcome", protocol: PROTOCOL_VERSION, server: this.env.SERVER_VERSION,
-          role: state.role, me: state.me, seq: data.seq, serverTime: new Date().toISOString(), capabilities: [CLOUD_VOTES, CLOUD_TIMERS], ...(state.voting && this.operations.socialView(state.me)), ...("threads" in data ? { threads: data.threads } : {}),
+          role: state.role, me: state.me, seq: data.seq, serverTime: new Date().toISOString(), capabilities: [...voteRoomCapabilities(state.privateVotes), ...(state.privateVotes ? [PER_VOTE_DESIGN] : [])], ...(state.privateVotes && this.operations.socialView(state.me)), ...("threads" in data ? { threads: data.threads } : {}),
         });
         if ("entries" in data && data.entries.length) send(socket, { type: "applied", entries: data.entries });
         state.ready = true;
@@ -167,7 +185,7 @@ export class Room extends DurableObject<Env> {
       if (message.ops.length > LIMITS.opsPerMessage) throw new HttpError(429, "quota", "Too many ops in one message");
       await this.refreshRules();
       if (socket.readyState !== WebSocket.OPEN) return;
-      const result = await this.applyAndBroadcast(state.doc, message.ops, state.me, session(socket).role, allowance, !!state.voting);
+      const result = await this.applyAndBroadcast(state.doc, message.ops, state.me, session(socket).role, allowance, !!state.privateVotes);
       for (const ack of result.acks) send(socket, { type: "ack", ...ack });
       if (result.rejected.length) send(socket, { type: "reject", rejected: result.rejected });
     } catch (error) {

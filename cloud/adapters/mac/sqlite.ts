@@ -55,3 +55,22 @@ export class SqliteStore implements SqlStore {
     try { this.db.close(); } catch { /* already closed */ }
   }
 }
+
+// Scan existing rooms without opening a replica or migrating rooms without deadlines.
+export function roomHasSocialDeadline(file: string): boolean {
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(file, { readOnly: true });
+    const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => row.name));
+    return (tables.has("room_timer") && !!db.prepare(`SELECT 1 FROM room_timer WHERE
+      json_extract(json, '$.endsAt') IS NOT NULL AND json_extract(json, '$.endedAt') IS NULL
+      AND json_extract(json, '$.pausedAt') IS NULL`).get()) ||
+      (tables.has("room_votes") && !!db.prepare(`SELECT 1 FROM room_votes WHERE
+        json_extract(json, '$.conclusion.expiresAt') IS NOT NULL OR (json_extract(json, '$.state') = 'active'
+          AND json_extract(json, '$.timer.endsAt') IS NOT NULL AND json_extract(json, '$.timer.pausedAt') IS NULL) LIMIT 1`).get());
+  } catch {
+    return false;
+  } finally {
+    db?.close();
+  }
+}

@@ -1,4 +1,4 @@
-import { applyStandaloneTimer, timerExpired, applyOp, canonicalMentions, checkEnvelope, isVoteOp, isUuid, LIMITS, mayApply } from "../protocol.ts";
+import { applyStandaloneTimer, timerExpired, applyOp, canonicalMentions, checkEnvelope, isVoteOp, isUuid, LIMITS, mayApply, UPDATE_VOTE_CLIENT } from "../protocol.ts";
 import type { Applied, Author, OpEnvelope, Rejected, Role, StandaloneTimer, Thread, TimerOp, Vote, VoteDesign, VoteOp } from "../protocol.ts";
 import { forgetAnonymousBallots, projectVotes, voteTotals, readVoteTopology, updateRoomVote, voteDesignForTopology, type StoredVote, type VoteTopology } from "./votes.ts";
 import { initializeRoom } from "./room-schema.ts";
@@ -26,12 +26,21 @@ export class Operations {
     this.storage = storage;
     this.now = now;
     initializeRoom(storage);
-    if (this.legacyKey()) storage.transactionSync(() => {
-      for (const row of this.voteRows()) {
+    const legacyKey = this.legacyKey();
+    const legacy = storage.sql.exec<{ json: string }>(`SELECT json FROM room_votes WHERE
+      json_extract(json, '$.conclusion.opId') IS NOT NULL AND json_extract(json, '$.conclusion.expiresAt') IS NULL
+      OR (? IS NOT NULL AND json_extract(json, '$.anonymous') = 1 AND json_extract(json, '$.state') != 'active'
+        AND json_extract(json, '$.anonymousKey') IS NULL)`, legacyKey ?? null).toArray();
+    if (legacy.length || legacyKey) storage.transactionSync(() => {
+      for (const row of legacy) {
         const vote = JSON.parse(row.json) as StoredVote;
-        if (!vote.anonymous || vote.state === "active" || vote.anonymousKey) continue;
-        forgetAnonymousBallots(vote);
-        if (vote.conclusion) vote.conclusion.by = "";
+        if (legacyKey && !vote.conclusionConfirmed && vote.anonymous && vote.state !== "active" && !vote.anonymousKey)
+          forgetAnonymousBallots(vote);
+        if (vote.conclusion && !vote.conclusion.expiresAt) {
+          delete vote.conclusion;
+          if (vote.anonymous) vote.timedOut = true;
+          else vote.conclusionPending = true;
+        }
         storage.sql.exec("UPDATE room_votes SET json = ? WHERE id = ?", JSON.stringify(vote), vote.id);
       }
       this.dropLegacyKey();
@@ -72,7 +81,7 @@ export class Operations {
     if (id === undefined) sql.exec("INSERT OR REPLACE INTO room_vote_design VALUES (1, ?)", json);
     else {
       if (!isUuid(id)) return false;
-      sql.exec("INSERT OR REPLACE INTO vote_designs VALUES (?, ?)", id, json);
+      sql.exec("INSERT OR REPLACE INTO vote_designs (id, json, scoped) VALUES (?, ?, 1)", id, json);
       // An editor can publish before starting a vote. Bound these unpublished-to-a-vote designs too.
       sql.exec(`DELETE FROM vote_designs WHERE id IN (
         SELECT id FROM vote_designs WHERE id NOT IN (SELECT id FROM room_votes WHERE json_extract(json,'$.state') = 'active')
@@ -80,11 +89,19 @@ export class Operations {
     }
     return true;
   }
-  private voteDesign(id: string): VoteDesign | undefined {
+  private voteDesign(op: VoteOp): VoteDesign | undefined {
     const sql = this.storage.sql;
-    const row = sql.exec<{ json: string }>("SELECT json FROM vote_designs WHERE id = ?", id).toArray()[0] ??
-      sql.exec<{ json: string }>("SELECT json FROM room_vote_design WHERE id = 1").toArray()[0];
-    return row && voteDesignForTopology(JSON.parse(row.json) as VoteTopology);
+    const stored = sql.exec<{ json: string; scoped: number }>("SELECT json, scoped FROM vote_designs WHERE id = ?", op.vote).toArray()[0];
+    const decode = (row: { json: string }) => voteDesignForTopology(JSON.parse(row.json) as VoteTopology);
+    if (stored?.scoped) return decode(stored);
+    const whole = sql.exec<{ json: string }>("SELECT json FROM room_vote_design WHERE id = 1").toArray()[0];
+    if (!whole) return stored && decode(stored);
+    const design = decode(whole);
+    if (!stored || op.kind === "vote.conclusion") return design;
+    // Before negotiation, start could copy the whole map into this slot. Prefer a live whole map for its page.
+    const page = op.kind === "vote.start" ? op.scope.page : sql.exec<{ page: string }>(
+      "SELECT json_extract(json, '$.scope.page') AS page FROM room_votes WHERE id = ?", op.vote).toArray()[0]?.page;
+    return page && design.page(page) ? design : decode(stored);
   }
   private legacyKey(): string | undefined {
     return this.storage.sql.exec<{ key: string }>("SELECT key FROM room_vote_key WHERE id = 1").toArray()[0]?.key;
@@ -105,7 +122,7 @@ export class Operations {
     return row ? JSON.parse(row.json) : null;
   }
   socialView(me: Author) {
-    return { votes: this.voteView(me, false), timer: this.standaloneTimer() };
+    return { votes: this.voteView(me, false), timer: this.standaloneTimer(), serverTime: new Date(this.now()).toISOString() };
   }
   endedVoteTotals() {
     return this.voteRows().map(row => JSON.parse(row.json) as Vote)
@@ -121,14 +138,16 @@ export class Operations {
     const { at } = this.storage.sql.exec<{ at: string | null }>(`SELECT MIN(json_extract(json, '$.timer.endsAt')) AS at
       FROM room_votes WHERE json_extract(json, '$.state') = 'active' AND json_extract(json, '$.timer.pausedAt') IS NULL`).one();
     const timer = this.standaloneTimer();
-    const next = Math.min(at ? Date.parse(at) : Infinity,
+    const claim = this.storage.sql.exec<{ at: string | null }>("SELECT MIN(json_extract(json, '$.conclusion.expiresAt')) AS at FROM room_votes").one().at;
+    const next = Math.min(at ? Date.parse(at) : Infinity, claim ? Date.parse(claim) : Infinity,
       timer?.endsAt && !timer.endedAt && !timer.pausedAt ? Date.parse(timer.endsAt) : Infinity);
     return Number.isFinite(next) ? next : undefined;
   }
-  expireDueVotes() {
+  expireDueVotes(notify = true) {
     const entries: Applied[] = [];
     this.storage.transactionSync(() => this.expireVotes(new Date(this.now()).toISOString(), entries));
-    if (entries.length) this.onVotesExpired?.(entries);
+    if (notify && entries.length) this.onVotesExpired?.(entries);
+    return entries;
   }
   private applyRoomVote(op: VoteOp, opId: string, me: Identity, at: string, design: VoteDesign, result: OpResult) {
     const rows = this.voteRows();
@@ -142,13 +161,11 @@ export class Operations {
     if (newKey) next.anonymousKey = newKey;
     const prior = rows.find(row => row.id === op.vote);
     const evicted = rows.length >= LIMITS.votesPerDoc && !prior ? rows.find(row => !votes.some(v => v.id === row.id)) : undefined;
-    const entry = this.writeVoteChange(next, opId, at, prior?.json, evicted?.id);
+    const entry = this.writeVoteChange(next, opId, at, prior?.json, evicted?.id, op.kind === "vote.conclusion");
     if (!entry) {
-      result.rejected.push({ opId, code: "conflict", message: "Document storage quota exceeded" });
+      result.rejected.push({ opId, code: "storage_quota", message: "Document storage quota exceeded" });
       return;
     }
-    if (op.kind === "vote.start") this.storage.sql.exec(
-      "INSERT OR IGNORE INTO vote_designs SELECT ?, json FROM room_vote_design WHERE id = 1", next.id);
     if (next.state !== "active") this.finishVote(next.id);
     result.acks.push({ opId, seq: entry.seq });
     result.entries.push(entry);
@@ -180,7 +197,7 @@ export class Operations {
     const usage = this.storage.sql.exec<{ bytes: number }>("SELECT bytes FROM room_usage WHERE id = 1").one().bytes;
     const added = (next ? size(JSON.stringify(next)) : 0) - (previous ? size(JSON.stringify(previous)) : 0);
     if (next && usage + added + size(SOCIAL_MARKER_JSON) + size(opId) + 8 > DOCUMENT_BYTES) {
-      result.rejected.push({ opId, code: "quota", message: "Document storage quota exceeded" });
+      result.rejected.push({ opId, code: "storage_quota", message: "Document storage quota exceeded" });
       return;
     }
     const entry = this.writeTimer(next, opId, at);
@@ -192,6 +209,13 @@ export class Operations {
     this.dropLegacyKey();
   }
   private expireVotes(at: string, entries: Applied[]) {
+    const claims = this.storage.sql.exec<{ json: string }>("SELECT json FROM room_votes WHERE json_extract(json, '$.conclusion.expiresAt') <= ?", at).toArray();
+    for (const row of claims) {
+      const vote = JSON.parse(row.json) as StoredVote;
+      delete vote.conclusion;
+      vote.conclusionPending = true;
+      entries.push(this.writeVoteChange(vote, crypto.randomUUID(), at, row.json, undefined, true)!);
+    }
     const timer = this.standaloneTimer();
     if (timer && !timer.endedAt && timerExpired(timer, at))
       entries.push(this.writeTimer({ ...timer, endedAt: at }, crypto.randomUUID(), at));
@@ -225,11 +249,11 @@ export class Operations {
         const op = canonicalMentions(envelope.op, members);
         if (isVoteOp(op)) {
           if (!mayApply(op, role, me, [])) { reject("forbidden", "This role cannot apply the op"); return; }
-          if (!voteDesign) { reject("version", "Voting is unavailable on this connection. Update Canvas."); return; }
+          if (!voteDesign) { reject("version", UPDATE_VOTE_CLIENT); return; }
           const receipt = sql.exec<{ seq: number }>("SELECT seq FROM op_receipts WHERE op_id = ?", opId).toArray()[0];
           if (receipt) { result.acks.push({ opId, seq: receipt.seq }); return; }
           if (op.kind === "timer.set" && op.standalone) { this.applyRoomTimer(op, opId, at, result); return; }
-          const design = voteDesign === true ? this.voteDesign(op.vote) : voteDesign;
+          const design = voteDesign === true ? this.voteDesign(op) : voteDesign;
           if (!design && (op.kind === "vote.start" || op.kind === "vote.cast")) { reject("conflict", "An editor must publish the vote design first"); return; }
           this.applyRoomVote(op, opId, me, at, design ?? { page: () => false, node: () => undefined }, result);
           return;

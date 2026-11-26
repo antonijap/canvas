@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { after, test } from "node:test";
 import { CloudHost, INVITE_MS, newSecret, parseSecret } from "../cloud/adapters/mac/host.ts";
-import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, type Op, type ServerMessage } from "../cloud/protocol.ts";
+import { CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, UPDATE_VOTE_CLIENT, type Op, type ServerMessage } from "../cloud/protocol.ts";
 import { blobKey } from "../cloud/core/files/objects.ts";
 import { acceptKey, ServerSocket } from "../cloud/adapters/mac/websocket.ts";
 
@@ -696,20 +696,22 @@ test("comments rooms give vote views to capable members and keep old sockets in 
     return got;
   }
 
-  const a = await open(anna, [CLOUD_VOTES]), b = await open(ben, [CLOUD_VOTES]), old = await open(anna);
+  const a = await open(anna, [CLOUD_VOTES, "private-vote-views"]), b = await open(ben, [CLOUD_VOTES, "private-vote-views"]), old = await open(ben, [CLOUD_VOTES]);
   const start: Op = { kind: "vote.start", vote, scope: { page: "page" }, on: "stickies", perPerson: 1, hidden: true, anonymous: true };
   const cast: Op = { kind: "vote.cast", vote, ballot, layer: "note" };
   const submit = async (op: Op, token: string, capable = true) =>
     (await post(base, route + "/ops", { ops: [{ doc, op, opId: crypto.randomUUID(), at: new Date().toISOString() }] },
-      { ...bearer(token), ...(capable && { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES }) })).json() as Promise<{ acks: unknown[]; rejected: { code: string }[] }>;
-  assert.equal((await submit(start, anna, false)).rejected[0].code, "version");
+      { ...bearer(token), ...(capable && { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES + ", private-vote-views" }) })).json() as Promise<{ acks: unknown[]; rejected: { code: string; message: string }[] }>;
+  assert.equal((await submit(start, anna, false)).rejected[0].message, UPDATE_VOTE_CLIENT);
   assert.equal((await submit(start, anna)).acks.length, 1);
   assert.equal((await submit(cast, ben)).acks.length, 1);
   await until(() => [a, b, old].every(messages => messages.some(m => m.type === "applied" && m.entries[0]?.seq === 2)));
   assert.doesNotMatch(JSON.stringify(a), new RegExp(ballot));
   assert.match(JSON.stringify(b), new RegExp(ballot));
   assert.doesNotMatch(JSON.stringify(old), new RegExp(ballot + '|"votes"'));
-  const replay = await open(anna, [CLOUD_VOTES], 1);
+  const legacy = await fetch(base + route + "/threads", { headers: { ...bearer(ben), [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES } });
+  assert.doesNotMatch(JSON.stringify(await legacy.json()), new RegExp(ballot + '|"votes"'));
+  const replay = await open(anna, [CLOUD_VOTES, "private-vote-views"], 1);
   assert.doesNotMatch(JSON.stringify(replay), new RegExp(ballot));
   assert.equal((await submit({ kind: "vote.end", vote }, ben)).rejected[0].code, "forbidden");
   assert.equal((await submit({ kind: "vote.end", vote }, anna)).acks.length, 1);
@@ -723,4 +725,40 @@ test("comments rooms give vote views to capable members and keep old sockets in 
   assert.equal((await submit({ kind: "timer.set", vote: timed, ms: 250 }, anna)).acks.length, 1);
   await until(() => a.some(m => m.type === "applied" && m.votes?.some(v => v.id === timed && v.state === "ended")));
 
+});
+
+test("both Mac room types restore timer deadlines before the first request after restart", async () => {
+  let now = Date.now();
+  const { h, dir, base } = await host({ now: () => now });
+  const auth = bearer(h.ownerDevice("Anna"));
+  const doc = crypto.randomUUID();
+  await post(base, "/v1/docs", { doc }, auth);
+  const { id } = await (await post(base, "/v1/files", { name: "Board" }, auth)).json() as { id: string };
+  const vote = crypto.randomUUID(), at = new Date(now).toISOString();
+  const ops = (doc: string) => [{ doc, at, opId: crypto.randomUUID(),
+    op: { kind: "timer.set", vote, standalone: true, action: "start", ms: 5000 } }];
+  const caps = CLOUD_VOTES + ", private-vote-views";
+  const comments = { ...auth, [COMMENTS_CAPABILITIES_HEADER]: caps };
+  assert.equal((await (await post(base, `/v1/docs/${doc}/ops`, { ops: ops(doc) }, comments)).json() as any).acks.length, 1);
+  const view = await (await fetch(base + `/v1/docs/${doc}/threads`, { headers: comments })).json() as any;
+  assert.equal(view.timer?.id, vote, "comments GET returns the standalone timer");
+  const file = await post(base, `/v1/files/${id}/comments`, { ops: ops(id) }, { ...auth, "x-canvas-files-capabilities": caps });
+  assert.equal((await file.json() as any).acks.length, 1);
+  const legacy = await (await fetch(base + `/v1/files/${id}/comments`, {
+    headers: { ...auth, "x-canvas-files-capabilities": CLOUD_VOTES },
+  })).json() as any;
+  assert.equal(legacy.timer, undefined);
+  assert.equal(legacy.votes, undefined);
+  await h.stop();
+  now += 5000;
+  const restarted = new CloudHost({ dir, port: 0, now: () => now });
+  hosts.push(restarted);
+  await restarted.start();
+  const databases = [path.join(dir, "rooms", doc + ".sqlite"), path.join(dir, "files", id + ".sqlite")];
+  const ended = (filename: string) => {
+    const db = new DatabaseSync(filename, { readOnly: true });
+    try { return !!(db.prepare("SELECT json_extract(json, '$.endedAt') AS ended FROM room_timer").get()?.ended); }
+    finally { db.close(); }
+  };
+  await until(() => databases.every(ended));
 });

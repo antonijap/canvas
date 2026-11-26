@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from "vitest";
 import { listDurableObjectIds, reset, runInDurableObject } from "cloudflare:test";
 import { Team } from "../src/team";
-import { CLOUD_TIMERS, CLOUD_VOTES, LIMITS, PROTOCOL_VERSION, roleFor } from "../../../protocol";
+import { CLOUD_TIMERS, PER_VOTE_DESIGN, PRIVATE_VOTE_VIEWS, LIMITS, PROTOCOL_VERSION, roleFor } from "../../../protocol";
 import { bindings, call, envelope, member, owner, post, register, rules } from "./helpers";
 
 beforeEach(reset);
@@ -13,7 +13,7 @@ it("authenticates before touching any objects or trusting internal headers", asy
   expect(await listDurableObjectIds(bindings.ROOM)).toHaveLength(0);
 });
 it("returns version, identity, and bootstrap owner above deny rules", async () => {
-  expect(await (await call("/v1/info")).json()).toEqual({ protocol: PROTOCOL_VERSION, server: "0.1.0", capabilities: ["comments", CLOUD_VOTES, CLOUD_TIMERS] });
+  expect(await (await call("/v1/info")).json()).toEqual({ protocol: PROTOCOL_VERSION, server: "0.1.0", capabilities: ["comments", PRIVATE_VOTE_VIEWS, CLOUD_TIMERS, PER_VOTE_DESIGN] });
   await rules([{ match: "@example.com", role: "deny" }]);
   expect(await (await call("/v1/me")).json()).toEqual({ email: owner, name: "owner", role: "owner" });
   expect((await call("/v1/me", member)).status).toBe(403);

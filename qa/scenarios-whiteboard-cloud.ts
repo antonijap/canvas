@@ -97,7 +97,7 @@ sc("sticky", "Sticky text presence and stickers replicate on a Cloud file", {
 });
 
 sc("vote", "Cloud vote and timer let a viewer vote and comment without revealing hidden ballots", {
-  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence", "vote:cloud-cache", "vote:cloud-design", "timer:cloud", "timer:expiry"],
+  covers: ["vote:cloud", "vote:cloud-privacy", "vote:cloud-viewer", "vote:cloud-private-presence", "vote:cloud-cache", "vote:cloud-design", "vote:cloud-legacy-retry", "timer:cloud", "timer:expiry"],
   skip: { visual: "Checks the two live canvases and the synchronized results." },
 }, async (t: T) => {
   const dir = fs.mkdtempSync(path.join(path.dirname(t.file), "vote-cloud-"));
@@ -228,6 +228,28 @@ sc("vote", "Cloud vote and timer let a viewer vote and comment without revealing
     t.ok(!fs.readFileSync(path.join(copy, "comments.json"), "utf8").includes(newLayer), "the synced package contains no hidden target");
     t.ok(!fs.readFileSync(path.join(copy, "comments.json"), "utf8").includes(ballot), "the synced package contains no personal ballot ID");
     await waitVote(b, copy, data => data.votes.some((v: any) => v.ballots.some((b: any) => b.id === ballot)), "Viewer lost their private ballot");
+
+    // A synced older package can reintroduce an unverified operation. It stays private and waits for Retry.
+    const sidecar = path.join(copy, "comments.json");
+    const legacy = JSON.parse(fs.readFileSync(sidecar, "utf8"));
+    delete legacy.me;
+    const retryId = randomUUID();
+    legacy.outbox.push({ doc: shared.doc, opId: retryId, at: new Date().toISOString(),
+      op: { kind: "vote.retract", vote, ballot } });
+    fs.writeFileSync(sidecar, JSON.stringify(legacy));
+    await fetch(b.base + api("/api/comments", copy));
+    await waitVote(b, copy, data => data.rejected.some((r: any) => r.id === retryId && r.retryable),
+      "The migrated vote offers an explicit Retry");
+    t.ok(!fs.readFileSync(sidecar, "utf8").includes(ballot), "the older queue was scrubbed from the package");
+    await waitVote(b, copy, data => data.votes.some((v: any) => v.ballots.some((b: any) => b.id === ballot)),
+      "The unverified outgoing vote was not sent automatically");
+    await ben.page.send("Page.bringToFront");
+    await ben.page.goto(b.base + "/?file=" + encodeURIComponent(copy));
+    await ben.waitFor('document.querySelector("[data-vote-recovery-retry]")', "the recovered vote has a Retry button");
+    await ben.ev('document.querySelector("[data-vote-recovery-retry]").click()');
+    await waitVote(a, local, data => data.votes.some((v: any) => v.id === vote && v.done === 0),
+      "Retry sends the recovered operation");
+
 
   } finally {
     await Promise.allSettled([tab?.close(), chrome?.stop()]);

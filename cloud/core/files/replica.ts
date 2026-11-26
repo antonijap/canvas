@@ -1,4 +1,4 @@
-import { CLOUD_VOTES } from "../../protocol.ts";
+import { VOTE_CLIENT_CAPABILITIES } from "../../protocol.ts";
 // A Mac's side of a Cloud file, as plain state: the confirmed copy (server order), the actions it made that the room
 // has not confirmed, and the ones the room refused. The view is confirmed + pending, rebuilt with the shared apply.
 // This is the model the tests and the fuzz run drive; Phase 3 builds src/cloud-files-tree.ts and state.sqlite on it.
@@ -125,7 +125,7 @@ export class Replica {
   hello(file: string): Hello {
     this.joined = false;
     this.needHello = false;
-    return { type: "hello", protocol: 2, capabilities: [WHITEBOARD, CLOUD_VOTES], file, since: this.seq, epoch: this.epoch, pending: this.pending.slice(0, this.helloWindow).map((p) => ({ id: p.action.id, sha: p.sha })) };
+    return { type: "hello", protocol: 2, capabilities: [WHITEBOARD, ...VOTE_CLIENT_CAPABILITIES], file, since: this.seq, epoch: this.epoch, pending: this.pending.slice(0, this.helloWindow).map((p) => ({ id: p.action.id, sha: p.sha })) };
   }
 
   /** Actions to send now, in order, at most `maxOps` ops in all; they are marked sent. */

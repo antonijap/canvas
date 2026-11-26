@@ -1,7 +1,7 @@
 // The Cloud file room's rules (plan Sections 2.3 and 3): every rule on the room's own SQL rows, all or nothing actions,
 // receipts that outlive compaction, epochs, contiguous delivery, text transform, allowlists and path refusals.
 
-import { CLOUD_VOTES } from "../cloud/protocol.ts";
+import { CLOUD_VOTES, PRIVATE_VOTE_VIEWS } from "../cloud/protocol.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, rmSync } from "node:fs";
@@ -493,11 +493,11 @@ test("legacy hello accepts plain files and rejects whiteboard contents or replay
   assert.equal(room.hello(anna, { ...hello, pending: [] })[0].type, "welcome");
   ok(one(room, anna, [{ k: "insert", parent: null, after: null, node: { id: "whiteboard", type: "frame", children: [{ id: "note", type: "sticky", color: "yellow" }] } }]));
   assert.match(JSON.stringify(room.hello(anna, { ...hello, pending: [] })[0]), /Update Canvas/);
-  const modern = { ...hello, pending: [], capabilities: ["whiteboard", CLOUD_VOTES] };
+  const modern = { ...hello, pending: [], capabilities: ["whiteboard", CLOUD_VOTES, PRIVATE_VOTE_VIEWS] };
   const welcome = room.hello(anna, modern)[0];
   assert.equal(welcome.type, "welcome");
   if (welcome.type === "welcome") {
-    assert.ok(welcome.capabilities?.includes(CLOUD_VOTES));
+    assert.ok(welcome.capabilities?.includes(PRIVATE_VOTE_VIEWS));
     assert.ok(Number.isFinite(Date.parse(welcome.serverTime ?? "")));
   }
   ok(one(room, anna, [{ k: "remove", id: "whiteboard" }]));

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { evictDurableObject, reset } from "cloudflare:test";
-import { CLOUD_TIMERS, CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION } from "../../../protocol";
+import { evictDurableObject, reset, runInDurableObject } from "cloudflare:test";
+import { CLOUD_TIMERS, CLOUD_VOTES, PER_VOTE_DESIGN, PRIVATE_VOTE_VIEWS, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION } from "../../../protocol";
 import { bindings, call, connect, envelope, member, owner, post, register, rules } from "./helpers";
 
 const sockets: WebSocket[] = [];
@@ -82,14 +82,14 @@ it("enforces vote management permissions at message arrival", async () => {
 it("filters hidden ballots across legacy live, welcome, replay and export routes", async () => {
   await rules([{ match: member, role: "viewer" }]);
   const doc = await register(), vote = crypto.randomUUID(), ballot = crypto.randomUUID();
-  const headers = { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES };
+  const headers = { [COMMENTS_CAPABILITIES_HEADER]: PRIVATE_VOTE_VIEWS };
   const topology = { pages: ["page"], nodes: [["note", { page: "page", type: "sticky", chain: ["note"] }]] };
   const route = `/v1/docs/${doc}`;
   expect((await call(route + "/vote-design", member, "PUT", topology)).status).toBe(403);
   expect((await call(route + "/vote-design", owner, "PUT", topology)).status).toBe(200);
-  const a = await open(doc, owner, 0, [CLOUD_VOTES]);
-  const b = await open(doc, member, 0, [CLOUD_VOTES]);
-  const old = await open(doc);
+  const a = await open(doc, owner, 0, [CLOUD_VOTES, PRIVATE_VOTE_VIEWS]);
+  const b = await open(doc, member, 0, [CLOUD_VOTES, PRIVATE_VOTE_VIEWS]);
+  const old = await open(doc, member, 0, [CLOUD_VOTES]);
   expect(await a.next()).toMatchObject({ serverTime: expect.any(String) });
   await b.next(); await old.next();
   const start = envelope(doc, { kind: "vote.start", vote, scope: { page: "page" }, on: "stickies", perPerson: 1, hidden: true, anonymous: true });
@@ -103,7 +103,9 @@ it("filters hidden ballots across legacy live, welcome, replay and export routes
   const legacy = await old.next();
   expect(legacy).toMatchObject({ type: "applied", entries: [{ seq: 2, op: { kind: "vote.changed" } }] });
   expect(legacy).not.toHaveProperty("votes");
-  const replay = await open(doc, owner, 1, [CLOUD_VOTES]);
+  const oldView = await call(route + "/threads", member, "GET", undefined, { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES });
+  expect(await oldView.json()).not.toHaveProperty("votes");
+  const replay = await open(doc, owner, 1, [CLOUD_VOTES, PRIVATE_VOTE_VIEWS]);
   expect(await replay.next()).toMatchObject({ type: "welcome", votes: [{ ballots: [] }] });
   expect(JSON.stringify(await replay.next())).not.toContain(ballot);
   expect(JSON.stringify(await (await call(route + "/threads?since=1", owner, "GET", undefined, headers)).json())).not.toContain(ballot);
@@ -120,9 +122,9 @@ it("filters hidden ballots across legacy live, welcome, replay and export routes
 it("broadcasts when an idle room's vote timer ends", async () => {
   const doc = await register(), vote = crypto.randomUUID(), route = `/v1/docs/${doc}`;
   expect((await call(route + "/vote-design", owner, "PUT", { vote, pages: ["page"], nodes: [] })).status).toBe(200);
-  const a = await open(doc, owner, 0, [CLOUD_VOTES]);
+  const a = await open(doc, owner, 0, [CLOUD_VOTES, PRIVATE_VOTE_VIEWS]);
   await a.next();
-  const headers = { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES };
+  const headers = { [COMMENTS_CAPABILITIES_HEADER]: PRIVATE_VOTE_VIEWS };
   const response = await call(route + "/ops", owner, "POST", { ops: [
     envelope(doc, { kind: "vote.start", vote, scope: { page: "page" }, on: "anything", perPerson: 1, hidden: true, anonymous: true }),
     envelope(doc, { kind: "timer.set", vote, ms: 250 }),
@@ -134,17 +136,46 @@ it("broadcasts when an idle room's vote timer ends", async () => {
 it("broadcasts standalone timer expiry on the comments stream", async () => {
   await rules([{ match: member, role: "viewer" }]);
   const doc = await register(), timer = crypto.randomUUID(), route = `/v1/docs/${doc}/ops`;
-  const legacy = await open(doc), viewer = await open(doc, member, 0, [CLOUD_VOTES, CLOUD_TIMERS]);
+  const legacy = await open(doc), viewer = await open(doc, member, 0, [CLOUD_VOTES, PRIVATE_VOTE_VIEWS]);
   await legacy.next();
-  expect(await viewer.next()).toMatchObject({ capabilities: [CLOUD_VOTES, CLOUD_TIMERS], timer: null });
+  expect(await viewer.next()).toMatchObject({ capabilities: [PRIVATE_VOTE_VIEWS, CLOUD_TIMERS, PER_VOTE_DESIGN], timer: null });
   const start = envelope(doc, { kind: "timer.set", vote: timer, standalone: true, action: "start", ms: 350 });
-  const headers = { [COMMENTS_CAPABILITIES_HEADER]: CLOUD_VOTES };
+  const headers = { [COMMENTS_CAPABILITIES_HEADER]: PRIVATE_VOTE_VIEWS };
   expect(await (await call(route, member, "POST", { ops: [start] }, headers)).json())
     .toMatchObject({ rejected: [{ code: "forbidden" }] });
   expect(await (await call(route, owner, "POST", { ops: [start] }, headers)).json()).toMatchObject({ rejected: [] });
   expect(await legacy.next()).not.toHaveProperty("timer");
   expect(await viewer.next()).toMatchObject({ votes: [], timer: { id: timer, startedAt: expect.any(String), endsAt: expect.any(String) } });
   expect(await viewer.next()).toMatchObject({ type: "applied", timer: { id: timer, endedAt: expect.any(String) } });
+});
+it("commits expiry and schedules the next timer even if Team authorization fails", async () => {
+  const doc = await register(), timer = crypto.randomUUID(), vote = crypto.randomUUID();
+  const client = await open(doc, owner, 0, [PRIVATE_VOTE_VIEWS]);
+  await client.next();
+  await runInDurableObject(bindings.ROOM.getByName(doc), async (instance, state) => {
+    const startedAt = new Date(Date.now() - 5000).toISOString();
+    const endsAt = new Date(Date.now() - 1000).toISOString();
+    const next = Date.now() + 60_000;
+    state.storage.sql.exec("INSERT INTO room_timer VALUES (1, ?)", JSON.stringify({ id: timer, startedAt, endsAt, ms: 4000 }));
+    state.storage.sql.exec("INSERT INTO room_votes VALUES (?, ?)", vote, JSON.stringify({
+      id: vote, host: { id: owner }, scope: { page: "page" }, on: "anything", state: "active", ballots: [],
+      timer: { startedAt, endsAt: new Date(next).toISOString(), ms: 65_000 },
+    }));
+    let authorizationAttempted = false;
+    const room = instance as unknown as { alarm(): Promise<void>; refreshRules(): Promise<void> };
+    const refresh = room.refreshRules;
+    room.refreshRules = async () => {
+      authorizationAttempted = true;
+      throw new Error("Team unavailable");
+    };
+    try {
+      await room.alarm();
+      expect(authorizationAttempted).toBe(true);
+      expect(await state.storage.getAlarm()).toBe(next);
+      expect(state.storage.sql.exec("SELECT json_extract(json, '$.endedAt') AS ended FROM room_timer").one().ended).toBeTruthy();
+      expect(state.storage.sql.exec("SELECT COUNT(*) AS count FROM ops").one().count).toBe(1);
+    } finally { room.refreshRules = refresh; }
+  });
 });
 it("closes the oldest socket above the per-person limit", async () => {
   const doc = await register();
@@ -195,7 +226,6 @@ it("falls back to threads when the requested replay has been pruned", async () =
   const doc = await register();
   await post(doc, [envelope(doc), envelope(doc), envelope(doc)]);
   await bindings.ROOM.getByName(doc).snapshot();
-  const { runInDurableObject } = await import("cloudflare:test");
   await runInDurableObject(bindings.ROOM.getByName(doc), (_instance, state) => {
     state.storage.sql.exec("DELETE FROM ops WHERE seq < 3");
   });

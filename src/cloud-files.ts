@@ -20,9 +20,9 @@ import { type Action, type FileServerMessage, type FileOp, type Role, CAN_EDIT, 
 import { createPackage, targetPath } from './docpath.ts';
 import { type BlobRow } from '../cloud/core/files/seam.ts';
 import { readBodyText } from './body.ts';
-import { applyOp, CLOUD_VOTES, isVoteOp, LIMITS, needsCloudTimers, supportsCloudTimers, supportsCloudVotes, UPDATE_TIMER_HOST, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type StandaloneTimer, type Thread, type Vote, type VoteView } from '../cloud/protocol.ts';
+import { applyOp, VOTE_CLIENT_CAPABILITIES, isRateRefusal, isVoteOp, LIMITS, needsCloudTimers, supportsCloudTimers, supportsCloudVotes, supportsPrivateVoteViews, UPDATE_TIMER_HOST, UPDATE_COMMENT_HOST, UPDATE_VOTE_HOST, type CommentsFile, type OpEnvelope, type Rejected, type StandaloneTimer, type Thread, type Vote, type VoteView } from '../cloud/protocol.ts';
 import { COMMENTS_FILE, forkComments, readCommentsFile, writeCommentsFile } from './comments-file.ts';
-import { ownLocalVotes, receiveVoteViews, sendableCommentOps } from './vote-state.ts';
+import { anchorVoteClock, ownLocalVotes, receiveVoteViews, sendableCommentOps, voteOpsForTransfer, voteServerTime, type VoteClock } from './vote-state.ts';
 import { prepareMove } from './cloud-files-move.ts';
 import { checkPresence, stripIdentity, keep, type Presence, type PeerPresence } from '../cloud/core/presence.ts';
 import { createPresenceSender } from './page/presence-client.js';
@@ -77,8 +77,8 @@ interface Session {
     voting?: boolean;
     timerCapable?: boolean;
     cloudTimer?: StandaloneTimer | null;
-    serverTime?: string;
-    voteClockOffset?: number;
+    voteClock?: VoteClock;
+    leasedConclusions?: boolean;
     cloudVotes?: VoteView[];
     voteConclusions?: string[];
     legacyVotes?: Vote[];
@@ -203,7 +203,7 @@ function waitingForHost(s: Session) {
     return s.whiteboard === false && s.store.replica.pending.some(p => insertsWhiteboard(p.action.ops))
         ? 'Edits are waiting for the Cloud host to update Canvas.' : undefined;
 }
-export function fileInfo(file: string, open = true) { const s = open ? fileSession(file) : sessions.get(docFile(file)); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, whiteboard: s.whiteboard === true, voting: s.voting, serverTime: s.serverTime, voteClockOffset: s.voteClockOffset, updateMessage: s.updateMessage, waitingForHost: waitingForHost(s), pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
+export function fileInfo(file: string, open = true) { const s = open ? fileSession(file) : sessions.get(docFile(file)); return s ? { author: s.store.meta.author, name: s.store.meta.name, cloud: s.store.meta.cloud, key: cloudKey(s.store.meta.cloud), file: s.store.meta.file, role: s.store.meta.role, status: s.status, whiteboard: s.whiteboard === true, voting: s.voting, serverTime: voteServerTime(s.voteClock), leasedConclusions: s.leasedConclusions, updateMessage: s.updateMessage, waitingForHost: waitingForHost(s), pending: s.store.replica.pending.length, refused: s.store.replica.refused.map(r => ({ id: r.action.id, code: r.code, message: r.message })) } : null; }
 class CloudHttpError extends Error {
     readonly status: number;
     readonly code: string;
@@ -226,7 +226,7 @@ async function request(cloud: string, p: string, method = 'GET', body?: unknown)
         if (t.fail === 'removed') removeCaches(cloud);
         fail(503, t.fail, 'The Cloud is unavailable');
     }
-    const r = await fetch((t as any).base + p, { method, headers: { ...(t as any).headers, [FILE_CAPABILITIES_HEADER]: WHITEBOARD + ', ' + CLOUD_VOTES, ...(body === undefined ? {} : { 'content-type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json' }) }, body: body === undefined ? undefined : body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body), signal: AbortSignal.timeout(30000), redirect: 'error' });
+    const r = await fetch((t as any).base + p, { method, headers: { ...(t as any).headers, [FILE_CAPABILITIES_HEADER]: [WHITEBOARD, ...VOTE_CLIENT_CAPABILITIES].join(', '), ...(body === undefined ? {} : { 'content-type': body instanceof Uint8Array ? 'application/octet-stream' : 'application/json' }) }, body: body === undefined ? undefined : body instanceof Uint8Array ? body as BodyInit : JSON.stringify(body), signal: AbortSignal.timeout(30000), redirect: 'error' });
     checkGeneration(cloud, g);
     if (r.status === 403) {
         void r.body?.cancel().catch(() => {});
@@ -299,7 +299,7 @@ export function clearLegacyFileVote(file: string, vote: string) {
 }
 function saveVoteViews(s: Session, votes: VoteView[]) {
     const state = commentState(s);
-    receiveVoteViews(state, votes);
+    receiveVoteViews(state, votes, state.outbox, s.leasedConclusions);
     s.cloudVotes = state.cloudVotes;
     s.voteConclusions = state.voteConclusions;
 }
@@ -404,6 +404,7 @@ export async function receive(s: Session, m: any) {
         render(s);
         return;
     }
+    if ((m.type === 'comments.snapshot' || m.type === 'comments.applied') && m.serverTime) s.voteClock = anchorVoteClock(m.serverTime);
     if (m.type === 'comments.snapshot') {
         if (m.votes) saveVoteViews(s, m.votes);
         if (m.timer !== undefined) s.cloudTimer = m.timer;
@@ -434,14 +435,16 @@ export async function receive(s: Session, m: any) {
     }
     if (m.type === 'comments.ack') {
         for (const a of m.acks) s.commentsInFlight?.delete(a.opId);
-        for (const r of m.rejected ?? []) {
+        const rejected = new Map<string, Rejected>();
+        for (const r of (m.rejected ?? []) as Rejected[]) {
             s.commentsInFlight?.delete(r.opId);
             const envelope = s.commentsPending.find(p => p.opId === r.opId);
             if (!envelope) continue;
-            if (r.code === 'quota') { waitForQuota(s); continue; }
+            if (isRateRefusal(r)) { waitForQuota(s); continue; }
+            rejected.set(r.opId, r);
             (s.commentsRejected ??= []).push({ envelope, code: r.code, message: r.message });
         }
-        s.commentsPending = s.commentsPending.filter(p => !m.acks.some((a: any) => a.opId === p.opId && a.seq <= s.commentsSeq) && !m.rejected.some((r: any) => r.opId === p.opId && r.code !== 'quota'));
+        s.commentsPending = s.commentsPending.filter(p => !m.acks.some((a: any) => a.opId === p.opId && a.seq <= s.commentsSeq) && !rejected.has(p.opId));
         sendComments(s);
         saveComments(s);
         fileEvents.comments?.(path.join(s.store.pkg, 'document.json'));
@@ -466,8 +469,8 @@ export async function receive(s: Session, m: any) {
         s.whiteboard = supportsWhiteboard(m.capabilities);
         s.voting = supportsCloudVotes(m.capabilities);
         s.timerCapable = supportsCloudTimers(m.capabilities);
-        s.serverTime = m.serverTime;
-        s.voteClockOffset = m.serverTime ? Date.parse(m.serverTime) - Date.now() : undefined;
+        s.voteClock = anchorVoteClock(m.serverTime);
+        s.leasedConclusions = supportsPrivateVoteViews(m.capabilities);
         s.updateMessage = undefined;
         s.status = 'connected';
         s.retryDelay = undefined;
@@ -832,8 +835,9 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
             const moved = await prepareMove(url.searchParams.get('file')!, async (name, doc, env, blobs, comments) => {
                 if (hasWhiteboard(doc.children) || comments.some(e => isVoteOp(e.op))) {
                     const info = await cloudJson(await request(b.cloud, '/v1/info')) as { capabilities?: unknown };
-                    if (comments.some(e => isVoteOp(e.op)) && !supportsCloudVotes(info.capabilities)) fail(426, 'version', UPDATE_VOTE_HOST);
-                    if (comments.some(e => needsCloudTimers(e.op)) && !supportsCloudTimers(info.capabilities)) fail(426, 'version', UPDATE_TIMER_HOST);
+                    const voting = supportsCloudVotes(info.capabilities);
+                    comments = voteOpsForTransfer(comments, voting && supportsCloudTimers(info.capabilities));
+                    if (comments.some(e => isVoteOp(e.op)) && !voting) fail(426, 'version', UPDATE_VOTE_HOST);
                     if (hasWhiteboard(doc.children) && !supportsWhiteboard(info.capabilities)) fail(426, 'update_host', UPDATE_WHITEBOARD_HOST);
                 }
                 const created = { id: randomUUID() };
@@ -855,15 +859,14 @@ export async function handleCloudFiles(req: http.IncomingMessage, res: http.Serv
                     seq += a.ops.length;
                     actions.push(a);
                 }
-                let social: { seq: number; threads: Thread[]; votes?: VoteView[]; timer?: StandaloneTimer | null } | undefined;
+                let social: { seq: number; threads: Thread[]; votes?: VoteView[]; timer?: StandaloneTimer | null; serverTime?: string } | undefined;
                 for (let i = 0; i < comments.length; i += LIMITS.opsPerMessage) {
                     let ops = comments.slice(i, i + LIMITS.opsPerMessage).map(e => ({ ...e, doc: created.id }));
                     while (ops.length) {
                         const out = await cloudJson(await request(b.cloud, `/v1/files/${created.id}/comments`, 'POST', { ops }));
-                        const hard = out.rejected.find((r: { code: string; message?: string }) =>
-                            r.code !== 'quota' || !/minute/i.test(r.message ?? ''));
+                        const hard = out.rejected.find((r: Rejected) => !isRateRefusal(r));
                         if (hard) throw new Error(hard.message ?? 'Cloud refused imported comments or votes');
-                        social = { seq: out.seq, threads: out.threads, votes: out.votes };
+                        social = { seq: out.seq, threads: out.threads, votes: out.votes, timer: out.timer, serverTime: out.serverTime };
                         const retry = new Set(out.rejected.map((r: { opId: string }) => r.opId));
                         ops = ops.filter(e => retry.has(e.opId));
                         if (ops.length) await delay(Math.min(60_100, Math.max(100, Number(out.retryAfterMs) || 60_100)));

@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import type http from "node:http";
 import path from "node:path";
-import { CLOUD_VOTES, isVoteOp, PROTOCOL_VERSION, needsCloudTimers, supportsCloudTimers, supportsCloudVotes, UPDATE_TIMER_HOST, UPDATE_VOTE_HOST, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread, type CommentsFile, type Role } from "../cloud/protocol.ts";
+import { VOTE_CLIENT_CAPABILITIES, isRateRefusal, isVoteOp, PROTOCOL_VERSION, supportsCloudTimers, supportsCloudVotes, supportsPerVoteDesign, supportsPrivateVoteViews, UPDATE_VOTE_HOST, type Applied, type Author, type ClientMessage, type Rejected, type ServerMessage, type Thread, type CommentsFile, type Role } from "../cloud/protocol.ts";
 import { readBodyText } from "./body.ts";
 import { addCloud, bump, cleanServerUrl, cloudConfigs, devEmailFor, generation, hostedId, hostedUrl, hostOf, isConfigured, isLocalDev, onCloudsChanged, parseInvite, removeCloud } from "./cloud-config.ts";
 import { hostsHere, hostStatus, hostStatusAll, invite, localHost, removePerson, startHosting, stopHosting, wipeHosting } from "./cloud-host.ts";
@@ -40,7 +40,8 @@ import { deleteJoined, readJoined, writeJoined, type JoinedSecrets } from "./clo
 import { forward, genkey, helperPath, hostIdFor, type Helper } from "./cloud-tunnel.ts";
 import { newSecret } from "../cloud/adapters/mac/host.ts";
 import { currentDoc } from "./docwriter.ts";
-import { receiveVoteViews, savePrivateVotes, sendableCommentOps, voteAccount, voterId, voteOpsForShare, voteTopology, withPrivateVotes } from "./vote-state.ts";
+import { conclusionId } from "../cloud/core/votes.ts";
+import { anchorVoteClock, migrateLegacyVoteQueue, stageLegacyVoteQueue, voteOpsForTransfer, voteServerTime, type VoteClock, receiveVoteViews, savePrivateVotes, sendableCommentOps, voteAccount, voterId, voteOpsForShare, voteTopology, withPrivateVotes } from "./vote-state.ts";
 import { acknowledge, confirm, discard, hooks, isShared, opsForShare, pendingStates, reject, retry, shareLocal, snapshot, viewOf, type SyncFile } from "./cloud-sync.ts";
 import { CommentsError, emptyComments, readCommentsFile, withoutCloudVotes, writeCommentsFile } from "./comments-file.ts";
 import { localName, packageOf } from "./comments.ts";
@@ -319,7 +320,9 @@ interface Session {
   designTimer?: ReturnType<typeof setTimeout>;
   designWatch?: fs.FSWatcher;
   publishedDesign?: Map<string, string>;
-  voteClockOffset?: number;
+  voteClock?: VoteClock;
+  perVoteDesign?: boolean;
+  leasedConclusions?: boolean;
   ws?: WebSocket;
   ready: boolean;
   attempt: number;
@@ -359,15 +362,19 @@ function setStatus(s: Session, status: Status): void {
 
 /** Reads, changes and writes the file in one step. `fn` says whether it changed anything. */
 function mutate(s: Session, fn: (f: SyncFile) => boolean): void {
-  let f: SyncFile | null;
+  let f: SyncFile, scrub: boolean;
   try {
     const disk = readCommentsFile(s.pkg);
-    f = disk && legacyVoteState(disk);
+    if (!disk || disk.doc !== s.doc || disk.server?.url !== s.origin) { stop(s); return; }
+    scrub = hasLegacyVoteData(disk);
+    const key = knownKey(s.pkg, disk);
+    stageLegacyVoteQueue(key, disk, readKnown().includes(key));
+    const account = verifiedVoteAccounts.get(s.origin);
+    f = account ? migrateLegacyVoteQueue(key, withoutCloudVotes(disk), account) : withoutCloudVotes(disk);
   } catch {
     return; // not readable comments: left as it is
   }
-  if (!f || f.server?.url !== s.origin || f.doc !== s.doc) { stop(s); return; }
-  if (fn(f)) {
+  if (fn(f) || scrub) {
     try { writeLegacyVoteState(s.pkg, f); } catch { return; }
     notify(s);
   }
@@ -420,7 +427,7 @@ async function connect(s: Session): Promise<void> {
   }
   s.ws = ws;
   if (t.hosted) watch(s, ws);
-  ws.onopen = () => { if (s.ws === ws && !s.stopped) send(s, { type: "hello", protocol: PROTOCOL_VERSION, doc: s.doc, since: seqOf(s), capabilities: [CLOUD_VOTES] }); };
+  ws.onopen = () => { if (s.ws === ws && !s.stopped) send(s, { type: "hello", protocol: PROTOCOL_VERSION, doc: s.doc, since: seqOf(s), capabilities: VOTE_CLIENT_CAPABILITIES }); };
   ws.onmessage = (ev) => {
     if (s.ws !== ws || s.stopped) return; // a socket this session no longer owns (removed, signed out) says nothing
     try { onMessage(s, JSON.parse(String(ev.data)) as ServerMessage); } catch { /* a bad message is skipped */ }
@@ -470,9 +477,12 @@ function onMessage(s: Session, m: ServerMessage): void {
       if (m.protocol !== PROTOCOL_VERSION) { setStatus(s, m.protocol < PROTOCOL_VERSION ? "tooOld" : "tooNew"); s.ws?.close(); return; }
       const account = voteAccount(m.me);
       if (account) verifiedVoteAccounts.set(s.origin, account);
+      s.voteClock = anchorVoteClock(m.serverTime);
+      s.perVoteDesign = supportsPerVoteDesign(m.capabilities);
+      s.leasedConclusions = supportsPrivateVoteViews(m.capabilities);
       mutate(s, (f) => {
         if (m.threads) snapshot(f, m.threads as Thread[], m.seq);
-        if (m.votes) receiveVoteViews(f, m.votes);
+        if (m.votes) receiveVoteViews(f, m.votes, f.outbox, s.leasedConclusions);
         f.voteCapable = supportsCloudVotes(m.capabilities);
         f.timerCapable = supportsCloudTimers(m.capabilities);
         if (m.timer !== undefined) f.cloudTimer = m.timer;
@@ -483,7 +493,6 @@ function onMessage(s: Session, m: ServerMessage): void {
       s.ready = true;
       s.attempt = 0;
       s.role = m.role;
-      s.voteClockOffset = m.serverTime ? Date.parse(m.serverTime) - Date.now() : undefined;
       s.publishedDesign?.clear();
       watchVoteDesign(s);
       designChanged(s);
@@ -492,12 +501,13 @@ function onMessage(s: Session, m: ServerMessage): void {
       return;
     }
     case "applied": {
+      if (m.serverTime) s.voteClock = anchorVoteClock(m.serverTime);
       for (const e of m.entries) s.inflight.delete(e.opId);
       mutate(s, (f) => {
         if (m.votes) {
-          receiveVoteViews(f, m.votes);
+          receiveVoteViews(f, m.votes, f.outbox, s.leasedConclusions);
           const active = new Set(m.votes.filter(v => v.state === "active").map(v => v.id));
-          for (const id of s.publishedDesign?.keys() ?? []) if (!active.has(id)) s.publishedDesign?.delete(id);
+          for (const id of s.publishedDesign?.keys() ?? []) if (id && !active.has(id)) s.publishedDesign?.delete(id);
         }
         if (m.timer !== undefined) f.cloudTimer = m.timer;
         return confirm(f, m.entries as Applied[]) || !!m.votes || m.timer !== undefined;
@@ -512,10 +522,9 @@ function onMessage(s: Session, m: ServerMessage): void {
       return;
     }
     case "reject": {
-      const rate = (r: Rejected) => r.code === "quota" && /minute/i.test(r.message);
       for (const r of m.rejected) s.inflight.delete(r.opId);
-      const hard = m.rejected.filter((r) => !rate(r));
-      if (m.rejected.some(rate)) delayFlush(s, 20_000); // too many for this minute: they stay in the outbox
+      const hard = m.rejected.filter((r) => !isRateRefusal(r));
+      if (m.rejected.some(isRateRefusal)) delayFlush(s, 20_000); // too many for this minute: they stay in the outbox
       mutate(s, (f) => reject(f, hard));
       flush(s);
       return;
@@ -562,7 +571,12 @@ export function flush(s: Session): void {
   const starts = batch.flatMap(e => e.op.kind === "vote.start" ? [{ envelope: e, page: e.op.scope.page, id: e.op.vote }] : []);
   const active = s.designDirty ? (f.cloudVotes ?? []).filter(v => v.state === "active")
     .map(v => ({ id: v.id, page: v.scope.page, envelope: undefined })) : [];
-  const designs = [...new Map([...active, ...starts].map(v => [v.id, v])).values()];
+  const confirmations = batch.flatMap(({ op }) => {
+    if (op.kind !== "vote.conclusion") return [];
+    const vote = f.cloudVotes?.find(v => v.id === op.vote);
+    return vote ? [{ id: vote.id, page: vote.scope.page, envelope: undefined, card: conclusionId(vote.id) }] : [];
+  });
+  const designs = [...new Map([...active, ...starts, ...confirmations].map(v => [v.id, v])).values()];
   if (!designs.length || (s.role !== "owner" && s.role !== "editor")) { deliver(); return; }
   s.designDirty = false;
   s.publishing = true;
@@ -578,15 +592,19 @@ export function flush(s: Session): void {
     const topology = voteTopology(file, currentDoc(file).doc);
     const published = s.publishedDesign ??= new Map();
     const invalid: Rejected[] = [];
-    for (const { id, page, envelope } of designs) {
-      const body = { vote: id, pages: topology.pages.filter(p => p === page), nodes: topology.nodes.filter(([, node]) => node.page === page) };
+    const uploads = s.perVoteDesign ? designs.map(target => {
+      const page = "card" in target ? topology.nodes.find(([id]) => id === target.card)?.[1].page ?? target.page : target.page;
+      return { id: target.id, body: { vote: target.id, pages: [page].filter(p => topology.pages.includes(p)),
+        nodes: topology.nodes.filter(([, node]) => node.page === page) }, starts: target.envelope ? [target.envelope] : [] };
+    }) : [{ id: "", body: topology, starts: starts.map(v => v.envelope) }];
+    for (const { id, body, starts } of uploads) {
       const signature = createHash("sha256").update(JSON.stringify(body)).digest("hex");
       if (published.get(id) === signature) continue;
       const reply = await request(s.origin, `/v1/docs/${s.doc}/vote-design`, { method: "PUT", body });
       if (s.ws !== ws || s.stopped) return;
       if (reply.fail) { retry(); return; }
       if (reply.res.ok) published.set(id, signature);
-      else if (envelope) invalid.push({ opId: envelope.opId, code: "invalid", message: String(reply.json?.message ?? "Could not publish the vote design") });
+      else for (const envelope of starts) invalid.push({ opId: envelope.opId, code: "invalid", message: String(reply.json?.message ?? "Could not publish the vote design") });
     }
     if (invalid.length) {
       mutate(s, f => reject(f, invalid));
@@ -711,7 +729,9 @@ function markKnown(key: string): void {
 export function vouch(pkg: string, f: SyncFile): boolean {
   if (!isShared(f)) return false;
   const key = knownKey(pkg, f);
-  if (readKnown().includes(key)) return false;
+  const known = readKnown().includes(key);
+  stageLegacyVoteQueue(key, f, known);
+  if (known) return false;
   markKnown(key);
   if (!f.outbox.length) return false;
   f.rejected = [...(f.rejected ?? []), ...f.outbox.map((envelope) => ({ envelope, code: "forbidden" as const, message: UNVOUCHED }))];
@@ -720,15 +740,27 @@ export function vouch(pkg: string, f: SyncFile): boolean {
 }
 hooks.vouch = vouch;
 
+function hasLegacyVoteData(f: CommentsFile) {
+  return Boolean(f.cloudVotes || f.cloudTimer !== undefined || f.timer !== undefined || f.timerCapable !== undefined ||
+    f.votes || f.voteConclusions || f.voteCapable !== undefined || f.voteRole || f.outbox.some(e => isVoteOp(e.op)) ||
+    f.rejected?.some(r => isVoteOp(r.envelope.op)));
+}
+
 function touch(pkg: string, display: string | null): void {
   let f: SyncFile | null;
   try { f = readCommentsFile(pkg) as SyncFile | null; } catch { return; }
   const live = sessions.get(pkg);
   if (!f || !isShared(f)) { if (live) stop(live); parked.delete(pkg); return; }
-  const hadLegacyVotes = Boolean(f.cloudVotes || f.cloudTimer || f.timer || f.timerCapable !== undefined || f.votes || f.voteConclusions || f.voteCapable !== undefined || f.voteRole ||
-    f.outbox.some(e => isVoteOp(e.op)) || f.rejected?.some(r => isVoteOp(r.envelope.op)));
-  if (hadLegacyVotes) f = withoutCloudVotes(f);
-  if (vouch(pkg, f) || hadLegacyVotes) { try { writeCommentsFile(pkg, f); } catch { return; } notifier(display, pkg); }
+  const hadLegacyVotes = hasLegacyVoteData(f);
+  try {
+    const held = vouch(pkg, f);
+    if (hadLegacyVotes) {
+      f = withoutCloudVotes(f);
+      const account = verifiedVoteAccounts.get(f.server!.url);
+      if (account) migrateLegacyVoteQueue(knownKey(pkg, f), f, account);
+    }
+    if (held || hadLegacyVotes) { writeCommentsFile(pkg, f); notifier(display, pkg); }
+  } catch { return; }
   if (live && (live.doc !== f.doc || live.origin !== f.server!.url)) stop(live);
   // A Cloud this Canvas does not have (removed, never added, or an address that is not safe): nothing connects.
   if (!isConfigured(f.server!.url)) { const l = sessions.get(pkg); if (l) stop(l); parked.set(pkg, display ?? parked.get(pkg) ?? null); return; }
@@ -744,11 +776,11 @@ function touch(pkg: string, display: string | null): void {
   flush(s);
 }
 
-export const legacyVoteClockOffset = (pkg: string) => sessions.get(pkg)?.voteClockOffset;
+export const legacyVoteServerTime = (pkg: string) => voteServerTime(sessions.get(pkg)?.voteClock);
+export const legacyVoteLeases = (pkg: string) => sessions.get(pkg)?.leasedConclusions === true;
 
 export function queueLegacyVote(pkg: string, display: string, file: CommentsFile, envelope: import("../cloud/protocol.ts").OpEnvelope) {
   if (!file.server || !verifiedVoteAccounts.has(file.server.url) || !file.voteCapable) throw new CloudError(426, "version", file.voteCapable === false ? UPDATE_VOTE_HOST : "Connect to the Cloud to check for voting support.");
-  if (vouch(pkg, file)) writeCommentsFile(pkg, file);
   if (file.outbox.some(e => e.opId === envelope.opId) || file.rejected?.some(r => r.envelope.opId === envelope.opId)) return;
   file.outbox.push({ ...envelope, doc: file.doc });
   writeLegacyVoteState(pkg, file);
@@ -841,9 +873,8 @@ async function shareOnce(pkg: string, display: string | null, to?: string | null
   if (isShared(fresh)) { touch(pkg, display); return { doc: fresh.doc, url: fresh.server!.url, already: true, ops: 0 }; }
   if (fresh.doc !== file.doc) throw new CloudError(409, "conflict", "The file's comments changed while sharing. Try again.");
   const me: Author = { id: st.id, email: st.email, name: st.name ?? localName() };
-  const voteOps = voteOpsForShare(fresh, fresh.votes?.length ? voterId() : "");
+  const voteOps = voteOpsForTransfer(voteOpsForShare(fresh, fresh.votes?.length ? voterId() : ""), st.voting === true && st.timerCapable === true);
   if (voteOps.length && !st.voting) throw new CloudError(426, "version", UPDATE_VOTE_HOST);
-  if (voteOps.some(e => needsCloudTimers(e.op)) && !st.timerCapable) throw new CloudError(426, "version", UPDATE_TIMER_HOST);
   const ops = [...opsForShare(fresh), ...voteOps];
   const shared = shareLocal({ ...fresh, outbox: fresh.outbox.filter(e => !isVoteOp(e.op)) }, url, me, ops);
   markKnown(knownKey(pkg, shared)); // shared from this Mac: its ops are this person's
@@ -941,11 +972,13 @@ export async function handleCloudRoute(req: http.IncomingMessage, res: http.Serv
     }
     // retry and discard
     const opId = typeof body.opId === "string" ? body.opId : "";
-    const f = readCommentsFile(pkg) as SyncFile | null;
-    if (!f || !isShared(f)) return out(404, { error: "This file is not shared", code: "not_found" });
+    touch(pkg, file);
+    const disk = readCommentsFile(pkg);
+    if (!disk || !isShared(disk)) return out(404, { error: "This file is not shared", code: "not_found" });
+    const f = legacyVoteState(disk);
     const done = p === "/api/comments/retry" ? retry(f, opId) : discard(f, opId);
     if (!done) return out(404, { error: "No such refused comment", code: "not_found" });
-    writeCommentsFile(pkg, f);
+    writeLegacyVoteState(pkg, f);
     touch(pkg, file);
     changed?.(file, pkg);
     return out(200, { ok: true, threads: viewOf(f, { name: localName() }), sync: info(pkg, f) });

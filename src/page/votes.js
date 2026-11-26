@@ -142,8 +142,11 @@ function start(host) {
   results.dataset.voteResults = "";
   layer.append(results);
 
-  let canVote = true, canStart = true, canTimer = true, cloud = false, message, timerMessage, people = [], clockOffset = 0;
+  let canVote = true, canStart = true, canTimer = true, cloud = false, message, timerMessage, people = [];
+  let clockTime = Date.now(), clockSample = performance.now();
+  const hostTime = () => clockTime + performance.now() - clockSample;
   const checkedDeadlines = new Set();
+  let recovery;
   const dismissKey = "canvas.timer.dismissed:" + host.file;
   let standalone, clock, clocks = [], muted = localStorage.getItem(MUTE_KEY) === "1";
   let dismissedTimer = localStorage.getItem(dismissKey);
@@ -249,7 +252,11 @@ function start(host) {
     canStart = data.canStart ?? true;
     people = data.people ?? [];
     message = data.message;
-    clockOffset = data.clockOffset ?? 0;
+    const serverTime = Date.parse(data.serverTime ?? "");
+    if (Number.isFinite(serverTime)) {
+      clockTime = serverTime;
+      clockSample = performance.now();
+    }
     canTimer = data.canTimer ?? true;
     timerMessage = data.timerMessage;
     if (data.waitingForTimerSupport && !shownErrors.has(timerMessage)) {
@@ -262,8 +269,9 @@ function start(host) {
     if (draft && !canStart) closeSheet();
     if (!canStart || !canTimer || (standalone && !standalone.endedAt)) closeTimerSheet();
     updateTimerOptions();
+    recovery = data.rejected?.find(error => error.retryable);
     for (const error of data.rejected ?? []) {
-      if (shownErrors.has(error.id)) continue;
+      if (error.retryable || shownErrors.has(error.id)) continue;
       shownErrors.add(error.id);
       repeatVote = null;
       host.toast(error.message);
@@ -395,7 +403,7 @@ function start(host) {
     if (!clocks.length) return;
     let next = Infinity;
     for (const { id, timer, display, number, ring, status, voting } of clocks) {
-      const ms = Math.max(0, timer.pausedAt ? timer.remainingMs ?? 0 : Date.parse(timer.endsAt) - (Date.now() + clockOffset));
+      const ms = Math.max(0, timer.pausedAt ? timer.remainingMs ?? 0 : Date.parse(timer.endsAt) - hostTime());
       const seconds = Math.ceil(ms / 1000);
       const time = [Math.floor(seconds / 60), seconds % 60].map(n => String(n).padStart(2, "0")).join(":");
       if (number.textContent !== time) number.textContent = time;
@@ -442,8 +450,25 @@ function start(host) {
   function paintTimerBars(v) {
     clocks = [];
     paintBar(v);
+    if (recovery) {
+      const { id, message } = recovery;
+      bar.hidden = false;
+      bar.append(el("span", "vote-muted", message),
+        control("Retry", () => recoverVote("retry", id), "voteRecoveryRetry"),
+        control("Discard", () => recoverVote("discard", id), "voteRecoveryDiscard"));
+    }
     paintStandalone();
     tick();
+  }
+
+  async function recoverVote(action, id) {
+    try {
+      const response = await fetch(host.api(`/api/comments/${action}`), {
+        method: "POST", headers: { "x-canvas": "1", "content-type": "application/json" }, body: JSON.stringify({ opId: id }),
+      });
+      if (!response.ok) throw new Error((await response.json()).error || "Could not update the recovered vote.");
+      await load();
+    } catch (error) { host.toast(error.message); }
   }
 
   function paintBar(v) {
@@ -626,7 +651,7 @@ function start(host) {
     if (!id && e.target.closest?.(canvasChrome)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!id || busy || (v.timer?.endsAt && !v.timer.pausedAt && Date.parse(v.timer.endsAt) <= Date.now() + clockOffset)) return;
+    if (!id || busy || (v.timer?.endsAt && !v.timer.pausedAt && Date.parse(v.timer.endsAt) <= hostTime())) return;
     if (v.mine >= v.perPerson) { host.toast("You have no votes left. Click one of your dots to remove it."); return; }
     void send({ kind: "vote.cast", vote: v.id, ballot: crypto.randomUUID(), layer: id });
   }, true);

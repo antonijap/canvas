@@ -1,5 +1,5 @@
 import { route as routeComments } from "../../../core/router.ts";
-import { CLOUD_TIMERS, CLOUD_VOTES, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsCloudVotes } from "../../../protocol";
+import { CLOUD_TIMERS, PER_VOTE_DESIGN, PRIVATE_VOTE_VIEWS, COMMENTS_CAPABILITIES_HEADER, LIMITS, PROTOCOL_VERSION, supportsPrivateVoteViews } from "../../../protocol";
 import type { ServerInfo } from "../../../protocol";
 import { authenticate } from "./auth";
 import type { Env } from "./env";
@@ -21,7 +21,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   const team = env.TEAM.getByName("team");
   if (!await team.allowMessage(me.email)) return failure(429, "quota", "Too many requests in one minute");
   if (path === "/v1/info" && method === "GET") {
-    return Response.json({ protocol: PROTOCOL_VERSION, server: env.SERVER_VERSION, capabilities: ["comments", CLOUD_VOTES, CLOUD_TIMERS] } satisfies ServerInfo);
+    return Response.json({ protocol: PROTOCOL_VERSION, server: env.SERVER_VERSION, capabilities: ["comments", PRIVATE_VOTE_VIEWS, CLOUD_TIMERS, PER_VOTE_DESIGN] } satisfies ServerInfo);
   }
   const role = await team.role(me.email);
   if (!role) return failure(403, "forbidden", "No access to this team");
@@ -62,7 +62,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (result === "forbidden") return failure(403, "forbidden", "Owner or editor role required");
     return result ? Response.json({ ok: true }) : failure(400, "invalid", "Invalid vote design");
   }
-  const voting = supportsCloudVotes(request.headers.get(COMMENTS_CAPABILITIES_HEADER)?.split(/\s*,\s*/));
+  const voting = supportsPrivateVoteViews(request.headers.get(COMMENTS_CAPABILITIES_HEADER)?.split(/\s*,\s*/));
   const match = /^\/v1\/docs\/([^/]+)\/(threads|ops|socket)$/.exec(path);
   if (!match) return failure(404, "not_found", "No such route");
   const [, doc, action] = match;

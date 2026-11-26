@@ -281,13 +281,20 @@ sc("whiteboard-review", "DOM sticker placement anchors to the sticky layer", {
 });
 
 sc("timer", "Standalone timer pauses, extends, resumes and ends", {
-  covers: ["timer:standalone", "timer:controls"],
+  covers: ["timer:standalone", "timer:controls", "timer:clock-change"],
   skip: { visual: "Countdown text changes against the clock. The scenario checks rendered states and captures the running bar." },
 }, async (t: T) => {
   await t.io.key("t", { shift: true });
   await t.waitFor('document.querySelector("[data-timer-sheet]:not([hidden])")', "timer duration sheet");
   await t.ev('document.querySelector("[data-timer-start]").click()');
   await t.waitFor('document.querySelector("[data-timer-pause]")', "running timer");
+  await t.ev('window.qaRealNow = Date.now; Date.now = () => window.qaRealNow() + 3600000');
+  try {
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    t.ok(await t.ev('document.querySelector("[data-timer-countdown]").textContent !== "00:00"'), "a wall-clock jump does not zero the timer");
+  } finally {
+    await t.ev('Date.now = window.qaRealNow; delete window.qaRealNow');
+  }
   await t.ev('document.querySelector("[data-timer-pause]").click()');
   const paused = await t.waitFor<string>('document.querySelector("[data-timer-resume]") && document.querySelector("[data-timer-countdown]").textContent', "paused countdown");
   await t.ev('document.querySelector("[data-timer-extend]").click()');
