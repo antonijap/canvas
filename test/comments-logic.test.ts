@@ -172,3 +172,11 @@ test("while a comment is written the hover is off and its own layer stays outlin
   assert.equal(L.hoverTarget({ ...base, mode: false, draft: { nodeId: "A" } }), "A");
   assert.equal(L.hoverTarget({ ...base, draft: { x: 1, y: 2 } }), null, "a free comment outlines nothing");
 });
+
+test("the bar counts a resolved unread thread as new only while resolved threads show", () => {
+  const threads = [thread({ id: "r", resolvedAt: 1 }), thread({ id: "d", deletedAt: 1 })];
+  const unread = new Set(["r", "d"]);
+  assert.equal(L.newCount(threads, unread, false), 0);
+  assert.equal(L.newCount(threads, unread, true), 1);
+  assert.equal(L.newCount([thread({ id: "o" })], new Set(["o"]), false), 1);
+});

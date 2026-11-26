@@ -1116,7 +1116,7 @@ function start(host) {
     if (show) {
       const m = h("span"); m.innerHTML = ICON.bubble; m.style.display = "flex";
       bar.append(m, h("span", "", `${n.open} ${n.open === 1 ? "comment" : "comments"}`));
-      const unread = st.threads.filter(t => !t.deletedAt && st.unread.has(t.id)).length;
+      const unread = L.newCount(st.threads, st.unread, showResolved);
       bar.setAttribute("aria-label", unread ? `Open comments, ${unread} new` : "Open comments");
       if (unread) bar.append(h("span", "cm-new", `${unread} new`));
       if (n.resolved) {

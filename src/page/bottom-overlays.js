@@ -15,7 +15,7 @@ export function bottomOverlayArea(width, height, insets = {}, zoom = null, pill 
 
 export function installBottomOverlays(host) {
   let zoom = null, nativeToast = false, bottomClearance = 0, frame = 0, sent = '';
-  const selectors = ['#msg', '#webhint', '[data-bottom-toast]', '#scaleBadge', '.cm-hint.on', '.cm-bar.on'];
+  const selectors = ['#msg', '#webhint', '[data-bottom-toast]', '#scaleBadge', '.cm-hint.on'];
   const schedule = () => { if (!frame) frame = requestAnimationFrame(place); };
   function place() {
     frame = 0;
@@ -40,6 +40,14 @@ export function installBottomOverlays(host) {
       const geometry = { x: vr.left + area.x, y: vr.top + area.y, width: area.width };
       const key = JSON.stringify(geometry);
       if (key !== sent) { sent = key; host.post({ bottomOverlay: geometry }); }
+    }
+    // The comments bar sits at the top centre, clear of the tool palette and its popovers at the bottom.
+    if (bar) {
+      const set = (key, value) => { if (bar.style[key] !== value) bar.style[key] = value; };
+      set('maxWidth', area.width + 'px'); set('width', 'max-content'); set('boxSizing', 'border-box'); set('whiteSpace', 'normal');
+      set('left', area.x + 'px'); set('right', 'auto'); set('bottom', 'auto');
+      set('translate', '-50% 0'); set('transform', 'none');
+      set('top', ((host.insets && host.insets.t) || 0) + inset + 'px');
     }
     for (const selector of selectors) for (const el of document.querySelectorAll(selector)) {
       if (!el.getClientRects().length || getComputedStyle(el).display === 'none') continue;

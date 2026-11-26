@@ -132,6 +132,11 @@ export function previewLine(preview) {
   return `${p.name || "Layer"}${p.type ? `, ${a} ${p.type}${size}` : size ? `,${size}` : ""}`;
 }
 
+/** Unread threads the bar may call "new": only ones it counts, so "0 comments, 1 new" never shows for a resolved thread. */
+export function newCount(threads, unread, showResolved) {
+  return threads.filter(t => !t.deletedAt && unread.has(t.id) && (showResolved || !t.resolvedAt)).length;
+}
+
 /** Open and resolved counts of the threads that are not deleted. */
 export function counts(threads) {
   let open = 0, resolved = 0;

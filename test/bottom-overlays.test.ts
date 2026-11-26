@@ -55,3 +55,11 @@ test('bottom overlays move above zoom when the comment controls need more width'
   assert.equal(area.width, 338);
   assert.ok(area.y + 20 < 370, 'the full comment pill clears zoom');
 });
+
+test('the comments bar sits at the top, not in the bottom stack with the tool palette', async () => {
+  const fs = await import('node:fs');
+  const source = fs.readFileSync(new URL('../src/page/bottom-overlays.js', import.meta.url), 'utf8');
+  const stack = source.slice(source.indexOf('const selectors'), source.indexOf('];', source.indexOf('const selectors')));
+  assert.ok(!stack.includes('.cm-bar'));
+  assert.ok(source.includes("set('top', ((host.insets && host.insets.t) || 0) + inset + 'px')"));
+});
