@@ -21,8 +21,8 @@
 .wd [hidden]{display:none!important}
 .wd-body{position:absolute;inset:0}
 .wd-lod{display:none;position:absolute;inset:0;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;font-size:64px;font-weight:600;line-height:1.1;color:var(--c-muted-fg);text-align:center;overflow:hidden}
-#wlayer.lod .wd-lod{display:flex}
-#wlayer.lod .wd-body{visibility:hidden}
+#wlayer.lod .wd:not(.keep-detail) .wd-lod{display:flex}
+#wlayer.lod .wd:not(.keep-detail) .wd-body{visibility:hidden}
 .wd[data-tone=yellow]{background:color-mix(in srgb,var(--c-warn) 12%,var(--c-popover))}
 .wd[data-tone=green]{background:color-mix(in srgb,var(--c-ok) 11%,var(--c-popover))}
 .wd[data-tone=blue]{background:color-mix(in srgb,var(--c-sel) 10%,var(--c-popover))}

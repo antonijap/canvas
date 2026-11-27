@@ -38,6 +38,9 @@ export const lodCrossing = (prevLow, z) => {
   return low === prevLow ? null : low;
 };
 
+/** Cards whose picture still reads when zoomed out: they keep it instead of swapping to their name. */
+export const keepsDetail = (kind) => kind === "video" || kind === "shader";
+
 export const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
 
 /** Top-left for a new widget so its middle sits at the middle of the free part of the view. */

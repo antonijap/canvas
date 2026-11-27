@@ -3,7 +3,7 @@
 // world and keeps one .wd card per widget. Pan and zoom never touch widget DOM beyond one class
 // toggle and lazy mounting; the camera transform on #world moves everything.
 
-import { CARD_RADIUS, LEASE_MARGIN, MOUNT_MARGIN, NudgeQueue, camToReveal, clamp, idsInView, lodCrossing, moveRect, placeCentered, rectsIntersect, rectToView, resizeRect, resizeZone, sameSet, viewToWorld, visibleWorldRect, ZONE_CURSOR } from "./geometry.js";
+import { CARD_RADIUS, LEASE_MARGIN, MOUNT_MARGIN, NudgeQueue, camToReveal, clamp, idsInView, keepsDetail, lodCrossing, moveRect, placeCentered, rectsIntersect, rectToView, resizeRect, resizeZone, sameSet, viewToWorld, visibleWorldRect, ZONE_CURSOR } from "./geometry.js";
 import { pageName } from "./widget-page.js";
 import { updateWidgetAges } from "./widget-live.js";
 import { localCard } from "./widget-local.js";
@@ -88,6 +88,7 @@ function start(host) {
     e.el.dataset.kind = w.kind;
     e.el.dataset.tone = (w.config && w.config.tone) || "";
     e.el.classList.toggle("locked", !!w.locked);
+    e.el.classList.toggle("keep-detail", keepsDetail(w.kind));
     const name = w.kind === "note" ? pageName(w.config?.text || "") : w.name || w.kind;
     e.el.setAttribute("aria-label", name);
     if (e.lod.textContent !== name) e.lod.textContent = name;

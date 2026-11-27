@@ -45,6 +45,13 @@ describe("page geometry", () => {
     assert.equal(g.lodCrossing(true, 0.25), false);
   });
 
+  test("video and shader cards keep their picture when zoomed out; text cards swap to their name", () => {
+    assert.equal(g.keepsDetail("video"), true);
+    assert.equal(g.keepsDetail("shader"), true);
+    assert.equal(g.keepsDetail("note"), false);
+    assert.equal(g.keepsDetail("todo"), false);
+  });
+
   test("sameSet ignores order", () => {
     assert.ok(g.sameSet(["a", "b"], ["b", "a"]));
     assert.ok(!g.sameSet(["a"], ["a", "b"]));
