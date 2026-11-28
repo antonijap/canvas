@@ -238,6 +238,35 @@ sc("vote", "Vote on objects, reveal results and undo the conclusion", { covers: 
   t.eq(read().votes[0].state, "dismissed", "the cleared vote stays dismissed");
 });
 
+sc("vote", "Layers still move by dragging while a vote is running, before and after the votes are used up", { covers: ["vote:drag"], skip: { visual: "Checks positions on disk and vote dots.", reopen: "the running vote's bar is live UI that the reopened tab draws after the check takes its picture" } }, async (t: T) => {
+  await t.focus("lay_nest");
+  await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');
+  await t.select(["lay_nest"]);
+  await t.io.key("d", { shift: true });
+  const start = await t.waitFor<{ x: number; y: number }>(`(() => {
+    const r = document.querySelector("[data-vote-start]")?.getBoundingClientRect();
+    return r?.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+  })()`, "start button");
+  await t.io.click(start.x, start.y);
+  await t.waitFor('document.querySelector("[data-vote-end]")?.offsetWidth', "vote started");
+  const x0 = t.node("r_free")!.x;
+  let c = await t.center("r_free");
+  await t.io.drag(c.x, c.y, c.x + 60, c.y + 40);
+  await t.flush();
+  t.ok(t.node("r_free")!.x !== x0, "a drag during the vote moves the layer");
+  t.eq(await t.ev('document.querySelectorAll("[data-vote-mark]").length'), 0, "a drag casts no vote");
+  c = await t.center("r_free");
+  for (let i = 1; i <= 3; i++) {
+    await t.io.click(c.x, c.y);
+    await t.waitFor(`document.querySelectorAll("[data-vote-mark]").length === ${i}`, `vote ${i}`);
+  }
+  const x1 = t.node("r_free")!.x;
+  await t.io.drag(c.x, c.y, c.x - 50, c.y + 30);
+  await t.flush();
+  t.ok(t.node("r_free")!.x !== x1, "with every vote used, a drag still moves the layer");
+  t.eq(await t.ev('document.querySelectorAll("[data-vote-mark]").length'), 3, "the drag leaves the votes as they were");
+});
+
 sc("sticky", "Sticky click, live edit, Tab and undo", { covers: ["sticky:create", "sticky:edit", "sticky:next", "sticky:undo"], skip: { visual: "Checks the drawn text and note bounds with the engine." } }, async (t: T) => {
   await t.focus("lay_nest");
   await t.ev('window.canvasCmd({ cmd: "prefs", prefs: { whiteboardName: "Anna" } })');

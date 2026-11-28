@@ -642,7 +642,19 @@ function start(host) {
     e.stopImmediatePropagation();
   }, true);
 
+  // A press on the canvas during a vote waits: let go in place and it casts a vote; move past the drag threshold and
+  // the press goes on to the canvas as a normal one, so every layer still moves by dragging while a vote runs.
+  let press = null;
+  const replayed = new WeakSet();
+  function castAt(p) {
+    const v = current();
+    if (!p.id || !v || v.id !== p.vote || v.state !== "active" || busy || (v.timer?.endsAt && !v.timer.pausedAt && Date.parse(v.timer.endsAt) <= hostTime())) return;
+    if (v.mine >= v.perPerson) { host.toast("You have no votes left. Click one of your dots to remove it."); return; }
+    void send({ kind: "vote.cast", vote: v.id, ballot: crypto.randomUUID(), layer: p.id });
+  }
   addEventListener("pointerdown", e => {
+    if (replayed.has(e)) return;
+    press = null;
     if (!timerSheet.hidden && !timerSheet.contains(e.target)) closeTimerSheet();
     if (draft && !sheet.contains(e.target)) closeSheet();
     const v = current();
@@ -651,10 +663,26 @@ function start(host) {
     if (!id && e.target.closest?.(canvasChrome)) return;
     e.preventDefault();
     e.stopImmediatePropagation();
-    if (!id || busy || (v.timer?.endsAt && !v.timer.pausedAt && Date.parse(v.timer.endsAt) <= hostTime())) return;
-    if (v.mine >= v.perPerson) { host.toast("You have no votes left. Click one of your dots to remove it."); return; }
-    void send({ kind: "vote.cast", vote: v.id, ballot: crypto.randomUUID(), layer: id });
+    const init = {};
+    for (const k of ["clientX", "clientY", "screenX", "screenY", "button", "buttons", "pointerId", "pointerType", "isPrimary", "width", "height", "pressure", "shiftKey", "altKey", "metaKey", "ctrlKey"]) init[k] = e[k];
+    press = { id, vote: v.id, target: e.target, init };
   }, true);
+  addEventListener("pointermove", e => {
+    if (!press || e.pointerId !== press.init.pointerId) return;
+    if (Math.hypot(e.clientX - press.init.clientX, e.clientY - press.init.clientY) < 3) return;
+    const p = press;
+    press = null;
+    const down = new PointerEvent("pointerdown", { ...p.init, bubbles: true, cancelable: true, composed: true });
+    replayed.add(down);
+    (p.target.isConnected ? p.target : view).dispatchEvent(down);
+  }, true);
+  addEventListener("pointerup", e => {
+    if (!press || e.pointerId !== press.init.pointerId) return;
+    const p = press;
+    press = null;
+    castAt(p);
+  }, true);
+  addEventListener("pointercancel", () => { press = null; }, true);
   addEventListener("pointermove", e => {
     if (!active()) return;
     const hit = view.contains(e.target) ? targetAt(e, current()) : null;

@@ -51,7 +51,7 @@ features:
     name: Whiteboard voting
     area: canvas
     driven: [page, native, mcp]
-    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, portable, palette, compact-panels, cloud, cloud-privacy, cloud-viewer, cloud-private-presence, cloud-cache, cloud-design, cloud-legacy-retry]
+    cases: [start, scope, ballot, persistence, privacy, results, undo, clear, drag, portable, palette, compact-panels, cloud, cloud-privacy, cloud-viewer, cloud-private-presence, cloud-cache, cloud-design, cloud-legacy-retry]
 
   - id: timer
     name: Whiteboard countdowns
