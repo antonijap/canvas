@@ -592,7 +592,9 @@ struct InspectorBody: View {
                         }
                     }
                     .buttonStyle(.plain).disabled(!editable)
-                    .task(id: family) { if !installed { fonts.checkDrawable(family, base: model.base, file: model.currentFile) } }
+                    .task(id: [family, String(fonts.generation)]) {
+                        if !installed { fonts.checkDrawable(family, base: model.base, file: model.currentFile) }
+                    }
                     .popover(isPresented: $pickingFont, arrowEdge: .leading) {
                         FontPicker(fonts: fonts, current: family, pick: { model.update(["fontFamily": $0]); pickingFont = false },
                                    close: { pickingFont = false })

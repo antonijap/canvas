@@ -37,22 +37,23 @@ export function keyedAnswer(asked: { key: string | null; v: string | null }, cur
   return { cacheable, notModified, headers: { "cache-control": IMMUTABLE, etag } };
 }
 
-const FONT_DIRS = [path.join(os.homedir(), "Library/Fonts"), "/Library/Fonts", "/System/Library/Fonts", "/System/Library/Fonts/Supplemental"];
+export const FONT_DIRS = [path.join(os.homedir(), "Library/Fonts"), "/Library/Fonts", "/System/Library/Fonts", "/System/Library/Fonts/Supplemental"];
+
+export function fontDirStamp(dirs = FONT_DIRS): string {
+  return JSON.stringify(dirs.map((dir) => {
+    try {
+      return [dir, fs.statSync(dir).mtimeMs];
+    } catch {
+      return [dir, null];
+    }
+  }));
+}
 
 /**
  * The scene environment: everything besides the board's key that shapes a scene. The code version (any change
  * under src/), the scene format, whether web fonts are on, and the font folders (a font added or removed changes
- * the folder's modification time). Worked out once per server: the server reads installed fonts once too.
+ * the folder's modification time).
  */
-export function sceneEnvOf(codeVersion: string, sceneVersion: number, webFonts: boolean, dirs = FONT_DIRS): string {
-  const h = createHash("sha1").update(`${codeVersion}|${sceneVersion}|${webFonts ? 1 : 0}`);
-  for (const d of dirs) {
-    try {
-      const st = fs.statSync(d);
-      h.update(`|${d}:${Math.floor(st.mtimeMs)}`);
-    } catch {
-      h.update(`|${d}:-`);
-    }
-  }
-  return h.digest("hex").slice(0, 12);
+export function sceneEnvOf(codeVersion: string, sceneVersion: number, webFonts: boolean, stamp = fontDirStamp()): string {
+  return createHash("sha1").update(`${codeVersion}|${sceneVersion}|${webFonts ? 1 : 0}|${stamp}`).digest("hex").slice(0, 12);
 }

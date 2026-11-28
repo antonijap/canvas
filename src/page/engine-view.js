@@ -117,21 +117,34 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   const fontFetch = new Map(); // url -> Promise<{bytes, weight, style} | null>
   const fontDone = new Set();
   let fontLayout = 0;
+  let fontGeneration = 0;
+  function refreshFonts(env) {
+    sceneEnv = env;
+    fontGeneration++;
+    warmed = false;
+    // Keep registered faces. A missing face or an unfinished request can be tried again.
+    for (const url of fontFetch.keys()) if (!fontDone.has(url)) fontFetch.delete(url);
+  }
   const fetchFont = (url) => {
     let p = fontFetch.get(url);
     if (!p) {
-      p = request(url).then(async (r) => (r.ok ? { bytes: new Uint8Array(await r.arrayBuffer()), weight: Number(r.headers.get("x-font-weight")) || 0, style: r.headers.get("x-font-style") || "" } : null)).catch(() => { fontFetch.delete(url); return null; });
+      p = request(url).then(async (r) => (r.ok ? { bytes: new Uint8Array(await r.arrayBuffer()), weight: Number(r.headers.get("x-font-weight")) || 0, style: r.headers.get("x-font-style") || "" } : null)).catch(() => {
+        if (fontFetch.get(url) === p) fontFetch.delete(url);
+        return null;
+      });
       fontFetch.set(url, p);
     }
     return p;
   };
-  async function registerFonts(list) {
+  async function registerFonts(list, generation) {
+    if (generation !== fontGeneration) return 0;
     const got = await Promise.all(list.map((f) => (fontDone.has(f.url) ? null : fetchFont(f.url))));
+    if (generation !== fontGeneration || dead) return 0;
     // In scene order: tagged faces (Google subsets, platform fallbacks) chain in that order.
     let added = 0;
     list.forEach((f, i) => {
       const g = got[i];
-      if (!g || fontDone.has(f.url) || dead) return;
+      if (!g || fontDone.has(f.url)) return;
       fontDone.add(f.url);
       try { added += engine.registerFont(f.family, g.weight, g.style, g.bytes) || 0; } catch (e) { console.warn("[canvas] font", f.family, e); }
       g.bytes = null; // the engine has its own copy
@@ -152,22 +165,23 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
   async function warmFonts() {
     if (warmed || dead) return;
     warmed = true;
+    const generation = fontGeneration;
     let list = [];
     try { list = (await (await request(api("/api/scene/fonts"))).json()).fonts || []; } catch { return; }
     const idle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 2000 }) : setTimeout(fn, 150));
     const tried = new Set(); // a face whose fetch failed is not asked for again in a loop
     const next = () => {
-      if (dead) return;
+      if (dead || generation !== fontGeneration) return;
       const f = list.find((x) => !fontDone.has(x.url) && !tried.has(x.url));
       if (!f) return;
       if (!isIdle()) { setTimeout(() => idle(next), 300); return; }
       // The fetch can outlast the idle moment: check again before the face goes in, a gesture may have begun.
       fetchFont(f.url).then((g) => {
-        if (dead) return;
+        if (dead || generation !== fontGeneration) return;
         if (!g) { tried.add(f.url); idle(next); return; }
         if (!isIdle()) { setTimeout(() => idle(next), 300); return; }
         // A new face lays out every loaded board using its family again: draw, and re-place the overlays.
-        registerFonts([f]).then((added) => { if (added && !dead && loaded.size) { onChange(); onLayout(); } idle(next); });
+        registerFonts([f], generation).then((added) => { if (added && !dead && loaded.size) { onChange(); onLayout(); } idle(next); });
       });
     };
     idle(next);
@@ -578,6 +592,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
    * Resolves to one result per meta: { key, root } | { stale: true } | null (no such board / error).
    */
   async function loadBoards(metas, onEach) {
+    const generation = fontGeneration;
     const firstLoad = opening;
     opening = false;
     if (nativePreviews && metas.length >= 400 && getCam()?.z <= 0.04) bulkOverview = true;
@@ -610,7 +625,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     };
     if (metas.length >= BULK_MIN && await loadBulk(jobs, order, async (group) => {
       // Each arrival is placed as it comes (its fonts first): the nearest boards show while the far ones are built.
-      await registerFonts(fontsOf(group.map((x) => x.g)));
+      await registerFonts(fontsOf(group.map((x) => x.g)), generation);
       await inSlices(group, (x) => placeOne(x.i, x.g), slices);
     })) {
       if (restack && !dead) { restack = false; reorder(); }
@@ -622,7 +637,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
         return request(sceneUrl(api, meta.id, meta.key, sceneEnv)).then((r) => r.text())
           .then((text) => ({ text, scene: JSON.parse(text) })).catch(() => null);
       }));
-      await registerFonts(fontsOf(got));
+      await registerFonts(fontsOf(got), generation);
       const ready = new Map(indices.map((i, n) => [i, got[n]]));
       await inSlices(indices, (i) => placeOne(i, ready.get(i)), slices);
     }
@@ -984,7 +999,7 @@ export async function createEngineView({ view, api, sceneEnv = "", waitForGpu = 
     infoOf: (id) => { const n = nodeIndex.get(id); return n ? { type: n.type, name: n.name || "", instance: !!n.instance } : null; },
     radiusOf: (id, r) => { const n = nodeIndex.get(id); return n ? Math.min(n.radius, Math.min(r.w, r.h) / 2) : 0; },
     isLoaded: (id) => loaded.has(id),
-    loadBoards, removeBoard, park, pruneParked, moveBoard, parkedCount: () => parked.size, isParked: (id) => parked.has(id), freeze, thaw, capture, syncBg, refineImages, imageStats, imagesPending, warmFonts, reorder,
+    loadBoards, removeBoard, park, pruneParked, moveBoard, parkedCount: () => parked.size, isParked: (id) => parked.has(id), freeze, thaw, capture, syncBg, refineImages, imageStats, imagesPending, warmFonts, refreshFonts, reorder,
     sceneText, fetchScene, install, moveNode, updateNode,
     motionSource(id) {
       const r = loaded.get(id);

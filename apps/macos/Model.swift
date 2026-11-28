@@ -340,6 +340,16 @@ final class CanvasModel: NSObject, ObservableObject, WKScriptMessageHandler {
         self.webView = CanvasWebView(frame: .zero, configuration: configuration)
         self.base = base
         super.init()
+        fonts.onRefresh = { [weak self] force in
+            guard let self else { return }
+            let command = "{cmd:'fontsChanged',force:\(force)}"
+            self.run(command)
+            if force {
+                for view in self.live.values where view !== self.webView {
+                    view.evaluateJavaScript("window.canvasCmd && window.canvasCmd(\(command))")
+                }
+            }
+        }
         configuration.userContentController.add(self, name: "canvasState")
         NSApplication.shared.appearance = theme.appearance
         tabHost.show(webView)

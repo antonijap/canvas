@@ -7,7 +7,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { tmpDir } from "./helpers.ts";
-import { IMMUTABLE, keyedAnswer, sceneEnvOf } from "../src/keyed.ts";
+import { FONT_DIRS, IMMUTABLE, fontDirStamp, keyedAnswer, sceneEnvOf } from "../src/keyed.ts";
+import { cachedScene, docFonts } from "../src/scene.ts";
 // @ts-ignore: a plain ES module the page imports too
 import { sceneUrl } from "../src/page/engine-view.js";
 
@@ -42,14 +43,15 @@ describe("keyedAnswer", () => {
   });
   test("the scene environment follows the code, the scene format, web fonts and the font folders", () => {
     const dir = tmpDir("keyed-env");
-    const a = sceneEnvOf("c1", 2, true, [dir]);
-    assert.equal(sceneEnvOf("c1", 2, true, [dir]), a);
-    assert.notEqual(sceneEnvOf("c2", 2, true, [dir]), a);
-    assert.notEqual(sceneEnvOf("c1", 3, true, [dir]), a);
-    assert.notEqual(sceneEnvOf("c1", 2, false, [dir]), a);
+    const stamp = fontDirStamp([dir]);
+    const a = sceneEnvOf("c1", 2, true, stamp);
+    assert.equal(sceneEnvOf("c1", 2, true, fontDirStamp([dir])), a);
+    assert.notEqual(sceneEnvOf("c2", 2, true, stamp), a);
+    assert.notEqual(sceneEnvOf("c1", 3, true, stamp), a);
+    assert.notEqual(sceneEnvOf("c1", 2, false, stamp), a);
     const t = new Date(Date.now() + 5000);
     fs.utimesSync(dir, t, t); // a font added to the folder
-    assert.notEqual(sceneEnvOf("c1", 2, true, [dir]), a);
+    assert.notEqual(sceneEnvOf("c1", 2, true, fontDirStamp([dir])), a);
     fs.rmSync(dir, { recursive: true, force: true });
   });
   test("a web font lookup that failed on the network marks the answer transient until one works", async () => {
@@ -101,6 +103,37 @@ const update = (id: string, props: object) =>
 describe("keyed board routes", () => {
   test("the page carries the scene environment", async () => {
     assert.match(await env(), /^[0-9a-f]{12}$/);
+  });
+
+  test("a changed font directory invalidates the live environment and both scene caches", async (t) => {
+    const fonts = tmpDir("live-font-dir");
+    FONT_DIRS.push(fonts);
+    t.after(() => {
+      FONT_DIRS.pop();
+      fs.rmSync(fonts, { recursive: true, force: true });
+    });
+    const liveEnv = async () => {
+      const r = await fetch(`${base}/api/scene/env`);
+      assert.equal(r.headers.get("cache-control"), "no-store");
+      return (await r.json()).env;
+    };
+    const oldEnv = await env();
+    assert.equal(await liveEnv(), oldEnv);
+    const scene = cachedScene(DOC, file, "B1");
+    const union = docFonts(DOC, file);
+    assert.strictEqual(cachedScene(DOC, file, "B1"), scene);
+    assert.strictEqual(docFonts(DOC, file), union);
+    await Promise.all([scene, union]);
+
+    const changed = new Date(Date.now() + 5000);
+    fs.utimesSync(fonts, changed, changed);
+    assert.notEqual(await liveEnv(), oldEnv);
+    assert.notStrictEqual(cachedScene(DOC, file, "B1"), scene);
+    assert.notStrictEqual(docFonts(DOC, file), union);
+    await Promise.all([cachedScene(DOC, file, "B1"), docFonts(DOC, file)]);
+    const key = await keyOf("B1");
+    const old = await fetch(`${base}/api/scene${q}&id=B1&key=${key}&v=${oldEnv}`);
+    assert.equal(old.headers.get("cache-control"), "no-store");
   });
 
   for (const route of ["/api/scene", "/api/board"]) {

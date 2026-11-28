@@ -1,4 +1,4 @@
-// Every font installed on this Mac, read once off the main thread and cached. Weights and the
+// Every font installed on this Mac, read off the main thread and cached. Weights and the
 // "is this family installed" check are lazy and O(1) after that, so a document with hundreds of
 // text nodes and a font list of a thousand families both stay cheap.
 
@@ -8,16 +8,53 @@ import SwiftUI
 
 final class FontCatalog: ObservableObject {
     @Published private(set) var families: [String] = []
+    @Published private(set) var generation = 0
+    var onRefresh: ((Bool) -> Void)?
     private var lowered = Set<String>()
     private var styleCache: [String: [(name: String, weight: Int)]] = [:]
+    private let queue = DispatchQueue(label: "canvas.font-catalog", qos: .userInitiated)
+    private var observers: [NSObjectProtocol] = []
+    private var registryObserver: NSObjectProtocol?
 
     init() {
-        DispatchQueue.global(qos: .userInitiated).async {
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(forName: NSFont.fontSetChangedNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.refresh(force: true)
+            },
+            center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.refresh()
+            },
+        ]
+        registryObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name(kCTFontManagerRegisteredFontsChangedNotification as String), object: nil, queue: .main
+        ) { [weak self] _ in self?.refresh(force: true) }
+        refresh(notify: false)
+    }
+
+    deinit {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        if let registryObserver { DistributedNotificationCenter.default().removeObserver(registryObserver) }
+    }
+
+    private func refresh(force: Bool = false, notify: Bool = true) {
+        queue.async { [weak self] in
             let all = NSFontManager.shared.availableFontFamilies
                 .filter { !$0.hasPrefix(".") }
                 .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
             let set = Set(all.map { $0.lowercased() })
-            DispatchQueue.main.async { self.families = all; self.lowered = set }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let changed = self.families != all
+                self.lowered = set
+                self.styleCache.removeAll()
+                self.smcpCache.removeAll()
+                self.asking.removeAll()
+                self.drawable.removeAll()
+                self.generation += 1
+                if changed { self.families = all }
+                if notify { self.onRefresh?(force || changed) }
+            }
         }
     }
 
@@ -33,12 +70,14 @@ final class FontCatalog: ObservableObject {
         let key = family.lowercased()
         guard !has(family), drawable[key] == nil, !asking.contains(key),
               var c = URLComponents(url: base.appendingPathComponent("api/fonts/file"), resolvingAgainstBaseURL: false) else { return }
-        asking.insert(key)
         c.setQuery([URLQueryItem(name: "family", value: family), URLQueryItem(name: "weight", value: "400")] + (file.map { [URLQueryItem(name: "file", value: $0)] } ?? []))
         guard let url = c.url else { return }
-        URLSession.shared.dataTask(with: url) { _, response, _ in
+        asking.insert(key)
+        let generation = self.generation
+        URLSession.shared.dataTask(with: url) { [weak self] _, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.generation == generation else { return }
                 self.asking.remove(key)
                 // No answer (server busy, offline): ask again next time rather than calling it missing for good.
                 if status == 200 { self.drawable[key] = true } else if status == 404 { self.drawable[key] = false }

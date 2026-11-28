@@ -6,10 +6,10 @@
 // only understands sfnt.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
+import { FONT_DIRS, fontDirStamp } from "./keyed.ts";
 
 export const FONT_EXTS = new Set([".ttf", ".otf", ".ttc", ".woff", ".woff2"]);
 
@@ -567,11 +567,13 @@ export const weightOf = (v: unknown): number => {
 
 // ---------------------------------------------------------------- sources
 
-let installed: Promise<Face[]> | undefined;
+let installed: { stamp: string; faces: Promise<Face[]> } | undefined;
 
-/** Installed fonts on this Mac (system, local, user), read from the files' own name tables. Cached. */
-export function installedFaces(dirs = [path.join(os.homedir(), "Library/Fonts"), "/Library/Fonts", "/System/Library/Fonts", "/System/Library/Fonts/Supplemental"]): Promise<Face[]> {
-  installed ??= (async () => {
+/** Installed fonts on this Mac (system, local, user), read from the files' own name tables. */
+export function installedFaces(dirs = FONT_DIRS): Promise<Face[]> {
+  const stamp = fontDirStamp(dirs);
+  if (installed?.stamp === stamp) return installed.faces;
+  const faces = (async () => {
     const files: string[] = [];
     const walk = async (d: string, depth: number) => {
       let es: fs.Dirent[];
@@ -594,7 +596,8 @@ export function installedFaces(dirs = [path.join(os.homedir(), "Library/Fonts"),
     }
     return faces;
   })();
-  return installed;
+  installed = { stamp, faces };
+  return faces;
 }
 
 type DocFont = { name: string; url: string; weight?: number | string; style?: string };

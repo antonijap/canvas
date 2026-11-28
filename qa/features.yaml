@@ -121,6 +121,11 @@ features:
     area: canvas
     driven: [page]
     cases: [tiny, large, engine-restart, gpu-fence, scene-reload, scene-stream]
+  - id: font-refresh
+    name: A newly available font redraws open boards
+    area: canvas
+    driven: [page]
+    cases: [focus, shell-command]
 
   # ------------------------------------------------------------ selection
   - id: select-click

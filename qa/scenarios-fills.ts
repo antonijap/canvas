@@ -249,6 +249,39 @@ async function openSynthetic(t: T, script: string, run: (o: T, write: (width: nu
   }
 }
 
+sc("render", "a newly available font redraws open boards", { covers: ["font-refresh:focus", "font-refresh:shell-command"], skip: { visual: "uses a separate synthetic file" } }, async (t: T) => {
+  await openSynthetic(t, `
+    const realFetch = window.fetch;
+    window.availableFonts = [];
+    window.fetch = (url, init) => {
+      const target = new URL(url, location.href);
+      if (target.pathname === "/api/scene/env" && window.newFontEnv) return Promise.resolve(Response.json({ env: window.newFontEnv }));
+      const family = target.searchParams.get("family");
+      if (target.pathname === "/api/fonts/file" && family?.startsWith("Refresh Test ")) {
+        if (!window.availableFonts.includes(family)) return Promise.resolve(new Response(null, { status: 404 }));
+        target.searchParams.set("family", "Courier New");
+        return realFetch(target, init);
+      }
+      return realFetch(url, init);
+    };
+  `, async (o) => {
+    await o.waitFor("window.canvasHost.worldRectOf('ben')", "the board to draw");
+    await o.a.post("/api/structure", { file: o.file, op: "add", nodes: ["focus", "command"].map((id, i) => ({
+      id, type: "text", name: id, x: 10, y: 60 + i * 40, content: "iiiiiiiiiiii",
+      fontFamily: "Refresh Test " + id, fontSize: 32, textGrowth: "auto", fill: "#111111",
+    })), place: { parent: "anna" } });
+    const width = (id: string) => `window.canvasHost.worldRectOf('${id}')?.w`;
+    const fallback = await o.waitFor<number>(width("focus"), "the fallback text to draw");
+    const commandFallback = await o.waitFor<number>(width("command"), "the second fallback text to draw");
+
+    await o.ev(`window.availableFonts.push("Refresh Test focus"); window.newFontEnv = "abcdef123456"; window.dispatchEvent(new Event("focus"));`);
+    await o.waitFor(`${width("focus")} > ${fallback}`, "the focus check to lay out the new face");
+
+    await o.ev(`window.availableFonts.push("Refresh Test command"); window.canvasCmd({ cmd: "fontsChanged" });`);
+    await o.waitFor(`${width("command")} > ${commandFallback}`, "the shell command to lay out the new face");
+  });
+});
+
 sc("render", "a stalled native GPU fence stops waiting and draws the board", { covers: ["renderer-fallback:gpu-fence"], skip: { visual: "uses a separate synthetic file" } }, async (t: T) => {
   await openSynthetic(t, `
     const fence = GPUQueue.prototype.onSubmittedWorkDone;

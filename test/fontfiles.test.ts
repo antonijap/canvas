@@ -3,10 +3,27 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { describe, test } from "node:test";
-import { coverageOf, emojiSubset, fallbackFamilies, findFont, googleFaces, isEmoji, parseGoogleCss, parseUnicodeRange, pickGoogle, toSfnt } from "../src/fontfiles.ts";
+import { coverageOf, emojiSubset, fallbackFamilies, findFont, googleFaces, installedFaces, isEmoji, parseGoogleCss, parseUnicodeRange, pickGoogle, toSfnt } from "../src/fontfiles.ts";
+import { tmpDir } from "./helpers.ts";
 
 const ARIAL = "/System/Library/Fonts/Supplemental/Arial.ttf";
+
+test("installed faces refresh when a font is added to a scanned directory", async (t) => {
+  const dir = tmpDir("installed-faces");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "Arial.ttf");
+  const before = installedFaces([dir]);
+  assert.strictEqual(installedFaces([dir]), before);
+  assert.deepEqual(await before, []);
+
+  fs.copyFileSync(ARIAL, file);
+  const changed = new Date(Date.now() + 5000);
+  fs.utimesSync(dir, changed, changed);
+  const faces = await installedFaces([dir]);
+  assert.ok(faces.some((face) => face.family === "Arial" && face.file === file));
+});
 
 const CSS_RANGE = `/* cyrillic */
 @font-face {

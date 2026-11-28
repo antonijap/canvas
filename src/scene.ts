@@ -13,7 +13,7 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import type { Snapshot } from "./boards.ts";
 import { buildIndex, defaultTheme, expand, iconArt, resolveProps, resolveVariable, type Json, type CanvasDoc, type DocNode } from "./engine.ts";
-import { keyedAnswer, sceneEnvOf } from "./keyed.ts";
+import { fontDirStamp, keyedAnswer, sceneEnvOf } from "./keyed.ts";
 import { readBodyText } from "./body.ts";
 import { resolveShaderFill } from "./shader-fill.ts";
 import { stickyFrame } from "./page/whiteboard-model.js";
@@ -401,16 +401,30 @@ export async function sceneOf(doc: CanvasDoc, file: string, id: string): Promise
 const transientScenes = new WeakSet<SceneBoard>();
 export const isTransient = (s: SceneBoard): boolean => transientScenes.has(s);
 
-let env: string | undefined;
+let codeVersion: string | undefined;
+let env = "";
+let fontStamp: string | undefined;
+let sceneCache = new WeakMap<CanvasDoc, Map<string, Promise<SceneBoard>>>();
+let fontUnions = new WeakMap<CanvasDoc, Promise<FontRef[]>>();
+
 /** This server's scene environment (src/keyed.ts): the `v` a keyed scene request must carry to be cached. */
-export const sceneEnv = (): string => (env ??= sceneEnvOf(version(), SCENE_VERSION, webFontsOn()));
+export function sceneEnv(): string {
+  const stamp = fontDirStamp();
+  if (fontStamp !== stamp) {
+    env = sceneEnvOf(codeVersion ??= version(), SCENE_VERSION, webFontsOn(), stamp);
+    fontStamp = stamp;
+    sceneCache = new WeakMap();
+    fontUnions = new WeakMap();
+  }
+  return env;
+}
 
 /**
  * Scenes per document revision (a revision is one CanvasDoc object): a board's scene is built once, so the page's
  * idle prefetch of other pages' first boards makes the first visit of that page instant. A failed build is not kept.
  */
-const sceneCache = new WeakMap<CanvasDoc, Map<string, Promise<SceneBoard>>>();
 export function cachedScene(doc: CanvasDoc, file: string, id: string): Promise<SceneBoard> {
+  sceneEnv();
   let m = sceneCache.get(doc);
   if (!m) sceneCache.set(doc, (m = new Map()));
   const key = file + "\0" + id;
@@ -423,13 +437,13 @@ export function cachedScene(doc: CanvasDoc, file: string, id: string): Promise<S
   return p;
 }
 
-const fontUnions = new WeakMap<CanvasDoc, Promise<FontRef[]>>();
 /**
  * Every font file any board of the document needs, in board order then each board's own order, once each.
  * The page registers these with the engine while it is idle: a face registered after boards that use its
  * family exist lays those boards out again, which costs a frame or more mid-gesture.
  */
 export function docFonts(doc: CanvasDoc, file: string): Promise<FontRef[]> {
+  sceneEnv();
   let p = fontUnions.get(doc);
   if (!p) {
     p = (async () => {
@@ -554,6 +568,7 @@ async function bulkScenes(url: URL, res: http.ServerResponse, snapOf: (file: str
 /** GET /api/scene?file=&id= and GET /api/fonts/file?family=&weight=&style=[&file=]. True when handled. */
 export async function handleEngineRoute(url: URL, res: http.ServerResponse, snapOf: (file: string) => Snapshot, req?: http.IncomingMessage): Promise<boolean> {
   if (url.pathname.startsWith("/engine/")) return serveEnginePkg(req, url, res);
+  if (url.pathname === "/api/scene/env") return sendJson(res, { env: sceneEnv() }), true;
   if (url.pathname === "/api/scene/fonts") {
     const file = url.searchParams.get("file");
     if (!file) return sendJson(res, { error: "file is required" }, 400), true;
@@ -579,7 +594,8 @@ export async function handleEngineRoute(url: URL, res: http.ServerResponse, snap
     // Asked for by content key (src/keyed.ts): an unchanged board comes from the browser's cache from then on.
     const asked = { key: url.searchParams.get("key"), v: url.searchParams.get("v") };
     const current = snap.boards.find((b) => b.id === id)?.key;
-    const pre = keyedAnswer(asked, current, sceneEnv(), req?.headers["if-none-match"]);
+    const before = sceneEnv();
+    const pre = keyedAnswer(asked, current, before, req?.headers["if-none-match"]);
     if (pre.notModified) {
       res.writeHead(304, pre.headers);
       res.end();
@@ -587,7 +603,8 @@ export async function handleEngineRoute(url: URL, res: http.ServerResponse, snap
     }
     try {
       const scene = await cachedScene(snap.doc, snap.path, id);
-      const k = keyedAnswer(asked, current, sceneEnv(), undefined, isTransient(scene));
+      const after = sceneEnv();
+      const k = keyedAnswer(asked, current, after, undefined, before !== after || isTransient(scene));
       // A cached answer is only what the key names: no revision (that moves with every edit anywhere in the file).
       const body = k.cacheable ? { ...scene, key: current } : { ...scene, key: current, revision: snap.revision };
       res.writeHead(200, { "content-type": "application/json", "x-content-type-options": "nosniff", ...k.headers });

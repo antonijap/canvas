@@ -1445,8 +1445,8 @@ const selBox = document.getElementById("sel"), selDim = document.getElementById(
 const api = (p) => p + "?file=" + encodeURIComponent(file);
 // Board data asked for by content key and scene environment (src/keyed.ts): the browser keeps it, an unchanged
 // board is never fetched again (reloads, tab switches, launches).
-const SCENE_ENV = document.documentElement.dataset.env || "";
-const keyedQ = (key) => (key && SCENE_ENV ? "&key=" + encodeURIComponent(key) + "&v=" + SCENE_ENV : "");
+let sceneEnvironment = document.documentElement.dataset.env || "";
+const keyedQ = (key) => (key && sceneEnvironment ? "&key=" + encodeURIComponent(key) + "&v=" + sceneEnvironment : "");
 const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 const sidebarKey = "canvas:sidebar-section";
 const sidebarFileKey = sidebarKey + ":" + file;
@@ -2233,6 +2233,35 @@ async function engineLoad(list) {
   ev.warmFonts(); // the first boards are up: the rest of the document's fonts follow while idle
   schedulePrefetch(); // and, a moment later, the other pages' first boards
 }
+let checkingFonts = false, forceFontRefresh = false;
+async function refreshFonts(force = false) {
+  if (!file) return;
+  forceFontRefresh ||= force;
+  if (!tabShown || checkingFonts) return;
+  checkingFonts = true;
+  let nextEnv = sceneEnvironment;
+  try {
+    const r = await loadRequest("/api/scene/env");
+    if (r.ok) nextEnv = (await r.json()).env || nextEnv;
+  } catch {}
+  checkingFonts = false;
+  if (!tabShown || (!forceFontRefresh && nextEnv === sceneEnvironment)) return;
+  forceFontRefresh = false;
+  sceneEnvironment = nextEnv;
+  prefetched.clear();
+  ev?.refreshFonts(sceneEnvironment);
+  const reload = [];
+  for (const b of boards.values()) {
+    if (b.gone) continue;
+    b.failedKey = null;
+    if (!b.loadedKey && !b.loading) continue;
+    b.loadedKey = null;
+    if (mode === "engine") reload.push(b);
+    else if (mode === "dom") loadBoard(b);
+  }
+  if (reload.length) engineLoad(reload);
+  scheduleVisible();
+}
 /** The size badge under a selection: the inspector's numbers (two decimals at most), so H 92.8 is 92.8 on both. */
 const dimNum = (v) => String(Math.round(v * 100) / 100);
 const dimText = (r) => dimNum(r.w) + " × " + dimNum(r.h);
@@ -2626,7 +2655,7 @@ async function startEngine() {
     engineMod = await wait(import("/page/engine-view.js"), LOAD_MS);
     if (!engineMod) throw new Error("engine module timed out");
     const v = await engineMod.createEngineView({
-      view, api, sceneEnv: SCENE_ENV, nativePreviews: document.documentElement.dataset.imagePreviews === "1",
+      view, api, sceneEnv: sceneEnvironment, nativePreviews: document.documentElement.dataset.imagePreviews === "1",
       showOverview: () => snapHold && !blueprint, waitForGpu: native, onChange: () => requestFlush(false), onLost: engineLost, getCam: () => cam, isIdle: () => !gesturing && !drag,
       posOf: (id) => { const b = boards.get(id); return b ? { x: b.meta.x, y: b.meta.y } : null; },
       orderOf: (id) => { const b = boards.get(id); return b ? b.idx : 1e9; },
@@ -2635,6 +2664,7 @@ async function startEngine() {
       rebase: (id, scene, t) => (host.live ? host.live.rebase(id, scene, t) : false),
     });
     if (mode !== "pending") { v.destroy(); return; }
+    v.refreshFonts(sceneEnvironment);
     ev = v;
     mode = "engine";
     perfAt("engine");
@@ -4235,10 +4265,11 @@ let motionWindowVisible = true;
 function setTabShown(on) {
   if (on === tabShown) return;
   tabShown = on;
-  if (on) { if (file) connectDoc(); requestFlush(false); scheduleVisible(); } else { saveCam(); clearTimeout(docTimer); es.close(); }
+  if (on) { if (file) connectDoc(); void refreshFonts(); requestFlush(false); scheduleVisible(); } else { saveCam(); clearTimeout(docTimer); es.close(); }
   host.emit("tab", on);
 }
 readViewBox();
+window.addEventListener("focus", () => { void refreshFonts(); });
 // Home has no document to draw. The shell already warms the GPU in a small separate view.
 if (mode === "pending" && (file || !native)) void startEngine();
 else announceRenderer();
@@ -4254,6 +4285,7 @@ window.canvasCmd = (c) => {
     return;
   }
   if (c.cmd === "tab") { setTabShown(!!c.active); return; }
+  if (c.cmd === "fontsChanged") { void refreshFonts(c.force !== false); return; }
   if (c.cmd === "resync") { resync(); return; }
   if (c.cmd === "fit") c.id ? fit(c.id) : fitSelectionOrPage();
   else if (c.cmd === "fitAll") fitAll();
